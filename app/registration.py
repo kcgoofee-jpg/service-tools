@@ -27,7 +27,9 @@ class RegistrationService:
                  command_guild: str = COMMAND_GUILD, membership_guild: str = MEMBERSHIP_GUILD,
                  membership_role: str = MEMBERSHIP_ROLE, site_url: str = SITE_URL,
                  key_daily_images: int = 100, key_daily_v5: int = 50,
-                 key_image_scope: str = "all", key_expires_days: int = 0, key_rpm: int = 5):
+                 key_image_scope: str = "all", key_expires_days: int = 0, key_rpm: int = 5,
+                 max_users: int = 0, reset_at: str = ""):
+        self.max_users, self.reset_at = max_users, reset_at
         self.command_guild, self.membership_guild = command_guild, membership_guild
         self.membership_role, self.site_url = membership_role, site_url
         self.key_daily_images, self.key_daily_v5 = key_daily_images, key_daily_v5
@@ -39,6 +41,39 @@ class RegistrationService:
         self.pending: dict[str, tuple[str, float]] = {}
         self.lock = asyncio.Lock()
 
+    async def count_active(self) -> int:
+        """仍持有有效 Key 的已注册用户数（Key 被删则名额释放）。"""
+        rows = await self.db._db.execute_fetchall(
+            "SELECT COUNT(*) FROM discord_registrations r JOIN api_keys k ON k.id=r.key_id")
+        return int(rows[0][0])
+
+    async def _check_capacity(self) -> None:
+        if self.max_users and await self.count_active() >= self.max_users:
+            raise RegistrationError(f"名额已满（上限 {self.max_users} 人），请联系站长。")
+
+    async def key_row_for(self, discord_id: str):
+        rows = await self.db._db.execute_fetchall(
+            "SELECT key_id FROM discord_registrations WHERE discord_id=?", (discord_id,))
+        return await self.db.get_key(rows[0][0]) if rows else None
+
+    async def revoke(self, discord_id: str) -> bool:
+        """删除该用户的 Key 和领取记录，名额释放，用户可重新领取。"""
+        rows = await self.db._db.execute_fetchall(
+            "SELECT key_id FROM discord_registrations WHERE discord_id=?", (discord_id,))
+        if not rows:
+            return False
+        await self.db.delete_key(rows[0][0])
+        await self.db._db.execute("DELETE FROM discord_registrations WHERE discord_id=?", (discord_id,))
+        await self.db._db.commit()
+        return True
+
+    async def reset_all(self) -> int:
+        """清空所有自助注册用户（删 Key 和记录，保留用量账本），用户需重新 /register。"""
+        rows = await self.db._db.execute_fetchall("SELECT discord_id FROM discord_registrations")
+        for (discord_id,) in rows:
+            await self.revoke(str(discord_id))
+        return len(rows)
+
     async def begin(self, user_id: str, guild_id: str) -> str:
         if guild_id != self.command_guild or not user_id.isdecimal():
             raise RegistrationError("请在指定服务器使用 /register。")
@@ -46,6 +81,7 @@ class RegistrationService:
             "SELECT 1 FROM discord_registrations WHERE discord_id=?", (user_id,)
         )):
             raise RegistrationError("这个 Discord 账号已经领取过 Key。")
+        await self._check_capacity()
         self.pending = {k: v for k, v in self.pending.items() if v[1] > time.time()}
         if sum(u == user_id for u, _ in self.pending.values()) >= 2:
             raise RegistrationError("授权链接已发送，请先完成授权或稍后重试。")
@@ -74,6 +110,7 @@ class RegistrationService:
                 "SELECT 1 FROM discord_registrations WHERE discord_id=?", (expected_id,)
             )):
                 raise RegistrationError("这个 Discord 账号已经领取过 Key。")
+            await self._check_capacity()
             try:
                 response = await self.http.post("https://discord.com/api/oauth2/token", data={
                     "client_id": self.client_id, "client_secret": self.client_secret,
@@ -146,4 +183,5 @@ def configured_service(db, http: httpx.AsyncClient) -> RegistrationService | Non
         site_url=site, key_daily_images=number("REGISTER_DAILY_IMAGES", 30),
         key_daily_v5=number("REGISTER_DAILY_V5", 0),
         key_image_scope="all" if os.getenv("REGISTER_IMAGE_SCOPE") == "all" else "legacy",
-        key_expires_days=number("REGISTER_EXPIRES_DAYS", 30), key_rpm=max(1, number("REGISTER_RPM", 5)))
+        key_expires_days=number("REGISTER_EXPIRES_DAYS", 30), key_rpm=max(1, number("REGISTER_RPM", 5)),
+        max_users=number("REGISTER_MAX_USERS", 0), reset_at=os.getenv("REGISTER_RESET_AT", "").strip())
