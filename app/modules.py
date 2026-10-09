@@ -56,7 +56,7 @@ def capacity(state) -> Module:
         # 独立来源：上游报告的 V5 剩余变化 ↔ 我们日志里数到的 V5 张数（同时校准「每 1% ≈ 14.2 张」）
         snaps = await state.db._db.execute_fetchall(
             "SELECT ts, v5_percent, v5_rate FROM upstream_snapshots WHERE ts>? AND v5_percent IS NOT NULL ORDER BY ts",
-            now - 86400)
+            (now - 86400,))
         v5_check = Check("上游 V5 消耗 ↔ 日志 V5 张数", True, "数据不足（需要 ≥ 6 小时、账号剩余 < 95%）")
         if len(snaps) >= 2 and snaps[-1][0] - snaps[0][0] >= 6 * 3600 and snaps[-1][1] < 95:
             hours = (snaps[-1][0] - snaps[0][0]) / 3600

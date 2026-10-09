@@ -77,3 +77,20 @@ async def test_real_modules_build_tick_and_check(state):
     # 观测：计数和日志对得上；内存每小时计数 ↔ 日志
     checks = {c["name"]: c for m in (await k.snapshot()) for c in m["last"].get("checks", [])}
     assert checks["生成记录 ↔ 用量日志"]["ok"]
+
+
+
+@pytest.mark.asyncio
+async def test_capacity_checks_run_with_a_token(state):
+    """有上游账号时容量校验（含上游快照核对）必须能跑通，不能「校验本身出错」（10-10 线上抓到过参数写错）。"""
+    from app import modules
+
+    class Tok:
+        token_id, usable = "t1", True
+    state.nai.pool = [Tok()]
+    await state.db._db.execute("INSERT INTO upstream_snapshots(ts, v5_percent, v5_rate, anlas) VALUES (0, 90, 11, 9000)")
+    await state.db._db.commit()
+    k = modules.build(state, bug=lambda *a, **kw: None)
+    bad = await k.check_all()
+    names = [c.name for _, c in bad]
+    assert "校验本身出错" not in names
