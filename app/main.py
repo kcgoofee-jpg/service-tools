@@ -59,7 +59,7 @@ SETTINGS = load_settings()
 STATE: Optional[GateState] = None
 
 DEFAULT_ANNOUNCEMENT = """<!doctype html>
-<html lang="zh"><head><meta charset="utf-8"><title>NAI Gate</title>
+<html lang="zh"><head><meta charset="utf-8"><title>猫头鹰公益站</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 body{font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
@@ -67,7 +67,7 @@ body{font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-se
 h1{color:#7cc4ff;font-size:1.6em} code{background:#1d2733;padding:2px 8px;border-radius:6px}
 a{color:#7cc4ff} .card{background:#161e29;border:1px solid #243043;border-radius:12px;padding:18px 22px;margin:18px 0}
 </style></head><body>
-<h1>NAI Gate · NovelAI 中转网关</h1>
+<h1>猫头鹰公益站 · NovelAI 中转网关</h1>
 <div class="card">
 本站为 NovelAI 资源分发的中转服务。使用方法：<br>
 1. 向站长申请一把虚拟 Key（形如 <code>nai-xxxxxxxx</code>）。<br>
@@ -162,7 +162,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-app = FastAPI(title="NAI Gate", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
+app = FastAPI(title="猫头鹰公益站", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
 
 class AdminNoStoreMiddleware:

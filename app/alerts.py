@@ -37,7 +37,7 @@ class Alerter:
             return
         self._last[kind] = now
         try:
-            task = asyncio.get_running_loop().create_task(self._send(f"⚠ **NAI Gate 告警**（{kind}）\n{message}"))
+            task = asyncio.get_running_loop().create_task(self._send(f"⚠ **猫头鹰公益站告警**（{kind}）\n{message}"))
         except RuntimeError:
             return
         self._tasks.add(task)
