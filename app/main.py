@@ -124,6 +124,10 @@ async def lifespan(app: FastAPI):
     await STATE.db.migrate_upstream_token_ids([token.token_id for token in STATE.nai.pool])
     await STATE.nai.load_saved_limits()
     await STATE.guard.load()
+    try:
+        await STATE.guard.seed_hour(STATE.db, [t.token_id for t in getattr(STATE.nai, "pool", [])])
+    except Exception as exc:
+        bug("guard_seed", exc)
     if getattr(STATE, "share", None) is not None:
         await STATE.share.load()
     await STATE.load_image_cooldown()
@@ -170,7 +174,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "1.9.3"
+__version__ = "1.9.4"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 

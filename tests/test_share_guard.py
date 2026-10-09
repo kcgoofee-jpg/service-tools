@@ -182,3 +182,17 @@ async def test_habits_same_network_and_client_only_recorded(guard):
         await guard.observe_habit(KEY, body, "1.2.*.*", WIN, now=t + i * 300, **c.kw())
     ev = await guard.evidence(1)
     assert ev and all(e["points"] == 0 for e in ev) and not c.member
+
+
+@pytest.mark.asyncio
+async def test_guard_hour_count_survives_restart(guard):
+    """部署重启不能把每小时计数清零（10-10 00 点连部署 4 次，实际出了 85 张 > 80）。"""
+    import time as _t
+    from app.guard import Guard
+    db, now = guard.db, _t.time()
+    for i in range(30):
+        await db.add_log(1, "m", "image", "nai-diffusion-4-5-full", "ok", images=1)
+    await db.add_log(1, "m", "tags", "", "ok")
+    g = Guard(db)
+    assert await g.seed_hour(db, ["tok"], now=now + 1) == 30
+    assert g.hour_count("tok", now + 2) == 30

@@ -94,6 +94,20 @@ class Guard:
         q = self._starts.setdefault(token_id, deque())
         q.append(time.time() if now is None else now)
 
+    async def seed_hour(self, db, token_ids: list[str], now: Optional[float] = None) -> int:
+        """启动时从用量日志补回最近 1 小时的出图，避免重启（部署）把每小时计数清零、绕过上限。
+        日志里没有记是哪个上游账号，所以每个账号都按全站数量计（偏保守）。2026-10-10 00 点连部署 4 次，实际出了 85 张 > 80。"""
+        now = time.time() if now is None else now
+        rows = await db._db.execute_fetchall(
+            "SELECT ts, images FROM usage_log WHERE ts>? AND status='ok' AND kind LIKE 'image%' AND images>0 ORDER BY ts",
+            (now - HOUR,))
+        stamps = [float(ts) for ts, n in rows for _ in range(int(n))]
+        for tid in token_ids:
+            q = self._starts.setdefault(tid, deque())
+            merged = sorted(set(q) | set(stamps)) if q else stamps
+            self._starts[tid] = deque(merged)
+        return len(stamps)
+
     def hour_count(self, token_id: str, now: Optional[float] = None) -> int:
         now = time.time() if now is None else now
         q = self._starts.get(token_id)
