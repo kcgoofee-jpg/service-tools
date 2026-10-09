@@ -218,9 +218,14 @@ th,td{text-align:left;padding:14px 12px;border-bottom:1px solid var(--border);ve
 thead th{position:sticky;top:0;z-index:2;background:var(--surface-2);color:var(--muted);font-weight:500;font-size:12px;white-space:nowrap;border-bottom:1px solid var(--border-strong)}
 tbody tr:last-child td{border-bottom:0}
 tbody tr:hover td{background:var(--surface-2)}
+th.num,td.num{text-align:right;white-space:nowrap}
+td.t,th.t{white-space:nowrap;width:104px;font-variant-numeric:tabular-nums}
+td.st{width:72px}
+td.act,th.act{width:1%;white-space:nowrap;text-align:right}
+td.nw,th.nw{white-space:nowrap}
+.tri{white-space:nowrap}
+.tri .num{display:inline-block;min-width:3ch;text-align:right}
 td .stack{display:flex;flex-direction:column;gap:2px}
-#keysTable td .stack>span{white-space:nowrap}
-#keysTable td:nth-child(2){white-space:nowrap}
 td .tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
 .cell-name{font-weight:600;overflow-wrap:anywhere;min-width:120px}
 .actions{display:flex;gap:6px;flex-wrap:wrap;min-width:150px;max-width:210px}
@@ -238,31 +243,51 @@ td .tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
 .seg button.active{background:var(--surface);color:var(--text);box-shadow:var(--shadow-sm)}
 .member-grid{display:block}
 .mtable td{vertical-align:middle;padding-top:10px;padding-bottom:10px}
-.mtable tr.dim{opacity:.55}
-.mtable td.muted{white-space:nowrap;font-size:12px;line-height:1.5}
-.mtable td,.mtable th{padding-left:10px;padding-right:10px}
-.mtable .mbar{width:96px}
+.mtable tr.dim>td:not(.mact){opacity:.55}
+.mtable td,.mtable th{padding-left:12px;padding-right:12px}
+.mtable tr.mr{cursor:pointer}
+.mtable td.mtime{white-space:nowrap;color:var(--text-2);font-size:12.5px;width:96px}
+.mtable td.mweek{width:110px}
+.mtable td.mtoday{width:220px}
 #memberFilter .fchip{min-height:28px;padding:3px 10px;font-size:12.5px}
-.mrow{display:flex;gap:10px;align-items:center}
+.mrow{display:flex;gap:10px;align-items:center;min-width:0}
 .avatar.sm{width:28px;height:28px;font-size:12px;flex:none}
 .avatar.sm .av{width:28px;height:28px}
-.mn{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px}
+.mn{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px}
 .mn .muted{font-weight:400;font-size:12px}
 .mflags{display:flex;flex-wrap:wrap;gap:4px;margin-top:2px}
-.mf{font-size:11px;line-height:1.5;padding:0 6px;border-radius:4px;background:var(--surface-2);color:var(--text-2)}
+.mf{font-size:11px;line-height:1.5;padding:0 6px;border-radius:4px;background:var(--surface-3);color:var(--text-2);white-space:nowrap}
 .mf.new{background:var(--accent-soft);color:var(--accent-text)}
-.mf.info{background:var(--surface-3,var(--surface-2));color:var(--muted)}
+.mf.info{background:var(--surface-3);color:var(--muted)}
 .mf.warn{background:var(--warn-soft);color:var(--warn)}
 .mf.bad{background:var(--bad-soft);color:var(--bad)}
 .mq{display:flex;flex-direction:column;align-items:flex-start;gap:4px;white-space:nowrap;font-size:12.5px}
-.mbar{width:90px;height:6px;border-radius:3px;background:var(--surface-2);display:flex;overflow:hidden;flex:none}
+.mbar{width:120px;height:6px;border-radius:3px;background:var(--surface-3);display:flex;overflow:hidden;flex:none}
 .mbar i{display:block;height:100%;background:var(--accent)}
 .mbar i.v5{background:#14a3a3}
 .mbar.full i{background:var(--bad)}
-.mact{white-space:nowrap;text-align:right}
-.mperm{white-space:nowrap}
-.psel{font-size:12px;padding:3px 6px;min-height:28px;border-radius:6px;width:auto;margin:1px 0;display:block}
+.mact{white-space:nowrap;text-align:right;width:1%}
+.mact>*{vertical-align:middle}
 .mact .menu{display:inline-block}
+.mx-arrow{transition:transform .15s;color:var(--muted)}
+.mx-arrow svg.ic{width:16px;height:16px}
+.mx-arrow[aria-expanded="true"]{transform:rotate(90deg)}
+.psel{font-size:12.5px;padding:4px 8px;min-height:30px;border-radius:6px;width:100%}
+tr.mx>td{background:var(--surface-2);padding:16px 18px 18px;cursor:default}
+.mtable tbody tr.mx:hover td{background:var(--surface-2)}
+tr.mr.open>td{background:var(--surface-2);border-bottom-color:transparent}
+.mx-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr) minmax(0,1fr);gap:16px 28px}
+.mx-g h4{font-size:12px;font-weight:600;color:var(--muted);margin:0 0 10px;letter-spacing:.02em}
+.kv{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 14px;font-size:12.5px;margin:0}
+.kv dt{color:var(--muted);white-space:nowrap}
+.kv dd{margin:0;min-width:0;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+.keyline{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.keyline .mono{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:3px 8px;white-space:nowrap}
+.mx-perm{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+.mx-acts{display:flex;flex-wrap:wrap;gap:6px}
+.mx-acts .btn{text-decoration:none}
+.mx-acts.danger-row{margin-top:10px;padding-top:10px;border-top:1px dashed var(--border-strong);justify-content:flex-end}
+@media (max-width:1000px){.mx-grid{grid-template-columns:1fr 1fr}.mx-g.ops{grid-column:1/-1}}
 .mtools{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:14px}
 .mtools .search{flex:0 1 260px}
 .mtools .chips-filter{margin:0}
@@ -403,7 +428,16 @@ details.neg div{margin-top:6px;white-space:pre-wrap;overflow-wrap:anywhere;max-h
 .feat-checks .check{margin:0;padding:8px 10px}
 .feat-checks.off{opacity:.45;pointer-events:none}
 .notice-box{background:var(--info-soft);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 16px;font-size:13px;line-height:1.75;color:var(--text-2);margin-bottom:16px}
-.cols-3{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 16px}
+.cols-3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px 16px}
+.cols-3{margin-bottom:16px}
+.cols-3>.field{margin-bottom:0}
+input:disabled,select:disabled{background:var(--surface-3);color:var(--muted);cursor:not-allowed}
+.lfilt>summary{display:none}
+.lfilt-body{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+td.num.cost,td.num.tm{white-space:normal;min-width:84px}
+td.num.cost{min-width:136px}
+span.nw{white-space:nowrap}
+td.note{min-width:220px}
 @media (max-width:720px){.feat-checks,.cols-3{grid-template-columns:1fr}}
 
 /* ===== Responsive ===== */
@@ -449,24 +483,55 @@ details.neg div{margin-top:6px;white-space:pre-wrap;overflow-wrap:anywhere;max-h
   table.rt .actions{min-width:0;justify-content:flex-start}
   table.rt td.empty-cell{display:block;text-align:center}
   table.rt td.empty-cell::before{display:none}
+  table.rt td:empty{display:none}
+  table.rt td.note{min-width:0}
+  table.rt.logs tr{padding:6px 0}
+  table.rt.logs td{padding:5px 14px}
+  /* 去掉卡片套卡片：放表格的面板在手机上不再画外框，标题区仍留白 */
+  .panel:has(.table-wrap){padding:0!important;background:none;border:0;box-shadow:none}
+  .panel:has(.table-wrap)>.panel-head,.panel:has(.table-wrap)>.hint{padding:0 2px}
+  .page-head{margin-bottom:16px}
+  .page-head{flex-wrap:nowrap;align-items:center}
+  .page-head .ttl{min-width:auto;flex:1 0 auto}
+  .page-head h1{white-space:nowrap}
+  #logRid{width:110px!important}
+  .page-head .tools{justify-content:flex-end}
+  .mtools .search{flex-basis:100%;max-width:none}
+  .page-head p{display:none}
+  .page-head .tools .btn.rf{width:36px;padding:0}
+  .page-head .tools .btn.rf .lbl{display:none}
+  .lfilt{flex:none}
+  .lfilt>summary{display:inline-flex}
+  .lfilt[open]{flex-basis:100%;order:9}
+  .lfilt[open]>summary{margin-bottom:8px}
+  .lfilt-body{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .lfilt-body>*{width:100%!important}
+  .lfilt-body .check{margin:0;padding:8px 10px}
+  .page-head:has(.lfilt[open]){flex-wrap:wrap}
+  .page-head:has(.lfilt[open]) .tools{flex-basis:100%}
+  .page-head:has(.lfilt[open]) #logRid{flex:1;width:auto!important}
 }
-/* 成员表手机布局：一位成员一张紧凑卡片，名字一行、用量一行、权限一行 */
+/* 成员表手机布局：一位成员一张紧凑卡片：名字 + 操作一行、今日用量一行、7 天与最近使用一行；展开面板接在卡片下面 */
 @media (max-width:720px){
-  table.mtable tr{display:grid;grid-template-columns:1fr auto;grid-template-areas:"m act" "q q" "w t" "p p";gap:6px 10px;padding:12px 14px}
-  table.mtable td{display:block;padding:0;text-align:left}
+  table.mtable tr.mr{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"m act" "q q" "w t";gap:8px 10px;padding:12px 14px}
+  table.mtable tr.mr.open{border-bottom-left-radius:0;border-bottom-right-radius:0;margin-bottom:0;border-bottom:0}
+  table.mtable td{display:block;padding:0;text-align:left;width:auto}
   table.mtable td::before{display:none}
-  table.mtable td.mcell{grid-area:m}
-  table.mtable td.mact{grid-area:act;align-self:start;justify-self:end}
+  table.mtable td.mcell{grid-area:m;min-width:0}
+  table.mtable td.mact{grid-area:act;align-self:start;justify-self:end;width:auto}
   table.mtable .mbar{flex:1;width:auto}
-  table.mtable td[data-label="今日"]{grid-area:q}
-  table.mtable td[data-label="近 7 天 / 累计"]{grid-area:w;font-size:12.5px;color:var(--text-2)}
-  table.mtable td[data-label="近 7 天 / 累计"]::before{display:inline;content:"7 天 ";color:var(--muted)}
-  table.mtable td.mtime{grid-area:t;text-align:right}
-  table.mtable td.mtime br{display:none}
-  table.mtable .mreg::before{content:" · "}
-  table.mtable td.mperm{grid-area:p;display:flex;gap:8px}
-  table.mtable .psel{display:inline-block;flex:1}
+  table.mtable td.mtoday{grid-area:q;width:auto}
+  table.mtable td.mweek{grid-area:w;font-size:12.5px;color:var(--text-2);text-align:left;width:auto}
+  table.mtable td.mweek::before{display:inline;content:"7 天 / 累计 ";color:var(--muted)}
+  table.mtable td.mtime{grid-area:t;text-align:right;width:auto}
+  table.mtable td.mtime::before{display:inline;content:"最近 ";color:var(--muted)}
   table.mtable .mq{flex-direction:row;align-items:center;gap:10px}
+  table.mtable .mn{max-width:none}
+  table.mtable tr.mx{padding:0;border-top-left-radius:0;border-top-right-radius:0;border-top:1px dashed var(--border-strong)}
+  table.mtable tr.mx>td{padding:12px 14px 14px;background:none}
+  tr.mr.open>td{background:none}
+  .mx-grid{grid-template-columns:1fr;gap:16px}
+  .mx-perm{grid-template-columns:1fr}
 }
 </style>
 </head>
@@ -496,7 +561,6 @@ details.neg div{margin-top:6px;white-space:pre-wrap;overflow-wrap:anywhere;max-h
       <button data-tab="ov" class="active"><span data-ic="home"></span>总览</button>
       <div class="nav-label">成员</div>
       <button data-tab="members"><span data-ic="users"></span>成员</button>
-      <button data-tab="keys"><span data-ic="key"></span>Key 管理</button>
       <button data-tab="ops"><span data-ic="toggle"></span>领 Key 与功能</button>
       <button data-tab="audit"><span data-ic="image"></span>生成记录</button>
       <div class="nav-label">监控</div>
@@ -529,8 +593,8 @@ details.neg div{margin-top:6px;white-space:pre-wrap;overflow-wrap:anywhere;max-h
 
         <!-- 总览 -->
         <section id="tab-ov">
-          <div class="page-head"><div class="ttl"><h1>总览</h1><p>今日用量与系统状态</p></div>
-            <div class="tools"><button class="btn" data-act="refresh-ov"><span data-ic="refresh"></span>刷新</button></div></div>
+          <div class="page-head"><div class="ttl"><h1>总览</h1></div>
+            <div class="tools"><button class="btn rf" data-act="refresh-ov" aria-label="刷新" title="刷新"><span data-ic="refresh"></span><span class="lbl">刷新</span></button></div></div>
           <div class="stats" id="ovCards"></div>
           <div class="two-col">
             <div class="card panel"><div class="panel-head"><div><div class="hint" id="chartLabel" style="margin:0">今日生成图片</div>
@@ -545,43 +609,27 @@ details.neg div{margin-top:6px;white-space:pre-wrap;overflow-wrap:anywhere;max-h
             <div class="card panel"><div class="panel-head"><h2>状态与防护</h2></div><div class="status-list" id="statusPanel"></div></div>
           </div>
           <div class="card panel">
-            <div class="panel-head"><h2>各功能用量</h2><div class="desc">按用量日志统计（日志保留期内）；点功能名查看对应日志</div></div>
-            <div class="table-wrap"><table class="rt"><thead><tr><th>功能</th><th>今日 成功 / 失败 / 拒绝</th><th>今日产出</th><th>近 7 天 成功 / 失败 / 拒绝</th><th>近 7 天产出</th></tr></thead><tbody id="featUsage"></tbody></table></div>
+            <div class="panel-head"><h2>各功能用量</h2><div class="desc">点功能名查看日志</div></div>
+            <div class="table-wrap"><table class="rt"><thead><tr><th>功能</th><th class="num">今日 成功 / 失败 / 拒绝</th><th>今日产出</th><th class="num">近 7 天 成功 / 失败 / 拒绝</th><th>近 7 天产出</th></tr></thead><tbody id="featUsage"></tbody></table></div>
           </div>
         </section>
         <!-- 上游 -->
         <section id="tab-up" hidden>
-          <div class="page-head"><div class="ttl"><h1>上游</h1><p>NovelAI 令牌池、出图表现、调度影子模式与 Anlas 核对</p></div><div class="tools"><button class="btn" data-act="refresh-up"><span data-ic="refresh"></span>刷新</button></div></div>
+          <div class="page-head"><div class="ttl"><h1>上游</h1></div><div class="tools"><button class="btn rf" data-act="refresh-up" aria-label="刷新" title="刷新"><span data-ic="refresh"></span><span class="lbl">刷新</span></button></div></div>
           <div class="card panel">
             <div class="panel-head"><h2>上游 NovelAI 令牌池</h2><button class="btn primary" type="button" id="tokAddBtn" data-act="tok-add"><span data-ic="plus"></span>添加 Token</button></div>
             <div id="pool"></div>
             <div id="allowanceDetails" class="hint" style="white-space:pre-line;margin-top:16px">V5 余量：正在读取本地状态…</div>
-            <details class="help" id="tokenHelp"><summary>添加更多上游 Token</summary>
-              <div class="help-body">
-                <p><b>最简单的方式：点上方的「添加 Token」按钮</b>，把 NovelAI 的 <code>pst-</code> 开头 Token 粘贴进去即可；每把 Token 也可以在列表里「替换」或「删除」。后台会先向 NovelAI 验证，通过后才保存。</p>
-                <p>一旦在后台使用过这些功能，令牌池就改由后台管理，<code>.env</code> 里的 <code>NAI_TOKENS</code> 不再被读取（它只用于第一次使用前初始化令牌池）。</p>
-                <p style="margin-top:8px"><b>首次部署或备用方式：在服务器 <code>.env</code> 里配置</b></p>
-                <ol>
-                  <li>编辑 <code>.env</code>，用英文逗号分隔多个 Token，<b>顺序有意义</b>：
-                    <div class="codeblk"><pre>NAI_TOKENS=pst-aaa,pst-bbb</pre><button class="btn mini" type="button" data-act="copy-code">复制</button></div></li>
-                  <li>可选：在同一文件里按相同顺序设置每把 Token 是否允许消耗 Anlas，以及免费 V5 每日上限（0 = 不限）：
-                    <div class="codeblk"><pre>NAI_TOKEN_ALLOW_ANLAS=1,0
-NAI_TOKEN_V5_DAILY_LIMITS=0,150</pre><button class="btn mini" type="button" data-act="copy-code">复制</button></div></li>
-                  <li>重启网关使配置生效：
-                    <div class="codeblk"><pre>docker compose up -d</pre><button class="btn mini" type="button" data-act="copy-code">复制</button></div></li>
-                </ol>
-                <p>重启后，每把 Token 会出现在上面的列表中，可以单独启用 / 停用，并设置各自的 V5 日限和图片并发。</p>
-                <p style="margin-bottom:8px"><b>不要随意调整 Token 的顺序：</b>每把 Token 的后台设置跟随 Token 本身保存，但 <code>.env</code> 里的 <code>NAI_TOKEN_ALLOW_ANLAS</code> 和 <code>NAI_TOKEN_V5_DAILY_LIMITS</code> 是按位置对应的，改了顺序就会错位。</p>
-              </div></details>
+            <p class="hint" id="tokenHelp" style="margin-top:8px">也可在 .env 配 <code>NAI_TOKENS</code></p>
           </div>
           <div class="card panel">
-            <div class="panel-head"><h2>上游表现</h2><div class="desc">出图耗时、排队、限流与产能，按 V4.5 / V5 分开；对比过去 7 天（不含最近 24 小时）。异常时会私信提醒</div></div>
+            <div class="panel-head"><h2>上游表现</h2><div class="desc">按 V4.5 / V5 分开，对比过去 7 天</div></div>
             <div id="perfFlags"></div>
-            <div class="table-wrap"><table class="rt"><thead><tr><th>模型</th><th>时段</th><th>请求 / 成功率</th><th title="上游返回 429 的次数">限流</th><th title="上游返回 401/402/403/5xx 或连接失败">其他失败</th><th>中位生成</th><th>P90 生成</th><th title="收到请求到发往上游：排队 + 冷却">平均排队</th><th title="按中位生成耗时和请求间隔估算：全站 / 单个成员">估算产能 / 小时</th></tr></thead><tbody id="perfBody"></tbody></table></div>
+            <div class="table-wrap"><table class="rt"><thead><tr><th>模型</th><th class="nw">时段</th><th class="num">请求 / 成功率</th><th class="num" title="上游返回 429 的次数">限流</th><th class="num" title="上游返回 401/402/403/5xx 或连接失败">其他失败</th><th class="num">中位生成</th><th class="num">P90 生成</th><th class="num" title="收到请求到发往上游：排队 + 冷却">平均排队</th><th class="num" title="按中位生成耗时和请求间隔估算：全站 / 单个成员">估算产能 / 小时</th></tr></thead><tbody id="perfBody"></tbody></table></div>
             <div id="perfHourly" style="margin-top:12px"></div>
           </div>
           <div class="card panel">
-            <div class="panel-head"><h2>调度影子模式</h2><div class="desc">用真实请求回放「保底 + 空闲借用 + 成员间轮流 + 账号每日上限」，<b>只计算、不改变实际出图顺序</b>。观察 1–2 周后决定是否启用</div>
+            <div class="panel-head"><h2>调度影子模式</h2><div class="desc" title="用真实请求回放「保底 + 空闲借用 + 成员间轮流 + 账号每日上限」">只回放计算，不改变实际出图顺序</div>
               <select id="shadowRange" aria-label="回放范围" style="width:120px"><option value="24">最近 24 小时</option><option value="168">最近 7 天</option></select></div>
             <div id="shadowBody"><div class="hint">正在回放…</div></div>
           </div>
@@ -593,35 +641,35 @@ NAI_TOKEN_V5_DAILY_LIMITS=0,150</pre><button class="btn mini" type="button" data
             <div id="reconStatus" class="muted" role="status" aria-live="polite">正在读取记录…</div>
             <div id="reconResult"></div>
             <details style="margin-top:16px"><summary style="cursor:pointer;font-weight:500">历史记录与说明</summary>
-              <p class="hint" style="margin:12px 0">点击「查询并核对」会读取官方账号余额，再和本站记录的消耗比较。充值、续费或在其他地方使用账号，也会影响余额。核对结果不会修改用户积分。</p>
-              <div class="table-wrap"><table class="rt"><thead><tr><th>查询时间</th><th>官方余额</th><th>余额减少</th><th>本站记录</th><th>相差</th><th>说明</th></tr></thead><tbody id="reconHistory"></tbody></table></div>
+              <p class="hint" style="margin:12px 0">充值、续费或在别处使用账号也会影响余额；核对不改用户积分。</p>
+              <div class="table-wrap"><table class="rt"><thead><tr><th class="t">查询时间</th><th class="num">官方余额</th><th class="num">余额减少</th><th class="num">本站记录</th><th class="num">相差</th><th>说明</th></tr></thead><tbody id="reconHistory"></tbody></table></div>
             </details>
           </div>
         </section>
         <!-- Bug 追踪 -->
         <section id="tab-bugs" hidden>
-          <div class="page-head"><div class="ttl"><h1>Bug 追踪</h1><p>程序错误、上游故障、后台任务失败等，按特征归并</p></div><div class="tools"><button class="btn" data-act="refresh-bugs"><span data-ic="refresh"></span>刷新</button></div></div>
-          <div class="card panel" id="bugPanel">
-            <div class="panel-head"><h2>Bug 追踪 <span class="tag" id="bugCount"></span></h2><div class="desc">程序没预料到的错误、上游故障、后台任务失败、成员在出图完成前断开、网页脚本报错，按特征归并；新 bug 和复发会私信提醒。点「错误编号」可查对应日志</div>
-              <label class="check" style="white-space:nowrap"><input type="checkbox" id="bugAll"><span>含已处理</span></label></div>
-            <div class="table-wrap"><table class="rt"><thead><tr><th>级别</th><th>来源</th><th>内容</th><th>次数</th><th>首次 / 最近</th><th>最近错误编号</th><th></th></tr></thead><tbody id="bugBody"></tbody></table></div>
+          <div class="page-head"><div class="ttl"><h1>Bug 追踪</h1></div><div class="tools"><span class="tag" id="bugCount"></span>
+              <label class="check" style="white-space:nowrap;margin:0;padding:7px 10px"><input type="checkbox" id="bugAll"><span>含已处理</span></label>
+              <button class="btn rf" data-act="refresh-bugs" aria-label="刷新" title="刷新"><span data-ic="refresh"></span><span class="lbl">刷新</span></button></div></div>
+          <div class="card panel" id="bugPanel" style="padding:16px">
+            <div class="table-wrap"><table class="rt"><thead><tr><th class="st">级别</th><th class="nw">来源</th><th>内容</th><th class="num">次数</th><th class="t">首次 / 最近</th><th class="nw">最近错误编号</th><th class="act">操作</th></tr></thead><tbody id="bugBody"></tbody></table></div>
           </div>
         </section>
 
         <!-- Discord 机器人 -->
         <section id="tab-discord" hidden>
-          <div class="page-head"><div class="ttl"><h1>Discord</h1><p>奶妹机器人的状态与跑图分享设置，保存后一分钟内生效</p></div><div class="tools"><button class="btn" data-act="refresh-bot"><span data-ic="refresh"></span>刷新</button></div></div>
+          <div class="page-head"><div class="ttl"><h1>Discord</h1></div><div class="tools"><button class="btn rf" data-act="refresh-bot" aria-label="刷新" title="刷新"><span data-ic="refresh"></span><span class="lbl">刷新</span></button></div></div>
           <div class="card panel"><div class="panel-head"><h2>机器人</h2></div><div id="botStatus"><div class="skel" style="height:60px"></div></div></div>
           <div class="card panel"><div class="panel-head"><h2>跑图分享</h2><div class="desc">新帖自动点赞、看图写评论；露骨图片只发「捂眼睛跑开」</div></div>
             <div id="botCfg"><div class="skel" style="height:200px"></div></div></div>
           <div class="card panel"><div class="panel-head"><h2>最近动作</h2></div><div id="botEvents"><div class="skel" style="height:120px"></div></div></div>
-          <p class="hint" style="margin:-8px 0 24px">领 Key 的开关和名额在「<a href="#" data-act="goto-ops">领 Key 与功能</a>」页；机器人 Token 和 AI 评论的 API Key 只放在服务器 .env 里</p>
         </section>
 
         <!-- 成员 -->
         <section id="tab-members" hidden>
           <div class="page-head"><div class="ttl"><h1>成员</h1></div>
-            <div class="tools"><button class="btn" data-act="refresh-members"><span data-ic="refresh"></span>刷新</button></div></div>
+            <div class="tools"><button class="btn rf" data-act="refresh-members" aria-label="刷新" title="刷新"><span data-ic="refresh"></span><span class="lbl">刷新</span></button>
+              <button class="btn primary" data-act="new-key"><span data-ic="plus"></span>新建 Key</button></div></div>
           <div class="mtools">
             <div class="search"><span data-ic="search"></span><input id="memberSearch" type="search" placeholder="搜索名称或 Discord ID" aria-label="搜索成员"></div>
             <div class="chips-filter" id="memberFilter" role="group" aria-label="筛选成员"></div>
@@ -631,10 +679,10 @@ NAI_TOKEN_V5_DAILY_LIMITS=0,150</pre><button class="btn mini" type="button" data
 
         <!-- 生成记录 -->
         <section id="tab-audit" hidden>
-          <div class="page-head"><div class="ttl"><h1>生成记录</h1><p>成员提交的提示词与缩略图，到期自动清除</p></div>
+          <div class="page-head"><div class="ttl"><h1>生成记录</h1></div>
             <div class="tools">
               <select id="auditFilter" aria-label="按成员筛选" style="width:200px"><option value="">全部成员</option></select>
-              <button class="btn" data-act="refresh-audit"><span data-ic="refresh"></span>刷新</button>
+              <button class="btn rf" data-act="refresh-audit" aria-label="刷新" title="刷新"><span data-ic="refresh"></span><span class="lbl">刷新</span></button>
             </div></div>
           <div class="card panel" id="auditSettings"><div class="skel" style="height:56px"></div></div>
           <div class="gallery" id="auditGrid"></div>
@@ -643,34 +691,18 @@ NAI_TOKEN_V5_DAILY_LIMITS=0,150</pre><button class="btn mini" type="button" data
 
         <!-- 功能与开放 -->
         <section id="tab-ops" hidden>
-          <div class="page-head"><div class="ttl"><h1>功能与开放</h1><p>全局功能开关与 Discord 自助领取</p></div>
-            <div class="tools"><button class="btn" data-act="refresh-ops"><span data-ic="refresh"></span>刷新</button></div></div>
-          <div class="card panel"><div class="panel-head"><h2>功能开关</h2><div class="desc">切换后立即保存。关闭后管理员 Key 仍可使用。</div></div><div id="opsFeatures"><div class="skel" style="height:200px"></div></div></div>
+          <div class="page-head"><div class="ttl"><h1>功能与开放</h1></div>
+            <div class="tools"><button class="btn rf" data-act="refresh-ops" aria-label="刷新" title="刷新"><span data-ic="refresh"></span><span class="lbl">刷新</span></button></div></div>
+          <div class="card panel"><div class="panel-head"><h2>功能开关</h2><div class="desc">关闭后管理员 Key 仍可使用</div></div><div id="opsFeatures"><div class="skel" style="height:200px"></div></div></div>
           <div class="card panel"><div class="panel-head"><h2>领 Key</h2><div class="desc">成员在 Discord 用 /register 自助领取</div></div><div id="opsReg"><div class="skel" style="height:260px"></div></div></div>
-          <p class="hint" style="margin:-8px 0 24px">生成记录设置已移到「<a href="#" data-act="goto-audit">生成记录</a>」页</p>
-        </section>
-
-        <!-- Key 管理 -->
-        <section id="tab-keys" hidden>
-          <div class="page-head"><div class="ttl"><h1>Key 管理</h1><p>创建、编辑与管理成员的 Key</p></div>
-            <div class="tools"><button class="btn" data-act="refresh-keys"><span data-ic="refresh"></span>刷新</button>
-              <button class="btn primary" data-act="new-key"><span data-ic="plus"></span>新建 Key</button></div></div>
-          <div class="card panel" style="padding:16px">
-            <div class="table-wrap">
-              <table id="keysTable" class="rt">
-                <thead><tr><th>名称</th><th>Key</th><th>今日用量</th><th>配额</th><th>最近使用 / 到期</th><th>操作</th></tr></thead>
-                <tbody></tbody>
-              </table>
-            </div>
-          </div>
         </section>
 
         <!-- 操作日志 -->
         <section id="tab-actions" hidden>
-          <div class="page-head"><div class="ttl"><h1>操作日志</h1><p>后台、机器人管理命令与系统自动操作的记录，保留 180 天</p></div>
-            <div class="tools"><button class="btn" data-act="refresh-actions"><span data-ic="refresh"></span>刷新</button></div></div>
+          <div class="page-head"><div class="ttl"><h1>操作日志</h1></div>
+            <div class="tools"><button class="btn rf" data-act="refresh-actions" aria-label="刷新" title="刷新"><span data-ic="refresh"></span><span class="lbl">刷新</span></button></div></div>
           <div class="card panel" style="padding:16px">
-            <div class="table-wrap"><table class="rt logs"><thead><tr><th>时间</th><th>操作者</th><th>操作</th><th>对象</th><th>详情</th><th>结果</th></tr></thead>
+            <div class="table-wrap"><table class="rt logs"><thead><tr><th class="t">时间</th><th class="nw">操作者</th><th class="nw">操作</th><th>对象</th><th>详情</th><th class="st">结果</th></tr></thead>
               <tbody id="actionBody"></tbody></table></div>
             <div class="pager" id="actionPager"></div>
           </div>
@@ -678,21 +710,22 @@ NAI_TOKEN_V5_DAILY_LIMITS=0,150</pre><button class="btn mini" type="button" data
 
         <!-- 日志 -->
         <section id="tab-logs" hidden>
-          <div class="page-head"><div class="ttl"><h1>用量日志</h1><p>最近的请求、消耗与错误信息</p></div>
+          <div class="page-head"><div class="ttl"><h1>用量日志</h1></div>
             <div class="tools">
+              <input id="logRid" class="mono" type="search" placeholder="错误编号" aria-label="按错误编号查找" style="width:130px">
+              <details class="lfilt" id="logFilters"><summary class="btn">筛选</summary><div class="lfilt-body">
               <select id="logFeature" aria-label="按功能筛选" style="width:160px"><option value="">全部功能</option>
                 <option value="image">文生图</option><option value="upscale">放大</option><option value="augment">导演工具</option>
                 <option value="vibe">Vibe 编码</option><option value="tags">标签补全</option><option value="text">文本 / 聊天</option><option value="voice">语音合成</option></select>
-              <input id="logRid" class="mono" placeholder="错误编号" aria-label="按错误编号查找" style="width:110px">
               <label class="check" style="white-space:nowrap"><input type="checkbox" id="logHideTest" checked><span>隐藏测试 Key</span></label>
-              <select id="logFilter" aria-label="按 Key 筛选" style="width:200px"><option value="">全部 Key</option></select>
-              <button class="btn" data-act="refresh-logs"><span data-ic="refresh"></span>刷新</button>
+              <select id="logFilter" aria-label="按 Key 筛选" style="width:200px"><option value="">全部 Key</option></select></div></details>
+              <button class="btn rf" data-act="refresh-logs" aria-label="刷新" title="刷新"><span data-ic="refresh"></span><span class="lbl">刷新</span></button>
             </div></div>
           <div class="card panel" style="padding:16px">
             <div class="table-wrap">
               <table class="rt logs">
-                <thead><tr><th>时间</th><th>Key</th><th>类型</th><th>模型</th><th>状态</th>
-                  <th>图</th><th title="等待：收到请求到发往上游（排队 + 冷却）；生成：上游处理时间">耗时</th><th>Anlas</th><th title="失败请求可能产生的费用，实际扣款尚未确认">可能消耗 Anlas</th><th>tokens</th><th>备注</th></tr></thead>
+                <thead><tr><th class="t">时间</th><th>Key</th><th class="nw">类型</th><th class="nw">模型</th><th class="st">状态</th>
+                  <th class="num" title="等待：收到请求到发往上游（排队 + 冷却）；生成：上游处理时间">耗时</th><th class="num" title="图片张数 · Anlas · 文本 tokens；≈ 为失败请求可能产生的费用">消耗</th><th>备注</th></tr></thead>
                 <tbody id="logBody"></tbody>
               </table>
             </div>
@@ -703,28 +736,27 @@ NAI_TOKEN_V5_DAILY_LIMITS=0,150</pre><button class="btn mini" type="button" data
         <!-- 设置 -->
         <!-- 额度与保护 -->
         <section id="tab-limits" hidden>
-          <div class="page-head"><div class="ttl"><h1>额度与保护</h1><p>全站预算、排队与冷却、账号保护、Anlas 自动分配</p></div></div>
+          <div class="page-head"><div class="ttl"><h1>额度与保护</h1></div></div>
           <div class="card panel">
             <div class="panel-head"><h2>Anlas 与 V5 预算</h2></div>
             <div class="form-grid">
               <div class="field">
                 <label for="s_budget">全站月度 Anlas 预算</label>
                 <input id="s_budget" type="number" min="0" step="1" required value="10000">
-                <div class="hint">0 = 不限。Opus Anlas 每月账单日回满到 10000、不叠加，建议留 20~30% 余量。</div>
+                <div class="hint">0 = 不限</div>
               </div>
               <div class="field">
                 <label for="s_v5">全站每日 V5 张数</label>
                 <input id="s_v5" type="number" min="0" step="1" required value="150">
-                <div class="hint">0 = 不限。V5 周额度由 NovelAI 服务端按 ~190 张/天恢复，账户内所有人共享；此处镜像限制，默认 150 留安全边际。不会随名额自动变化。</div>
+                <div class="hint">0 = 不限</div>
                 <div class="notice-box" id="s_v5_cap" hidden style="margin-top:8px"></div>
               </div>
               <div class="field">
                 <label for="s_v5_alert">V5 官方余量告警阈值（%）</label>
                 <input id="s_v5_alert" type="number" min="1" max="100" step="1" value="20">
-                <div class="hint">低于此值持续提醒；余量随 V5 生成按需查询。点击「保存」生效。</div>
+                <div class="hint">1～100</div>
               </div>
             </div>
-            <div class="hint" style="margin:-4px 0 16px">V5 在官方额度可用、≤1024² 像素且≤28步时，首张走额度；同批其余图片按 Anlas 计费。额度耗尽后的付费请求仍受 Key 权限和预算限制。</div>
             <button class="btn primary" data-act="save-budget">保存</button>
           </div>
           <div class="card panel">
@@ -735,32 +767,31 @@ NAI_TOKEN_V5_DAILY_LIMITS=0,150</pre><button class="btn mini" type="button" data
               <div class="field"><label for="r_image_min_interval">每把上游 Key 图片请求间隔（秒）</label><input id="r_image_min_interval" type="number" min="15" max="120" step="1"><div class="hint">范围 15～120</div></div>
               <div class="field"><label for="r_image_429_cooldown_seconds">上游 429 最短冷却（秒）</label><input id="r_image_429_cooldown_seconds" type="number" min="60" max="3600" step="1"><div class="hint">范围 60～3600</div></div>
             </div>
-            <div class="hint" style="margin:-4px 0 16px">保存后对新请求生效，重启后仍保留。已在等待中的请求可能沿用保存前的时间；不允许低于保护下限。</div>
             <button class="btn primary" data-act="save-runtime">保存运行限制</button>
           </div>
           <div class="card panel">
-            <div class="panel-head"><h2>账号保护与排队</h2><div class="desc">保护上游账号：每日 / 每小时总量、安静时段、间隔抖动；每把 Key 的排队数与 V4.5 保底借用。0 = 关闭该项，保存后立即生效</div></div>
+            <div class="panel-head"><h2>账号保护与排队</h2><div class="desc">0 = 关闭该项，保存后立即生效</div></div>
             <div id="guardLive" class="hint" style="margin-bottom:12px">正在读取…</div>
             <div class="form-grid" id="guardFields"></div>
             <button class="btn primary" data-act="save-guard">保存账号保护设置</button>
           </div>
           <div class="card panel" id="autopilot">
-            <div class="panel-head"><h2>自动驾驶</h2><div class="desc">闲置回收、名额、重置时间、全站熔断、单个 Key 暂停 / 重置交给算法。目前全部是「观察」：只记录会怎么做，不执行；审核没问题后逐条切换为执行</div></div>
+            <div class="panel-head"><h2>自动驾驶</h2><div class="desc">「观察」只记录会怎么做，不执行</div></div>
             <div id="apBody"><div class="skel" style="height:80px"></div></div>
           </div>
           <div class="card panel" id="quotaAlgo">
-            <div class="panel-head"><h2>动态额度</h2><div class="desc">所有「交给算法」的成员同一套额度，每 10 分钟重算；每天按前一天的拥挤程度微调上限和保底。成员页里手动改过的 Key 不受影响</div></div>
+            <div class="panel-head"><h2>动态额度</h2><div class="desc">交给算法的成员共用一套额度，每 10 分钟重算，每天按拥挤程度微调</div></div>
             <div id="qaBody"><div class="skel" style="height:80px"></div></div>
           </div>
           <div class="card panel">
-            <div class="panel-head"><h2>Anlas 自动分配</h2><div class="desc">Anlas 每个账单周期补满、不累积。每 10 分钟按「(剩余 − 保留) ÷ 距续费天数」重算每日池，平均分给近 7 天活跃、能用 V5 的成员，只用于当天 V5 用完后的「续杯」，仍保留免费尺寸钳制。手动设置过 Anlas 的 Key 不受影响</div></div>
+            <div class="panel-head"><h2>Anlas 自动分配</h2><div class="desc" title="每日池 = (剩余 − 保留) ÷ 距续费天数，平均分给近 7 天活跃、能用 V5 的成员；手动设置过 Anlas 的 Key 不受影响">每 10 分钟重算，供活跃成员在 V5 用完后续杯</div></div>
             <div id="anlasLive" class="hint" style="margin-bottom:12px;white-space:pre-line">正在读取…</div>
             <div class="form-grid" id="anlasFields"></div>
             <button class="btn primary" data-act="save-anlas">保存并立即重算</button>
           </div>
         </section>
         <section id="tab-set" hidden>
-          <div class="page-head"><div class="ttl"><h1>系统</h1><p>站点公告、后台密码与服务端概况</p></div></div>
+          <div class="page-head"><div class="ttl"><h1>系统</h1></div></div>
           <div class="card panel">
             <div class="panel-head"><h2>站点公告</h2><div class="desc">用户访问首页看到的内容，支持 HTML</div></div>
             <textarea id="announce" rows="10" placeholder="&lt;h2&gt;欢迎&lt;/h2&gt;&lt;p&gt;申请 Key 请联系……&lt;/p&gt;" aria-label="站点公告"></textarea>
@@ -811,11 +842,11 @@ NAI_TOKEN_V5_DAILY_LIMITS=0,150</pre><button class="btn mini" type="button" data
         <div class="field"><label for="f_expires">有效天数</label><input id="f_expires" type="number" min="0" step="1" required value="30"><div class="hint">0 = 永久</div></div>
       </div>
       <div class="sec-title">权限</div>
-      <label class="check"><input id="f_allow_anlas" type="checkbox"><span>允许消耗 Anlas（旧模型和 V5 的付费规格均受 日Anlas/月Anlas/全站预算 约束；不开启时仅允许免费档或 V5 额度规格）</span></label>
-      <label class="check"><input id="f_allow_img2img" type="checkbox"><span>允许 img2img / 局部重绘（需同时开启上面一项）</span></label>
-      <label class="check"><input id="f_exclude_global_v5" type="checkbox"><span>独立 V5 额度（此 Key 的 V5 使用不计入、也不受全站 V5 日额度限制）</span></label>
-      <label class="check"><input id="f_is_test" type="checkbox"><span>测试 Key（不计入成员统计、上游表现和首页稳定性，不会被闲置回收）</span></label>
-      <label class="check"><input id="f_notify" type="checkbox" checked><span>保存后由机器人私信通知该成员（停用 / 恢复、额度、模型、Anlas、有效期的变化；仅限 Discord 领取的成员）</span></label>
+      <label class="check"><input id="f_allow_anlas" type="checkbox"><span title="旧模型和 V5 的付费规格均受 日Anlas / 月Anlas / 全站预算 约束；不开启时仅允许免费档或 V5 额度规格">允许消耗 Anlas</span></label>
+      <label class="check"><input id="f_allow_img2img" type="checkbox"><span title="需同时允许消耗 Anlas">允许 img2img / 局部重绘</span></label>
+      <label class="check"><input id="f_exclude_global_v5" type="checkbox"><span title="此 Key 的 V5 使用不计入、也不受全站 V5 日额度限制">独立 V5 额度</span></label>
+      <label class="check"><input id="f_is_test" type="checkbox"><span title="不计入成员统计、上游表现和首页稳定性，不会被闲置回收">测试 Key</span></label>
+      <label class="check"><input id="f_notify" type="checkbox" checked><span title="停用 / 恢复、额度、模型、Anlas、有效期的变化；仅限 Discord 领取的成员">保存后私信通知成员</span></label>
       <div class="sec-title">功能权限</div>
       <div class="opt-group">
         <label class="check"><input type="radio" name="f_feat_mode" value="legacy" checked><span>全部已开放功能（含以后新开放的）</span></label>
@@ -927,6 +958,8 @@ const ICONS = {
   check:'<path d="M5 12.5l4.5 4.5L19 7.5"/>',
   alert:'<path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18h0"/>',
   info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h0"/>',
+  chev:'<path d="M9 6l6 6-6 6"/>',
+  pulse:'<path d="M3 12h4l3-7 4 14 3-7h4"/>',
 };
 function ic(name){ return `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]||''}</svg>`; }
 function hydrateIcons(root=document){
@@ -1065,7 +1098,7 @@ function renderReconciliation(d){
           `<div class="card stat"><div class="k">${label}</div><div class="v">${reconNumber(value)} <small>Anlas</small></div></div>`).join('')}
        </div><p>${differenceText}</p>${c.unconfirmed_requests>0 ? `<p class="hint">有 ${reconNumber(c.unconfirmed_requests)} 笔失败请求可能产生费用，合计预估 ${reconNumber(c.unconfirmed_anlas)} Anlas。</p>` : ''}`;
   $('#reconHistory').innerHTML=rows.map(row=>{ const x=row.comparison; return `<tr>
-    <td data-label="查询时间">${esc(reconTime(row.checked_at))}</td><td class="num" data-label="官方余额">${reconNumber(row.balance)}</td><td class="num" data-label="余额减少">${reconNumber(x.balance_decrease)}</td>
+    <td class="t" data-label="查询时间" title="${esc(reconTime(row.checked_at))}">${esc(shortTime(row.checked_at))}</td><td class="num" data-label="官方余额">${reconNumber(row.balance)}</td><td class="num" data-label="余额减少">${reconNumber(x.balance_decrease)}</td>
     <td class="num" data-label="本站记录">${reconNumber(x.recorded)}</td><td class="num" data-label="相差">${reconNumber(x.difference)}</td><td data-label="说明">${esc(reconReasons[x.reason] || '核对完成')}</td></tr>`; }).join('')
     || '<tr><td colspan="6" class="empty-cell">尚无记录</td></tr>';
 }
@@ -1154,7 +1187,7 @@ async function boot(){
 }
 
 /* ---------- tabs ---------- */
-const TABS = ['ov','members','keys','ops','audit','up','bugs','logs','actions','limits','discord','set'];
+const TABS = ['ov','members','ops','audit','up','bugs','logs','actions','limits','discord','set'];
 function tab(name){
   document.body.classList.remove('nav-open');
   $$('.nav button').forEach(b=>b.classList.toggle('active', b.dataset.tab===name));
@@ -1163,9 +1196,8 @@ function tab(name){
   if(name==='ov') loadOverview();
   if(name==='members') loadMembers();
   if(name==='audit'){ loadAuditSettings(); loadAudit(); }
-  if(name==='keys') loadKeys();
   if(name==='ops') loadOps();
-  if(name==='logs') loadLogs();
+  if(name==='logs'){ fillLogFilter(); syncLogFilters(); loadLogs(); }
   if(name==='actions') loadActions();
   if(name==='set' || name==='limits') loadSettings();
   if(name==='limits'){ loadQuotaAlgo(); loadAutopilot(); }
@@ -1192,7 +1224,7 @@ async function loadPerf(){
     for(const [fam, f] of Object.entries(d.families)){
       for(const [label, w] of [['最近 1 小时', f.h1], ['最近 24 小时', f.d1], ['过去 7 天基线', f.baseline]]){
         const other = w.auth + w.server + w.other;
-        rows.push(`<tr><td data-label="模型">${label==='最近 1 小时'?`<b>${esc(fam)}</b>`:''}</td><td data-label="时段">${label}</td>
+        rows.push(`<tr><td data-label="模型">${label==='最近 1 小时'?`<b>${esc(fam)}</b>`:''}</td><td class="nw" data-label="时段">${label}</td>
           <td class="num" data-label="请求 / 成功率">${w.requests} / ${pct(w.success_rate)}</td>
           <td class="num" data-label="限流">${w.rate_limited?`<span class="tag warn">${w.rate_limited}</span>`:'0'}</td>
           <td class="num" data-label="其他失败">${other?`<span class="tag off">${other}</span>`:'0'}</td>
@@ -1228,28 +1260,31 @@ async function loadShadow(){
       : `⚠ ${pct(c.contended_share)} 的出图发出时有其他成员在排队（最多同时 ${c.peak_waiting_members} 人）：轮流出图开始有收益，可以考虑启用。`;
     const hist = c.hist, tot = Math.max(1, c.dispatches);
     const bars = ['0','1','2','3+'].map(k => `<div style="display:flex;align-items:center;gap:8px"><span class="muted sm" style="width:70px">${k==='0'?'无人排队':k+' 人在排队'}</span><div class="bar" style="flex:1;height:10px"><i style="width:${hist[k]/tot*100}%"></i></div><span class="num sm" style="width:44px;text-align:right">${hist[k]}</span></div>`).join('');
-    const members = q.members.slice(0, 8).map(m => `<tr><td>${esc(m.name)}</td><td class="num">${m.images}</td><td>${m.over_ceil?`<span class="tag off">超出借用上限 ${m.over_ceil}</span>`:m.borrowed?`<span class="tag warn">借用 ${m.borrowed}</span>`:'<span class="tag on">保底内</span>'}</td></tr>`).join('');
+    const members = q.members.slice(0, 8).map(m => `<tr><td data-label="成员">${esc(m.name)}</td><td class="num" data-label="出图">${m.images}</td><td data-label="新规则下">${m.over_ceil?`<span class="tag off">超出借用上限 ${m.over_ceil}</span>`:m.borrowed?`<span class="tag warn">借用 ${m.borrowed}</span>`:'<span class="tag on">保底内</span>'}</td></tr>`).join('');
     box.innerHTML = `
       <div class="notice-box" style="margin-bottom:12px">${verdict}</div>
-      <div class="table-wrap"><table class="rt"><thead><tr><th>等待时间</th><th>实际（现在的规则）</th><th>回放：先到先出</th><th>回放：成员间轮流</th></tr></thead><tbody>
-        <tr><td>全体 P50</td><td class="num">${sec(d.actual.p50)}</td><td class="num">${sec(d.fifo.p50)}</td><td class="num">${cmp(d.fifo.p50, d.drr.p50)}</td></tr>
-        <tr><td>全体 P90</td><td class="num">${sec(d.actual.p90)}</td><td class="num">${sec(d.fifo.p90)}</td><td class="num">${cmp(d.fifo.p90, d.drr.p90)}</td></tr>
-        <tr><td>轻度用户 P90（当天 ≤10 张）</td><td class="num">${sec(d.actual.light_p90)}</td><td class="num">${sec(d.fifo.light_p90)}</td><td class="num">${cmp(d.fifo.light_p90, d.drr.light_p90)}</td></tr>
-        <tr><td>等得最久那个人的平均</td><td class="num">—</td><td class="num">${sec(d.fifo.worst_member_mean)}</td><td class="num">${cmp(d.fifo.worst_member_mean, d.drr.worst_member_mean)}</td></tr>
+      <div class="table-wrap"><table class="rt"><thead><tr><th>等待时间</th><th class="num">实际（现在的规则）</th><th class="num">回放：先到先出</th><th class="num">回放：成员间轮流</th></tr></thead><tbody>
+        <tr><td data-label="等待时间">全体 P50</td><td class="num" data-label="实际">${sec(d.actual.p50)}</td><td class="num">${sec(d.fifo.p50)}</td><td class="num">${cmp(d.fifo.p50, d.drr.p50)}</td></tr>
+        <tr><td data-label="等待时间">全体 P90</td><td class="num" data-label="实际">${sec(d.actual.p90)}</td><td class="num">${sec(d.fifo.p90)}</td><td class="num">${cmp(d.fifo.p90, d.drr.p90)}</td></tr>
+        <tr><td data-label="等待时间">轻度用户 P90（当天 ≤10 张）</td><td class="num" data-label="实际">${sec(d.actual.light_p90)}</td><td class="num">${sec(d.fifo.light_p90)}</td><td class="num">${cmp(d.fifo.light_p90, d.drr.light_p90)}</td></tr>
+        <tr><td data-label="等待时间">等得最久那个人的平均</td><td class="num" data-label="实际">—</td><td class="num">${sec(d.fifo.worst_member_mean)}</td><td class="num">${cmp(d.fifo.worst_member_mean, d.drr.worst_member_mean)}</td></tr>
       </tbody></table></div>
-      <div class="hint" style="margin:6px 0 14px">样本 ${d.samples} 次出图。「实际」是日志里记录的等待；回放按相同到达时间、生成耗时和 ${P.interval} 秒间隔重新排队，两者应接近，差距大说明模型需要校准。</div>
+      <div style="height:14px"></div>
       <div class="two-col">
         <div><h3 style="font-size:14px;margin-bottom:8px">发出时有几位其他成员在排队</h3>${bars}</div>
         <div><h3 style="font-size:14px;margin-bottom:8px">繁忙程度（15 分钟窗口）</h3>
           <div class="row" style="display:flex;justify-content:space-between"><span class="muted sm">峰值利用率</span><span class="num">${pct(L.peak_util)}</span></div>
           <div class="row" style="display:flex;justify-content:space-between"><span class="muted sm">处于「繁忙」的时间</span><span class="num">${L.busy_minutes} 分钟</span></div>
-          <div class="hint">利用率 &gt; ${pct(P.busy_util)} 进入繁忙（只服务保底内请求），&lt; ${pct(P.idle_util)} 回到空闲（允许借用）。</div></div>
+</div>
       </div>
       <h3 style="font-size:14px;margin:14px 0 8px">保底与借用（保底 ${q.base} 张 / 借用上限 ${q.ceil} 张；账号每日上限 ${q.account_cap} 张）</h3>
       <div class="row" style="display:flex;justify-content:space-between;margin-bottom:6px"><span class="muted sm">账号总量 / 每日上限</span><span class="num">${q.total} / ${q.account_cap}（${pct(q.cap_used)}）</span></div>
       <div class="bar" style="margin-bottom:10px"><i style="width:${Math.min(100, q.cap_used*100)}%"></i></div>
-      <div class="table-wrap"><table class="rt"><thead><tr><th>成员</th><th>出图</th><th>新规则下</th></tr></thead><tbody>${members || '<tr><td colspan="3" class="empty-cell">暂无</td></tr>'}</tbody></table></div>
-      <div class="hint">${q.borrowers ? `有 ${q.borrowers} 人超过保底，共借用 ${q.borrowed_images} 张：新规则下这些请求只在空闲时放行。` : '没有人超过保底：新规则下所有请求都在保底内，体验不变。'} 7 天视图按 7 天合计张数显示，保底按天计算，仅供参考。</div>`;
+      <div class="table-wrap"><table class="rt"><thead><tr><th>成员</th><th class="num">出图</th><th>新规则下</th></tr></thead><tbody>${members || '<tr><td colspan="3" class="empty-cell">暂无</td></tr>'}</tbody></table></div>
+      <details style="margin-top:12px"><summary class="hint" style="cursor:pointer">说明</summary><div class="hint">
+        <p>样本 ${d.samples} 次出图。「实际」是日志里记录的等待；回放按相同到达时间、生成耗时和 ${P.interval} 秒间隔重新排队，两者应接近，差距大说明模型需要校准。</p>
+        <p>利用率 &gt; ${pct(P.busy_util)} 进入繁忙（只服务保底内请求），&lt; ${pct(P.idle_util)} 回到空闲（允许借用）。</p>
+        <p>${q.borrowers ? `有 ${q.borrowers} 人超过保底，共借用 ${q.borrowed_images} 张：新规则下这些请求只在空闲时放行。` : '没有人超过保底：新规则下所有请求都在保底内，体验不变。'} 7 天视图按 7 天合计张数显示，保底按天计算，仅供参考。</p></div></details>`;
   }catch(e){ box.innerHTML = '<div class="hint">回放失败</div>'; }
 }
 /* 总览图表：今日数值 + 近 7 天，用按钮切换指标（原来的几张今日卡片合并到这里） */
@@ -1286,16 +1321,15 @@ async function loadBugs(){
     $('#bugCount').textContent = d.open ? d.open + ' 个未处理' : '无未处理';
     $('#navBugs').hidden = !d.open; $('#navBugs').textContent = d.open;
     $('#bugCount').className = 'tag ' + (d.open ? 'warn' : 'on');
-    const t = x => new Date(x*1000).toLocaleString();
     $('#bugBody').innerHTML = d.errors.map(e=>`
       <tr${e.resolved_at?' class="muted"':''}>
-        <td data-label="级别">${e.level==='error'?'<span class="tag off">错误</span>':'<span class="tag warn">注意</span>'}</td>
-        <td data-label="来源">${esc(bugSource(e.source))}</td>
+        <td class="st" data-label="级别">${e.level==='error'?'<span class="tag off">错误</span>':'<span class="tag warn">注意</span>'}</td>
+        <td class="nw" data-label="来源">${esc(bugSource(e.source))}</td>
         <td data-label="内容"><details><summary>${esc(e.title)}</summary><pre class="mono" style="white-space:pre-wrap;font-size:11.5px;max-height:320px;overflow:auto">${esc(e.detail||'（无堆栈）')}${e.last_path?'\n路径：'+esc(e.last_path):''}${e.key_name?'\nKey：'+esc(e.key_name):''}</pre></details></td>
         <td class="num" data-label="次数">${esc(e.count)}</td>
-        <td class="mono" data-label="首次 / 最近" style="font-size:11.5px">${esc(t(e.first_seen))}<br>${esc(t(e.last_seen))}</td>
-        <td class="mono" data-label="错误编号">${e.last_rid?`<a href="#" data-rid="${esc(e.last_rid)}">${esc(e.last_rid)}</a>`:'—'}</td>
-        <td>${e.resolved_at?'已处理':`<button class="btn mini" data-bug="${esc(e.sig)}">标记已处理</button>`}</td>
+        <td class="t" data-label="首次 / 最近" title="${esc(fullTime(e.first_seen) + ' / ' + fullTime(e.last_seen))}">${esc(shortTime(e.first_seen))}<br>${esc(shortTime(e.last_seen))}</td>
+        <td class="mono nw" data-label="错误编号">${e.last_rid?`<a href="#" data-rid="${esc(e.last_rid)}">${esc(e.last_rid)}</a>`:'—'}</td>
+        <td class="act" data-label="操作">${e.resolved_at?'<span class="muted">已处理</span>':`<button class="btn mini" data-bug="${esc(e.sig)}">标记已处理</button>`}</td>
       </tr>`).join('') || '<tr><td colspan="7" class="empty-cell">没有发现 bug 🎉</td></tr>';
   }catch(e){ $('#bugBody').innerHTML = '<tr><td colspan="7" class="empty-cell">读取失败</td></tr>'; }
 }
@@ -1320,13 +1354,13 @@ async function loadOverview(){
         <div class="v">${t.unconfirmed_anlas||0} <small>Anlas</small></div>
         <div class="sub">今日预估 ${t.unconfirmed_requests||0} 笔 · 本月 ${d.month.unconfirmed_anlas||0} Anlas / ${d.month.unconfirmed_requests||0} 笔<br>仅为估算，实际扣款尚未确认。</div></div>`;
     $('#featUsage').innerHTML = (d.feature_usage||[]).map(f=>{
-      const cnt = b => `<span class="num">${b.ok}</span> / <span class="num ${b.error?'bad':''}">${b.error}</span> / <span class="num ${b.rejected?'warn':''}">${b.rejected}</span>`;
+      const cnt = b => `<span class="tri"><span class="num">${b.ok}</span> / <span class="num ${b.error?'bad':''}">${b.error}</span> / <span class="num ${b.rejected?'warn':''}">${b.rejected}</span></span>`;
       const out = b => [b.images?`${b.images} 张`:'', b.tokens?`${fmt(b.tokens)} tokens`:'', b.anlas?`${b.anlas} Anlas`:''].filter(Boolean).join(' · ') || '—';
       const idle = !f.week.ok && !f.week.error && !f.week.rejected;
       return `<tr class="${idle?'muted':''}">
         <td data-label="功能"><button class="btn mini ghost" data-act="feat-logs" data-feat="${esc(f.id)}">${esc(f.label)}</button></td>
-        <td data-label="今日">${cnt(f.today)}</td><td data-label="今日产出">${esc(out(f.today))}</td>
-        <td data-label="近 7 天">${cnt(f.week)}</td><td data-label="近 7 天产出">${esc(out(f.week))}</td></tr>`;
+        <td class="num" data-label="今日">${cnt(f.today)}</td><td data-label="今日产出">${esc(out(f.today))}</td>
+        <td class="num" data-label="近 7 天">${cnt(f.week)}</td><td data-label="近 7 天产出">${esc(out(f.week))}</td></tr>`;
     }).join('');
     ovData = d; drawChart();
     const pool = d.pool.length ? d.pool : [];
@@ -1516,8 +1550,12 @@ async function ensureMembers(){
 async function loadMembers(){
   if(!membersCache){ $('#memberGrid').innerHTML = skeletons(6, 56); }
   try{
-    { const d = await api('/admin/api/members'); membersCache = d.members; memberMeta = d; }
-    try{ const ks = (await api('/admin/api/keys')).keys; const fm = new Map(ks.map(k=>[k.id,k.features])); membersCache.forEach(m=>{ m.features = fm.has(m.id) ? fm.get(m.id) : undefined; }); }catch(_){}
+    // 成员与 Key 一一对应：/members 给用量与 Discord 资料，/keys 给 Key、配额、功能等编辑所需字段
+    const [d, kd] = await Promise.all([api('/admin/api/members'), api('/admin/api/keys').catch(()=>null)]);
+    membersCache = d.members; memberMeta = d;
+    if(kd){ keysCache = kd.keys; memberMeta.share_alert_nets = kd.share_alert_nets ?? d.share_alert_nets; }
+    const km = new Map(keysCache.map(k=>[k.id, k]));
+    membersCache.forEach(m=>{ m.k = km.get(m.id); m.features = m.k ? m.k.features : undefined; });
     fillMemberFilter();
     renderMembers();
   }catch(e){ toastErr(e); $('#memberGrid').innerHTML = ''; }
@@ -1525,14 +1563,16 @@ async function loadMembers(){
 const DC_CDN = 'https://cdn.discordapp.com/', DC_SITE = 'https://discord.com/';
 function safeUrl(u, prefix){ return typeof u === 'string' && u.startsWith(prefix) && !/[\s"'<>]/.test(u) ? u : ''; }
 function memberLabel(m){ const d = m.discord; return (d && (d.display_name || d.username)) || m.name; }
+function findMember(id){ return (membersCache||[]).find(x=>x.id===id); }
 async function refreshAfterMemberChange(){
-  membersCache = null; keysCache = [];
-  await Promise.allSettled([loadMembers(), loadKeys(), loadOverview()]);
+  membersCache = null;
+  await Promise.allSettled([loadMembers(), loadOverview()]);
 }
+/* 启用 / 停用、删除：成员页和展开面板共用这一套确认逻辑 */
 async function memberToggle(id, enabled){
-  const m = (membersCache||[]).find(x=>x.id===id); if(!m) return;
+  const m = findMember(id); if(!m) return;
   const name = memberLabel(m);
-  if(!enabled && !await askConfirm(`确定停用成员「${name}」？\n停用后其 Key 立即不能使用，但成员记录和用量保留，之后可以重新启用。`, '停用')) return;
+  if(!enabled && !await askConfirm(`确定停用「${name}」？\n停用后其 Key 立即不能使用，记录和用量保留，之后可以重新启用。`, '停用')) return;
   try{
     await api('/admin/api/keys/'+id, {method:'PATCH', body:JSON.stringify({enabled})});
     toast(`已${enabled?'启用':'停用'}「${name}」`, 'ok');
@@ -1540,7 +1580,7 @@ async function memberToggle(id, enabled){
   }catch(e){ toastErr(e); }
 }
 async function memberDelete(id, ban){
-  const m = (membersCache||[]).find(x=>x.id===id); if(!m || m.is_admin) return;
+  const m = findMember(id); if(!m || m.is_admin) return;
   const name = memberLabel(m), isDc = !!(m.discord || m.discord_id);
   let msg, okText;
   if(ban){
@@ -1550,13 +1590,14 @@ async function memberDelete(id, ban){
     msg = `确定删除成员「${name}」？\n其 Key 将被删除，Discord 领取记录会被清除并摘除身份组。\n删除后该成员可以重新自助领取新的 Key，历史用量不再保留。`;
     okText = '删除';
   }else{
-    msg = `确定删除成员「${name}」？\n其 Key 将被删除且不可恢复。`;
+    msg = `确定删除「${name}」？\n其 Key 将被删除且不可恢复。`;
     okText = '删除';
   }
   if(!await askConfirm(msg, okText)) return;
   try{
     await api('/admin/api/keys/'+id+(ban?'?ban=true':''), {method:'DELETE'});
     toast(ban ? `已删除「${name}」并永久禁止领取` : `已删除「${name}」`, 'ok');
+    memberOpen.delete(id);
     await refreshAfterMemberChange();
   }catch(e){ toastErr(e); }
 }
@@ -1564,6 +1605,7 @@ function memberLimitRatio(m){ return m.daily_images>0 ? m.today.images/m.daily_i
 /* 成员筛选：时间都按秒；“活动”= 最近一次请求（含网站查额度），“出图”= 成功生成过图片 */
 const H = 3600, D = 86400;
 const activityAt = m => m.last_used_at || m.registered_at || m.created_at || 0;
+const isManual = m => !m.is_admin && !m.is_test && !m.discord && !m.discord_id;
 function memberFilters(now){
   const idleDays = memberMeta.inactivity_days || 3, nets = memberMeta.share_alert_nets || 3;
   return [
@@ -1575,17 +1617,12 @@ function memberFilters(now){
     ['rejected', '被拒', m => m.rejected_24h > 0],
     ['shared', '疑似分享', m => nets > 0 && m.sources_24h >= nets],
     ['disabled', '已停用', m => !m.enabled],
-    ['staff', '测试（站长）', m => m.is_test || m.is_admin],
+    ['manual', '手动', isManual],
+    ['staff', '站长 / 测试', m => m.is_test || m.is_admin],
   ];
 }
 function ago(sec){ return sec < H ? Math.max(1, Math.round(sec/60)) + ' 分钟' : sec < D ? Math.round(sec/H) + ' 小时' : Math.round(sec/D) + ' 天'; }
-function onboardLine(m, now){
-  if(m.is_admin || !m.registered_at) return '';
-  if(m.first_image_at) return `<div class="muted sm">领取后 ${ago(Math.max(0, m.first_image_at - m.registered_at))}首次出图</div>`;
-  const tried = m.last_used_at ? '，查过额度但' : '，';
-  return `<div class="sm" style="color:var(--warn)">领取 ${ago(now - m.registered_at)}${tried}还没出过图</div>`;
-}
-/* 成员页快捷权限：模型范围、Anlas 方式。改动立即生效，并由机器人私信成员 */
+/* 快捷权限：额度方式、Anlas 方式。改动立即生效，并由机器人私信成员 */
 const ANLAS_PRESETS = [30, 78, 150];
 function permControls(m){
   const scope = m.image_model_scope === 'all' ? 'all' : 'legacy';
@@ -1593,19 +1630,19 @@ function permControls(m){
   const manual = ANLAS_PRESETS.includes(daily) ? ANLAS_PRESETS : [...ANLAS_PRESETS, daily].filter(Boolean).sort((a,b)=>a-b);
   const autoLabel = m.anlas_auto ? `算法 · 今日 ${daily}` : '交给算法';
   const qa = m.quota_auto !== false;
-  return `<select class="psel" data-perm="scope" data-id="${m.id}" aria-label="额度">
-      <option value="auto"${qa?' selected':''}>算法 · ${m.daily_images}${m.daily_v5?' + V5 '+m.daily_v5:''}</option>
-      <option value="legacy"${!qa&&scope==='legacy'?' selected':''}>手动 · 仅 V4.5</option>
-      <option value="all"${!qa&&scope==='all'?' selected':''}>手动 · V4.5 + V5</option></select>
-    <select class="psel" data-perm="anlas" data-id="${m.id}" aria-label="Anlas 权限">
+  return `<select class="psel" data-perm="scope" data-id="${m.id}" aria-label="额度" title="额度：改动立即生效并私信通知">
+      <option value="auto"${qa?' selected':''}>额度：算法 · ${m.daily_images}${m.daily_v5?' + V5 '+m.daily_v5:''}</option>
+      <option value="legacy"${!qa&&scope==='legacy'?' selected':''}>额度：手动 · 仅 V4.5</option>
+      <option value="all"${!qa&&scope==='all'?' selected':''}>额度：手动 · V4.5 + V5</option></select>
+    <select class="psel" data-perm="anlas" data-id="${m.id}" aria-label="Anlas 权限" title="Anlas：改动立即生效并私信通知">
       <option value="off"${mode==='off'?' selected':''}>Anlas 关闭</option>
-      <option value="auto"${mode==='auto'?' selected':''}>${esc(autoLabel)}</option>
-      ${manual.map(n=>`<option value="manual:${n}"${mode==='manual'&&daily===n?' selected':''}>手动 ${n}/天</option>`).join('')}
+      <option value="auto"${mode==='auto'?' selected':''}>Anlas：${esc(autoLabel)}</option>
+      ${manual.map(n=>`<option value="manual:${n}"${mode==='manual'&&daily===n?' selected':''}>Anlas：手动 ${n}/天</option>`).join('')}
     </select>`;
 }
 document.addEventListener('change', async e => {
   const sel = e.target.closest('select[data-perm]'); if(!sel) return;
-  const m = (membersCache||[]).find(x=>x.id===+sel.dataset.id); if(!m) return;
+  const m = findMember(+sel.dataset.id); if(!m) return;
   const v = sel.value, body = {};
   if(sel.dataset.perm === 'scope'){ if(v === 'auto') body.quota_mode = 'auto'; else body.image_model_scope = v; }
   else if(v.startsWith('manual:')){ body.anlas_mode = 'manual'; body.daily_anlas = +v.slice(7); }
@@ -1618,13 +1655,64 @@ document.addEventListener('change', async e => {
   }catch(err){ toastErr(err); sel.disabled = false; }
 });
 const sortTh = (k, label, cls='') => `<th class="sortable ${cls}${memberSort===k?' on':''}" data-sort="${k}" aria-sort="${memberSort===k?'descending':'none'}">${label}${memberSort===k?' ↓':''}</th>`;
+const memberOpen = new Set();          // 展开的成员：刷新、筛选、排序后保持
+const fullTime = ts => ts ? new Date(ts*1000).toLocaleString('zh-CN') : '';
+const pad2 = n => String(n).padStart(2, '0');
+function shortTime(ts){ const d = new Date(ts*1000); return `${pad2(d.getMonth()+1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; }
+function memberPanel(m, now){
+  const k = m.k, dc = m.discord || null;
+  const prof = dc ? safeUrl(dc.profile_url, DC_SITE) : '';
+  const dcId = dc ? String(dc.id) : (m.discord_id ? String(m.discord_id) : '');
+  const inf = n => n > 0 ? n : '∞';
+  let keyGrp, quotaGrp;
+  if(!k){
+    keyGrp = '<div class="muted sm">Key 信息读取失败，点右上角刷新重试</div>';
+    quotaGrp = '';
+  }else{
+    const exp = k.expires_at ? new Date(k.expires_at*1000).toLocaleDateString('zh-CN') : '永久';
+    const expTag = k.expires_at && k.expires_at < now ? ' <span class="mf bad">已过期</span>' : k.expires_at && k.expires_at - now < 3*D ? ' <span class="mf warn">快到期</span>' : '';
+    keyGrp = `<div class="keyline" data-kid="${k.id}"><span class="mono" data-tok="${esc(k.token)}">${esc(mask(k.token))}</span>
+        <button class="btn mini" type="button" data-act="copy-key">${ic('copy')}复制</button>
+        <button class="btn mini" type="button" data-act="regen-key" data-id="${k.id}">重新生成</button></div>
+      <dl class="kv"><dt>到期</dt><dd>${esc(exp)}${expTag}</dd>
+        <dt>24h 来源</dt><dd>${srcBadge(k, memberMeta.share_alert_nets)}</dd>
+        <dt>${m.discord_id ? '领取' : '创建'}</dt><dd title="${esc(fullTime(m.registered_at))}">${m.registered_at ? esc(rel(m.registered_at)) : '—'}</dd>
+        <dt>最近使用</dt><dd>${k.last_used_at ? esc(fullTime(k.last_used_at)) : '从未使用'}</dd></dl>`;
+    const u = k.used;
+    const quota = k.is_admin
+      ? `<dt>配额</dt><dd>单 Key 不限 · 仍受全站保护 · RPM ${k.rpm}</dd>`
+      : `<dt>图片</dt><dd>免费 ${inf(k.daily_images)}/日${k.image_model_scope==='all' ? ` · V5 ${inf(k.daily_v5)}/日` : ' · 仅 V4.5↓'}</dd>
+         <dt>Anlas</dt><dd>${k.allow_anlas ? `${inf(k.daily_anlas)}/日 · ${inf(k.monthly_anlas)}/月` : '未开'}</dd>
+         <dt>文本</dt><dd>${fmt(k.daily_text_tokens)}/日 · RPM ${k.rpm}</dd>`;
+    const extra = [k.allow_img2img ? 'img2img' : '', k.exclude_global_v5 ? '独立 V5' : ''].filter(Boolean).join(' · ');
+    quotaGrp = `${m.is_admin ? '' : `<div class="mx-perm">${permControls(m)}</div>`}
+      <dl class="kv"><dt>今日用量</dt><dd>免费 ${u.legacy_free_images||0} · V5 ${u.v5||0} · Anlas ${u.anlas} · 文本 ${fmt(u.text_tokens)}</dd>
+        ${quota}
+        <dt>功能</dt><dd><div class="chips">${featChips(k.features)}</div></dd>
+        ${extra ? `<dt>其他</dt><dd>${esc(extra)}</dd>` : ''}</dl>
+      <div style="margin-top:10px"><button class="btn mini" type="button" data-act="edit-key" data-id="${k.id}">编辑全部…</button></div>`;
+  }
+  return `<tr class="mx" data-mx="${m.id}"><td colspan="5"><div class="mx-grid">
+    <div class="mx-g"><h4>Key</h4>${keyGrp}</div>
+    <div class="mx-g"><h4>额度与权限</h4>${quotaGrp}</div>
+    <div class="mx-g ops"><h4>操作</h4><div class="mx-acts">
+      ${k ? `<button class="btn mini" type="button" data-act="reset-quota" data-id="${m.id}">重置今日额度</button>` : ''}
+      <button class="btn mini" type="button" data-act="member-toggle" data-id="${m.id}" data-on="${m.enabled?0:1}">${m.enabled?'停用':'启用'}</button>
+      <button class="btn mini" type="button" data-act="view-audit" data-id="${m.id}">生成记录</button>
+      ${prof?`<a class="btn mini" href="${esc(prof)}" target="_blank" rel="noopener noreferrer">在 Discord 打开</a>`:''}
+      ${dcId?`<button class="btn mini" type="button" data-act="copy-dc" data-dcid="${esc(dcId)}">复制 Discord ID</button>`:''}</div>
+      ${m.is_admin ? '' : `<div class="mx-acts danger-row">
+        <button class="btn mini danger" type="button" data-act="member-del" data-id="${m.id}">${dcId?'删除（可重新领取）':'删除'}</button>
+        ${dcId?`<button class="btn mini danger" type="button" data-act="member-ban" data-id="${m.id}">删除并禁领</button>`:''}</div>`}
+    </div></div></td></tr>`;
+}
 function renderMembers(){
   const everyone = membersCache || [];
   const now = Date.now()/1000;
   const isStaff = m => m.is_test || m.is_admin;
   const filters = memberFilters(now);
   const testView = memberFilter === 'staff';
-  const all = everyone.filter(m => testView ? isStaff(m) : !isStaff(m));      // 站长 / 测试账号只在「测试（站长）」里出现，不混进成员统计
+  const all = everyone.filter(m => testView ? isStaff(m) : !isStaff(m));      // 站长 / 测试账号只在「站长 / 测试」里出现，不混进成员统计
   const members = everyone.filter(m => !isStaff(m));
   const topWeek = new Set(members.length>3 ? members.filter(m=>m.week.images>0).sort((a,b)=>b.week.images-a.week.images).slice(0,3).map(m=>m.id) : []);
   const cnt = fn => members.filter(fn).length;
@@ -1643,6 +1731,7 @@ function renderMembers(){
     $('#memberGrid').innerHTML = `<div class="empty card"><div class="ico">${ic('users')}</div><h3>${everyone.length?'没有匹配的成员':'还没有成员'}</h3><p>${everyone.length?'换个筛选或关键词试试。':'成员在 Discord 领取 Key 后会出现在这里。'}</p></div>`;
     return;
   }
+  const nets = memberMeta.share_alert_nets || 3;
   const flag = (cls, text, title) => `<span class="mf ${cls}"${title?` title="${esc(title)}"`:''}>${esc(text)}</span>`;
   const rows = list.map(m=>{
     const dc = m.discord || null;
@@ -1655,31 +1744,31 @@ function renderMembers(){
     const v45 = Math.max(0, m.today.images - (m.today.v5||0)), v5 = m.today.v5 || 0;
     const pct = x => cap ? Math.min(100, x / cap * 100) : 0;
     const full = cap && m.today.images >= cap;
+    // 状态标签按优先级取前 3 个：停用 / 过期 / 疑似分享最先
     const flags = [
       !m.enabled ? flag('bad', '已停用') : '',
-      m.is_admin ? flag('info', '站长') : '', m.is_test ? flag('info', '测试') : '',
+      m.expires_at && m.expires_at < now ? flag('bad', '已过期') : '',
+      nets > 0 && m.sources_24h >= nets ? flag('bad', '疑似分享', `近 24 小时 ${m.sources_24h} 个网段`) : '',
+      full ? flag('bad', '已达日限') : '',
+      m.expires_at && m.expires_at >= now && m.expires_at - now < 3*D ? flag('warn', '快到期') : '',
+      m.rejected_24h > 0 ? flag('warn', '被拒 ' + m.rejected_24h, '近 24 小时被拒次数') : '',
+      m.is_admin ? flag('info', '站长') : '', m.is_test ? flag('info', '测试') : '', isManual(m) ? flag('info', '手动', '后台手动创建的 Key') : '',
       m.registered_at && now - m.registered_at < D ? flag('new', '新加入') : '',
       !m.first_image_at && !isStaff(m) ? flag('warn', m.registered_at && now - m.registered_at > H ? '还没出过图' : '未出图') : '',
-      full ? flag('bad', '已达日限') : '',
       topWeek.has(m.id) ? flag('', '高频') : '',
-      m.rejected_24h > 0 ? flag('warn', '被拒 ' + m.rejected_24h, '近 24 小时被拒次数') : '',
-      (memberMeta.share_alert_nets||3) > 0 && m.sources_24h >= (memberMeta.share_alert_nets||3) ? flag('bad', '疑似分享', `近 24 小时 ${m.sources_24h} 个网段`) : '',
-      m.expires_at && m.expires_at < now ? flag('bad', '已过期') : m.expires_at && m.expires_at - now < 3*D ? flag('warn', '快到期') : '',
-      m.allow_anlas ? flag('info', m.anlas_auto ? 'Anlas 自动' : 'Anlas') : '',
-      m.features === undefined ? '' : m.features == null ? flag('info', '全部功能') :
-        flag('info', m.features.map(n => (FEAT[n]||[n])[0]).join(' · ') || '无功能', '已开通的功能；在「Key 管理」里可手动增减'),
-    ].join('');
-    return `<tr class="${m.enabled?'':'dim'}">
+    ].filter(Boolean).slice(0, 3).join('');
+    const open = memberOpen.has(m.id);
+    return `<tr class="mr${m.enabled?'':' dim'}${open?' open':''}" data-mid="${m.id}">
       <td class="mcell" data-label="成员"><div class="mrow">
         <div class="avatar sm ${dc?'dc':''}">${esc([...String(title||'?')][0]||'?')}${av?`<img class="av" src="${esc(av)}" alt="" width="28" height="28" referrerpolicy="no-referrer" loading="lazy">`:''}</div>
-        <div style="min-width:0"><div class="mn">${esc(title)} ${handle?`<span class="muted">${esc(handle)}</span>`:''}</div><div class="mflags">${flags}</div></div></div></td>
-      <td data-label="今日"><div class="mq"><div class="mbar${full?' full':''}" title="V4.5 ${v45} · V5 ${v5}${cap?' / 上限 '+cap:''}"><i style="width:${pct(v45)}%"></i><i class="v5" style="width:${pct(v5)}%"></i></div>
-        <span class="num"><b>${m.today.images}</b>${cap?'/'+cap:''}${v5||m.daily_v5?` <span class="muted">V5 ${v5}${m.daily_v5>0?'/'+m.daily_v5:''}</span>`:''}</span></div></td>
-      <td data-label="权限" class="mperm">${m.is_admin ? '<span class="muted">站长</span>' : permControls(m)}</td>
-      <td class="num" data-label="近 7 天 / 累计">${m.week.images}<span class="muted"> / ${m.total_images}</span></td>
-      <td data-label="使用 / 领取" class="muted mtime">${esc(rel(m.last_used_at))}<br><span class="mreg">${m.registered_at?'领取 '+esc(rel(m.registered_at)):'—'}</span></td>
+        <div style="min-width:0"><div class="mn">${esc(title)} ${handle?`<span class="muted">${esc(handle)}</span>`:''}</div>${flags?`<div class="mflags">${flags}</div>`:''}</div></div></td>
+      <td class="mtoday" data-label="今日"><div class="mq"><div class="mbar${full?' full':''}" title="V4.5 ${v45} · V5 ${v5}${cap?' / 上限 '+cap:''}"><i style="width:${pct(v45)}%"></i><i class="v5" style="width:${pct(v5)}%"></i></div>
+        <span class="num"><b>${m.today.images}</b>${cap?'/'+cap:''}${v5||m.daily_v5?` <span class="muted">· V5 ${v5}${m.daily_v5>0?'/'+m.daily_v5:''}</span>`:''}</span></div></td>
+      <td class="num mweek" data-label="7 天 / 累计">${m.week.images}<span class="muted"> / ${m.total_images}</span></td>
+      <td class="mtime" data-label="最近使用" title="${esc(m.last_used_at ? '最近使用 ' + fullTime(m.last_used_at) : '从未使用')}">${esc(rel(m.last_used_at))}</td>
       <td class="mact">
-        <details class="menu"><summary class="btn mini icon" aria-label="更多操作：${esc(title)}">⋯</summary>
+        <button class="btn mini ghost icon mx-arrow" type="button" data-act="mx-toggle" data-id="${m.id}" aria-expanded="${open}" aria-label="展开 Key 与操作：${esc(title)}">${ic('chev')}</button>
+        <details class="menu"><summary class="btn mini ghost icon" aria-label="更多操作：${esc(title)}">⋯</summary>
           <div class="menu-pop">
             <button type="button" data-act="view-audit" data-id="${m.id}">生成记录</button>
             ${prof?`<a href="${esc(prof)}" target="_blank" rel="noopener noreferrer">在 Discord 打开</a>`:''}
@@ -1688,11 +1777,22 @@ function renderMembers(){
             ${m.is_admin?'':`<button type="button" class="danger" data-act="member-del" data-id="${m.id}">${dcId?'删除（可重新领取）':'删除'}</button>`}
             ${m.is_admin||!dcId?'':`<button type="button" class="danger" data-act="member-ban" data-id="${m.id}">删除并永久禁止领取</button>`}
           </div></details></td>
-    </tr>`;
+    </tr>${open ? memberPanel(m, now) : ''}`;
   }).join('');
-  $('#memberGrid').innerHTML = `<div class="card panel" style="padding:4px 0"><div class="table-wrap mwrap"><table class="rt mtable">
-    <thead><tr><th>成员</th>${sortTh('today','今日图片')}<th title="改动立即生效，并私信通知该成员">权限</th>${sortTh('week','7 天 / 累计','num')}${sortTh('recent','最近使用')}<th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+  $('#memberGrid').innerHTML = `<div class="card panel mpanel" style="padding:0"><div class="table-wrap mwrap"><table class="rt mtable">
+    <thead><tr><th>成员</th>${sortTh('today','今日')}${sortTh('week','7 天 / 累计','num')}${sortTh('recent','最近使用')}<th class="act"><span class="sr" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">操作</span></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
+function toggleMemberPanel(id){
+  if(memberOpen.has(id)) memberOpen.delete(id); else memberOpen.add(id);
+  renderMembers();
+  const b = document.querySelector(`[data-act="mx-toggle"][data-id="${id}"]`); if(b) b.focus({preventScroll:true});
+}
+document.addEventListener('click', e => {
+  const tr = e.target.closest('tr.mr'); if(!tr) return;
+  if(e.target.closest('button,a,select,input,details,summary,label')) return;
+  if(getSelection && String(getSelection()).length) return;      // 选中文字时不切换
+  toggleMemberPanel(+tr.dataset.mid);
+});
 
 /* ---------- audit ---------- */
 let auditSetOpen = null;
@@ -1712,8 +1812,6 @@ function renderAuditSettings(){
       ${on?`<button class="btn" type="button" data-act="toggle-audit-set" aria-expanded="${auditSetOpen}">${auditSetOpen?'收起':'修改'}</button>`:''}</div>`;
   if(!auditSetOpen){ box.innerHTML = head; return; }
   box.innerHTML = head + `<div style="margin-top:16px">
-    <div class="notice-box">目前处于测试期：站长会记录成员提交的提示词与缩略图，用于防范违规内容（例如政治类内容）。成员会通过首页、/help、/register 私信和频道公告获知这一点。记录将在 <b>${esc(a.retention_days)}</b> 天后自动删除，且仅站长可见。
-      ${a.announce_configured?'':'<br>成员公告频道尚未配置，不会发布频道公告；首页与私信中的告知仍然有效。'}</div>
     <div class="feat-row"><div class="body"><div class="t">记录提示词</div></div><label class="switch"><input type="checkbox" id="aud_prompts" ${a.prompts?'checked':''} aria-label="记录提示词"><span></span></label></div>
     <div class="feat-row"><div class="body"><div class="t">记录缩略图</div></div><label class="switch"><input type="checkbox" id="aud_thumbs" ${a.thumbs?'checked':''} aria-label="记录缩略图"><span></span></label></div>
     <div class="field" style="margin-top:16px;max-width:260px"><label for="aud_days">保留天数</label><input id="aud_days" type="number" min="1" max="90" value="${esc(a.retention_days)}"><div class="hint">1～90 天</div></div>
@@ -1812,16 +1910,21 @@ function syncFeatMode(modeName, listSel){
 }
 
 /* ---------- ops page ---------- */
-let opsData = null;
+let opsData = null, quotaAlgoOn = false;
 async function loadOps(){
-  try{ opsData = await api('/admin/api/ops'); renderOpsFeatures(); renderOpsReg(); }
+  try{
+    const [o, qa] = await Promise.all([api('/admin/api/ops'), api('/admin/api/quota-algo').catch(()=>null)]);
+    opsData = o;
+    quotaAlgoOn = !!qa && String(qa.params?.quota_auto_enabled ?? 1) !== '0' && (qa.last||{}).enabled !== false;
+    renderOpsFeatures(); renderOpsReg();
+  }
   catch(e){ toastErr(e); }
 }
 function renderOpsFeatures(){
   const g = opsData.features.global;
   $('#opsFeatures').innerHTML = FEAT_NAMES.map(n=>`<div class="feat-row"><div class="body"><div class="t">${esc(featLabel(n))}</div><div class="d">${esc(FEAT[n][1])}</div></div>
     <label class="switch"><input type="checkbox" data-feat="${n}" ${g[n]?'checked':''} aria-label="${esc(featLabel(n))}"><span></span></label></div>`).join('')
-    + '<p class="hint" style="margin-top:16px">关闭后，除管理员 Key 外所有成员立即不能使用该功能。</p>';
+;
 }
 async function toggleFeature(input){
   const name = input.dataset.feat, val = input.checked;
@@ -1836,6 +1939,9 @@ function renderOpsReg(){
   const r = opsData.registration;
   const pct = r.max_users>0 ? Math.min(100, Math.round(r.active/r.max_users*100)) : 0;
   const cls = r.max_users>0 && r.active>=r.max_users ? 'bad' : pct>=80 ? 'warn' : '';
+  // 动态额度开启时，这三项由算法接管：直接禁用
+  const algo = quotaAlgoOn ? ' disabled title="由「额度与保护 › 动态额度」自动设置"' : '';
+  const algoHint = quotaAlgoOn ? '由动态额度设置' : '0 = 不限';
   $('#opsReg').innerHTML = `
     ${r.configured?'':'<div class="notice-box">Discord 机器人尚未配置，以下设置会保存，但在机器人启用后才会生效。</div>'}
     ${r.v5_capacity&&r.v5_capacity.short?`<div class="notice-box">⚠ ${esc(r.v5_capacity.message)}</div>`:''}
@@ -1847,11 +1953,16 @@ function renderOpsReg(){
     <div class="cols-3">
       <div class="field"><label for="reg_max">名额上限</label><input id="reg_max" type="number" min="0" value="${esc(r.max_users)}"><div class="hint">0 = 不限</div></div>
       <div class="field"><label for="reg_exp">有效期（天）</label><input id="reg_exp" type="number" min="0" value="${esc(r.expires_days)}"><div class="hint">0 = 永久</div></div>
-      <div class="field"><label for="reg_img">每日图片</label><input id="reg_img" type="number" min="0" value="${esc(r.daily_images)}"><div class="hint">0 = 不限</div></div>
-      <div class="field"><label for="reg_v5">每日 V5</label><input id="reg_v5" type="number" min="0" value="${esc(r.daily_v5)}"><div class="hint">0 = 不限（仅“含 V5”时生效）</div></div>
-      <div class="field"><label for="reg_scope">图片模型范围</label><select id="reg_scope"><option value="legacy" ${r.image_scope==='legacy'?'selected':''}>仅 V4.5 及以下</option><option value="all" ${r.image_scope==='all'?'selected':''}>含 V5</option></select></div>
+      <div class="field"><label for="reg_img">每日图片</label><input id="reg_img" type="number" min="0" value="${esc(r.daily_images)}"${algo}><div class="hint">${algoHint}</div></div>
+      <div class="field"><label for="reg_v5">每日 V5</label><input id="reg_v5" type="number" min="0" value="${esc(r.daily_v5)}"${algo}><div class="hint">${algoHint}</div></div>
+      <div class="field"><label for="reg_scope">图片模型范围</label><select id="reg_scope"${algo}><option value="legacy" ${r.image_scope==='legacy'?'selected':''}>仅 V4.5 及以下</option><option value="all" ${r.image_scope==='all'?'selected':''}>含 V5</option></select></div>
     </div>
-    <div class="hint" style="margin:-4px 0 12px">每日图片、每日 V5、模型范围由「额度与保护 › 动态额度」自动设置，这里改了也会在 10 分钟内被算法覆盖。</div>
+    <label title="留空表示不限定">限定身份组 <span class="muted" style="font-weight:400">· 留空不限定</span></label>
+    <div class="cols-3" style="margin-bottom:16px">
+      <input id="reg_role_guild" inputmode="numeric" maxlength="21" placeholder="服务器 ID" aria-label="限定身份组：服务器 ID" value="${esc(r.role_guild||'')}">
+      <input id="reg_role_id" inputmode="numeric" maxlength="21" placeholder="身份组 ID" aria-label="限定身份组：身份组 ID" value="${esc(r.role_id||'')}">
+      <input id="reg_role_note" maxlength="60" placeholder="显示名，如「创作者」" aria-label="限定身份组：显示名" value="${esc(r.role_note||'')}">
+    </div>
     <label>新成员默认开通的功能</label>
     <div class="opt-group">
       <label class="check"><input type="radio" name="reg_feat_mode" value="legacy" ${r.features==null?'checked':''}><span>全部已开放功能（含以后新开放的）</span></label>
@@ -1875,7 +1986,11 @@ async function saveReg(){
     vals = {max_users:readNum('reg_max','名额上限',{max:1000}), expires_days:readNum('reg_exp','有效期',{max:3650}),
             daily_images:readNum('reg_img','每日图片',{max:100000}), daily_v5:readNum('reg_v5','每日 V5',{max:100000})};
   }catch(e){ toastErr(e); return; }
-  try{ await putReg({...vals, image_scope:$('#reg_scope').value, features:readFeatMode('reg_feat_mode','#reg_feat_list')}, '开放设置已保存'); }
+  const role = {role_guild:$('#reg_role_guild').value.trim(), role_id:$('#reg_role_id').value.trim(), role_note:$('#reg_role_note').value.trim()};
+  for(const [k, label] of [['role_guild','服务器 ID'],['role_id','身份组 ID']]){
+    if(role[k] && !/^\d{15,21}$/.test(role[k])){ toast(label + '应为 Discord 数字 ID，或留空', 'err'); $('#reg_'+k).focus(); return; }
+  }
+  try{ await putReg({...vals, ...role, image_scope:$('#reg_scope').value, features:readFeatMode('reg_feat_mode','#reg_feat_list')}, '开放设置已保存'); }
   catch(e){ toastErr(e); }
 }
 async function saveAudit(){
@@ -1888,59 +2003,25 @@ async function saveAudit(){
   }catch(e){ toastErr(e); }
 }
 
-/* ---------- keys ---------- */
-async function loadKeys(){
-  const tb = $('#keysTable tbody');
-  if(!keysCache.length) tb.innerHTML = '<tr><td colspan="6" class="empty-cell">加载中…</td></tr>';
-  try{
-    const d = await api('/admin/api/keys');
-    keysCache = d.keys;
-    tb.innerHTML = d.keys.map(k=>{
-      const exp = k.expires_at ? new Date(k.expires_at*1000).toLocaleDateString() : '永久';
-      return `<tr>
-        <td class="cell-name" data-label="名称">${esc(k.name)}
-          <div class="tags">
-            ${k.enabled?'<span class="tag on">启用</span>':'<span class="tag off">禁用</span>'}
-            ${k.is_admin?'<span class="tag info">站长</span>':''}${k.is_test?'<span class="tag dim">测试</span>':''}
-            ${k.allow_anlas?'<span class="tag warn">Anlas</span>':''}
-            <span class="tag ${k.image_model_scope==='all'?'info':'dim'}">${k.image_model_scope==='all'?'含 V5':'仅 V4.5↓'}</span>
-            ${k.allow_img2img?'<span class="tag warn">img2img</span>':''}
-          </div><div class="tags">${featChips(k.features)}</div></td>
-        <td data-label="Key"><div class="stack"><span class="mono" data-tok="${esc(k.token)}">${esc(mask(k.token))}</span>
-            <button class="btn mini" data-act="copy-key" style="margin-top:6px">${ic('copy')}复制</button></div></td>
-        <td data-label="今日用量"><div class="stack num"><span>今日 ${k.used.images} · 累计 ${k.used.generated_images_total||0}</span>
-          <span class="muted sm">免费 ${k.used.legacy_free_images||0} · V5 ${k.used.v5||0}</span>
-          <span class="muted sm">Anlas ${k.used.anlas} · 文本 ${fmt(k.used.text_tokens)}</span></div></td>
-        <td data-label="配额"><div class="stack num">${k.is_admin ? '<span>单 Key 不限</span><span class="muted sm">仍受全站保护 · RPM ${k.rpm}</span>' : `
-          <span>免费 ${k.daily_images>0?k.daily_images:'∞'}/日${k.image_model_scope==='all' ? ` · V5 ${k.daily_v5>0?k.daily_v5:'∞'}/日` : ''}</span>
-          <span class="muted sm">Anlas ${k.allow_anlas ? `${k.daily_anlas>0?k.daily_anlas:'∞'}/日 · ${k.monthly_anlas>0?k.monthly_anlas:'∞'}/月` : '未开'}</span>
-          <span class="muted sm">文本 ${fmt(k.daily_text_tokens)}/日 · RPM ${k.rpm}</span>`}</div></td>
-                <td data-label="最近使用 / 到期"><div class="stack"><span>${k.last_used_at ? esc(new Date(k.last_used_at*1000).toLocaleString()) : '从未使用'}</span><span class="muted sm">到期：${esc(exp)}</span>${srcBadge(k, d.share_alert_nets)}</div></td>
-        <td data-label="操作" class="full"><div class="actions">
-          <button class="btn mini" data-act="edit-key" data-id="${k.id}">编辑</button>
-          <button class="btn mini" data-act="toggle-key" data-id="${k.id}" data-on="${k.enabled?0:1}">${k.enabled?'禁用':'启用'}</button>
-          <button class="btn mini" data-act="regen-key" data-id="${k.id}">重新生成 Key</button>
-          <button class="btn mini" data-act="reset-quota" data-id="${k.id}">重置今日额度</button>
-          <button class="btn mini danger" data-act="del-key" data-id="${k.id}">删除</button>
-        </div></td>
-      </tr>`;
-    }).join('') || '<tr><td colspan="6" class="empty-cell">还没有 Key，点右上角「新建 Key」</td></tr>';
-    $('#logFilter').innerHTML = '<option value="">全部 Key</option>' +
-      d.keys.map(k=>`<option value="${k.id}">${esc(k.name)}</option>`).join('');
-  }catch(e){ toastErr(e); }
+/* ---------- keys（并入成员页：Key、编辑、重新生成、重置今日额度） ---------- */
+async function fillLogFilter(){
+  const sel = $('#logFilter'), cur = sel.value;
+  try{ if(!keysCache.length) keysCache = (await api('/admin/api/keys')).keys; }catch(_){ return; }
+  sel.innerHTML = '<option value="">全部 Key</option>' + keysCache.map(k=>`<option value="${k.id}">${esc(k.name)}</option>`).join('');
+  sel.value = cur;
 }
 /* 24h 来源网段数：达到阈值标黄（可能被分享，也可能只是换了网络 / 代理） */
 function srcBadge(k, limit){
-  if(k.is_admin) return '';
+  if(k.is_admin) return '<span class="muted">—</span>';
   const list = k.sources_24h || [], n = list.length;
-  if(!n) return '<span class="muted sm">24h 来源：—</span>';
+  if(!n) return '<span class="muted">—</span>';
   const hot = limit > 0 && n >= limit;
   const tip = '近 24 小时的来源网段：' + list.join('、') + (hot ? '\n可能被分享，也可能只是换了网络 / 代理，建议先问一下本人。' : '');
-  return `<span class="${hot?'tag warn':'muted sm'}" title="${esc(tip)}">24h 来源 ${n} 个网段${hot?' · 疑似分享':''}</span>`;
+  return `<span class="${hot?'mf warn':''}" title="${esc(tip)}">${n} 个网段${hot?' · 疑似分享':''}</span>`;
 }
 function mask(t){ return t.slice(0,8) + '····' + t.slice(-4); }
 async function copyKey(btn){
-  const t = btn.closest('td').querySelector('[data-tok]').dataset.tok;
+  const t = btn.closest('[data-kid]').querySelector('[data-tok]').dataset.tok;
   if(!await copyText(t)) showKey('请手动复制', '浏览器不允许自动复制，请手动选择并复制：', t);
 }
 async function openCreate(){
@@ -2021,20 +2102,13 @@ async function saveKey(){
     }else{
       body.features = readFeatMode('f_feat_mode','#f_feat_list');
       const d = await api('/admin/api/keys', {method:'POST', body: JSON.stringify(body)});
-      membersCache = null;
-      await loadKeys(); closeModal();
+      closeModal(); refreshAfterMemberChange();
       showKey('新 Key 已创建', '请立即复制新 Key（发给用户）：', d.key.token);
       return;
     }
-    membersCache = null;
-    closeModal(); loadKeys();
+    closeModal(); refreshAfterMemberChange();
   }catch(e){ $('#modalErr').textContent = e.message; }
   finally{ savingKey = false; $('#modalSave').disabled = false; }
-}
-async function toggleKey(id, enabled){
-  await api('/admin/api/keys/'+id, {method:'PATCH', body: JSON.stringify({enabled})}).catch(toastErr);
-  membersCache = null;
-  loadKeys();
 }
 const regeneratingKeys = new Set();
 async function regenerateKey(id, button){
@@ -2049,40 +2123,42 @@ async function regenerateKey(id, button){
     toast('Key 已重新生成，配额和历史用量已保留', 'ok');
   }catch(e){ toastErr(e); }
   finally{
-    await loadKeys();
     regeneratingKeys.delete(id);
+    membersCache = null; await loadMembers();
   }
 }
 async function resetDailyImageQuota(id){
   const key = keysCache.find(k=>k.id===id); if(!key) return;
-  const name = key.name;
+  const name = findMember(id) ? memberLabel(findMember(id)) : key.name;
   if(!await askConfirm(`确定重置「${name}」今日的 V5 和 Anlas 用量吗？\n图片、文本、请求数及用量日志不会删除。`, '重置')) return;
   try{
     await api('/admin/api/keys/'+id+'/reset-daily-image-quota', {method:'POST'});
     toast('已重置「'+name+'」今日的 V5 和 Anlas 用量', 'ok');
-    membersCache = null;
-    loadKeys();
+    membersCache = null; loadMembers();
   }catch(e){ toastErr(e); }
 }
-async function delKey(id){
-  const key = keysCache.find(k=>k.id===id); if(!key) return;
-  const name = key.name;
-  if(!await askConfirm(`确定删除 Key「${name}」？该操作不可恢复。`, '删除')) return;
-  await api('/admin/api/keys/'+id, {method:'DELETE'}).catch(toastErr);
-  membersCache = null;
-  loadKeys();
-}
-
 /* ---------- logs ---------- */
 function fmtTiming(l){
   const sec = ms => ms >= 10000 ? Math.round(ms/1000) + 's' : (ms/1000).toFixed(1) + 's';
   if(!l.wait_ms && !l.dur_ms) return '—';
   const parts = [];
-  if(l.wait_ms >= 100) parts.push('等 ' + sec(l.wait_ms));
-  if(l.dur_ms) parts.push('生成 ' + sec(l.dur_ms));
-  return esc(parts.join(' · ') || '—');
+  if(l.dur_ms) parts.push(`<span class="nw">生成 ${esc(sec(l.dur_ms))}</span>`);
+  if(l.wait_ms >= 100) parts.push(`<span class="nw muted">等 ${esc(sec(l.wait_ms))}</span>`);
+  return parts.length ? `<span>${parts.join(' ')}</span>` : '—';
 }
 let logRid = '';
+/* 模型短名：nai-diffusion-4-5-full → V4.5（title 里保留全名） */
+function shortModel(m){
+  m = String(m || ''); if(!m) return '';
+  const base = /diffusion-5/.test(m) ? 'V5' : /diffusion-4-5/.test(m) ? 'V4.5' : /diffusion-4/.test(m) ? 'V4'
+    : /furry-3/.test(m) ? 'Furry V3' : /diffusion-3/.test(m) ? 'V3' : /diffusion-2/.test(m) ? 'V2' : /furry/.test(m) ? 'Furry' : /^nai-diffusion$/.test(m) ? 'V1' : '';
+  if(!base) return m.length > 18 ? m.slice(0, 16) + '…' : m;
+  return base + (/curated/.test(m) ? ' Curated' : '') + (/inpainting/.test(m) ? ' 重绘' : '');
+}
+/* 手机上筛选收进「筛选」折叠，桌面上始终展开 */
+const logMq = matchMedia('(max-width:720px)');
+function syncLogFilters(){ const d = $('#logFilters'); if(d) d.open = !logMq.matches; }
+logMq.addEventListener?.('change', syncLogFilters);
 document.addEventListener('change', e => { if(e.target.id === 'logRid'){ logRid = e.target.value.trim().toLowerCase().replace(/[^0-9a-f]/g, ''); logPage = 1; loadLogs(); } });
 async function loadLogs(){
   try{
@@ -2091,17 +2167,21 @@ async function loadLogs(){
     const d = await api('/admin/api/logs?' + (kf?`key_id=${encodeURIComponent(kf)}&`:'') + (logRid?`rid=${encodeURIComponent(logRid)}&`:'') +
                         (ff?`feature=${encodeURIComponent(ff)}&`:'') + (ht?'hide_test=true&':'') + `page=${logPage}`);
     logPage = d.page;
-    $('#logBody').innerHTML = d.logs.map(l=>`
-      <tr>
-        <td class="mono" data-label="时间">${esc(new Date(l.ts*1000).toLocaleString())}</td>
-        <td data-label="Key">${esc(l.key_name)}${l.client?`<div class="muted" style="font-size:11.5px" title="客户端自报的 User-Agent，仅供参考">${esc(l.client)}</div>`:''}</td>
-        <td data-label="类型">${esc(l.kind)}</td>
-        <td class="mono" data-label="模型">${esc(l.model)}</td>
-        <td data-label="状态">${l.status==='ok'?'<span class="tag on">ok</span>':l.status==='rejected'?'<span class="tag warn">拒绝</span>':'<span class="tag off">错误</span>'}</td>
-        <td class="num" data-label="图">${esc(l.images||'')}</td><td class="num" data-label="耗时">${fmtTiming(l)}</td><td class="num" data-label="Anlas">${esc(l.anlas||'')}</td>
-        <td data-label="可能消耗 Anlas">${l.unconfirmed_anlas>0?`<span class="tag warn">≈ ${esc(l.unconfirmed_anlas)}</span>`:'—'}</td><td class="num" data-label="tokens">${esc(l.tokens||'')}</td>
-        <td class="muted" data-label="备注">${esc(l.detail)}${l.rid?`<div class="mono" style="font-size:11px" title="错误编号（响应头 X-Request-Id）">#${esc(l.rid)}</div>`:''}</td>
-      </tr>`).join('') || '<tr><td colspan="11" class="empty-cell">暂无记录</td></tr>';
+    $('#logBody').innerHTML = d.logs.map(l=>{
+      const cost = [l.images ? `<span class="nw">${esc(l.images)} 张</span>` : '', l.anlas ? `<span class="nw">${esc(+(+l.anlas).toFixed(2))} Anlas</span>` : '',
+        l.unconfirmed_anlas > 0 ? `<span class="tag warn" title="失败请求可能产生的费用，实际扣款尚未确认">≈ ${esc(l.unconfirmed_anlas)}</span>` : '',
+        l.tokens ? `<span class="nw">${esc(fmt(l.tokens))} tokens</span>` : ''].filter(Boolean).join(' · ');
+      const timing = l.wait_ms || l.dur_ms ? fmtTiming(l) : '';
+      return `<tr>
+        <td class="t" data-label="时间" title="${esc(fullTime(l.ts))}">${esc(shortTime(l.ts))}</td>
+        <td data-label="Key"><div class="stack"><span>${esc(l.key_name)}</span>${l.client?`<span class="muted" style="font-size:11.5px" title="客户端自报的 User-Agent，仅供参考">${esc(l.client)}</span>`:''}</div></td>
+        <td class="nw" data-label="类型">${esc(l.kind)}</td>
+        <td class="nw" data-label="模型" title="${esc(l.model)}">${esc(shortModel(l.model))}</td>
+        <td class="st" data-label="状态">${l.status==='ok'?'<span class="tag on">ok</span>':l.status==='rejected'?'<span class="tag warn">拒绝</span>':'<span class="tag off">错误</span>'}</td>
+        <td class="num tm" data-label="耗时">${timing}</td>
+        <td class="num cost" data-label="消耗">${cost?`<span>${cost}</span>`:''}</td>
+        <td class="muted note" data-label="备注">${esc(l.detail)}${l.rid?`<div class="mono" style="font-size:11px" title="错误编号（响应头 X-Request-Id）">#${esc(l.rid)}</div>`:''}</td>
+      </tr>`; }).join('') || '<tr><td colspan="8" class="empty-cell">暂无记录</td></tr>';
     pager($('#logPager'), d, 'log');
   }catch(e){ toastErr(e); }
 }
@@ -2112,12 +2192,12 @@ async function loadActions(){
     actionPage = d.page;
     $('#actionBody').innerHTML = d.actions.map(a=>`
       <tr>
-        <td class="mono" data-label="时间">${esc(new Date(a.ts*1000).toLocaleString())}</td>
-        <td data-label="操作者">${esc(a.actor)}</td>
-        <td data-label="操作">${esc(a.action)}</td>
-        <td data-label="对象">${esc(a.target)||'—'}</td>
-        <td class="muted" data-label="详情">${esc(a.detail)||'—'}</td>
-        <td data-label="结果">${a.ok?'<span class="tag on">成功</span>':'<span class="tag off">失败</span>'}</td>
+        <td class="t" data-label="时间" title="${esc(fullTime(a.ts))}">${esc(shortTime(a.ts))}</td>
+        <td class="nw" data-label="操作者">${esc(a.actor)}</td>
+        <td class="nw" data-label="操作">${esc(a.action)}</td>
+        <td data-label="对象">${esc(a.target)}</td>
+        <td class="muted" data-label="详情">${esc(a.detail)}</td>
+        <td class="st" data-label="结果">${a.ok?'<span class="tag on">成功</span>':'<span class="tag off">失败</span>'}</td>
       </tr>`).join('') || '<tr><td colspan="6" class="empty-cell">暂无记录</td></tr>';
     pager($('#actionPager'), d, 'action');
   }catch(e){ toastErr(e); }
@@ -2201,7 +2281,7 @@ async function loadGuard(){
     guardData = await api('/admin/api/guard');
     const v = guardData.values, f = guardData.fields;
     $('#guardFields').innerHTML = Object.keys(f).map(k => `<div class="field"><label for="g_${k}">${esc(f[k].label)}</label>
-      <input id="g_${k}" type="number" min="${f[k].min}" max="${f[k].max}" step="1" value="${esc(v[k])}"><div class="hint">默认 ${f[k].default}，范围 ${f[k].min}～${f[k].max}</div></div>`).join('');
+      <input id="g_${k}" type="number" min="${f[k].min}" max="${f[k].max}" step="1" value="${esc(v[k])}"><div class="hint" title="默认 ${esc(f[k].default)}">${f[k].min}～${f[k].max}</div></div>`).join('');
     const acc = guardData.accounts.map(a => `账号 ${a.position}：今天 ${a.today}${v.account_daily_cap?' / '+v.account_daily_cap:''} 张，本小时 ${a.this_hour}${guardData.hourly_cap_now?' / '+guardData.hourly_cap_now:''} 张`).join('；');
     $('#guardLive').textContent = `${guardData.quiet_now ? '🌙 现在是安静时段' : '☀️ 正常时段'} · ${acc || '没有可用账号'} · 正在生成或排队 ${guardData.queued_images} 张`;
   }catch(e){ $('#guardLive').textContent = '读取失败'; }
@@ -2241,8 +2321,8 @@ async function loadBot(){
       </div><div style="margin-top:12px"><button class="btn primary" data-act="save-bot"><span data-ic="check"></span>保存</button></div>`;
     hydrateIcons($('#botCfg'));
     const ev = d.events || [];
-    $('#botEvents').innerHTML = ev.length ? `<div class="table-wrap"><table class="rt"><thead><tr><th>时间</th><th>动作</th><th>帖子</th><th>作者</th><th>内容</th></tr></thead><tbody>${
-      ev.map(e => `<tr><td class="mono" data-label="时间">${esc(new Date(e.at*1000).toLocaleString())}</td><td data-label="动作"><span class="tag ${BOT_TAG[e.kind]||''}">${esc(d.kinds[e.kind]||e.kind)}</span></td><td data-label="帖子">${e.url?`<a href="${esc(e.url)}" target="_blank" rel="noopener">${esc(e.title||'帖子')}</a>`:esc(e.title)}</td><td data-label="作者">${esc(e.author)}</td><td class="muted" data-label="内容">${esc(e.detail)}</td></tr>`).join('')
+    $('#botEvents').innerHTML = ev.length ? `<div class="table-wrap"><table class="rt"><thead><tr><th class="t">时间</th><th class="nw">动作</th><th>帖子</th><th class="nw">作者</th><th>内容</th></tr></thead><tbody>${
+      ev.map(e => `<tr><td class="t" data-label="时间" title="${esc(fullTime(e.at))}">${esc(shortTime(e.at))}</td><td data-label="动作"><span class="tag ${BOT_TAG[e.kind]||''}">${esc(d.kinds[e.kind]||e.kind)}</span></td><td data-label="帖子">${e.url?`<a href="${esc(e.url)}" target="_blank" rel="noopener">${esc(e.title||'帖子')}</a>`:esc(e.title)}</td><td data-label="作者">${esc(e.author)}</td><td class="muted" data-label="内容">${esc(e.detail)}</td></tr>`).join('')
     }</tbody></table></div>` : '<div class="muted">还没有记录（跑图分享有新帖时出现）</div>';
   }catch(e){ $('#botStatus').innerHTML = '<div class="muted">读取失败</div>'; }
 }
@@ -2258,7 +2338,7 @@ async function saveBot(){
 async function loadQuotaAlgo(){
   try{
     const d = await api('/admin/api/quota-algo'), l = d.last || {}, v = l.v5 || {};
-    const rows = (d.history || []).slice(-7).reverse().map(h => `<tr><td class="mono">${esc(h.day)}</td><td class="num">${esc(h.used)} / ${esc(h.cap)}</td><td class="num">${esc(h.hourly_blocks)}</td><td class="num">${esc(h.ceiling_hits)}</td><td class="num">${esc(h.from[0])}→${esc(h.to[0])} · ${esc(h.from[1])}→${esc(h.to[1])}</td><td class="muted">${esc((h.reasons||[]).join('；'))}</td></tr>`).join('');
+    const rows = (d.history || []).slice(-7).reverse().map(h => `<tr><td class="t" data-label="日期">${esc(h.day)}</td><td class="num" data-label="用量 / 账号日上限">${esc(h.used)} / ${esc(h.cap)}</td><td class="num" data-label="每小时拦截">${esc(h.hourly_blocks)}</td><td class="num" data-label="顶格人数">${esc(h.ceiling_hits)}</td><td class="num" data-label="上限 · 保底">${esc(h.from[0])}→${esc(h.to[0])} · ${esc(h.from[1])}→${esc(h.to[1])}</td><td class="muted" data-label="理由">${esc((h.reasons||[]).join('；'))}</td></tr>`).join('');
     $('#qaBody').innerHTML = l.enabled === false ? '<div class="muted">动态额度已关闭</div>' : `
       <div class="cols-3">
         <div><div class="muted sm">V4.5 每人每天</div><div class="num" style="font-size:22px;font-weight:700">${esc(l.ceiling ?? '—')} <span class="muted" style="font-size:13px">保底 ${esc(l.base ?? '—')}</span></div></div>
@@ -2266,7 +2346,7 @@ async function loadQuotaAlgo(){
         <div><div class="muted sm">账号 V5 剩余 · 恢复</div><div class="num" style="font-size:22px;font-weight:700">${v.percent==null?'—':esc(Math.round(v.percent))+'%'} <span class="muted" style="font-size:13px">${esc(v.rate ?? '—')}%/天 · 系数 ${esc(v.k ?? '—')}</span></div></div>
       </div>
       <div class="muted sm" style="margin:8px 0">由算法管理 ${esc(l.members ?? 0)} 人 · V5 按 ${esc(v.people ?? '—')} 人分 · 更新于 ${l.updated_at?esc(new Date(l.updated_at*1000).toLocaleString()):'—'}</div>
-      ${rows?`<div class="table-wrap"><table class="rt"><thead><tr><th>日期</th><th>用量 / 账号日上限</th><th>每小时拦截</th><th>顶格人数</th><th>上限 · 保底</th><th>理由</th></tr></thead><tbody>${rows}</tbody></table></div>`:'<div class="muted sm">每日微调记录会在明天出现</div>'}`;
+      ${rows?`<div class="table-wrap"><table class="rt"><thead><tr><th class="t">日期</th><th class="num">用量 / 账号日上限</th><th class="num">每小时拦截</th><th class="num">顶格人数</th><th class="num">上限 · 保底</th><th>理由</th></tr></thead><tbody>${rows}</tbody></table></div>`:'<div class="muted sm">每日微调记录会在明天出现</div>'}`;
   }catch(e){ $('#qaBody').innerHTML = '<div class="muted">读取失败</div>'; }
 }
 async function loadAnlasPool(){
@@ -2343,13 +2423,11 @@ document.addEventListener('click', ev=>{
     case 'feat-logs': $('#logFeature').value = el.dataset.feat; $('#logFilter').value = ''; logPage = 1; tab('logs'); break;
     case 'refresh-members': membersCache=null; loadMembers(); break;
     case 'refresh-audit': loadAuditSettings(); loadAudit(); break;
-    case 'refresh-keys': loadKeys(); break;
     case 'refresh-logs': loadLogs(); break;
     case 'refresh-up': loadOverview(); loadReconciliation(); loadPerf(); loadShadow(); break;
     case 'refresh-bugs': loadBugs(); break;
     case 'refresh-bot': loadBot(); break;
     case 'save-bot': saveBot(); break;
-    case 'goto-ops': tab('ops'); break;
     case 'refresh-actions': loadActions(); break;
     case 'recon-reload': loadReconciliation(); break;
     case 'recon-run': runReconciliation(); break;
@@ -2369,7 +2447,6 @@ document.addEventListener('click', ev=>{
     case 'save-reg': saveReg(); break;
     case 'save-audit': saveAudit(); break;
     case 'toggle-audit-set': auditSetOpen = !auditSetOpen; renderAuditSettings(); break;
-    case 'goto-audit': ev.preventDefault(); tab('audit'); break;
     case 'save-pw': changePassword(); break;
     case 'tok-add': openTokModal('add', '', '', el); break;
     case 'tok-replace': openTokModal('replace', el.dataset.id, el.dataset.label, el); break;
@@ -2383,13 +2460,12 @@ document.addEventListener('click', ev=>{
     case 'member-del': el.closest('details')?.removeAttribute('open'); memberDelete(id, false); break;
     case 'member-ban': el.closest('details')?.removeAttribute('open'); memberDelete(id, true); break;
     case 'new-key': openCreate(); break;
+    case 'mx-toggle': toggleMemberPanel(id); break;
     case 'edit-key': openEdit(id); break;
     case 'close-modal': closeModal(); break;
     case 'save-key': saveKey(); break;
-    case 'toggle-key': toggleKey(id, el.dataset.on==='1'?1:0); break;
     case 'regen-key': regenerateKey(id, el); break;
     case 'reset-quota': resetDailyImageQuota(id); break;
-    case 'del-key': delKey(id); break;
     case 'copy-key': copyKey(el); break;
     case 'copy-modal-key': { const v=$('#keyModalVal').value; copyText(v).then(ok=>{ if(!ok){ $('#keyModalVal').select(); toast('请按 Ctrl/Cmd+C 复制'); } }); break; }
     case 'close-keymodal': closeOverlay('#keyModal'); $('#keyModalVal').value=''; break;
