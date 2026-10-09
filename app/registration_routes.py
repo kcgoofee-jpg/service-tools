@@ -116,7 +116,9 @@ async def _run_op(request: Request, body, service, gate, on: bool):
         if not body.value.isdecimal():
             raise HTTPException(422, "请输入数字")
         await ops.set_registration(gate.db, {"max_users": int(body.value)}, gate, service)
-        return JSONResponse({"message": f"名额上限已设为 {int(body.value) or '不限'}。"})
+        cap = await ops.v5_capacity(gate.db, gate.settings, service)
+        tip = f"\n⚠ {cap['message']}（全站 V5 在网页后台「设置」修改）" if cap["short"] else ""
+        return JSONResponse({"message": f"名额上限已设为 {int(body.value) or '不限'}。" + tip})
     if body.action == "grant":
         if body.feature not in feature_defs.FEATURES:
             raise HTTPException(422, "未知功能：" + ",".join(feature_defs.FEATURES))

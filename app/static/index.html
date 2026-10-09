@@ -481,6 +481,12 @@ details.neg div{margin-top:6px;white-space:pre-wrap;overflow-wrap:anywhere;max-h
             <div class="table-wrap"><table class="rt"><thead><tr><th>功能</th><th>今日 成功 / 失败 / 拒绝</th><th>今日产出</th><th>近 7 天 成功 / 失败 / 拒绝</th><th>近 7 天产出</th></tr></thead><tbody id="featUsage"></tbody></table></div>
           </div>
           <div class="card panel">
+            <div class="panel-head"><h2>上游表现</h2><div class="desc">出图耗时、排队、限流与产能，按 V4.5 / V5 分开；对比过去 7 天（不含最近 24 小时）。异常时会私信提醒</div></div>
+            <div id="perfFlags"></div>
+            <div class="table-wrap"><table class="rt"><thead><tr><th>模型</th><th>时段</th><th>请求 / 成功率</th><th title="上游返回 429 的次数">限流</th><th title="上游返回 401/402/403/5xx 或连接失败">其他失败</th><th>中位生成</th><th>P90 生成</th><th title="收到请求到发往上游：排队 + 冷却">平均排队</th><th title="按中位生成耗时和请求间隔估算：全站 / 单个成员">估算产能 / 小时</th></tr></thead><tbody id="perfBody"></tbody></table></div>
+            <div id="perfHourly" style="margin-top:12px"></div>
+          </div>
+          <div class="card panel">
             <div class="panel-head"><h2>上游 NovelAI 令牌池</h2><button class="btn primary" type="button" id="tokAddBtn" data-act="tok-add"><span data-ic="plus"></span>添加 Token</button></div>
             <div id="pool"></div>
             <div id="allowanceDetails" class="hint" style="white-space:pre-line;margin-top:16px">V5 余量：正在读取本地状态…</div>
@@ -614,7 +620,8 @@ NAI_TOKEN_V5_DAILY_LIMITS=0,150</pre><button class="btn mini" type="button" data
               <div class="field">
                 <label for="s_v5">全站每日 V5 张数</label>
                 <input id="s_v5" type="number" min="0" step="1" required value="150">
-                <div class="hint">0 = 不限。V5 周额度由 NovelAI 服务端按 ~190 张/天恢复，账户内所有人共享；此处镜像限制，默认 150 留安全边际。</div>
+                <div class="hint">0 = 不限。V5 周额度由 NovelAI 服务端按 ~190 张/天恢复，账户内所有人共享；此处镜像限制，默认 150 留安全边际。不会随名额自动变化。</div>
+                <div class="notice-box" id="s_v5_cap" hidden style="margin-top:8px"></div>
               </div>
               <div class="field">
                 <label for="s_v5_alert">V5 官方余量告警阈值（%）</label>
@@ -1035,8 +1042,43 @@ function statCard(k, v, small, sub, cls){
 }
 function skeletons(n, h){ return Array.from({length:n}, ()=>`<div class="skel" style="height:${h||110}px"></div>`).join(''); }
 
+async function loadPerf(){
+  try{
+    const d = await api('/admin/api/perf');
+    const sec = ms => ms==null ? '—' : (ms/1000).toFixed(1) + 's';
+    const pct = r => r==null ? '—' : Math.round(r*100) + '%';
+    $('#perfFlags').innerHTML = d.flags.length
+      ? d.flags.map(f=>`<div class="notice-box" style="margin-bottom:8px">${f.level==='bad'?'🚨':'⚠'} ${esc(f.text)}</div>`).join('')
+      : '<div class="hint" style="margin-bottom:8px">✅ 暂无异常：耗时、限流、成功率都在正常范围。</div>';
+    const rows = [];
+    for(const [fam, f] of Object.entries(d.families)){
+      for(const [label, w] of [['最近 1 小时', f.h1], ['最近 24 小时', f.d1], ['过去 7 天基线', f.baseline]]){
+        const other = w.auth + w.server + w.other;
+        rows.push(`<tr><td data-label="模型">${label==='最近 1 小时'?`<b>${esc(fam)}</b>`:''}</td><td data-label="时段">${label}</td>
+          <td class="num" data-label="请求 / 成功率">${w.requests} / ${pct(w.success_rate)}</td>
+          <td class="num" data-label="限流">${w.rate_limited?`<span class="tag warn">${w.rate_limited}</span>`:'0'}</td>
+          <td class="num" data-label="其他失败">${other?`<span class="tag off">${other}</span>`:'0'}</td>
+          <td class="num" data-label="中位生成">${sec(w.p50_ms)}</td><td class="num" data-label="P90 生成">${sec(w.p90_ms)}</td>
+          <td class="num" data-label="平均排队">${sec(w.avg_wait_ms)}</td>
+          <td class="num" data-label="估算产能 / 小时">${w.capacity_per_hour==null?'—':`${w.capacity_per_hour} 张 / 每人 ${w.member_capacity_per_hour}`}</td></tr>`);
+      }
+      if(!f.baseline_ready) rows.push(`<tr><td></td><td colspan="8" class="hint">${esc(fam)} 基线样本不足：需要积累几天带耗时的日志（1.3.0 起记录）才能判断「变慢」。</td></tr>`);
+    }
+    $('#perfBody').innerHTML = rows.join('') || '<tr><td colspan="9" class="empty-cell">暂无出图记录</td></tr>';
+    $('#perfHourly').innerHTML = Object.entries(d.families).filter(([,f])=>f.d1.requests).map(([fam, f])=>{
+      const max = Math.max(1, ...f.hourly.map(h=>h.ok+h.err));
+      const bars = f.hourly.map((h,i)=>{
+        const okH = Math.round(h.ok/max*36), errH = Math.round(h.err/max*36);
+        const t = new Date(h.t*1000).getHours() + ':00 · 成功 ' + h.ok + ' · 失败 ' + h.err + (h.r429?' · 限流 '+h.r429:'') + (h.p50_ms?' · 中位 '+(h.p50_ms/1000).toFixed(1)+'s':'');
+        return `<g><title>${esc(t)}</title><rect x="${i*10}" y="${40-okH}" width="8" height="${okH}" fill="var(--ok)" opacity=".75"/><rect x="${i*10}" y="${40-okH-errH}" width="8" height="${errH}" fill="var(--bad)"/></g>`;
+      }).join('');
+      return `<div style="display:flex;align-items:center;gap:12px;margin-top:6px"><span class="hint" style="width:90px">${esc(fam)} 24 小时</span><svg viewBox="0 0 240 40" width="240" height="40" role="img" aria-label="${esc(fam)} 近 24 小时每小时成功与失败">${bars}</svg></div>`;
+    }).join('');
+  }catch(e){ $('#perfBody').innerHTML = '<tr><td colspan="9" class="empty-cell">读取失败</td></tr>'; }
+}
 async function loadOverview(){
   loadReconciliation();
+  loadPerf();
   loadStatus();
   if(!$('#ovCards').children.length) $('#ovCards').innerHTML = skeletons(8, 96);
   try{
@@ -1550,6 +1592,7 @@ function renderOpsReg(){
   const cls = r.max_users>0 && r.active>=r.max_users ? 'bad' : pct>=80 ? 'warn' : '';
   $('#opsReg').innerHTML = `
     ${r.configured?'':'<div class="notice-box">Discord 机器人尚未配置，以下设置会保存，但在机器人启用后才会生效。</div>'}
+    ${r.v5_capacity&&r.v5_capacity.short?`<div class="notice-box">⚠ ${esc(r.v5_capacity.message)}</div>`:''}
     <div class="big-toggle"><label class="switch big"><input type="checkbox" id="regOpen" ${r.open?'checked':''} aria-label="开放注册"><span></span></label>
       <div class="body"><div class="t">${r.open?'注册已开放':'注册已关闭'}</div><div class="hint" style="margin:0">${r.open?'成员可通过 Discord /register 自助领取 Key':'新成员暂时无法领取 Key'}${r.reset_at?` · 重置时间 ${esc(r.reset_at)}`:''}</div></div>
       <div style="min-width:200px;flex:1;max-width:280px"><div class="quota"><div class="row"><span>名额</span><span class="num"><b>${esc(r.active)}</b> / ${r.max_users>0?esc(r.max_users):'不限'}</span></div>
@@ -1835,6 +1878,7 @@ async function loadSettings(){
     $('#announce').value = a.html || '';
     $('#s_budget').value = s.global_monthly_anlas;
     $('#s_v5').value = s.global_daily_v5;
+    showV5Cap(s.v5_capacity);
     $('#s_v5_alert').value = s.v5_alert_threshold;
     for(const name of ['queue_timeout','key_image_min_interval','image_min_interval','image_429_cooldown_seconds']){
       $('#r_'+name).value = r[name];
@@ -1878,6 +1922,11 @@ async function changePassword(){
     }, 1500);
   }catch(e){ err.textContent = '网络错误，请稍后再试'; btn.disabled = false; }
 }
+function showV5Cap(c){
+  const box = $('#s_v5_cap'); if(!box) return;
+  box.hidden = !(c && c.short);
+  box.textContent = c && c.short ? '⚠ ' + c.message : '';
+}
 async function saveBudget(){
   try{
     const d = await api('/admin/api/settings', {method:'PUT', body: JSON.stringify({
@@ -1886,6 +1935,7 @@ async function saveBudget(){
       v5_alert_threshold: readNum('s_v5_alert', 'V5 告警阈值', {min:1, max:100}),
     })});
     toast('已保存：月预算 ' + d.global_monthly_anlas + 'A / V5 日限 ' + d.global_daily_v5, 'ok');
+    showV5Cap(d.v5_capacity);
     loadAllowance();
   }catch(e){ toastErr(e); }
 }

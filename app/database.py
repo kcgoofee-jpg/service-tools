@@ -93,7 +93,8 @@ CREATE TABLE IF NOT EXISTS usage_log (
     detail TEXT NOT NULL DEFAULT '',
     wait_ms INTEGER NOT NULL DEFAULT 0,   -- 从收到请求到发往上游（排队 + 冷却）
     dur_ms INTEGER NOT NULL DEFAULT 0,    -- 上游处理耗时；没发到上游为 0
-    client TEXT NOT NULL DEFAULT ''       -- User-Agent 摘要，客户端自报，仅供参考
+    client TEXT NOT NULL DEFAULT '',      -- User-Agent 摘要，客户端自报，仅供参考
+    up_status INTEGER NOT NULL DEFAULT 0  -- 上游最后返回的 HTTP 状态码；没收到响应为 0
 );
 CREATE INDEX IF NOT EXISTS idx_log_ts ON usage_log (ts DESC);
 CREATE INDEX IF NOT EXISTS idx_log_key ON usage_log (key_id, ts DESC);
@@ -170,8 +171,8 @@ END;
 
 _INSERT_LOG = """INSERT INTO usage_log (ts, key_id, key_name, kind, model, status,
                                       images, anlas, tokens, detail, unconfirmed_anlas,
-                                      wait_ms, dur_ms, client)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)"""
+                                      wait_ms, dur_ms, client, up_status)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"""
 _UPSERT_COUNTERS = """INSERT INTO counters
                      (key_id, day, images, anlas, text_tokens, requests, v5, legacy_free_images)
                      VALUES (?,?,?,?,?,?,?,?)
@@ -219,6 +220,7 @@ class Database:
             "ALTER TABLE usage_log ADD COLUMN wait_ms INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE usage_log ADD COLUMN dur_ms INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE usage_log ADD COLUMN client TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE usage_log ADD COLUMN up_status INTEGER NOT NULL DEFAULT 0",
         ):
             try:
                 await self._db.execute(ddl)
@@ -626,7 +628,7 @@ class Database:
         self, key_id: int, key_name: str, kind: str, model: str, day: str, *,
         images: int = 0, anlas: float = 0.0, tokens: int = 0, v5: int = 0,
         legacy_free_images: int = 0, detail: str = "", unconfirmed_anlas: float = 0.0,
-        wait_ms: int = 0, dur_ms: int = 0, client: str = "",
+        wait_ms: int = 0, dur_ms: int = 0, client: str = "", up_status: int = 0,
     ) -> None:
         """成功日志、额度与使用时间一起提交；写入失败时整笔回退。"""
         # 不使用共享连接，避免其他请求的 commit 提前保存半笔记账。
@@ -637,7 +639,7 @@ class Database:
                 await db.execute(_INSERT_LOG, (
                     now, key_id, key_name, kind, model, "ok", images, anlas,
                     tokens, detail[:500], unconfirmed_anlas, max(0, int(wait_ms)),
-                    max(0, int(dur_ms)), client[:60],
+                    max(0, int(dur_ms)), client[:60], int(up_status),
                 ))
                 await db.execute(_UPSERT_COUNTERS, (
                     key_id, day, images, anlas, tokens, 1, v5, legacy_free_images,
@@ -763,13 +765,13 @@ class Database:
         self, key_id: Optional[int], key_name: str, kind: str, model: str,
         status: str, images: int = 0, anlas: float = 0.0, tokens: int = 0,
         detail: str = "", unconfirmed_anlas: float = 0.0,
-        wait_ms: int = 0, dur_ms: int = 0, client: str = "",
+        wait_ms: int = 0, dur_ms: int = 0, client: str = "", up_status: int = 0,
     ) -> None:
         await self._db.execute(
             _INSERT_LOG,
             (time.time(), key_id, key_name[:80], kind, model[:80], status,
              images, anlas, tokens, detail[:500], unconfirmed_anlas,
-             max(0, int(wait_ms)), max(0, int(dur_ms)), client[:60]),
+             max(0, int(wait_ms)), max(0, int(dur_ms)), client[:60], int(up_status)),
         )
         await self._db.commit()
 
@@ -816,6 +818,14 @@ class Database:
         for key_id, n in await cur.fetchall():
             out.setdefault(int(key_id), {"first_image_at": None, "last_image_at": None})["rejected_24h"] = int(n)
         return out
+
+    async def image_perf_rows(self, since: float) -> list[tuple]:
+        """出图请求的 (ts, model, status, images, wait_ms, dur_ms, up_status, detail)，供上游表现分析。"""
+        cur = await self._db.execute(
+            """SELECT ts, model, status, images, wait_ms, dur_ms, up_status, detail FROM usage_log
+               WHERE ts>=? AND kind IN ('image','image_stream') AND status IN ('ok','error')
+               ORDER BY ts""", (since,))
+        return [tuple(r) for r in await cur.fetchall()]
 
     async def image_stability(self, since: float) -> dict[str, int]:
         """since 之后出图请求的成功 / 上游失败次数（不含参数错误等被拒请求），用于首页稳定性图标。"""

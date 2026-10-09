@@ -566,6 +566,14 @@ async def logs(request: Request, key_id: Optional[int] = None, page: int = 1,
     }
 
 
+@router.get("/perf")
+async def upstream_perf(request: Request):
+    """上游表现：V4.5 / V5 的生成耗时、排队、限流、成功率、产能，与过去 7 天对比。"""
+    require_admin(request)
+    from . import perf
+    return await perf.collect(request.app.state.gate, time.time())
+
+
 @router.get("/actions")
 async def admin_actions(request: Request, page: int = 1):
     require_admin(request)
@@ -627,7 +635,8 @@ async def get_settings(request: Request):
     v = await st.db.get_setting("global_monthly_anlas", st.settings.global_monthly_anlas)
     v5 = await st.db.get_setting("global_daily_v5", st.settings.global_daily_v5)
     return {"global_monthly_anlas": float(v or 0), "global_daily_v5": int(float(v5 or 0)),
-            SETTING: await read_alert_threshold(st.db)}
+            SETTING: await read_alert_threshold(st.db),
+            "v5_capacity": await ops.v5_capacity(st.db, st.settings, getattr(request.app.state, "registrar", None))}
 
 
 @router.get("/runtime-limits")
@@ -771,7 +780,8 @@ async def put_settings(request: Request):
     await st.db.set_setting("global_monthly_anlas", v)
     await st.db.set_setting("global_daily_v5", g5)
     await st.db.set_setting(SETTING, threshold)
-    return {"ok": True, "global_monthly_anlas": v, "global_daily_v5": g5, SETTING: threshold}
+    return {"ok": True, "global_monthly_anlas": v, "global_daily_v5": g5, SETTING: threshold,
+            "v5_capacity": await ops.v5_capacity(st.db, st.settings, getattr(request.app.state, "registrar", None))}
 
 
 @router.get("/announcement")
@@ -890,6 +900,7 @@ async def _ops_snapshot(request: Request) -> dict:
     reg = await ops.registration_settings(st.db, service)
     reg["active"] = await service.count_active() if service else 0
     reg["reset_at"] = service.reset_at if service else ""
+    reg["v5_capacity"] = await ops.v5_capacity(st.db, st.settings, service)
     prompts, thumbs, days = await ops.audit_flags(st.db, st.settings)
     return {
         "registration": reg,

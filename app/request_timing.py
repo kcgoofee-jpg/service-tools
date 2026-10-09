@@ -27,7 +27,7 @@ def begin(scope) -> object:
         if name == b"user-agent":
             ua = value.decode("latin-1", "replace")
             break
-    return _TIMING.set({"t0": time.monotonic(), "sent": None, "client": client_name(ua)})
+    return _TIMING.set({"t0": time.monotonic(), "sent": None, "client": client_name(ua), "status": 0})
 
 
 def end(token) -> None:
@@ -41,13 +41,23 @@ def mark_sent() -> None:
         holder["sent"] = time.monotonic()
 
 
-def snapshot() -> tuple[int, int, str]:
-    """返回 (等待毫秒, 上游耗时毫秒, 客户端)。没发到上游的请求：等待=全程，上游耗时=0。"""
+def mark_status(code: int) -> None:
+    """记录上游最后一次返回的 HTTP 状态码（429 / 5xx 等），用于分析上游是否在限流或封控。"""
+    holder = _TIMING.get()
+    if holder is not None:
+        holder["status"] = int(code)
+
+
+def snapshot() -> dict:
+    """wait_ms：收到请求到发往上游；dur_ms：上游耗时（没发到上游为 0）；up_status：上游状态码（没收到为 0）。"""
     holder = _TIMING.get()
     if holder is None:
-        return 0, 0, ""
+        return {"wait_ms": 0, "dur_ms": 0, "client": "", "up_status": 0}
     now = time.monotonic()
     sent = holder["sent"]
     if sent is None:
-        return int((now - holder["t0"]) * 1000), 0, holder["client"]
-    return int((sent - holder["t0"]) * 1000), int((now - sent) * 1000), holder["client"]
+        wait, dur = now - holder["t0"], 0.0
+    else:
+        wait, dur = sent - holder["t0"], now - sent
+    return {"wait_ms": int(wait * 1000), "dur_ms": int(dur * 1000), "client": holder["client"],
+            "up_status": holder["status"]}
