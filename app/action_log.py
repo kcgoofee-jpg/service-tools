@@ -40,6 +40,8 @@ ADMIN_ACTIONS = {
     ("POST", "/errors/{sig}/resolve"): "标记 Bug 已处理",
     ("PUT", "/quota-algo"): "修改动态额度参数",
     ("PUT", "/discord-bot"): "修改 Discord 机器人设置",
+    ("POST", "/keys/{key_id}/share-clear"): "防分享清零（误判）",
+    ("PUT", "/share-guard"): "修改防分享模式",
 }
 
 

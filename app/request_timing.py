@@ -70,7 +70,7 @@ def snapshot() -> dict:
     """wait_ms：收到请求到发往上游；dur_ms：上游耗时（没发到上游为 0）；up_status：上游状态码（没收到为 0）。"""
     holder = _TIMING.get()
     if holder is None:
-        return {"wait_ms": 0, "dur_ms": 0, "client": "", "up_status": 0, "rid": ""}
+        return {"wait_ms": 0, "dur_ms": 0, "client": "", "up_status": 0, "rid": "", "src": ""}
     now = time.monotonic()
     sent = holder["sent"]
     if sent is None:
@@ -78,4 +78,11 @@ def snapshot() -> dict:
     else:
         wait, dur = sent - holder["t0"], now - sent
     return {"wait_ms": int(wait * 1000), "dur_ms": int(dur * 1000), "client": holder["client"],
-            "up_status": holder["status"], "rid": holder.get("rid", "")}
+            "up_status": holder["status"], "rid": holder.get("rid", ""), "src": holder.get("src", "")}
+
+
+def set_source(label: str) -> None:
+    """记下本请求的来源网络打码标签，写进用量日志（防分享溯源）。"""
+    holder = _TIMING.get()
+    if holder is not None:
+        holder["src"] = label or ""

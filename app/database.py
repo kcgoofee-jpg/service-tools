@@ -98,7 +98,8 @@ CREATE TABLE IF NOT EXISTS usage_log (
     dur_ms INTEGER NOT NULL DEFAULT 0,    -- 上游处理耗时；没发到上游为 0
     client TEXT NOT NULL DEFAULT '',      -- User-Agent 摘要，客户端自报，仅供参考
     up_status INTEGER NOT NULL DEFAULT 0, -- 上游最后返回的 HTTP 状态码；没收到响应为 0
-    rid TEXT NOT NULL DEFAULT ''          -- 请求编号（响应头 X-Request-Id），成员报错时据此定位
+    rid TEXT NOT NULL DEFAULT '',         -- 请求编号（响应头 X-Request-Id），成员报错时据此定位
+    src TEXT NOT NULL DEFAULT ''          -- 来源网络打码标签（如 120.235.*.*），防分享溯源用，不存完整 IP
 );
 CREATE INDEX IF NOT EXISTS idx_log_ts ON usage_log (ts DESC);
 CREATE INDEX IF NOT EXISTS idx_log_key ON usage_log (key_id, ts DESC);
@@ -109,6 +110,24 @@ CREATE TABLE IF NOT EXISTS upstream_token_counters (
     v5 INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (token_id, day)
 );
+CREATE TABLE IF NOT EXISTS share_state (       -- 防分享风险分（share_guard.py）
+    key_id INTEGER PRIMARY KEY,
+    score REAL NOT NULL DEFAULT 0,
+    score_ts REAL NOT NULL DEFAULT 0,
+    strikes INTEGER NOT NULL DEFAULT 0,
+    paused_until REAL NOT NULL DEFAULT 0,
+    warned_ts REAL NOT NULL DEFAULT 0,
+    paused_ts REAL NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS share_evidence (    -- 防分享证据与处罚记录，后台溯源用
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts REAL NOT NULL,
+    key_id INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    points REAL NOT NULL DEFAULT 0,
+    detail TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_share_evidence_key ON share_evidence (key_id, ts DESC);
 CREATE TABLE IF NOT EXISTS error_events (
     sig TEXT PRIMARY KEY,          -- 错误特征：异常类型 + 出错位置（或来源 + 去掉数字的消息）
     source TEXT NOT NULL,          -- request / upstream / maintenance:xxx / web:landing / disconnect ...
@@ -198,8 +217,8 @@ NOT_TEST = "COALESCE(key_id, 0) NOT IN (SELECT id FROM api_keys WHERE is_test=1)
 
 _INSERT_LOG = """INSERT INTO usage_log (ts, key_id, key_name, kind, model, status,
                                       images, anlas, tokens, detail, unconfirmed_anlas,
-                                      wait_ms, dur_ms, client, up_status, rid)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"""
+                                      wait_ms, dur_ms, client, up_status, rid, src)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"""
 _UPSERT_COUNTERS = """INSERT INTO counters
                      (key_id, day, images, anlas, text_tokens, requests, v5, legacy_free_images)
                      VALUES (?,?,?,?,?,?,?,?)
@@ -252,6 +271,7 @@ class Database:
             "ALTER TABLE api_keys ADD COLUMN anlas_auto INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE usage_log ADD COLUMN rid TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE api_keys ADD COLUMN quota_auto INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE usage_log ADD COLUMN src TEXT NOT NULL DEFAULT ''",
         ):
             try:
                 await self._db.execute(ddl)
@@ -662,7 +682,7 @@ class Database:
         self, key_id: int, key_name: str, kind: str, model: str, day: str, *,
         images: int = 0, anlas: float = 0.0, tokens: int = 0, v5: int = 0,
         legacy_free_images: int = 0, detail: str = "", unconfirmed_anlas: float = 0.0,
-        wait_ms: int = 0, dur_ms: int = 0, client: str = "", up_status: int = 0, rid: str = "",
+        wait_ms: int = 0, dur_ms: int = 0, client: str = "", up_status: int = 0, rid: str = "", src: str = "",
     ) -> None:
         """成功日志、额度与使用时间一起提交；写入失败时整笔回退。"""
         # 不使用共享连接，避免其他请求的 commit 提前保存半笔记账。
@@ -673,7 +693,7 @@ class Database:
                 await db.execute(_INSERT_LOG, (
                     now, key_id, key_name, kind, model, "ok", images, anlas,
                     tokens, detail[:500], unconfirmed_anlas, max(0, int(wait_ms)),
-                    max(0, int(dur_ms)), client[:60], int(up_status), rid[:16],
+                    max(0, int(dur_ms)), client[:60], int(up_status), rid[:16], src[:40],
                 ))
                 await db.execute(_UPSERT_COUNTERS, (
                     key_id, day, images, anlas, tokens, 1, v5, legacy_free_images,
@@ -799,13 +819,13 @@ class Database:
         self, key_id: Optional[int], key_name: str, kind: str, model: str,
         status: str, images: int = 0, anlas: float = 0.0, tokens: int = 0,
         detail: str = "", unconfirmed_anlas: float = 0.0,
-        wait_ms: int = 0, dur_ms: int = 0, client: str = "", up_status: int = 0, rid: str = "",
+        wait_ms: int = 0, dur_ms: int = 0, client: str = "", up_status: int = 0, rid: str = "", src: str = "",
     ) -> None:
         await self._db.execute(
             _INSERT_LOG,
             (time.time(), key_id, key_name[:80], kind, model[:80], status,
              images, anlas, tokens, detail[:500], unconfirmed_anlas,
-             max(0, int(wait_ms)), max(0, int(dur_ms)), client[:60], int(up_status), rid[:16]),
+             max(0, int(wait_ms)), max(0, int(dur_ms)), client[:60], int(up_status), rid[:16], src[:40]),
         )
         await self._db.commit()
 

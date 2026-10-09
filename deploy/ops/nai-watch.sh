@@ -32,8 +32,7 @@ while true; do
   q "SELECT '⚠ 注意（'||source||'）：'||substr(title,1,90)||'（累计 '||count||' 次）' FROM error_events WHERE last_seen>$last AND level='warn'"
   q "SELECT '💸 可能产生费用：'||key_name||' ≈'||unconfirmed_anlas||' Anlas' FROM usage_log WHERE ts>$last AND unconfirmed_anlas>0"
   q "SELECT '💳 消耗 Anlas：'||key_name||' '||anlas FROM usage_log WHERE ts>$last AND anlas>0"
-  shared=$(q "SELECT k.name||' '||COUNT(DISTINCT s.label) FROM key_sources s JOIN api_keys k ON k.id=s.key_id WHERE s.last_seen>$now-86400 GROUP BY s.key_id HAVING COUNT(DISTINCT s.label)>=3")
-  if [ -n "$shared" ] && [ "$shared" != "$shared_prev" ]; then echo "$shared" | sed 's/^/🔍 疑似分享（24h 网段数）：/'; fi; shared_prev=$shared
+  q "SELECT CASE e.kind WHEN 'action' THEN '🛡 防分享处罚：' ELSE '🔍 防分享证据：' END||COALESCE(k.name,'#'||e.key_id)||' · '||e.detail||CASE WHEN e.points>0 THEN '（+'||CAST(e.points AS INT)||'）' ELSE '' END FROM share_evidence e LEFT JOIN api_keys k ON k.id=e.key_id WHERE e.ts>$last"
   cool=$(curl -s -m 5 127.0.0.1:3003/queue-status | python3 -c 'import json,sys;print(json.load(sys.stdin).get("image_cooldown_remaining",0))' 2>/dev/null || echo 0)
   if [ "${cool:-0}" -gt 0 ] && [ "$cool_prev" -eq 0 ]; then echo "⏸ 上游 429 冷却中：约 ${cool} 秒"; fi; cool_prev=${cool:-0}
   down=$(for c in nai-gate nai-gate-discord caddy; do [ "$(docker inspect -f '{{.State.Running}}' $c 2>/dev/null)" = true ] || echo -n "$c "; done)

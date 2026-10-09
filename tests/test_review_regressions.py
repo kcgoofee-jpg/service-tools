@@ -445,6 +445,7 @@ async def test_source_tracker_counts_networks_alerts_and_never_stores_full_ip():
                                    "daily_text_tokens": 0, "rpm": 5})
         alerts = _Alerts()
         tracker = SourceTracker(db, alerts, threshold=3)
+        tracker.notify_owner = True          # 线上默认关闭（由 share_guard 负责），这里测网段计数本身
         now = 1_800_000_000.0
         await tracker.observe(key, "120.235.155.213", now)
         await tracker.observe(key, "120.235.155.99", now + 1)          # 同网段：不增加

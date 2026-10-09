@@ -57,7 +57,8 @@ class SourceTracker:
         self._trail: dict[int, deque] = {}
         self._clients: dict[int, dict[str, float]] = {}
         self._hours: dict[int, set] = {}
-        self.events: deque = deque(maxlen=2000)     # (时间, key_id, 信号类型)：给自动驾驶（autopilot.py）判断用
+        self.events: deque = deque(maxlen=2000)
+        self.notify_owner = False     # (时间, key_id, 信号类型)：给自动驾驶（autopilot.py）判断用
 
     async def _get_salt(self) -> str:
         if self._salt is None:
@@ -104,6 +105,8 @@ class SourceTracker:
         if self.alerter is not None and not _is_test(key):
             for kind, text in self.signals(key, found[1] if found else None, client, now):
                 self.events.append((now, int(key["id"]), kind))
+                if not self.notify_owner:      # 2026-10-10 起由 share_guard.py 负责提醒和处罚（这里只看网段，会误伤 VPN 用户）
+                    continue
                 self.alerter.notify(f"resale_{kind}_{key['id']}",
                                     f"Key「{key['name']}」{text}。可能被转卖或共享，建议先问一下本人。", cooldown=ALERT_COOLDOWN)
         if found is None:
@@ -118,7 +121,7 @@ class SourceTracker:
             cutoff = now - WRITE_INTERVAL
             self._recent = {k: t for k, t in self._recent.items() if t >= cutoff}
         is_new = await self.db.touch_key_source(int(key["id"]), digest, label, now, now - WINDOW_SECONDS)
-        if not is_new or not self.threshold or self.alerter is None:
+        if not is_new or not self.threshold or self.alerter is None or not self.notify_owner:
             return
         labels = await self.db.key_source_labels(int(key["id"]), now - WINDOW_SECONDS)
         if len(labels) >= self.threshold:
