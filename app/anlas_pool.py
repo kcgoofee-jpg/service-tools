@@ -23,11 +23,11 @@ import httpx
 
 from .action_log import log_action
 
-V5_PAID_PRICE = 26          # 一张免费规格 V5 在没有额度时大约扣的 Anlas，低于它的分配没有意义
+V5_PAID_PRICE = 30          # 一张免费规格 V5（832×1216 / 1024²，28 步）在没有额度时扣的 Anlas：policy.py 实测系数 20 × V5 1.5 倍；低于它的分配没有意义
 DEFAULTS = {
     "anlas_auto_enabled": 1,
     "anlas_reserve": 1000,             # 留给账号本身（V5 额度耗尽时的兜底等）
-    "anlas_member_daily_cap": 78,      # 每人每天最多约 3 张续杯 V5
+    "anlas_member_daily_cap": 90,      # 每人每天最多约 3 张续杯 V5（3 × 30）
     "anlas_min_images_7d": 10,
     "anlas_min_key_age_days": 3,
 }

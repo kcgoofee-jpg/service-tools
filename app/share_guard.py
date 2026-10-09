@@ -14,6 +14,10 @@
   allday       +15  近 24 小时里有 ≥ 20 个小时在用（作息不像一个人）。
   同一类证据每把 Key 30 分钟（multi_device / many_clients / allday 为 24 小时）最多记一次。
 
+  三重滤网（2026-10-10 盘点后修正）：multi_device / many_clients / allday 只看 UA 或作息，是「辅助证据」——
+  只有最近 72 小时内出现过「网络 + 客户端」的强证据（overlap / concurrent / alternate）才计分，否则只记录、0 分。
+  这样一个有三台设备、每天用很久的老实人永远不会被处罚；处罚至少需要一条强证据 + 其他证据印证。
+
 ━━ 风险分 ━━
   所有证据分数按半衰期 48 小时衰减后相加。正常换网络的人分数会自己降下来。
 
@@ -45,6 +49,8 @@ FAST_SWITCH = 90
 CONCURRENT_WINDOW = 1800
 DEDUPE = {"overlap": 1800, "concurrent": 1800, "alternate": 1800, "multi_device": 86400, "many_clients": 86400,
           "allday": 86400}
+STRONG = ("overlap", "concurrent", "alternate")
+CONFIRM_WINDOW = 72 * 3600     # 辅助证据只在 72 小时内有过强证据时计分
 OVERLAP_WINDOW = 180          # 「上一张还没完」只看最近 3 分钟内的请求
 MODE_SETTING = "share_guard_mode"          # enforce（默认）/ observe / off
 
@@ -184,9 +190,20 @@ class ShareGuard:
         if s["strikes"] >= STRIKES_BAN:          # 已停用，不再重复处罚
             return None
         score = decayed(s["score"], s["score_ts"], now)
+        strong_recent = any(k in STRONG for k, _ in found) or bool(await self.db._db.execute_fetchall(
+            f"SELECT 1 FROM share_evidence WHERE key_id=? AND ts>=? AND kind IN ({','.join('?' * len(STRONG))}) LIMIT 1",
+            (kid, now - CONFIRM_WINDOW, *STRONG)))
+        counted = []
         for kind, text in found:
-            score += POINTS[kind]
-            await self._evidence(kid, kind, POINTS[kind], text, now)
+            pts = POINTS[kind] if (kind in STRONG or strong_recent) else 0
+            score += pts
+            if pts:
+                counted.append((kind, text))
+            await self._evidence(kid, kind, pts, text if pts else text + "（辅助证据，没有强证据印证，不计分）", now)
+        if not counted:
+            await self.db._db.commit()
+            return None
+        found = counted
         s["score"], s["score_ts"] = score, now
         name = key["name"]
         why = "；".join(t for _, t in found)

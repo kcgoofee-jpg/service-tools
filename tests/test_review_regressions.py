@@ -1288,9 +1288,9 @@ async def test_anlas_rebalance_grants_active_v5_members_and_revokes(tmp_path):
         async def notify(key_id, text):
             sent.append(key_id)
         r = await anlas_pool.rebalance(st, now=now, account={"anlas": 5000, "refill_at": now + 10 * 86400}, notify=notify)
-        assert r["per_member"] == 78 and r["members"] == ["活跃"]
+        assert r["per_member"] == 90 and r["members"] == ["活跃"]
         row = await db.get_key(active["id"])
-        assert row["allow_anlas"] == 1 and row["anlas_auto"] == 1 and row["daily_anlas"] == 78 and sent == [active["id"]]
+        assert row["allow_anlas"] == 1 and row["anlas_auto"] == 1 and row["daily_anlas"] == 90 and sent == [active["id"]]
         assert (await db.get_key(manual["id"]))["daily_anlas"] == 500            # 手动设置不受影响
         await db._db.execute("DELETE FROM counters"); await db._db.commit()
         await anlas_pool.rebalance(st, now=now, account={"anlas": 5000, "refill_at": now + 10 * 86400}, notify=notify)
