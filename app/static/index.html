@@ -1571,7 +1571,7 @@ async function loadKeys(){
           <span>免费 ${k.daily_images>0?k.daily_images:'∞'}/日${k.image_model_scope==='all' ? ` · V5 ${k.daily_v5>0?k.daily_v5:'∞'}/日` : ''}</span>
           <span class="muted sm">Anlas ${k.allow_anlas ? `${k.daily_anlas>0?k.daily_anlas:'∞'}/日 · ${k.monthly_anlas>0?k.monthly_anlas:'∞'}/月` : '未开'}</span>
           <span class="muted sm">文本 ${fmt(k.daily_text_tokens)}/日 · RPM ${k.rpm}</span>`}</div></td>
-                <td data-label="最近使用 / 到期"><div class="stack"><span>${k.last_used_at ? esc(new Date(k.last_used_at*1000).toLocaleString()) : '从未使用'}</span><span class="muted sm">到期：${esc(exp)}</span></div></td>
+                <td data-label="最近使用 / 到期"><div class="stack"><span>${k.last_used_at ? esc(new Date(k.last_used_at*1000).toLocaleString()) : '从未使用'}</span><span class="muted sm">到期：${esc(exp)}</span>${srcBadge(k, d.share_alert_nets)}</div></td>
         <td data-label="操作" class="full"><div class="actions">
           <button class="btn mini" data-act="edit-key" data-id="${k.id}">编辑</button>
           <button class="btn mini" data-act="toggle-key" data-id="${k.id}" data-on="${k.enabled?0:1}">${k.enabled?'禁用':'启用'}</button>
@@ -1584,6 +1584,15 @@ async function loadKeys(){
     $('#logFilter').innerHTML = '<option value="">全部 Key</option>' +
       d.keys.map(k=>`<option value="${k.id}">${esc(k.name)}</option>`).join('');
   }catch(e){ toastErr(e); }
+}
+/* 24h 来源网段数：达到阈值标黄（可能被分享，也可能只是换了网络 / 代理） */
+function srcBadge(k, limit){
+  if(k.is_admin) return '';
+  const list = k.sources_24h || [], n = list.length;
+  if(!n) return '<span class="muted sm">24h 来源：—</span>';
+  const hot = limit > 0 && n >= limit;
+  const tip = '近 24 小时的来源网段：' + list.join('、') + (hot ? '\n可能被分享，也可能只是换了网络 / 代理，建议先问一下本人。' : '');
+  return `<span class="${hot?'tag warn':'muted sm'}" title="${esc(tip)}">24h 来源 ${n} 个网段${hot?' · 疑似分享':''}</span>`;
 }
 function mask(t){ return t.slice(0,8) + '····' + t.slice(-4); }
 async function copyKey(btn){

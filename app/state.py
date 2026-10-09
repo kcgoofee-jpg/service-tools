@@ -14,6 +14,7 @@ from pathlib import Path
 from . import alerts, token_store
 from .config import Settings
 from .database import Database
+from .key_sources import SourceTracker
 from .nai import NaiClient, clamp_retry_after
 from .reconciliation import ManualReconciliation
 
@@ -53,6 +54,7 @@ class GateState:
         self.nai.managed_path = self.token_store_path
         self.upstream_managed = bool(managed)
         self.alerter = alerts.from_settings(settings)
+        self.sources = SourceTracker(self.db, self.alerter, threshold=settings.key_share_alert_nets)
         self.announcer = alerts.announcer_from_settings(settings)
         self.nai.on_event = lambda kind, msg, cooldown=900: self.alerter.notify(kind, msg, cooldown=cooldown)
         self.nai.allowance.on_low = self.nai.on_event

@@ -71,6 +71,8 @@ class Settings:
     # ---- 告警 / 生成记录 ----
     discord_bot_token: str = os.getenv("DISCORD_BOT_TOKEN", "")
     site_url: str = os.getenv("SITE_URL", "")
+    # 同一 Key 24 小时内出现的来源网段数达到此值时私信提醒站长（0 = 只统计不提醒）
+    key_share_alert_nets: int = _int("KEY_SHARE_ALERT_NETS", 3)
     alert_user_id: str = os.getenv("ALERT_USER_ID", "")        # 告警私信给此 Discord 用户（用机器人发）
     alert_channel_id: str = os.getenv("ALERT_CHANNEL_ID", "")  # 或发到某频道
     alert_webhook_url: str = os.getenv("ALERT_WEBHOOK_URL", "")  # 或使用 Webhook
