@@ -120,7 +120,7 @@ CREATE TABLE IF NOT EXISTS share_state (       -- 防分享风险分（share_gua
     warned_ts REAL NOT NULL DEFAULT 0,
     paused_ts REAL NOT NULL DEFAULT 0
 );
-CREATE TABLE IF NOT EXISTS req_features (      -- 出图请求的特征（只存哈希），给防分享回测用；30 天后删除
+CREATE TABLE IF NOT EXISTS req_features (      -- 出图请求的特征（只存哈希），给防分享回测用；长期保留
     ts REAL NOT NULL,
     key_id INTEGER NOT NULL,
     src TEXT NOT NULL DEFAULT '',          -- 来源网络打码标签
@@ -811,8 +811,6 @@ class Database:
 
     async def purge_usage_log(self, older_than: float) -> int:
         """只清理明细日志；每日计数器和账本不受影响。"""
-        await self._db.execute("DELETE FROM req_features WHERE ts<?", (max(older_than, time.time() - 30 * 86400),))
-        await self._db.execute("DELETE FROM share_evidence WHERE ts<?", (older_than,))
         cur = await self._db.execute("DELETE FROM usage_log WHERE ts<?", (older_than,))
         await self._db.commit()
         return cur.rowcount

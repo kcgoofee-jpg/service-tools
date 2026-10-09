@@ -137,7 +137,7 @@ async def set_audit(state, body: dict) -> dict:
     if "thumbs" in body:
         thumbs = bool(body["thumbs"])
     if "retention_days" in body:
-        days = max(1, min(int(body["retention_days"]), 90))
+        days = max(0, min(int(body["retention_days"]), 3650))      # 0 = 长期保留
     await state.db.set_settings_bulk({"audit_prompts": "1" if prompts else "0",
                                       "audit_thumbs": "1" if thumbs else "0",
                                       "audit_retention_days": days})
@@ -146,8 +146,9 @@ async def set_audit(state, body: dict) -> dict:
         if announcer is not None:
             if prompts or thumbs:
                 what = "、".join(x for x, on in (("图片提示词", prompts), ("生成结果的小缩略图", thumbs)) if on)
+                keep = f"{days} 天后自动删除" if days > 0 else "长期保存，用于防止滥用和优化调度算法"
                 text = (f"📢 **测试期公告**：站长已开启生成记录。本站处于测试阶段，会保留成员的{what}，"
-                        f"{days} 天后自动删除，仅站长可见，用于防止生成违禁内容（如政治相关等）。")
+                        f"{keep}，仅站长可见。")
             else:
                 text = "📢 **测试期公告**：站长已关闭生成记录，不再保存新的提示词和缩略图（已有记录到期自动删除）。"
             announcer.post(text)

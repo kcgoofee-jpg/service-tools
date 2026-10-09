@@ -185,7 +185,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "2.0.2"
+__version__ = "2.0.3"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -479,10 +479,13 @@ async def check_upstream_perf() -> None:
 async def maintenance_loop() -> None:
     """每 5 分钟：清理过期生成记录；磁盘与告警自检。"""
     async def purge():
-        days = max(1, (await audit_flags(STATE.db, STATE.settings))[2])
-        await STATE.db.purge_audit(time.time() - days * 86400)
-        keep = max(7, STATE.settings.usage_log_retention_days)
-        await STATE.db.purge_usage_log(time.time() - keep * 86400)
+        # 0 = 长期保留：测试期已向成员声明保留数据，用于防滥用、回测和优化算法（见 audit.audit_notice）
+        days = (await audit_flags(STATE.db, STATE.settings))[2]
+        if days > 0:
+            await STATE.db.purge_audit(time.time() - days * 86400)
+        keep = STATE.settings.usage_log_retention_days
+        if keep > 0:
+            await STATE.db.purge_usage_log(time.time() - max(7, keep) * 86400)
         await STATE.db.purge_key_sources(time.time() - KEY_SOURCE_RETENTION)
         await STATE.db.purge_admin_actions(time.time() - ADMIN_ACTION_RETENTION_DAYS * 86400)
         if getattr(STATE, "bugs", None) is not None:
