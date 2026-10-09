@@ -15,6 +15,26 @@ services:
     volumes:
       - ./data:/app/data
 
+  # 实验室（回测 / 蒙特卡洛 / 日报）：不常驻，只读挂载 data/，结果写 data/lab/。
+  #   docker compose --profile lab build lab
+  #   docker compose --profile lab run --rm -v /tmp/nai-lab.db:/snapshot/gate.db:ro lab
+  # 每日任务见 deploy/ops/lab-daily.sh（先 .backup 出副本，再跑 lab，再 dry-run 发帖）。
+  lab:
+    profiles: ["lab"]
+    build:
+      context: .
+      dockerfile: lab/Dockerfile
+    container_name: nai-gate-lab
+    restart: "no"
+    network_mode: none          # 不需要网络：只读数据库副本、写本地文件
+    cpus: 1.0                   # 2 核服务器：最多占一个核，网关不受影响（进程内还会 os.nice）
+    mem_limit: 1g
+    environment:
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./data:/app/data:ro
+      - ./data/lab:/app/data/lab
+
   # 可选：Discord /register 机器人。配置好 .env 里的 DISCORD_* 后用
   #   docker compose --profile discord up -d --build
   # 只给它需要的三个变量，不带上游 Token。
