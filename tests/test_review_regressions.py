@@ -692,3 +692,10 @@ async def test_idle_reminder_sent_once_24h_before_reclaim(tmp_path):
     actions = await db.list_admin_actions()
     assert actions[0]["action"] == "闲置回收前提醒"
     await db.close()
+
+
+@pytest.mark.asyncio
+async def test_get_v1_root_answers_connection_tests(state):
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url="http://gate") as c:
+        r = await c.get("/v1")
+    assert r.status_code == 200 and r.json()["object"] == "list"

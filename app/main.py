@@ -1594,6 +1594,7 @@ for path in ("/ai/generate", "/nai/ai/generate"):
 for path in ("/ai/generate-voice", "/nai/ai/generate-voice"):
     app.post(path)(generate_voice)
 app.get("/v1/models")(v1_models)
+app.get("/v1")(v1_models)          # 部分客户端“测试连接”会直接请求填写的 Base URL（…/v1）
 app.post("/v1/chat/completions")(limit_inflight(v1_chat))
 app.get("/v1/me")(v1_me)
 
