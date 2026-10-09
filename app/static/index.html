@@ -3,271 +3,776 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>NAI Gate 管理后台</title>
 <style>
+/* ===== Design tokens ===== */
 :root{
-  --bg:#0f151d; --panel:#161e29; --panel2:#1b2533; --line:#243043;
-  --txt:#dbe4f0; --muted:#8496ad; --accent:#7cc4ff; --accent2:#8be2b9;
-  --warn:#ffb26b; --bad:#ff8a8a;
+  --bg:#f5f6fa; --surface:#ffffff; --surface-2:#f8f9fc; --surface-3:#eff1f7;
+  --border:#e4e7ef; --border-strong:#d3d8e4;
+  --text:#1a2033; --text-2:#4a5368; --muted:#6b7488;
+  --accent:#4f46e5; --accent-hover:#4338ca; --accent-soft:#eceeff; --accent-text:#4338ca; --on-accent:#fff;
+  --ok:#15803d; --ok-soft:#e6f6ec; --warn:#b45309; --warn-soft:#fef3dc; --bad:#c2263a; --bad-soft:#fdeaed;
+  --info-soft:#eaf1fb;
+  --shadow-sm:0 1px 2px rgba(20,28,50,.05);
+  --shadow:0 1px 3px rgba(20,28,50,.06),0 6px 20px -8px rgba(20,28,50,.10);
+  --shadow-lg:0 24px 60px -12px rgba(15,20,40,.35);
+  --overlay:rgba(15,20,35,.5);
+  --radius:12px; --radius-sm:8px;
+  --font:system-ui,-apple-system,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK SC",sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  color-scheme:light;
 }
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#0d1017; --surface:#151a25; --surface-2:#1a2030; --surface-3:#212839;
+    --border:#252c3d; --border-strong:#323b52;
+    --text:#e7eaf3; --text-2:#b4bcd0; --muted:#8c96ad;
+    --accent:#818cf8; --accent-hover:#a5acff; --accent-soft:#222650; --accent-text:#b4bbff; --on-accent:#10122a;
+    --ok:#4ade80; --ok-soft:#14301f; --warn:#fbbf24; --warn-soft:#38290c; --bad:#fb7185; --bad-soft:#3b1820;
+    --info-soft:#17263d;
+    --shadow-sm:0 1px 2px rgba(0,0,0,.4); --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 24px -10px rgba(0,0,0,.6);
+    --shadow-lg:0 24px 60px -12px rgba(0,0,0,.7); --overlay:rgba(0,0,0,.65);
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0d1017; --surface:#151a25; --surface-2:#1a2030; --surface-3:#212839;
+  --border:#252c3d; --border-strong:#323b52;
+  --text:#e7eaf3; --text-2:#b4bcd0; --muted:#8c96ad;
+  --accent:#818cf8; --accent-hover:#a5acff; --accent-soft:#222650; --accent-text:#b4bbff; --on-accent:#10122a;
+  --ok:#4ade80; --ok-soft:#14301f; --warn:#fbbf24; --warn-soft:#38290c; --bad:#fb7185; --bad-soft:#3b1820;
+  --info-soft:#17263d;
+  --shadow-sm:0 1px 2px rgba(0,0,0,.4); --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 24px -10px rgba(0,0,0,.6);
+  --shadow-lg:0 24px 60px -12px rgba(0,0,0,.7); --overlay:rgba(0,0,0,.65);
+  color-scheme:dark;
+}
+
+/* ===== Base ===== */
 *{box-sizing:border-box}
-body{margin:0;font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
-     background:var(--bg);color:var(--txt);font-size:14px}
-button{font-family:inherit}
-a{color:var(--accent)}
-input,select,textarea{background:#101823;border:1px solid var(--line);color:var(--txt);
-  border-radius:8px;padding:8px 10px;font-size:14px;outline:none;width:100%}
-input:focus,textarea:focus{border-color:var(--accent)}
-label{display:block;font-size:12px;color:var(--muted);margin:10px 0 4px}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;font-family:var(--font);background:var(--bg);color:var(--text);font-size:14px;line-height:1.55;
+  -webkit-font-smoothing:antialiased}
+button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit}
+h1,h2,h3,p{margin:0}
+a{color:var(--accent-text)}
+[hidden]{display:none!important}
+.num{font-variant-numeric:tabular-nums}
+.mono{font-family:var(--mono);font-size:12.5px}
+.muted{color:var(--muted)}
+.sm{font-size:12px}
+[data-ic]{display:inline-flex;align-items:center;justify-content:center}
+svg.ic{width:18px;height:18px;flex:none;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
-/* login */
-#login{display:flex;align-items:center;justify-content:center;height:100vh}
-.login-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:32px;width:340px}
-.login-card h1{font-size:18px;margin:0 0 18px;color:var(--accent)}
+/* ===== Forms ===== */
+label{display:block;font-size:12.5px;font-weight:500;color:var(--text-2);margin:0 0 6px}
+input,select,textarea{width:100%;background:var(--surface);border:1px solid var(--border-strong);border-radius:var(--radius-sm);
+  padding:8px 12px;min-height:38px;outline:none;transition:border-color .15s, box-shadow .15s}
+textarea{resize:vertical;line-height:1.5}
+input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+input::placeholder,textarea::placeholder{color:var(--muted);opacity:.7}
+input[type=checkbox]{width:16px;height:16px;min-height:0;padding:0;accent-color:var(--accent);margin:2px 0 0;flex:none}
+.field{margin-bottom:16px}
+.hint{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.6}
+.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 16px}
+.check{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);
+  background:var(--surface-2);margin-bottom:8px;font-size:13px;color:var(--text-2);cursor:pointer;line-height:1.5}
 
-/* layout */
-#app{display:none;min-height:100vh}
-header{display:flex;align-items:center;gap:16px;padding:14px 22px;border-bottom:1px solid var(--line);
-  background:var(--panel);position:sticky;top:0;z-index:5}
-header .logo{font-weight:700;color:var(--accent);font-size:16px}
-header .sp{flex:1}
-.tabs{display:flex;gap:4px}
-.tabs button{background:none;border:none;color:var(--muted);padding:8px 14px;border-radius:8px;cursor:pointer;font-size:14px}
-.tabs button.active{background:var(--panel2);color:var(--txt)}
-main{max-width:1080px;margin:0 auto;padding:22px}
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:18px}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
-.card .k{font-size:12px;color:var(--muted)}
-.card .v{font-size:22px;font-weight:700;margin-top:4px}
-.card .v small{font-size:12px;color:var(--muted);font-weight:400}
-.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:18px}
-.panel h2{font-size:14px;margin:0 0 12px;color:var(--muted);font-weight:600}
+/* ===== Buttons ===== */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:36px;padding:6px 14px;border-radius:var(--radius-sm);
+  border:1px solid var(--border-strong);background:var(--surface);color:var(--text);font-weight:500;cursor:pointer;white-space:nowrap;
+  transition:background .15s,border-color .15s,transform .05s;box-shadow:var(--shadow-sm)}
+.btn:hover{background:var(--surface-2);border-color:var(--muted)}
+.btn:active{transform:translateY(1px)}
+.btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.btn.primary:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
+.btn.danger{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 40%,var(--border))}
+.btn.danger:hover{background:var(--bad-soft);border-color:var(--bad)}
+.btn.ghost{background:transparent;border-color:transparent;box-shadow:none;color:var(--text-2)}
+.btn.ghost:hover{background:var(--surface-3)}
+.btn.mini{min-height:28px;padding:2px 10px;font-size:12.5px;box-shadow:none}
+.btn.icon{width:36px;padding:0}
+.btn.block{width:100%}
 
-/* table */
-table{width:100%;border-collapse:collapse}
-th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
-th{color:var(--muted);font-weight:500;font-size:12px;white-space:nowrap}
-tr:hover td{background:#182230}
-.tag{display:inline-block;padding:1px 8px;border-radius:20px;font-size:12px}
-.tag.on{background:#173529;color:var(--accent2)}
-.tag.off{background:#3a2226;color:var(--bad)}
-.tag.warn{background:#3a2f1c;color:var(--warn)}
-.logs .tag{white-space:nowrap}
-.btn{background:var(--panel2);border:1px solid var(--line);color:var(--txt);
-  padding:6px 12px;border-radius:8px;cursor:pointer;font-size:13px}
-.btn:hover{border-color:var(--accent)}
-.btn.primary{background:#1c4d74;border-color:#2a6ea3}
-.btn.danger{background:#5b2530;border-color:#7c3644}
-.btn.mini{padding:3px 8px;font-size:12px}
-.row-actions{display:flex;gap:6px;flex-wrap:wrap}
-.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
-.key-summary{font-size:12px;line-height:1.6;white-space:nowrap}
-.key-summary .muted{font-size:11px}
-#keysTable .key-name{width:150px;max-width:150px;overflow-wrap:anywhere;word-break:break-word}
-#keysTable th:last-child,#keysTable td:last-child{
-  position:sticky;right:0;min-width:180px;background:var(--panel);box-shadow:-8px 0 12px -10px #000;
-}
-#keysTable th:last-child{z-index:2}
-#keysTable td:last-child{z-index:1}
-#keysTable tr:hover td:last-child{background:#182230}
+/* ===== Badges ===== */
+.tag{display:inline-flex;align-items:center;gap:4px;padding:1px 9px;border-radius:999px;font-size:12px;font-weight:500;line-height:20px;white-space:nowrap;
+  background:var(--surface-3);color:var(--text-2)}
+.tag.on{background:var(--ok-soft);color:var(--ok)}
+.tag.off{background:var(--bad-soft);color:var(--bad)}
+.tag.warn{background:var(--warn-soft);color:var(--warn)}
+.tag.info{background:var(--accent-soft);color:var(--accent-text)}
+.tag.dim{background:var(--surface-3);color:var(--muted)}
+.dot{width:7px;height:7px;border-radius:50%;background:currentColor;flex:none}
+
+/* ===== Login ===== */
+#login{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;
+  background:radial-gradient(900px 480px at 50% -10%,var(--accent-soft),transparent 70%),var(--bg)}
+.login-card{width:100%;max-width:380px;background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:32px;box-shadow:var(--shadow)}
+.brand{display:flex;align-items:center;gap:12px;font-weight:700;font-size:16px;letter-spacing:.2px}
+.brand-mark{width:36px;height:36px;border-radius:10px;background:var(--accent);color:var(--on-accent);display:grid;place-items:center}
+.login-card h1{font-size:20px;margin:24px 0 4px}
+.login-card .sub{color:var(--muted);margin-bottom:24px}
+.err{color:var(--bad);font-size:13px;min-height:20px;margin:4px 0 12px}
+
+/* ===== Shell ===== */
+#app{display:none}
+.shell{display:grid;grid-template-columns:240px minmax(0,1fr);min-height:100vh}
+.sidebar{position:sticky;top:0;height:100vh;background:var(--surface);border-right:1px solid var(--border);
+  display:flex;flex-direction:column;padding:16px 12px;gap:8px;z-index:30}
+.sidebar .brand{padding:8px 12px 16px}
+.nav{display:flex;flex-direction:column;gap:2px}
+.nav-label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);padding:12px 12px 6px}
+.nav button{display:flex;align-items:center;gap:12px;width:100%;text-align:left;border:0;background:none;color:var(--text-2);
+  padding:9px 12px;border-radius:var(--radius-sm);cursor:pointer;font-weight:500}
+.nav button:hover{background:var(--surface-3);color:var(--text)}
+.nav button.active{background:var(--accent-soft);color:var(--accent-text)}
+.side-foot{margin-top:auto;display:flex;flex-direction:column;gap:4px;border-top:1px solid var(--border);padding-top:12px}
+.side-foot button{display:flex;align-items:center;gap:12px;border:0;background:none;color:var(--text-2);padding:9px 12px;border-radius:var(--radius-sm);cursor:pointer;font-weight:500;width:100%}
+.side-foot button:hover{background:var(--surface-3);color:var(--text)}
+.topbar{display:none}
+.scrim{display:none}
+.content{min-width:0;padding:32px 40px 64px}
+.page{max-width:1120px;margin:0 auto}
+.page-head{display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:24px}
+.page-head .ttl{flex:1;min-width:200px}
+.page-head h1{font-size:24px;letter-spacing:-.01em;line-height:1.3}
+.page-head p{color:var(--muted);margin-top:4px}
+.page-head .tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+
+/* ===== Cards ===== */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-sm)}
+.panel{padding:24px;margin-bottom:24px}
+.panel-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+.panel-head h2{font-size:15px;font-weight:600;flex:1;min-width:140px}
+.panel-head .desc{flex-basis:100%;color:var(--muted);font-size:12.5px;margin-top:-8px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px}
+.stat{padding:16px 20px}
+.stat .k{font-size:12.5px;color:var(--muted);display:flex;align-items:center;gap:6px}
+.stat .v{font-size:26px;font-weight:650;margin-top:6px;letter-spacing:-.01em;font-variant-numeric:tabular-nums;line-height:1.2}
+.stat .v small{font-size:13px;font-weight:400;color:var(--muted)}
+.stat .sub{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.6}
+.stat.accent{background:linear-gradient(180deg,var(--accent-soft),var(--surface) 90%)}
+.two-col{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:24px;margin-bottom:24px;align-items:stretch}
+.two-col>.panel{margin-bottom:0}
+
+.bar{height:8px;border-radius:99px;background:var(--surface-3);overflow:hidden}
+.bar>i{display:block;height:100%;border-radius:99px;background:var(--accent);transition:width .4s}
+.bar.ok>i{background:var(--ok)} .bar.warn>i{background:var(--warn)} .bar.bad>i{background:var(--bad)}
 
 /* chart */
-.chart{display:flex;align-items:flex-end;gap:10px;height:120px;padding-top:8px}
-.chart .bar{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;height:100%;justify-content:flex-end}
-.chart .bar .fill{width:70%;background:linear-gradient(180deg,#7cc4ff,#2a6ea3);border-radius:6px 6px 0 0;min-height:2px}
-.chart .bar .lb{font-size:11px;color:var(--muted)}
+.chart{display:flex;align-items:stretch;gap:12px;height:176px}
+.chart .col{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;min-width:0}
+.chart .track{flex:1;width:100%;display:flex;align-items:flex-end;justify-content:center}
+.chart .fill{width:min(44px,70%);background:var(--accent);opacity:.85;border-radius:6px 6px 2px 2px;min-height:3px;transition:height .4s}
+.chart .col:hover .fill{opacity:1}
+.chart .lb{font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.chart .val{font-size:12px;font-weight:600;font-variant-numeric:tabular-nums}
 
-/* modal */
-#modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:50;
-  align-items:center;justify-content:center}
-.modal-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;
-  padding:24px;width:440px;max-height:90vh;overflow:auto}
-.modal-card h3{margin:0 0 8px}
-.grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 14px}
-.check{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:13px}
-.check input{width:auto}
-.modal-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
-.err{color:var(--bad);font-size:13px;margin-top:10px;min-height:18px}
-.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1c4d74;
-  color:#fff;padding:10px 18px;border-radius:10px;z-index:99;display:none}
-.muted{color:var(--muted)}
-.logs td{font-size:12.5px}
-.gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px}
-.gallery-item{background:var(--panel2);border:1px solid var(--line);border-radius:10px;overflow:hidden}
-.gallery-item img{display:block;width:100%;height:180px;object-fit:contain;background:#0b1017}
-.gallery-meta{padding:9px;font-size:12px;line-height:1.65;word-break:break-all}
-#allowanceStatus{margin:0 0 14px;padding:7px 10px;border-left:2px solid var(--warn);
-  color:var(--warn);font-size:12px;line-height:1.6;white-space:pre-line}
-#allowanceDetails{margin-top:10px;font-size:12px;line-height:1.8;white-space:pre-line}
+/* status panel */
+.status-list{display:flex;flex-direction:column}
+.status-row{display:flex;gap:12px;align-items:flex-start;padding:12px 0;border-bottom:1px solid var(--border)}
+.status-row:first-child{padding-top:0}
+.status-row:last-child{border-bottom:0;padding-bottom:0}
+.status-row .ico{width:32px;height:32px;border-radius:8px;display:grid;place-items:center;background:var(--surface-3);color:var(--text-2);flex:none}
+.status-row .ico.ok{background:var(--ok-soft);color:var(--ok)}
+.status-row .ico.warn{background:var(--warn-soft);color:var(--warn)}
+.status-row .body{flex:1;min-width:0}
+.status-row .t{font-weight:600;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.status-row .d{font-size:12.5px;color:var(--muted);margin-top:2px;line-height:1.6}
+
+/* notice */
+.notice{display:flex;gap:12px;align-items:flex-start;padding:12px 16px;border-radius:var(--radius-sm);background:var(--warn-soft);color:var(--warn);
+  margin-bottom:24px;font-size:13px;white-space:pre-line;line-height:1.7;border:1px solid color-mix(in srgb,var(--warn) 30%,transparent)}
+
+/* upstream pool */
+.token{border:1px solid var(--border);border-radius:var(--radius-sm);padding:16px;background:var(--surface-2);margin-bottom:16px}
+.token:last-child{margin-bottom:0}
+.token-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.token-head .mono{font-weight:600;font-size:13px}
+.token-head .sp{flex:1}
+.token-meta{font-size:12.5px;color:var(--muted);margin:8px 0 16px}
+.token-ctrls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.ctrl label{margin-bottom:6px}
+.ctrl .line{display:flex;gap:8px}
+.ctrl .line input{max-width:120px}
+.ctrl .hint{margin-top:6px}
+
+/* ===== Tables ===== */
+.table-wrap{overflow:auto;border:1px solid var(--border);border-radius:var(--radius-sm);max-height:70vh;background:var(--surface)}
+table{width:100%;border-collapse:separate;border-spacing:0}
+th,td{text-align:left;padding:14px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+thead th{position:sticky;top:0;z-index:2;background:var(--surface-2);color:var(--muted);font-weight:500;font-size:12px;white-space:nowrap;border-bottom:1px solid var(--border-strong)}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover td{background:var(--surface-2)}
+td .stack{display:flex;flex-direction:column;gap:2px}
+#keysTable td .stack>span{white-space:nowrap}
+#keysTable td:nth-child(2){white-space:nowrap}
+td .tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
+.cell-name{font-weight:600;overflow-wrap:anywhere;min-width:120px}
+.actions{display:flex;gap:6px;flex-wrap:wrap;min-width:150px;max-width:210px}
+.empty-cell{text-align:center!important;color:var(--muted);padding:32px 16px!important}
+.pager{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:16px;flex-wrap:wrap}
+.pager .info{color:var(--muted);font-size:12.5px;margin-right:auto}
+
+/* ===== Members ===== */
+.toolbar{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:24px}
+.search{position:relative;flex:1;min-width:200px;max-width:360px}
+.search svg{position:absolute;left:12px;top:10px;color:var(--muted)}
+.search input{padding-left:38px}
+.seg{display:inline-flex;background:var(--surface-3);border-radius:var(--radius-sm);padding:3px;gap:2px}
+.seg button{border:0;background:none;padding:5px 12px;border-radius:6px;cursor:pointer;color:var(--text-2);font-weight:500;min-height:30px}
+.seg button.active{background:var(--surface);color:var(--text);box-shadow:var(--shadow-sm)}
+.member-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px}
+.member{padding:20px;display:flex;flex-direction:column;gap:16px;transition:border-color .15s,box-shadow .15s}
+.member:hover{border-color:var(--border-strong);box-shadow:var(--shadow)}
+.member.dim{opacity:.75}
+.member-top{display:flex;gap:12px;align-items:flex-start}
+.avatar{width:40px;height:40px;border-radius:12px;background:var(--accent-soft);color:var(--accent-text);display:grid;place-items:center;font-weight:700;font-size:16px;flex:none}
+.member-top .nm{font-weight:600;font-size:15px;overflow-wrap:anywhere;line-height:1.35}
+.member-top .tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
+.quota .row{display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:6px;color:var(--text-2)}
+.quota .row b{color:var(--text);font-weight:600}
+.trio{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:12px 0;border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
+.trio div{text-align:center}
+.trio .n{font-size:18px;font-weight:650;font-variant-numeric:tabular-nums}
+.trio .l{font-size:11.5px;color:var(--muted)}
+.member-foot{display:flex;align-items:center;gap:8px;justify-content:space-between;flex-wrap:wrap;font-size:12.5px;color:var(--muted)}
+.member-foot .meta{display:flex;flex-direction:column;gap:2px}
+
+/* ===== Audit gallery ===== */
+.gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px}
+.shot{display:flex;flex-direction:column;overflow:hidden}
+.thumb{position:relative;aspect-ratio:4/3;background:var(--surface-3);display:grid;place-items:center;border:0;padding:0;cursor:zoom-in;width:100%;color:var(--muted)}
+.thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.thumb.none{cursor:default}
+.thumb .zoom{position:absolute;right:8px;bottom:8px;background:rgba(10,12,20,.6);color:#fff;border-radius:8px;padding:4px;opacity:0;transition:opacity .15s;display:grid}
+.thumb:hover .zoom{opacity:1}
+.thumb.none .zoom{display:none}
+.shot-body{padding:16px;display:flex;flex-direction:column;gap:12px;flex:1}
+.shot-top{display:flex;align-items:center;gap:8px;justify-content:space-between}
+.shot-top .who{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.shot-meta{font-size:12px;color:var(--muted);display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.shot-meta .mono{font-size:11.5px}
+.prompt{font-size:13px;line-height:1.55;color:var(--text);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;
+  overflow-wrap:anywhere;cursor:pointer;white-space:pre-wrap}
+.prompt.open{display:block;-webkit-line-clamp:unset;max-height:260px;overflow:auto}
+.prompt.empty{color:var(--muted);cursor:default;font-style:italic}
+.shot-actions{display:flex;gap:8px;align-items:center;margin-top:auto}
+details.neg{font-size:12.5px;color:var(--muted)}
+details.neg summary{cursor:pointer;user-select:none}
+details.neg div{margin-top:6px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:140px;overflow:auto;color:var(--text-2)}
+
+.empty{text-align:center;padding:64px 24px;color:var(--muted)}
+.empty .ico{width:56px;height:56px;border-radius:16px;background:var(--surface-3);display:grid;place-items:center;margin:0 auto 16px;color:var(--muted)}
+.empty .ico svg{width:26px;height:26px}
+.empty h3{color:var(--text);font-size:16px;margin-bottom:6px}
+.empty p{max-width:420px;margin:0 auto;line-height:1.7}
+
+/* skeleton */
+.skel{background:linear-gradient(90deg,var(--surface-3) 25%,var(--surface-2) 50%,var(--surface-3) 75%);background-size:200% 100%;animation:sk 1.3s infinite;border-radius:var(--radius-sm)}
+@keyframes sk{from{background-position:200% 0}to{background-position:-200% 0}}
+.skel-card{height:140px}
+@media (prefers-reduced-motion:reduce){.skel{animation:none}.bar>i,.chart .fill{transition:none}}
+
+/* ===== Modal / toast / lightbox ===== */
+.overlay{position:fixed;inset:0;background:var(--overlay);z-index:60;display:none;align-items:center;justify-content:center;padding:16px;backdrop-filter:blur(2px)}
+.overlay.show{display:flex}
+.dialog{background:var(--surface);border:1px solid var(--border);border-radius:16px;width:100%;max-width:560px;max-height:calc(100vh - 32px);display:flex;flex-direction:column;box-shadow:var(--shadow-lg)}
+.dialog.sm-d{max-width:420px}
+.dialog-head{padding:20px 24px 0;display:flex;align-items:center;gap:12px}
+.dialog-head h3{font-size:17px;flex:1}
+.dialog-body{padding:16px 24px;overflow:auto}
+.dialog-foot{padding:16px 24px 20px;display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap}
+.sec-title{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:8px 0 12px}
+.keybox{display:flex;gap:8px}
+.keybox input{font-family:var(--mono);font-size:13px}
+#toasts{position:fixed;right:24px;bottom:24px;display:flex;flex-direction:column;gap:8px;z-index:100;align-items:flex-end;pointer-events:none}
+.toast{background:var(--text);color:var(--bg);padding:10px 16px;border-radius:10px;box-shadow:var(--shadow-lg);max-width:min(420px,calc(100vw - 32px));
+  display:flex;gap:10px;align-items:flex-start;animation:tin .2s ease-out;line-height:1.5}
+.toast.err{background:var(--bad);color:#fff}
+.toast.ok svg{color:#4ade80}
+@keyframes tin{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+#lightbox{background:rgba(5,7,12,.88);z-index:80;flex-direction:column;gap:12px}
+#lightbox img{width:min(92vw,640px);max-height:72vh;object-fit:contain;border-radius:10px;box-shadow:var(--shadow-lg);background:#000}
+#lightbox .cap{color:#d6dbe8;font-size:13px;text-align:center;max-width:min(92vw,640px);max-height:16vh;overflow:auto;overflow-wrap:anywhere;white-space:pre-wrap}
+#lightbox .x{position:absolute;top:16px;right:16px;color:#fff;background:rgba(255,255,255,.12);border:0}
+#lightbox .x:hover{background:rgba(255,255,255,.22)}
+
+/* switch & chips */
+.switch{position:relative;display:inline-block;width:42px;height:24px;flex:none;margin:0}
+.switch input{padding:0;border:0;background:none;box-shadow:none;position:absolute;inset:0;opacity:0;width:100%;height:100%;min-height:0;margin:0;cursor:pointer;z-index:1}
+.switch span{position:absolute;inset:0;border-radius:99px;background:var(--border-strong);transition:background .15s}
+.switch span::after{content:"";position:absolute;left:3px;top:3px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.3);transition:transform .15s}
+.switch input:checked+span{background:var(--accent)}
+.switch input:checked+span::after{transform:translateX(18px)}
+.switch input:focus-visible+span{outline:2px solid var(--accent);outline-offset:2px}
+.switch.big{width:56px;height:32px}
+.switch.big span::after{width:26px;height:26px}
+.switch.big input:checked+span::after{transform:translateX(24px)}
+.feat-row{display:flex;align-items:center;gap:16px;padding:14px 0;border-bottom:1px solid var(--border)}
+.feat-row:first-child{padding-top:0}.feat-row:last-child{border-bottom:0;padding-bottom:0}
+.feat-row .body{flex:1;min-width:0}
+.feat-row .t{font-weight:600}
+.feat-row .d{font-size:12.5px;color:var(--muted)}
+.big-toggle{display:flex;align-items:center;gap:16px;padding:16px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface-2);margin-bottom:16px;flex-wrap:wrap}
+.big-toggle .body{flex:1;min-width:180px}
+.big-toggle .t{font-size:16px;font-weight:650}
+.chips{display:flex;gap:4px;flex-wrap:wrap}
+.tag.mini{font-size:11px;line-height:18px;padding:0 7px}
+.opt-group{display:flex;flex-direction:column;gap:8px}
+.opt-group label.check{margin:0}
+.check input[type=radio]{width:16px;height:16px;min-height:0;padding:0;accent-color:var(--accent);margin:2px 0 0;flex:none}
+.feat-checks{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:8px}
+.feat-checks .check{margin:0;padding:8px 10px}
+.feat-checks.off{opacity:.45;pointer-events:none}
+.notice-box{background:var(--info-soft);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 16px;font-size:13px;line-height:1.75;color:var(--text-2);margin-bottom:16px}
+.cols-3{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 16px}
+@media (max-width:720px){.feat-checks,.cols-3{grid-template-columns:1fr}}
+
+/* ===== Responsive ===== */
+@media (max-width:1000px){
+  .two-col{grid-template-columns:1fr}
+  .content{padding:24px}
+}
+@media (max-width:880px){
+  .shell{display:block}
+  .sidebar{position:fixed;left:0;top:0;bottom:0;width:260px;transform:translateX(-100%);transition:transform .2s;box-shadow:var(--shadow-lg)}
+  body.nav-open .sidebar{transform:none}
+  body.nav-open .scrim{display:block;position:fixed;inset:0;background:var(--overlay);z-index:25}
+  .topbar{display:flex;align-items:center;gap:8px;position:sticky;top:0;z-index:20;background:var(--surface);border-bottom:1px solid var(--border);padding:8px 16px}
+  .topbar .brand{flex:1;font-size:15px}
+  .topbar .brand-mark{width:30px;height:30px;border-radius:8px}
+}
+@media (max-width:720px){
+  .content{padding:16px 16px 48px}
+  .page-head h1{font-size:21px}
+  .panel{padding:16px}
+  .form-grid,.token-ctrls{grid-template-columns:1fr}
+  .stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+  .stat{padding:14px}
+  .stat .v{font-size:22px}
+  .member-grid,.gallery{grid-template-columns:1fr}
+  .toolbar .search{max-width:none;flex-basis:100%}
+  .dialog-head{padding:16px 16px 0}.dialog-body{padding:12px 16px}.dialog-foot{padding:12px 16px 16px}
+  #toasts{right:16px;left:16px;bottom:16px;align-items:stretch}
+  /* tables become cards */
+  .table-wrap{border:0;max-height:none;background:none;overflow:visible}
+  table.rt thead{display:none}
+  table.rt,table.rt tbody,table.rt tr,table.rt td{display:block;width:100%}
+  table.rt tr{border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:12px;background:var(--surface-2);padding:4px 0}
+  table.rt td{border:0;padding:8px 14px;display:flex;gap:12px;justify-content:space-between;align-items:flex-start;text-align:right}
+  table.rt td::before{content:attr(data-label);color:var(--muted);font-size:12px;text-align:left;flex:none;padding-top:1px}
+  table.rt td.cell-name{font-size:15px;flex-direction:column;align-items:stretch;text-align:left}
+  table.rt td.cell-name::before{display:none}
+  table.rt td.cell-name .tags{justify-content:flex-start}
+  table.rt tbody tr:hover td{background:none}
+  table.rt td.full{display:block;text-align:left}
+  table.rt td.full::before{display:block;margin-bottom:6px}
+  table.rt .stack,table.rt .tags{align-items:flex-end;justify-content:flex-end}
+  table.rt .actions{min-width:0;justify-content:flex-start}
+  table.rt td.empty-cell{display:block;text-align:center}
+  table.rt td.empty-cell::before{display:none}
+}
 </style>
 </head>
 <body>
 
+<!-- ===== Login ===== -->
 <div id="login">
   <div class="login-card">
-    <h1>NAI Gate 管理后台</h1>
-    <label>管理密码</label>
-    <input id="pwd" type="password" placeholder="ADMIN_PASSWORD" onkeydown="if(event.key==='Enter')doLogin()">
+    <div class="brand"><span class="brand-mark" data-ic="shield"></span>NAI Gate</div>
+    <h1>管理后台</h1>
+    <p class="sub">请输入管理密码登录</p>
+    <div class="field">
+      <label for="pwd">管理密码</label>
+      <input id="pwd" type="password" placeholder="ADMIN_PASSWORD" autocomplete="current-password">
+    </div>
     <div class="err" id="loginErr"></div>
-    <button class="btn primary" style="width:100%" onclick="doLogin()">登录</button>
+    <button class="btn primary block" id="loginBtn">登录</button>
   </div>
 </div>
 
+<!-- ===== App ===== -->
 <div id="app">
-<header>
-  <span class="logo">NAI Gate</span>
-  <nav class="tabs">
-    <button data-tab="ov" class="active" onclick="tab('ov')">总览</button>
-    <button data-tab="keys" onclick="tab('keys')">密钥管理</button>
-    <button data-tab="logs" onclick="tab('logs')">用量日志</button>
-    <button data-tab="set" onclick="tab('set')">设置</button>
-  </nav>
-  <span class="sp"></span>
-  <button class="btn" onclick="logout()">退出</button>
-</header>
-<main>
-  <div id="allowanceStatus" role="status" aria-live="polite" hidden></div>
+<div class="shell">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand"><span class="brand-mark" data-ic="shield"></span>NAI Gate</div>
+    <nav class="nav" aria-label="主导航">
+      <div class="nav-label">概览</div>
+      <button data-tab="ov" class="active"><span data-ic="home"></span>总览</button>
+      <div class="nav-label">用户</div>
+      <button data-tab="members"><span data-ic="users"></span>成员</button>
+      <button data-tab="audit"><span data-ic="image"></span>生成记录</button>
+      <button data-tab="keys"><span data-ic="key"></span>密钥管理</button>
+      <button data-tab="ops"><span data-ic="toggle"></span>功能与开放</button>
+      <div class="nav-label">系统</div>
+      <button data-tab="logs"><span data-ic="list"></span>用量日志</button>
+      <button data-tab="set"><span data-ic="sliders"></span>设置</button>
+    </nav>
+    <div class="side-foot">
+      <button id="themeBtn" type="button"><span data-ic="moon" id="themeIc"></span><span id="themeLb">切换主题</span></button>
+      <button id="logoutBtn" type="button"><span data-ic="logout"></span>退出登录</button>
+    </div>
+  </aside>
+  <div class="scrim" id="scrim"></div>
 
-  <!-- 总览 -->
-  <section id="tab-ov">
-    <div class="cards" id="ovCards"></div>
-    <div class="panel"><h2>近 7 天生成量（图片）</h2><div class="chart" id="chart"></div></div>
-    <div class="panel"><h2>上游 NovelAI 令牌池</h2><div id="pool"></div><div id="allowanceDetails" class="muted">V5 余量：正在读取本地状态…</div></div>
-    <div class="panel">
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px">
-        <h2 style="margin:0;flex:1">Anlas 消耗核对</h2>
-        <button class="btn" id="reconReload" onclick="loadReconciliation()">刷新记录</button>
-        <button class="btn primary" id="reconRun" onclick="runReconciliation()" disabled>查询并核对</button>
-      </div>
-      <div id="reconStatus" class="muted" role="status" aria-live="polite">正在读取记录…</div>
-      <div id="reconResult"></div>
-      <details style="margin-top:12px"><summary>历史记录与说明</summary>
-        <p class="muted">点击「查询并核对」会读取官方账号余额，再和本站记录的消耗比较。充值、续费或在其他地方使用账号，也会影响余额。核对结果不会修改用户积分。</p>
-        <div style="overflow-x:auto"><table><thead><tr><th>查询时间</th><th>官方余额</th><th>余额减少</th><th>本站记录</th><th>相差</th><th>说明</th></tr></thead><tbody id="reconHistory"></tbody></table></div>
-      </details>
+  <div>
+    <div class="topbar">
+      <button class="btn ghost icon" id="menuBtn" aria-label="打开菜单" type="button"><span data-ic="menu"></span></button>
+      <div class="brand"><span class="brand-mark" data-ic="shield"></span>NAI Gate</div>
+      <button class="btn ghost icon" id="themeBtn2" aria-label="切换主题" type="button"><span data-ic="moon"></span></button>
     </div>
-  </section>
 
-  <!-- 密钥 -->
-  <section id="tab-keys" style="display:none">
-    <div class="panel">
-      <div style="display:flex;align-items:center;margin-bottom:12px">
-        <h2 style="margin:0;flex:1">虚拟 Key</h2>
-        <button class="btn primary" onclick="openCreate()">＋ 新建 Key</button>
-        <button class="btn" style="margin-left:8px" onclick="loadKeys()">刷新</button>
-      </div>
-      <div style="overflow-x:auto">
-      <table id="keysTable">
-        <thead><tr>
-          <th class="key-name">名称</th><th>Key</th><th>状态</th>
-          <th>今日用量</th><th>配额</th><th>RPM</th><th>最近使用</th><th>到期</th><th>操作</th>
-        </tr></thead>
-        <tbody></tbody>
-      </table>
-      </div>
-    </div>
-  </section>
+    <main class="content">
+      <div class="page">
+        <div id="allowanceStatus" class="notice" role="status" aria-live="polite" hidden></div>
 
-  <!-- 日志 -->
-  <section id="tab-logs" style="display:none">
-    <div class="panel">
-      <div style="display:flex;align-items:center;margin-bottom:12px">
-        <h2 style="margin:0;flex:1">最近用量</h2>
-        <select id="logFilter" style="width:180px" onchange="logPage=1;loadLogs()"><option value="">全部 Key</option></select>
-        <button class="btn" style="margin-left:8px" onclick="loadLogs()">刷新</button>
-      </div>
-      <div style="overflow-x:auto">
-      <table class="logs">
-        <thead><tr><th>时间</th><th>Key</th><th>类型</th><th>模型</th><th>状态</th>
-          <th>图</th><th>Anlas</th><th title="失败请求可能产生的费用，实际扣款尚未确认">可能消耗 Anlas</th><th>tokens</th><th>备注</th></tr></thead>
-        <tbody id="logBody"></tbody>
-      </table>
-      </div>
-      <div id="logPager" style="display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:12px"></div>
-    </div>
-  </section>
+        <!-- 总览 -->
+        <section id="tab-ov">
+          <div class="page-head"><div class="ttl"><h1>总览</h1><p>今日用量、上游令牌池与系统防护状态</p></div>
+            <div class="tools"><button class="btn" data-act="refresh-ov"><span data-ic="refresh"></span>刷新</button></div></div>
+          <div class="stats" id="ovCards"></div>
+          <div class="two-col">
+            <div class="card panel"><div class="panel-head"><h2>近 7 天生成量（图片）</h2></div><div class="chart" id="chart"></div></div>
+            <div class="card panel"><div class="panel-head"><h2>状态与防护</h2></div><div class="status-list" id="statusPanel"></div></div>
+          </div>
+          <div class="card panel">
+            <div class="panel-head"><h2>上游 NovelAI 令牌池</h2></div>
+            <div id="pool"></div>
+            <div id="allowanceDetails" class="hint" style="white-space:pre-line;margin-top:16px">V5 余量：正在读取本地状态…</div>
+          </div>
+          <div class="card panel">
+            <div class="panel-head"><h2>Anlas 消耗核对</h2>
+              <button class="btn" id="reconReload" data-act="recon-reload">刷新记录</button>
+              <button class="btn primary" id="reconRun" data-act="recon-run" disabled>查询并核对</button>
+            </div>
+            <div id="reconStatus" class="muted" role="status" aria-live="polite">正在读取记录…</div>
+            <div id="reconResult"></div>
+            <details style="margin-top:16px"><summary style="cursor:pointer;font-weight:500">历史记录与说明</summary>
+              <p class="hint" style="margin:12px 0">点击「查询并核对」会读取官方账号余额，再和本站记录的消耗比较。充值、续费或在其他地方使用账号，也会影响余额。核对结果不会修改用户积分。</p>
+              <div class="table-wrap"><table class="rt"><thead><tr><th>查询时间</th><th>官方余额</th><th>余额减少</th><th>本站记录</th><th>相差</th><th>说明</th></tr></thead><tbody id="reconHistory"></tbody></table></div>
+            </details>
+          </div>
+        </section>
 
-  <!-- 设置 -->
-  <section id="tab-set" style="display:none">
-    <div class="panel">
-      <h2>Anlas 预算</h2>
-      <label>全站月度 Anlas 预算（0 = 不限。Opus Anlas 每月账单日回满到 10000、不叠加，建议留 20~30% 余量）</label>
-      <div style="display:flex;gap:8px">
-        <input id="s_budget" type="number" value="10000">
-      </div>
-      <label>全站每日 V5 张数（0 = 不限。V5 周额度由 NovelAI 服务端按 ~190 张/天恢复，账户内所有人共享；此处镜像限制，默认 150 留安全边际）</label>
-      <div style="display:flex;gap:8px">
-        <input id="s_v5" type="number" value="150">
-        <button class="btn primary" style="white-space:nowrap" onclick="saveBudget()">保存</button>
-      </div>
-      <div class="muted" style="font-size:12px;margin-top:8px">V5 在官方额度可用、≤1024² 像素且≤28步时，首张走额度；同批其余图片按 Anlas 计费。额度耗尽后的付费请求仍受 Key 权限和预算限制。</div>
-      <label>V5 官方余量告警阈值（%，低于此值持续提醒）</label>
-      <input id="s_v5_alert" type="number" min="1" max="100" step="1" value="20">
-      <div class="muted" style="font-size:12px;margin-top:8px">低于此比例时持续告警；余量随 V5 生成按需查询。点击上方“保存”生效。</div>
-    </div>
-    <div class="panel">
-      <h2>图片排队与冷却</h2>
-      <div class="grid2">
-        <div><label>单阶段排队等待上限（秒，15～300）</label><input id="r_queue_timeout" type="number" min="15" max="300" step="1"></div>
-        <div><label>用户 Key 图片任务间隔（秒，15～120）</label><input id="r_key_image_min_interval" type="number" min="15" max="120" step="1"></div>
-        <div><label>每把上游 Key 图片请求间隔（秒，15～120）</label><input id="r_image_min_interval" type="number" min="15" max="120" step="1"></div>
-        <div><label>上游 429 最短冷却（秒，60～3600）</label><input id="r_image_429_cooldown_seconds" type="number" min="60" max="3600" step="1"></div>
-      </div>
-      <div class="muted" style="font-size:12px;margin:8px 0">保存后对新请求生效，重启后仍保留。已在等待中的请求可能沿用保存前的时间；不允许低于保护下限。</div>
-      <button class="btn primary" onclick="saveRuntimeLimits()">保存运行限制</button>
-    </div>
-    <div class="panel">
-      <h2>站点公告（用户访问首页看到的内容，支持 HTML）</h2>
-      <textarea id="announce" rows="10" placeholder="&lt;h2&gt;欢迎&lt;/h2&gt;&lt;p&gt;申请 Key 请联系……&lt;/p&gt;"></textarea>
-      <div style="margin-top:10px;text-align:right">
-        <button class="btn primary" onclick="saveAnnounce()">保存公告</button>
-      </div>
-    </div>
-    <div class="panel"><h2>服务端配置（只读，修改请编辑 .env 后重启）</h2><div id="cfgInfo" class="mono" style="font-size:12px;line-height:2"></div></div>
-  </section>
+        <!-- 成员 -->
+        <section id="tab-members" hidden>
+          <div class="page-head"><div class="ttl"><h1>成员</h1><p>每位成员的用量概况；点击卡片可查看其生成记录</p></div>
+            <div class="tools"><button class="btn" data-act="refresh-members"><span data-ic="refresh"></span>刷新</button></div></div>
+          <div class="stats" id="memberStats"></div>
+          <div class="toolbar">
+            <div class="search"><span data-ic="search"></span><input id="memberSearch" type="search" placeholder="搜索成员名称或 Discord ID" aria-label="搜索成员"></div>
+            <div class="seg" id="memberSort" role="group" aria-label="排序">
+              <button data-sort="today" class="active">今日</button><button data-sort="week">近 7 天</button><button data-sort="total">累计</button><button data-sort="recent">最近使用</button>
+            </div>
+          </div>
+          <div class="member-grid" id="memberGrid"></div>
+        </section>
 
-</main>
+        <!-- 生成记录 -->
+        <section id="tab-audit" hidden>
+          <div class="page-head"><div class="ttl"><h1>生成记录</h1><p>成员提交的提示词与缩略图，到期自动清除</p></div>
+            <div class="tools">
+              <select id="auditFilter" aria-label="按成员筛选" style="width:200px"><option value="">全部成员</option></select>
+              <button class="btn" data-act="refresh-audit"><span data-ic="refresh"></span>刷新</button>
+            </div></div>
+          <div class="gallery" id="auditGrid"></div>
+          <div class="pager" id="auditPager"></div>
+        </section>
+
+        <!-- 功能与开放 -->
+        <section id="tab-ops" hidden>
+          <div class="page-head"><div class="ttl"><h1>功能与开放</h1><p>全局功能开关、Discord 自助领取与生成记录公告</p></div>
+            <div class="tools"><button class="btn" data-act="refresh-ops"><span data-ic="refresh"></span>刷新</button></div></div>
+          <div class="card panel"><div class="panel-head"><h2>功能开关</h2><div class="desc">切换后立即保存。关闭后管理员 Key 仍可使用。</div></div><div id="opsFeatures"><div class="skel" style="height:200px"></div></div></div>
+          <div class="card panel"><div class="panel-head"><h2>开放注册（Discord 自助领取）</h2></div><div id="opsReg"><div class="skel" style="height:260px"></div></div></div>
+          <div class="card panel"><div class="panel-head"><h2>生成记录与公告</h2></div><div id="opsAudit"><div class="skel" style="height:220px"></div></div></div>
+        </section>
+
+        <!-- 密钥 -->
+        <section id="tab-keys" hidden>
+          <div class="page-head"><div class="ttl"><h1>密钥管理</h1><p>创建、编辑与管理虚拟 Key</p></div>
+            <div class="tools"><button class="btn" data-act="refresh-keys"><span data-ic="refresh"></span>刷新</button>
+              <button class="btn primary" data-act="new-key"><span data-ic="plus"></span>新建 Key</button></div></div>
+          <div class="card panel" style="padding:16px">
+            <div class="table-wrap">
+              <table id="keysTable" class="rt">
+                <thead><tr><th>名称</th><th>Key</th><th>今日用量</th><th>配额</th><th>最近使用 / 到期</th><th>操作</th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- 日志 -->
+        <section id="tab-logs" hidden>
+          <div class="page-head"><div class="ttl"><h1>用量日志</h1><p>最近的请求、消耗与错误信息</p></div>
+            <div class="tools">
+              <select id="logFilter" aria-label="按 Key 筛选" style="width:200px"><option value="">全部 Key</option></select>
+              <button class="btn" data-act="refresh-logs"><span data-ic="refresh"></span>刷新</button>
+            </div></div>
+          <div class="card panel" style="padding:16px">
+            <div class="table-wrap">
+              <table class="rt logs">
+                <thead><tr><th>时间</th><th>Key</th><th>类型</th><th>模型</th><th>状态</th>
+                  <th>图</th><th>Anlas</th><th title="失败请求可能产生的费用，实际扣款尚未确认">可能消耗 Anlas</th><th>tokens</th><th>备注</th></tr></thead>
+                <tbody id="logBody"></tbody>
+              </table>
+            </div>
+            <div class="pager" id="logPager"></div>
+          </div>
+        </section>
+
+        <!-- 设置 -->
+        <section id="tab-set" hidden>
+          <div class="page-head"><div class="ttl"><h1>设置</h1><p>全站预算、图片排队与站点公告</p></div></div>
+          <div class="card panel">
+            <div class="panel-head"><h2>Anlas 与 V5 预算</h2></div>
+            <div class="form-grid">
+              <div class="field">
+                <label for="s_budget">全站月度 Anlas 预算</label>
+                <input id="s_budget" type="number" value="10000">
+                <div class="hint">0 = 不限。Opus Anlas 每月账单日回满到 10000、不叠加，建议留 20~30% 余量。</div>
+              </div>
+              <div class="field">
+                <label for="s_v5">全站每日 V5 张数</label>
+                <input id="s_v5" type="number" value="150">
+                <div class="hint">0 = 不限。V5 周额度由 NovelAI 服务端按 ~190 张/天恢复，账户内所有人共享；此处镜像限制，默认 150 留安全边际。</div>
+              </div>
+              <div class="field">
+                <label for="s_v5_alert">V5 官方余量告警阈值（%）</label>
+                <input id="s_v5_alert" type="number" min="1" max="100" step="1" value="20">
+                <div class="hint">低于此值持续提醒；余量随 V5 生成按需查询。点击「保存」生效。</div>
+              </div>
+            </div>
+            <div class="hint" style="margin:-4px 0 16px">V5 在官方额度可用、≤1024² 像素且≤28步时，首张走额度；同批其余图片按 Anlas 计费。额度耗尽后的付费请求仍受 Key 权限和预算限制。</div>
+            <button class="btn primary" data-act="save-budget">保存</button>
+          </div>
+          <div class="card panel">
+            <div class="panel-head"><h2>图片排队与冷却</h2></div>
+            <div class="form-grid">
+              <div class="field"><label for="r_queue_timeout">单阶段排队等待上限（秒）</label><input id="r_queue_timeout" type="number" min="15" max="300" step="1"><div class="hint">范围 15～300</div></div>
+              <div class="field"><label for="r_key_image_min_interval">用户 Key 图片任务间隔（秒）</label><input id="r_key_image_min_interval" type="number" min="15" max="120" step="1"><div class="hint">范围 15～120</div></div>
+              <div class="field"><label for="r_image_min_interval">每把上游 Key 图片请求间隔（秒）</label><input id="r_image_min_interval" type="number" min="15" max="120" step="1"><div class="hint">范围 15～120</div></div>
+              <div class="field"><label for="r_image_429_cooldown_seconds">上游 429 最短冷却（秒）</label><input id="r_image_429_cooldown_seconds" type="number" min="60" max="3600" step="1"><div class="hint">范围 60～3600</div></div>
+            </div>
+            <div class="hint" style="margin:-4px 0 16px">保存后对新请求生效，重启后仍保留。已在等待中的请求可能沿用保存前的时间；不允许低于保护下限。</div>
+            <button class="btn primary" data-act="save-runtime">保存运行限制</button>
+          </div>
+          <div class="card panel">
+            <div class="panel-head"><h2>站点公告</h2><div class="desc">用户访问首页看到的内容，支持 HTML</div></div>
+            <textarea id="announce" rows="10" placeholder="&lt;h2&gt;欢迎&lt;/h2&gt;&lt;p&gt;申请 Key 请联系……&lt;/p&gt;" aria-label="站点公告"></textarea>
+            <div style="margin-top:16px"><button class="btn primary" data-act="save-announce">保存公告</button></div>
+          </div>
+          <div class="card panel">
+            <div class="panel-head"><h2>服务端配置</h2><div class="desc">只读，修改请编辑 .env 后重启</div></div>
+            <div id="cfgInfo" class="mono" style="line-height:2;overflow-wrap:anywhere"></div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+</div>
 </div>
 
-<!-- 新建/编辑 key 弹窗 -->
-<div id="modal" onclick="if(event.target===this)closeModal()">
-  <div class="modal-card">
-    <h3 id="modalTitle">新建 Key</h3>
-    <label>名称 / 备注</label><input id="f_name" placeholder="例如：张三">
-    <label>图片模型范围</label>
-    <select id="f_image_model_scope">
-      <option value="legacy">仅 V4.5 及更低（默认）</option>
-      <option value="all">所有当前支持模型（含 V5）</option>
-    </select>
-    <div class="grid2">
-      <div><label>每日 V4.5 及以下免费图张数（0=不限）</label><input id="f_daily_images" type="number" value="100"></div>
-      <div><label>每日 Anlas 上限（0=不限）</label><input id="f_daily_anlas" type="number" value="100"></div>
-      <div><label>每月 Anlas 上限</label><input id="f_monthly_anlas" type="number" value="2500"></div>
-      <div><label>每日 V5 张数（走官方周额度，0=不限）</label><input id="f_daily_v5" type="number" value="50"></div>
-      <div><label>每日文本 tokens</label><input id="f_daily_text" type="number" value="150000"></div>
-      <div><label>每分钟请求数 (RPM)</label><input id="f_rpm" type="number" value="10"></div>
-      <div><label>有效天数（0=永久）</label><input id="f_expires" type="number" value="30"></div>
+<!-- ===== Key edit modal ===== -->
+<div class="overlay" id="modal">
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="dialog-head"><h3 id="modalTitle">新建 Key</h3><button class="btn ghost icon" data-act="close-modal" aria-label="关闭"><span data-ic="x"></span></button></div>
+    <div class="dialog-body">
+      <div class="field"><label for="f_name">名称 / 备注</label><input id="f_name" placeholder="例如：张三"></div>
+      <div class="field"><label for="f_image_model_scope">图片模型范围</label>
+        <select id="f_image_model_scope">
+          <option value="legacy">仅 V4.5 及更低（默认）</option>
+          <option value="all">所有当前支持模型（含 V5）</option>
+        </select></div>
+      <div class="sec-title">额度</div>
+      <div class="form-grid">
+        <div class="field"><label for="f_daily_images">每日 V4.5 及以下免费图张数</label><input id="f_daily_images" type="number" value="100"><div class="hint">0 = 不限</div></div>
+        <div class="field"><label for="f_daily_v5">每日 V5 张数（走官方周额度）</label><input id="f_daily_v5" type="number" value="50"><div class="hint">0 = 不限</div></div>
+        <div class="field"><label for="f_daily_anlas">每日 Anlas 上限</label><input id="f_daily_anlas" type="number" value="100"><div class="hint">0 = 不限</div></div>
+        <div class="field"><label for="f_monthly_anlas">每月 Anlas 上限</label><input id="f_monthly_anlas" type="number" value="2500"></div>
+        <div class="field"><label for="f_daily_text">每日文本 tokens</label><input id="f_daily_text" type="number" value="150000"></div>
+        <div class="field"><label for="f_rpm">每分钟请求数 (RPM)</label><input id="f_rpm" type="number" value="10"></div>
+        <div class="field"><label for="f_expires">有效天数</label><input id="f_expires" type="number" value="30"><div class="hint">0 = 永久</div></div>
+      </div>
+      <div class="sec-title">权限</div>
+      <label class="check"><input id="f_allow_anlas" type="checkbox"><span>允许消耗 Anlas（旧模型和 V5 的付费规格均受 日Anlas/月Anlas/全站预算 约束；不开启时仅允许免费档或 V5 额度规格）</span></label>
+      <label class="check"><input id="f_allow_img2img" type="checkbox"><span>允许 img2img / 局部重绘（需同时开启上面一项）</span></label>
+      <label class="check"><input id="f_exclude_global_v5" type="checkbox"><span>独立 V5 额度（此 Key 的 V5 使用不计入、也不受全站 V5 日额度限制）</span></label>
+      <div class="sec-title">功能权限</div>
+      <div class="opt-group">
+        <label class="check"><input type="radio" name="f_feat_mode" value="legacy" checked><span>沿用旧行为（全部已开放功能）</span></label>
+        <label class="check"><input type="radio" name="f_feat_mode" value="custom"><span>仅选中的功能</span></label>
+      </div>
+      <div class="feat-checks off" id="f_feat_list"></div>
+      <div class="err" id="modalErr"></div>
     </div>
-    <div class="check"><input id="f_allow_anlas" type="checkbox"><span>允许消耗 Anlas（旧模型和 V5 的付费规格均受 日Anlas/月Anlas/全站预算 约束；不开启时仅允许免费档或 V5 额度规格）</span></div>
-    <div class="check"><input id="f_allow_img2img" type="checkbox"><span>允许 img2img / 局部重绘（需同时开启上面一项）</span></div>
-    <div class="check"><input id="f_exclude_global_v5" type="checkbox"><span>独立 V5 额度（此 Key 的 V5 使用不计入、也不受全站 V5 日额度限制）</span></div>
-    <div class="err" id="modalErr"></div>
-    <div class="modal-foot">
-      <button class="btn" onclick="closeModal()">取消</button>
-      <button class="btn primary" id="modalSave" onclick="saveKey()">创建</button>
+    <div class="dialog-foot">
+      <button class="btn" data-act="close-modal">取消</button>
+      <button class="btn primary" id="modalSave" data-act="save-key">创建</button>
     </div>
   </div>
 </div>
 
-<div class="toast" id="toast"></div>
+<!-- ===== Show key modal ===== -->
+<div class="overlay" id="keyModal">
+  <div class="dialog sm-d" role="dialog" aria-modal="true" aria-labelledby="keyModalTitle">
+    <div class="dialog-head"><h3 id="keyModalTitle">Key</h3></div>
+    <div class="dialog-body">
+      <p class="muted" id="keyModalMsg" style="margin-bottom:16px"></p>
+      <div class="keybox"><input id="keyModalVal" readonly aria-label="Key"><button class="btn primary" data-act="copy-modal-key">复制</button></div>
+    </div>
+    <div class="dialog-foot"><button class="btn" data-act="close-keymodal">完成</button></div>
+  </div>
+</div>
+
+<!-- ===== Confirm modal ===== -->
+<div class="overlay" id="confirmModal">
+  <div class="dialog sm-d" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle">
+    <div class="dialog-head"><h3 id="confirmTitle">请确认</h3></div>
+    <div class="dialog-body"><p id="confirmMsg" style="white-space:pre-line;line-height:1.7"></p></div>
+    <div class="dialog-foot"><button class="btn" id="confirmNo">取消</button><button class="btn primary" id="confirmYes">确定</button></div>
+  </div>
+</div>
+
+<!-- ===== Lightbox ===== -->
+<div class="overlay" id="lightbox">
+  <button class="btn icon x" data-act="close-lightbox" aria-label="关闭"><span data-ic="x"></span></button>
+  <img id="lbImg" alt="生成图缩略图">
+  <div class="cap" id="lbCap"></div>
+</div>
+
+<div id="toasts" aria-live="polite"></div>
 
 <script>
 const $ = s => document.querySelector(s);
-let editingId = null, keysCache = [], logPage = 1;
+const $$ = s => Array.from(document.querySelectorAll(s));
+let editingId = null, keysCache = [], logPage = 1, auditPage = 1;
+let membersCache = null, statusCache = null, memberSort = 'today', memberQuery = '';
 let allowanceTimer = null, allowanceLoading = false;
 let reconBusy = false, reconReady = false, reconRemoteRunning = false, reconRetryAt = 0, reconTimer = null, reconVersion = 0;
 let reconCsrf = '';
+const auditPrompts = new Map();
 
+/* ---------- icons (inline SVG, no external assets) ---------- */
+const ICONS = {
+  home:'<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/>',
+  users:'<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.6-3.6 3.2-5.5 6.5-5.5s5.9 1.9 6.5 5.5"/><path d="M16 4.6a3.5 3.5 0 010 6.8"/><path d="M18.5 14.8c1.8.7 2.8 2.4 3 5.2"/>',
+  image:'<rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="1.8"/><path d="M21 16l-5-5L6 20"/>',
+  key:'<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9"/><path d="M16 7l3 3"/><path d="M14 9l2 2"/>',
+  list:'<path d="M8 6h13M8 12h13M8 18h13"/><circle cx="3.5" cy="6" r="1"/><circle cx="3.5" cy="12" r="1"/><circle cx="3.5" cy="18" r="1"/>',
+  sliders:'<path d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
+  toggle:'<rect x="2" y="7" width="20" height="10" rx="5"/><circle cx="16" cy="12" r="2.5"/>',
+  moon:'<path d="M20 14.5A8.5 8.5 0 019.5 4 8.5 8.5 0 1020 14.5z"/>',
+  sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  logout:'<path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/>',
+  menu:'<path d="M4 6h16M4 12h16M4 18h16"/>',
+  shield:'<path d="M12 3l8 3v6c0 4.5-3.2 8-8 9-4.8-1-8-4.5-8-9V6l8-3z"/><path d="M9 12l2 2 4-4"/>',
+  refresh:'<path d="M20 11a8 8 0 00-14.5-4M4 4v4h4"/><path d="M4 13a8 8 0 0014.5 4M20 20v-4h-4"/>',
+  plus:'<path d="M12 5v14M5 12h14"/>',
+  x:'<path d="M6 6l12 12M18 6L6 18"/>',
+  search:'<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>',
+  bell:'<path d="M6 8a6 6 0 0112 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10.3 21a1.9 1.9 0 003.4 0"/>',
+  camera:'<path d="M3 8a2 2 0 012-2h2l1.5-2h7L17 6h2a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><circle cx="12" cy="13" r="3.5"/>',
+  lock:'<rect x="4" y="10" width="16" height="11" rx="3"/><path d="M8 10V7a4 4 0 018 0v3"/>',
+  disk:'<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>',
+  zoom:'<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5M11 8v6M8 11h6"/>',
+  copy:'<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 012-2h9"/>',
+  check:'<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  alert:'<path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18h0"/>',
+  info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h0"/>',
+};
+function ic(name){ return `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]||''}</svg>`; }
+function hydrateIcons(root=document){
+  root.querySelectorAll('[data-ic]').forEach(el=>{ if(!el.firstChild){ el.innerHTML = ic(el.dataset.ic); } });
+}
+function setIcon(el, name){ el.dataset.ic = name; el.innerHTML = ic(name); }
+
+/* ---------- theme ---------- */
+function curTheme(){
+  const t = document.documentElement.dataset.theme;
+  if(t) return t;
+  return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+function applyThemeUi(){
+  const dark = curTheme()==='dark';
+  setIcon($('#themeIc'), dark?'sun':'moon');
+  $('#themeLb').textContent = dark ? '切换为浅色' : '切换为深色';
+  const b2 = $('#themeBtn2 [data-ic]'); if(b2) setIcon(b2, dark?'sun':'moon');
+}
+function toggleTheme(){
+  const next = curTheme()==='dark' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = next;
+  try{ localStorage.setItem('nai-admin-theme', next); }catch(_){}
+  applyThemeUi();
+}
+(function initTheme(){
+  try{ const t = localStorage.getItem('nai-admin-theme'); if(t==='light'||t==='dark') document.documentElement.dataset.theme = t; }catch(_){}
+})();
+
+/* ---------- helpers ---------- */
+function esc(s){
+  return String(s??'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function fmt(n){ n=+n||0; return n>=1e6? (n/1e6).toFixed(1)+'M' : n>=1e3? (n/1e3).toFixed(1)+'k' : n; }
+function rel(ts){
+  if(!ts) return '从未';
+  const s = Math.floor(Date.now()/1000 - ts);
+  if(s < 45) return '刚刚';
+  if(s < 3600) return Math.floor(s/60)+' 分钟前';
+  if(s < 86400) return Math.floor(s/3600)+' 小时前';
+  if(s < 86400*30) return Math.floor(s/86400)+' 天前';
+  return new Date(ts*1000).toLocaleDateString('zh-CN');
+}
+function toast(msg, type){
+  const t = document.createElement('div');
+  t.className = 'toast ' + (type||'');
+  t.innerHTML = (type==='ok'?ic('check'):type==='err'?ic('alert'):ic('info')) + '<span></span>';
+  t.querySelector('span').textContent = msg;
+  $('#toasts').appendChild(t);
+  setTimeout(()=>t.remove(), type==='err' ? 4200 : 2600);
+}
+const toastErr = e => toast(e && e.message ? e.message : String(e), 'err');
+async function api(path, opts={}){
+  const r = await fetch(path, {headers:{'Content-Type':'application/json'}, credentials:'same-origin', ...opts});
+  if(r.status === 401 && path !== '/admin/api/login'){ showLogin(); throw new Error('未登录'); }
+  const data = await r.json().catch(()=>({}));
+  if(!r.ok){ const e = new Error(data.error?.message || data.detail || ('HTTP '+r.status)); e.status = r.status; throw e; }
+  return data;
+}
+function openOverlay(id){ $(id).classList.add('show'); }
+function closeOverlay(id){ $(id).classList.remove('show'); }
+let confirmResolve = null;
+function askConfirm(msg, okText){
+  $('#confirmMsg').textContent = msg;
+  $('#confirmYes').textContent = okText || '确定';
+  openOverlay('#confirmModal'); $('#confirmYes').focus();
+  return new Promise(res=>{ confirmResolve = res; });
+}
+function settleConfirm(v){ closeOverlay('#confirmModal'); if(confirmResolve){ const r=confirmResolve; confirmResolve=null; r(v); } }
+function showKey(title, msg, token){
+  $('#keyModalTitle').textContent = title; $('#keyModalMsg').textContent = msg;
+  $('#keyModalVal').value = token; openOverlay('#keyModal');
+  setTimeout(()=>{ const i=$('#keyModalVal'); i.focus(); i.select(); }, 30);
+}
+async function copyText(t, okMsg){
+  try{
+    if(!navigator.clipboard?.writeText) throw 0;
+    await navigator.clipboard.writeText(t); toast(okMsg||'已复制', 'ok'); return true;
+  }catch(_){
+    try{
+      const ta = document.createElement('textarea'); ta.value = t; ta.style.cssText='position:fixed;opacity:0';
+      document.body.appendChild(ta); ta.select(); const ok = document.execCommand('copy'); ta.remove();
+      if(ok){ toast(okMsg||'已复制', 'ok'); return true; }
+    }catch(__){}
+    return false;
+  }
+}
+
+/* ---------- reconciliation ---------- */
 const reconReasons = {first:'已记下当前余额', accounts_changed:'账号列表有变化，已重新记录余额',
   cycle_changed:'订阅周期已更新，已重新记录余额', balance_increased:'余额增加了，已重新记录余额',
   ledger_reset:'本站用量记录有变动，已重新记录余额'};
@@ -294,16 +799,16 @@ function renderReconciliation(d){
   $('#reconStatus').textContent=d.running ? '其他页面正在核对，稍后刷新记录即可。'
     : !latest ? '还没有记录。点击「查询并核对」获取当前余额。'
     : `上次查询 ${reconTime(latest.checked_at)} · ${Object.keys(latest.accounts).length} 个账号 · 官方余额 ${reconNumber(latest.balance)} Anlas`;
-  $('#reconResult').innerHTML=!latest ? '' : c.reason ? `<p>${esc(reconReasons[c.reason] || '已记下当前余额')}。下次查询时，会核对这期间用了多少 Anlas。</p>`
-    : `<p class="muted">这次核对的时间段：${esc(reconTime(c.since))} — ${esc(reconTime(latest.checked_at))}</p>
-       <div class="cards" style="margin:12px 0">
+  $('#reconResult').innerHTML=!latest ? '' : c.reason ? `<p style="margin-top:12px">${esc(reconReasons[c.reason] || '已记下当前余额')}。下次查询时，会核对这期间用了多少 Anlas。</p>`
+    : `<p class="muted" style="margin-top:12px">这次核对的时间段：${esc(reconTime(c.since))} — ${esc(reconTime(latest.checked_at))}</p>
+       <div class="stats" style="margin:16px 0">
         ${[['官方余额减少',c.balance_decrease],['本站记录消耗',c.recorded],['相差',c.difference]].map(([label,value])=>
-          `<div class="card"><div class="k">${label}</div><div class="v">${reconNumber(value)} <small>Anlas</small></div></div>`).join('')}
-       </div><p>${differenceText}</p>${c.unconfirmed_requests>0 ? `<div class="muted">有 ${reconNumber(c.unconfirmed_requests)} 笔失败请求可能产生费用，合计预估 ${reconNumber(c.unconfirmed_anlas)} Anlas。</div>` : ''}`;
+          `<div class="card stat"><div class="k">${label}</div><div class="v">${reconNumber(value)} <small>Anlas</small></div></div>`).join('')}
+       </div><p>${differenceText}</p>${c.unconfirmed_requests>0 ? `<p class="hint">有 ${reconNumber(c.unconfirmed_requests)} 笔失败请求可能产生费用，合计预估 ${reconNumber(c.unconfirmed_anlas)} Anlas。</p>` : ''}`;
   $('#reconHistory').innerHTML=rows.map(row=>{ const x=row.comparison; return `<tr>
-    <td>${esc(reconTime(row.checked_at))}</td><td>${reconNumber(row.balance)}</td><td>${reconNumber(x.balance_decrease)}</td>
-    <td>${reconNumber(x.recorded)}</td><td>${reconNumber(x.difference)}</td><td>${esc(reconReasons[x.reason] || '核对完成')}</td></tr>`; }).join('')
-    || '<tr><td colspan="6" class="muted">尚无记录</td></tr>';
+    <td data-label="查询时间">${esc(reconTime(row.checked_at))}</td><td class="num" data-label="官方余额">${reconNumber(row.balance)}</td><td class="num" data-label="余额减少">${reconNumber(x.balance_decrease)}</td>
+    <td class="num" data-label="本站记录">${reconNumber(x.recorded)}</td><td class="num" data-label="相差">${reconNumber(x.difference)}</td><td data-label="说明">${esc(reconReasons[x.reason] || '核对完成')}</td></tr>`; }).join('')
+    || '<tr><td colspan="6" class="empty-cell">尚无记录</td></tr>';
 }
 async function loadReconciliation(){
   if(reconBusy) return;
@@ -327,11 +832,13 @@ async function runReconciliation(){
   }finally{ reconBusy=false; updateReconciliationButton(); }
 }
 
+/* ---------- allowance ---------- */
 function renderAllowance(d){
   const rows = d.accounts || [], box = $('#allowanceStatus');
   const warnings = rows.filter(p=>p.low || p.error);
   box.hidden = warnings.length === 0;
-  box.textContent = warnings.map(p=>{
+  box.innerHTML = ic('alert') + '<div></div>';
+  box.lastChild.textContent = warnings.map(p=>{
     const value = p.is_negative ? '已耗尽' : `低于 ${d.threshold}%（上次 ${p.percent}%）`;
     return `账号 ${p.account} · ${p.low ? 'V5 余量' + value : ''}${p.low && p.error ? '；' : ''}${p.error ? '额度查询失败，V5 生图需确认后继续' : p.uncertain ? '，待下次生成确认' : ''}`;
   }).join('\n');
@@ -349,23 +856,8 @@ async function loadAllowance(){
   catch(e){
     const box = $('#allowanceStatus');
     $('#allowanceDetails').textContent = 'V5 状态暂时无法读取，稍后自动重试。';
-    if(!box.hidden && !box.textContent.startsWith('状态刷新失败')) box.textContent = '状态刷新失败，以下告警为上次记录。\n' + box.textContent;
+    if(!box.hidden && !box.textContent.startsWith('状态刷新失败')) box.lastChild.textContent = '状态刷新失败，以下告警为上次记录。\n' + box.lastChild.textContent;
   }finally{ allowanceLoading = false; }
-}
-
-function toast(msg){
-  const t = $('#toast'); t.textContent = msg; t.style.display = 'block';
-  setTimeout(()=>t.style.display='none', 2200);
-}
-function esc(s){
-  return String(s??'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
-async function api(path, opts={}){
-  const r = await fetch(path, {headers:{'Content-Type':'application/json'}, credentials:'same-origin', ...opts});
-  if(r.status === 401 && path !== '/admin/api/login'){ showLogin(); throw new Error('未登录'); }
-  const data = await r.json().catch(()=>({}));
-  if(!r.ok) throw new Error(data.error?.message || data.detail || ('HTTP '+r.status));
-  return data;
 }
 
 /* ---------- auth ---------- */
@@ -388,6 +880,7 @@ function showLogin(){
   reconCsrf=''; reconReady=false; ++reconVersion;
   clearInterval(allowanceTimer); allowanceTimer = null;
   clearInterval(reconTimer); reconTimer = null;
+  membersCache = null; statusCache = null;
   $('#login').style.display='flex'; $('#app').style.display='none';
 }
 async function boot(){
@@ -401,146 +894,465 @@ async function boot(){
 }
 
 /* ---------- tabs ---------- */
+const TABS = ['ov','members','audit','keys','ops','logs','set'];
 function tab(name){
-  document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('active', b.dataset.tab===name));
-  ['ov','keys','logs','set'].forEach(t=> $('#tab-'+t).style.display = t===name?'':'none');
+  document.body.classList.remove('nav-open');
+  $$('.nav button').forEach(b=>b.classList.toggle('active', b.dataset.tab===name));
+  TABS.forEach(t=> $('#tab-'+t).hidden = t!==name);
+  window.scrollTo(0,0);
   if(name==='ov') loadOverview();
+  if(name==='members') loadMembers();
+  if(name==='audit') loadAudit();
   if(name==='keys') loadKeys();
+  if(name==='ops') loadOps();
   if(name==='logs') loadLogs();
   if(name==='set') loadSettings();
 }
 
 /* ---------- overview ---------- */
+function statCard(k, v, small, sub, cls){
+  return `<div class="card stat ${cls||''}"><div class="k">${k}</div><div class="v">${v}${small?` <small>${small}</small>`:''}</div>${sub?`<div class="sub">${sub}</div>`:''}</div>`;
+}
+function skeletons(n, h){ return Array.from({length:n}, ()=>`<div class="skel" style="height:${h||110}px"></div>`).join(''); }
+
 async function loadOverview(){
   loadReconciliation();
+  loadStatus();
+  if(!$('#ovCards').children.length) $('#ovCards').innerHTML = skeletons(8, 96);
   try{
     const d = await api('/admin/api/overview');
     const t = d.today;
-    $('#ovCards').innerHTML = `
-      <div class="card"><div class="k">今日生成图片</div><div class="v">${t.images} <small>张</small></div></div>
-      <div class="card"><div class="k">今日消耗 Anlas（估算）</div><div class="v">${t.anlas}</div></div>
-      <div class="card"><div class="k">今日 V5 张数 / 全站日限</div><div class="v">${t.v5||0} <small>/ ${d.v5_limit>0?d.v5_limit:'∞'}</small></div></div>
-      <div class="card"><div class="k">本月 Anlas / 全站预算</div><div class="v">${d.month.anlas} <small>/ ${d.anlas_budget>0?d.anlas_budget:'∞'}</small></div></div>
-      <div class="card" title="按今日、本月累计；查询官方余额不会清空这些记录"><div class="k">失败请求可能产生的费用</div><div class="v">${t.unconfirmed_anlas||0} <small>Anlas</small></div><div class="muted">今日预估 · ${t.unconfirmed_requests||0} 笔</div><div class="muted">本月预估 ${d.month.unconfirmed_anlas||0} Anlas · ${d.month.unconfirmed_requests||0} 笔</div><div class="muted" style="margin-top:8px">仅为估算，实际扣款尚未确认。</div></div>
-      <div class="card"><div class="k">今日文本 tokens</div><div class="v">${fmt(t.text_tokens)}</div></div>
-      <div class="card"><div class="k">今日请求数</div><div class="v">${t.requests}</div></div>
-      <div class="card"><div class="k">Key 总数 / 有效</div><div class="v">${d.keys_total} <small>/ ${d.keys_active}</small></div></div>`;
+    $('#ovCards').innerHTML =
+      statCard('今日生成图片', t.images, '张', '', 'accent') +
+      statCard('今日消耗 Anlas（估算）', t.anlas) +
+      statCard('今日 V5 张数 / 全站日限', t.v5||0, '/ ' + (d.v5_limit>0?d.v5_limit:'∞')) +
+      statCard('本月 Anlas / 全站预算', d.month.anlas, '/ ' + (d.anlas_budget>0?d.anlas_budget:'∞')) +
+      statCard('今日文本 tokens', fmt(t.text_tokens)) +
+      statCard('今日请求数', t.requests) +
+      statCard('Key 总数 / 有效', d.keys_total, '/ ' + d.keys_active) +
+      `<div class="card stat" title="按今日、本月累计；查询官方余额不会清空这些记录"><div class="k">失败请求可能产生的费用</div>
+        <div class="v">${t.unconfirmed_anlas||0} <small>Anlas</small></div>
+        <div class="sub">今日预估 ${t.unconfirmed_requests||0} 笔 · 本月 ${d.month.unconfirmed_anlas||0} Anlas / ${d.month.unconfirmed_requests||0} 笔<br>仅为估算，实际扣款尚未确认。</div></div>`;
     const max = Math.max(1, ...d.week.map(w=>w.images));
     $('#chart').innerHTML = d.week.map(w=>`
-      <div class="bar" title="${w.day}：${w.images} 张 / ${w.anlas}A / ${fmt(w.text_tokens)}tk">
-        <div class="lb">${w.images}</div>
-        <div class="fill" style="height:${Math.round(w.images/max*80)}%"></div>
-        <div class="lb">${w.day.slice(5)}</div>
+      <div class="col" title="${esc(w.day)}：${w.images} 张 / ${w.anlas}A / ${esc(fmt(w.text_tokens))}tk">
+        <div class="val">${w.images}</div>
+        <div class="track"><div class="fill" style="height:${Math.max(2, Math.round(w.images/max*100))}%"></div></div>
+        <div class="lb">${esc(w.day.slice(5))}</div>
       </div>`).join('');
     const pool = d.pool.length ? d.pool : [];
     $('#pool').innerHTML = (!d.pool_configured)
       ? `<span class="tag warn">未配置上游 Token —— 请设置环境变量 NAI_TOKENS 后重启</span>`
-      : pool.map(p=>`
-        <div style="padding:6px 0;border-bottom:1px solid var(--line)">
-          <span class="mono">#${p.position} ${esc(p.token)}</span>
-          ${!p.admin_enabled ? '<span class="tag off">已停用</span>'
-            : p.disabled ? '<span class="tag off">已失效(401)</span>'
-            : p.blocked_for>0 ? `<span class="tag warn">限流中 ${p.blocked_for}s</span>`
-            : '<span class="tag on">正常</span>'}
-          ${!p.admin_enabled && p.disabled ? '<span class="tag warn">401 失效</span>' : ''}
-          <button class="btn mini ${p.admin_enabled?'danger':''}" onclick="setUpstreamEnabled('${p.token_id}',${!p.admin_enabled})">${p.admin_enabled?'停用':'启用'}</button>
-          <span class="muted" style="margin-left:12px;font-size:12px">今日生成 ${p.images_today||0} 张 · 失败 ${p.fails} · Anlas ${p.allow_anlas?'允许':'禁止'} · 免费 V5 ${p.v5_used}/${p.v5_daily_limit||'∞'}</span>
-          <div style="display:flex;align-items:center;gap:8px;margin-top:6px;font-size:12px">
-            <span class="muted">V5 日限</span>
-            <input id="token-limit-${p.token_id}" type="number" min="0" max="100000" step="1" value="${p.v5_daily_limit}" style="width:100px" aria-label="第 ${p.position} 把上游 Token 的免费 V5 每日上限">
-            <button class="btn mini" onclick="saveUpstreamV5Limit('${p.token_id}')">保存</button>
-            <span class="muted">0 = 不限；只限制这把上游 Token</span>
+      : pool.map(p=>{
+        const id = esc(p.token_id);
+        return `
+        <div class="token">
+          <div class="token-head">
+            <span class="mono">#${esc(p.position)} ${esc(p.token)}</span>
+            ${!p.admin_enabled ? '<span class="tag off">已停用</span>'
+              : p.disabled ? '<span class="tag off">已失效(401)</span>'
+              : p.blocked_for>0 ? `<span class="tag warn">限流中 ${esc(p.blocked_for)}s</span>`
+              : '<span class="tag on"><i class="dot"></i>正常</span>'}
+            ${!p.admin_enabled && p.disabled ? '<span class="tag warn">401 失效</span>' : ''}
+            <span class="sp"></span>
+            <button class="btn mini ${p.admin_enabled?'danger':''}" data-act="up-enabled" data-id="${id}" data-on="${p.admin_enabled?0:1}">${p.admin_enabled?'停用':'启用'}</button>
           </div>
-          <div style="display:flex;align-items:center;gap:8px;margin-top:6px;font-size:12px">
-            <span class="muted">图片并发</span>
-            <input id="token-concurrency-${p.token_id}" type="number" min="1" max="4" step="1" value="${p.image_concurrency}" style="width:70px" aria-label="第 ${p.position} 把上游 Token 的图片并发上限">
-            <button class="btn mini" onclick="saveUpstreamImageConcurrency('${p.token_id}')">保存</button>
-            <span class="muted">当前 ${p.image_active} / ${p.image_concurrency}；默认 1，调高会增加上游限流风险</span>
+          <div class="token-meta num">今日生成 ${p.images_today||0} 张 · 失败 ${p.fails} · Anlas ${p.allow_anlas?'允许':'禁止'} · 免费 V5 ${p.v5_used}/${p.v5_daily_limit||'∞'}</div>
+          <div class="token-ctrls">
+            <div class="ctrl"><label for="token-limit-${id}">V5 日限</label>
+              <div class="line"><input id="token-limit-${id}" type="number" min="0" max="100000" step="1" value="${esc(p.v5_daily_limit)}" aria-label="第 ${esc(p.position)} 把上游 Token 的免费 V5 每日上限">
+              <button class="btn" data-act="up-v5" data-id="${id}">保存</button></div>
+              <div class="hint">0 = 不限；只限制这把上游 Token</div></div>
+            <div class="ctrl"><label for="token-concurrency-${id}">图片并发</label>
+              <div class="line"><input id="token-concurrency-${id}" type="number" min="1" max="4" step="1" value="${esc(p.image_concurrency)}" aria-label="第 ${esc(p.position)} 把上游 Token 的图片并发上限">
+              <button class="btn" data-act="up-conc" data-id="${id}">保存</button></div>
+              <div class="hint">当前 ${esc(p.image_active)} / ${esc(p.image_concurrency)}；默认 1，调高会增加上游限流风险</div></div>
           </div>
-        </div>`).join('');
-  }catch(e){ toast(e.message); }
+        </div>`; }).join('');
+  }catch(e){ toastErr(e); }
 }
+
+async function loadStatus(){
+  const box = $('#statusPanel');
+  if(!statusCache) box.innerHTML = skeletons(3, 52);
+  try{
+    statusCache = await api('/admin/api/status');
+    renderStatus(statusCache);
+  }catch(e){ if(!statusCache) box.innerHTML = '<div class="muted">状态暂时无法读取。</div>'; }
+}
+let cooldownEnd = 0, cooldownTimer = null;
+function upstreamRow(u){
+  if(!u) return '';
+  const st = u.status, cls = st==='ok'?'on':st==='degraded'?'warn':'dim';
+  const lb = st==='ok'?'正常':st==='degraded'?'不稳定':'空闲';
+  cooldownEnd = Date.now() + (Number(u.image_cooldown_seconds)||0)*1000;
+  clearInterval(cooldownTimer); cooldownTimer = null;
+  if(u.image_cooldown_seconds>0) cooldownTimer = setInterval(tickCooldown, 1000);
+  return `<div class="status-row"><div class="ico ${st==='ok'?'ok':st==='degraded'?'warn':''}">${ic('refresh')}</div><div class="body">
+    <div class="t">上游健康 <span class="tag ${cls}"><i class="dot"></i>${lb}</span></div>
+    <div class="d num">最近 ${esc(u.recent)} 次请求，失败 ${esc(u.failed)} 次<span id="cooldownLine"${u.image_cooldown_seconds>0?'':' hidden'}> · 图片冷却 <b id="cooldownSec">${esc(u.image_cooldown_seconds)}</b> 秒</span></div></div></div>`;
+}
+function tickCooldown(){
+  const left = Math.max(0, Math.ceil((cooldownEnd-Date.now())/1000)), el = $('#cooldownSec');
+  if(el) el.textContent = left;
+  if(left<=0){ clearInterval(cooldownTimer); cooldownTimer=null; const l=$('#cooldownLine'); if(l) l.hidden=true; }
+}
+function renderStatus(s){
+  const a = s.alerts, au = s.audit, p = s.protection, dk = s.disk;
+  const used = Math.max(0, dk.total_mb - dk.free_mb), pct = dk.total_mb>0 ? Math.round(used/dk.total_mb*100) : 0;
+  const freePct = 100 - pct;
+  const gb = mb => mb>=1024 ? (mb/1024).toFixed(1)+' GB' : mb+' MB';
+  const diskCls = freePct<10 ? 'bad' : freePct<20 ? 'warn' : 'ok';
+  const rec = au.prompts || au.thumbs;
+  $('#statusPanel').innerHTML = `
+    ${upstreamRow(s.upstream)}
+    <div class="status-row"><div class="ico ${a.configured?'ok':'warn'}">${ic('bell')}</div><div class="body">
+      <div class="t">告警渠道 <span class="tag ${a.configured?'on':'warn'}">${a.configured?'已配置':'未配置'}</span></div>
+      <div class="d">${a.configured?`已发送 ${esc(a.sent)} 条告警`:'设置 ALERT_* 环境变量后可接收异常通知'}</div>
+      <div style="margin-top:8px"><button class="btn mini" data-act="alert-test">发送测试告警</button></div></div></div>
+    <div class="status-row"><div class="ico ${rec?'ok':''}">${ic('camera')}</div><div class="body">
+      <div class="t">生成记录 <span class="tag ${rec?'on':'dim'}">${rec?'记录中':'已关闭'}</span></div>
+      <div class="d">提示词 ${au.prompts?'开':'关'} · 缩略图 ${au.thumbs?'开':'关'} · 保留 ${esc(au.retention_days)} 天</div></div></div>
+    <div class="status-row"><div class="ico ok">${ic('lock')}</div><div class="body">
+      <div class="t">暴力破解防护 <span class="tag on">已启用</span></div>
+      <div class="d">Key 鉴权失败 ${esc(p.auth_fail_max)} 次 / ${esc(p.auth_fail_window)} 秒后封禁 ${esc(p.auth_block_seconds)} 秒；后台登录最多尝试 ${esc(p.login_max_attempts)} 次</div></div></div>
+    <div class="status-row"><div class="ico ${freePct<20?'warn':''}">${ic('disk')}</div><div class="body">
+      <div class="t">磁盘空间 <span class="tag ${diskCls==='ok'?'on':diskCls==='warn'?'warn':'off'} num">剩余 ${esc(gb(dk.free_mb))}</span></div>
+      <div class="bar ${diskCls}" style="margin-top:8px" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><i style="width:${pct}%"></i></div>
+      <div class="d num">已用 ${pct}% · 共 ${esc(gb(dk.total_mb))}</div></div></div>`;
+}
+async function sendTestAlert(btn){
+  btn.disabled = true;
+  try{
+    await api('/admin/api/alerts/test', {method:'POST'});
+    toast('测试告警已发送，请检查告警渠道', 'ok');
+  }catch(e){
+    if(e.status===409) toast('尚未配置告警渠道', 'err'); else toastErr(e);
+  }finally{ btn.disabled = false; }
+}
+
 async function saveUpstreamV5Limit(tokenId){
-  const input = $('#token-limit-' + tokenId);
+  const input = document.getElementById('token-limit-' + tokenId);
   const limit = Number(input.value);
-  if(!Number.isInteger(limit) || limit<0 || limit>100000){ toast('请输入 0～100000 的整数'); return; }
+  if(!Number.isInteger(limit) || limit<0 || limit>100000){ toast('请输入 0～100000 的整数', 'err'); return; }
   try{
     await api('/admin/api/upstream-tokens/' + tokenId + '/v5-limit', {
       method:'PUT', body:JSON.stringify({v5_daily_limit:limit})});
-    toast('上游 V5 日限已保存');
+    toast('上游 V5 日限已保存', 'ok');
     loadOverview();
-  }catch(e){ toast(e.message); }
+  }catch(e){ toastErr(e); }
 }
 async function saveUpstreamImageConcurrency(tokenId){
-  const limit = Number($('#token-concurrency-' + tokenId).value);
-  if(!Number.isInteger(limit) || limit<1 || limit>4){ toast('请输入 1～4 的整数'); return; }
+  const limit = Number(document.getElementById('token-concurrency-' + tokenId).value);
+  if(!Number.isInteger(limit) || limit<1 || limit>4){ toast('请输入 1～4 的整数', 'err'); return; }
   try{
     await api('/admin/api/upstream-tokens/' + tokenId + '/image-concurrency', {
       method:'PUT', body:JSON.stringify({image_concurrency:limit})});
-    toast('上游图片并发已保存');
+    toast('上游图片并发已保存', 'ok');
     loadOverview();
-  }catch(e){ toast(e.message); }
+  }catch(e){ toastErr(e); }
 }
 async function setUpstreamEnabled(tokenId, enabled){
-  if(!enabled && !confirm('确定停用这把上游 Key？它将不再接收新请求；已发出的请求继续完成。')) return;
+  if(!enabled && !await askConfirm('确定停用这把上游 Key？它将不再接收新请求；已发出的请求继续完成。', '停用')) return;
   try{
     await api('/admin/api/upstream-tokens/' + tokenId + '/enabled', {
       method:'PUT', body:JSON.stringify({enabled})});
-    toast(enabled?'上游 Key 已启用（401 失效仍需更换 Token）':'上游 Key 已停用');
+    toast(enabled?'上游 Key 已启用（401 失效仍需更换 Token）':'上游 Key 已停用', 'ok');
     loadOverview();
-  }catch(e){ toast(e.message); }
+  }catch(e){ toastErr(e); }
 }
-function fmt(n){ n=+n||0; return n>=1e6? (n/1e6).toFixed(1)+'M' : n>=1e3? (n/1e3).toFixed(1)+'k' : n; }
+
+/* ---------- members ---------- */
+async function ensureMembers(){
+  if(!membersCache) membersCache = (await api('/admin/api/members')).members;
+  return membersCache;
+}
+async function loadMembers(){
+  if(!membersCache){ $('#memberGrid').innerHTML = skeletons(6, 230); $('#memberStats').innerHTML = skeletons(4, 80); }
+  try{
+    membersCache = (await api('/admin/api/members')).members;
+    try{ const ks = (await api('/admin/api/keys')).keys; const fm = new Map(ks.map(k=>[k.id,k.features])); membersCache.forEach(m=>{ m.features = fm.has(m.id) ? fm.get(m.id) : undefined; }); }catch(_){}
+    fillMemberFilter();
+    renderMembers();
+  }catch(e){ toastErr(e); $('#memberGrid').innerHTML = ''; }
+}
+function memberLimitRatio(m){ return m.daily_images>0 ? m.today.images/m.daily_images : 0; }
+function renderMembers(){
+  const all = membersCache || [];
+  const now = Date.now()/1000;
+  const topWeek = new Set(all.length>3 ? all.filter(m=>m.week.images>0).sort((a,b)=>b.week.images-a.week.images).slice(0,3).map(m=>m.id) : []);
+  $('#memberStats').innerHTML =
+    statCard('成员总数', all.length, '', `${all.filter(m=>m.enabled).length} 个已启用`) +
+    statCard('今日活跃', all.filter(m=>m.today.requests>0||m.today.images>0).length, '人', '今日有请求') +
+    statCard('从未使用', all.filter(m=>!m.last_used_at).length, '人', '拿到 Key 但没有用过', 'accent') +
+    statCard('已绑定 Discord', all.filter(m=>m.discord_id).length, '人');
+  const q = memberQuery.trim().toLowerCase();
+  let list = all.filter(m=>!q || m.name.toLowerCase().includes(q) || String(m.discord_id||'').includes(q));
+  const keyf = {today:m=>m.today.images, week:m=>m.week.images, total:m=>m.total_images, recent:m=>m.last_used_at||0}[memberSort];
+  list = list.slice().sort((a,b)=>keyf(b)-keyf(a) || a.name.localeCompare(b.name));
+  if(!list.length){
+    $('#memberGrid').innerHTML = `<div class="empty card" style="grid-column:1/-1"><div class="ico">${ic('users')}</div><h3>${all.length?'没有匹配的成员':'还没有成员'}</h3><p>${all.length?'换个关键词试试。':'在「密钥管理」中创建 Key 后，成员会出现在这里。'}</p></div>`;
+    return;
+  }
+  $('#memberGrid').innerHTML = list.map(m=>{
+    const ratio = memberLimitRatio(m), limited = m.daily_images>0;
+    const cls = ratio>=1 ? 'bad' : ratio>=.8 ? 'warn' : '';
+    const exp = m.expires_at ? (m.expires_at < now ? '<span class="tag off">已过期</span>'
+      : m.expires_at-now < 3*86400 ? `<span class="tag warn">${new Date(m.expires_at*1000).toLocaleDateString('zh-CN')} 到期</span>`
+      : `到期 ${new Date(m.expires_at*1000).toLocaleDateString('zh-CN')}`) : '永久有效';
+    return `<article class="card member ${m.enabled?'':'dim'}">
+      <div class="member-top">
+        <div class="avatar">${esc([...String(m.name||'?')][0]||'?')}</div>
+        <div style="min-width:0;flex:1">
+          <div class="nm">${esc(m.name)}</div>
+          <div class="tags">
+            <span class="tag ${m.enabled?'on':'off'}">${m.enabled?'启用':'禁用'}</span>
+            ${m.is_admin?'<span class="tag info">站长</span>':''}
+            ${m.discord_id?`<span class="tag info" title="Discord ID ${esc(m.discord_id)}">Discord 已绑定</span>`:'<span class="tag dim">未绑定 Discord</span>'}
+            ${!m.last_used_at?'<span class="tag warn">从未使用</span>':''}
+            ${ratio>=1?'<span class="tag off">已达日限</span>':ratio>=.8?'<span class="tag warn">接近日限</span>':''}
+            ${topWeek.has(m.id)?'<span class="tag warn">高频使用</span>':''}
+          </div>
+        </div>
+      </div>
+      ${m.features!==undefined?`<div class="chips">${featChips(m.features)}</div>`:''}
+      <div class="quota">
+        <div class="row"><span>今日图片</span><span class="num"><b>${m.today.images}</b> / ${limited?m.daily_images:'不限'}${m.today.v5?` · V5 ${m.today.v5}${m.daily_v5>0?'/'+m.daily_v5:''}`:''}</span></div>
+        ${limited?`<div class="bar ${cls}" role="progressbar" aria-valuenow="${Math.round(Math.min(1,ratio)*100)}" aria-valuemin="0" aria-valuemax="100"><i style="width:${Math.min(100,Math.round(ratio*100))}%"></i></div>`:'<div class="bar"><i style="width:0"></i></div>'}
+      </div>
+      <div class="trio">
+        <div><div class="n">${m.today.images}</div><div class="l">今日</div></div>
+        <div><div class="n">${m.week.images}</div><div class="l">近 7 天</div></div>
+        <div><div class="n">${m.total_images}</div><div class="l">累计</div></div>
+      </div>
+      <div class="member-foot">
+        <div class="meta"><span>最近使用：${esc(rel(m.last_used_at))}</span><span>${exp}</span></div>
+        <button class="btn mini" data-act="view-audit" data-id="${m.id}">${ic('image')}生成记录</button>
+      </div>
+    </article>`;
+  }).join('');
+}
+
+/* ---------- audit ---------- */
+function fillMemberFilter(){
+  const sel = $('#auditFilter'), cur = sel.value;
+  sel.innerHTML = '<option value="">全部成员</option>' + (membersCache||[]).map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join('');
+  sel.value = cur;
+}
+function viewAudit(id){
+  auditPage = 1;
+  fillMemberFilter();
+  $('#auditFilter').value = String(id);
+  tab('audit');
+}
+function statusTag(s){
+  return s==='ok' ? '<span class="tag on">ok</span>' : s==='rejected' ? '<span class="tag warn">拒绝</span>' : `<span class="tag off">${s&&s!=='error'?esc(s):'错误'}</span>`;
+}
+let auditVer = 0;
+async function loadAudit(){
+  const ver = ++auditVer;
+  const grid = $('#auditGrid');
+  grid.innerHTML = skeletons(8, 320);
+  try{
+    if(!membersCache){ await ensureMembers(); }
+    fillMemberFilter();
+    if(!statusCache){ try{ statusCache = await api('/admin/api/status'); }catch(_){} }
+    const kf = $('#auditFilter').value;
+    const d = await api('/admin/api/audit?' + (kf?`key_id=${encodeURIComponent(kf)}&`:'') + `page=${auditPage}`);
+    if(ver !== auditVer) return;
+    auditPage = d.page;
+    auditPrompts.clear();
+    if(!d.items.length){
+      const au = statusCache && statusCache.audit;
+      const on = au && (au.prompts || au.thumbs);
+      grid.innerHTML = `<div class="empty card" style="grid-column:1/-1"><div class="ico">${ic('image')}</div>
+        <h3>${kf?'该成员暂无生成记录':'暂无生成记录'}</h3>
+        <p>${au ? (on ? `生成记录功能已开启（提示词${au.prompts?'开':'关'}、缩略图${au.thumbs?'开':'关'}），新的生成请求会出现在这里。记录会在 ${esc(au.retention_days)} 天后自动清除。`
+          : '生成记录功能当前已关闭，不会保存提示词和缩略图。开启后，记录会在保留期满后自动清除。') : '记录会在保留期满后自动清除。'}</p></div>`;
+      $('#auditPager').innerHTML = '';
+      return;
+    }
+    grid.innerHTML = d.items.map(it=>{
+      auditPrompts.set(it.id, {p: it.prompt||'', n: it.negative||'', who: it.key_name});
+      const id = Number(it.id);
+      return `<article class="card shot">
+        ${it.has_thumb ? `<button class="thumb" data-act="zoom" data-id="${id}" aria-label="放大查看"><img loading="lazy" decoding="async" alt="" src="/admin/api/audit/${id}/thumb"><span class="zoom">${ic('zoom')}</span></button>`
+          : `<div class="thumb none">${ic('image')}</div>`}
+        <div class="shot-body">
+          <div class="shot-top"><span class="who" title="${esc(it.key_name)}">${esc(it.key_name)}</span>${statusTag(it.status)}</div>
+          <div class="shot-meta"><span class="mono">${esc(it.model||'—')}</span><span>·</span><span>${esc(it.kind||'')}</span><span>·</span><span title="${esc(new Date(it.ts*1000).toLocaleString('zh-CN'))}">${esc(rel(it.ts))}</span></div>
+          ${it.prompt ? `<div class="prompt" data-act="expand" title="点击展开 / 收起">${esc(it.prompt)}</div>` : '<div class="prompt empty">未记录提示词</div>'}
+          ${it.negative ? `<details class="neg"><summary>负面提示词</summary><div>${esc(it.negative)}</div></details>` : ''}
+          <div class="shot-actions">${it.prompt?`<button class="btn mini" data-act="copy-prompt" data-id="${id}">${ic('copy')}复制提示词</button>`:''}</div>
+        </div></article>`;
+    }).join('');
+    pager($('#auditPager'), d, 'audit');
+  }catch(e){ toastErr(e); grid.innerHTML = ''; }
+}
+function openLightbox(id){
+  const m = auditPrompts.get(id) || {};
+  $('#lbImg').src = `/admin/api/audit/${Number(id)}/thumb`;
+  $('#lbCap').textContent = (m.who ? m.who + ' · ' : '') + (m.p || '');
+  openOverlay('#lightbox');
+}
+function pager(el, d, kind){
+  el.innerHTML = `<span class="info num">共 ${d.total} 条，第 ${d.page} / ${d.pages} 页（每页 ${d.per_page} 条）</span>
+    <button class="btn mini" data-act="${kind}-page" data-d="-1" ${d.page<=1?'disabled':''}>上一页</button>
+    <button class="btn mini" data-act="${kind}-page" data-d="1" ${d.page>=d.pages?'disabled':''}>下一页</button>`;
+}
+
+/* ---------- features ---------- */
+const FEAT = {image:['文生图','文生图'], upscale:['放大','放大图片'], augment:['导演工具','线稿、上色等导演工具'],
+  vibe:['Vibe 编码','Vibe Transfer 编码'], tags:['标签补全','提示词标签补全'], text:['文本 / 聊天','文本生成与 OpenAI 兼容聊天'], voice:['语音合成','文字转语音']};
+const FEAT_NAMES = Object.keys(FEAT);
+function featLabel(n){ return (opsData && opsData.features.labels[n]) || FEAT[n][0]; }
+function featChips(list){
+  if(list == null) return '<span class="tag mini dim" title="沿用旧行为：所有已开放的功能">功能：全部</span>';
+  if(!list.length) return '<span class="tag mini off">无功能</span>';
+  return list.map(n=>`<span class="tag mini info">${esc((FEAT[n]||[n])[0])}</span>`).join('');
+}
+function featChecks(list, name, disabled){
+  return FEAT_NAMES.map(n=>`<label class="check"><input type="checkbox" data-fname="${name}" value="${n}" ${list&&list.includes(n)?'checked':''}><span>${esc(FEAT[n][0])}</span></label>`).join('');
+}
+function sameFeat(a,b){ return (a==null||b==null) ? a==b : [...a].sort().join()===[...b].sort().join(); }
+function readFeatMode(modeName, listSel){
+  const mode = document.querySelector(`input[name="${modeName}"]:checked`).value;
+  if(mode==='legacy') return null;
+  return $$(`${listSel} input[type=checkbox]`).filter(c=>c.checked).map(c=>c.value);
+}
+function syncFeatMode(modeName, listSel){
+  const custom = document.querySelector(`input[name="${modeName}"]:checked`).value==='custom';
+  $(listSel).classList.toggle('off', !custom);
+}
+
+/* ---------- ops page ---------- */
+let opsData = null;
+async function loadOps(){
+  try{ opsData = await api('/admin/api/ops'); renderOpsFeatures(); renderOpsReg(); renderOpsAudit(); }
+  catch(e){ toastErr(e); }
+}
+function renderOpsFeatures(){
+  const g = opsData.features.global;
+  $('#opsFeatures').innerHTML = FEAT_NAMES.map(n=>`<div class="feat-row"><div class="body"><div class="t">${esc(featLabel(n))}</div><div class="d">${esc(FEAT[n][1])}</div></div>
+    <label class="switch"><input type="checkbox" data-feat="${n}" ${g[n]?'checked':''} aria-label="${esc(featLabel(n))}"><span></span></label></div>`).join('')
+    + '<p class="hint" style="margin-top:16px">关闭后，除管理员 Key 外所有成员立即不能使用该功能。</p>';
+}
+async function toggleFeature(input){
+  const name = input.dataset.feat, val = input.checked;
+  input.disabled = true;
+  try{
+    opsData = await api('/admin/api/ops/features', {method:'PUT', body:JSON.stringify({flags:{[name]:val}})});
+    toast(`${featLabel(name)}已${val?'开启':'关闭'}`, 'ok');
+  }catch(e){ input.checked = !val; toastErr(e); }
+  finally{ input.disabled = false; }
+}
+function renderOpsReg(){
+  const r = opsData.registration;
+  const pct = r.max_users>0 ? Math.min(100, Math.round(r.active/r.max_users*100)) : 0;
+  const cls = r.max_users>0 && r.active>=r.max_users ? 'bad' : pct>=80 ? 'warn' : '';
+  $('#opsReg').innerHTML = `
+    ${r.configured?'':'<div class="notice-box">Discord 机器人尚未配置，以下设置会保存，但在机器人启用后才会生效。</div>'}
+    <div class="big-toggle"><label class="switch big"><input type="checkbox" id="regOpen" ${r.open?'checked':''} aria-label="开放注册"><span></span></label>
+      <div class="body"><div class="t">${r.open?'注册已开放':'注册已关闭'}</div><div class="hint" style="margin:0">${r.open?'成员可通过 Discord /register 自助领取 Key':'新成员暂时无法领取 Key'}${r.reset_at?` · 重置时间 ${esc(r.reset_at)}`:''}</div></div>
+      <div style="min-width:200px;flex:1;max-width:280px"><div class="quota"><div class="row"><span>名额</span><span class="num"><b>${esc(r.active)}</b> / ${r.max_users>0?esc(r.max_users):'不限'}</span></div>
+      <div class="bar ${cls}"><i style="width:${pct}%"></i></div></div></div></div>
+    <div class="cols-3">
+      <div class="field"><label for="reg_max">名额上限</label><input id="reg_max" type="number" min="0" value="${esc(r.max_users)}"><div class="hint">0 = 不限</div></div>
+      <div class="field"><label for="reg_exp">有效期（天）</label><input id="reg_exp" type="number" min="0" value="${esc(r.expires_days)}"><div class="hint">0 = 永久</div></div>
+      <div class="field"><label for="reg_img">每日图片</label><input id="reg_img" type="number" min="0" value="${esc(r.daily_images)}"></div>
+      <div class="field"><label for="reg_v5">每日 V5</label><input id="reg_v5" type="number" min="0" value="${esc(r.daily_v5)}"></div>
+      <div class="field"><label for="reg_scope">图片模型范围</label><select id="reg_scope"><option value="legacy" ${r.image_scope==='legacy'?'selected':''}>仅 V4.5 及以下</option><option value="all" ${r.image_scope==='all'?'selected':''}>含 V5</option></select></div>
+    </div>
+    <label>新成员默认开通的功能</label>
+    <div class="opt-group">
+      <label class="check"><input type="radio" name="reg_feat_mode" value="legacy" ${r.features==null?'checked':''}><span>沿用旧行为（全部开放）</span></label>
+      <label class="check"><input type="radio" name="reg_feat_mode" value="custom" ${r.features!=null?'checked':''}><span>仅选中的功能</span></label>
+    </div>
+    <div class="feat-checks ${r.features==null?'off':''}" id="reg_feat_list">${featChecks(r.features,'reg')}</div>
+    <div style="margin-top:20px"><button class="btn primary" data-act="save-reg">保存</button></div>`;
+}
+async function putReg(body, okMsg){
+  const d = await api('/admin/api/ops/registration', {method:'PUT', body:JSON.stringify(body)});
+  opsData = d; toast(okMsg, 'ok'); renderOpsReg();
+}
+async function toggleRegOpen(input){
+  const val = input.checked; input.disabled = true;
+  try{ await putReg({open:val}, val?'注册已开放':'注册已关闭'); }
+  catch(e){ input.checked = !val; input.disabled = false; toastErr(e); }
+}
+async function saveReg(){
+  const num = id => Number($('#'+id).value);
+  const vals = {max_users:num('reg_max'), expires_days:num('reg_exp'), daily_images:num('reg_img'), daily_v5:num('reg_v5')};
+  for(const [k,v] of Object.entries(vals)) if(!Number.isInteger(v) || v<0){ toast('请填写不小于 0 的整数', 'err'); return; }
+  try{ await putReg({...vals, image_scope:$('#reg_scope').value, features:readFeatMode('reg_feat_mode','#reg_feat_list')}, '开放设置已保存'); }
+  catch(e){ toastErr(e); }
+}
+function renderOpsAudit(){
+  const a = opsData.audit;
+  $('#opsAudit').innerHTML = `
+    <div class="notice-box">目前处于测试期：站长会记录成员提交的提示词与缩略图，用于防范违规内容（例如政治类内容）。成员会通过首页、/help、/register 私信和频道公告获知这一点。记录将在 <b>${esc(a.retention_days)}</b> 天后自动删除，且仅站长可见。
+      ${a.announce_configured?'':'<br>成员公告频道尚未配置，不会发布频道公告；首页与私信中的告知仍然有效。'}</div>
+    <div class="feat-row"><div class="body"><div class="t">记录提示词</div></div><label class="switch"><input type="checkbox" id="aud_prompts" ${a.prompts?'checked':''} aria-label="记录提示词"><span></span></label></div>
+    <div class="feat-row"><div class="body"><div class="t">记录缩略图</div></div><label class="switch"><input type="checkbox" id="aud_thumbs" ${a.thumbs?'checked':''} aria-label="记录缩略图"><span></span></label></div>
+    <div class="field" style="margin-top:16px;max-width:260px"><label for="aud_days">保留天数</label><input id="aud_days" type="number" min="1" max="90" value="${esc(a.retention_days)}"><div class="hint">1～90 天</div></div>
+    <label class="check"><input type="checkbox" id="aud_notify" checked><span>切换时在成员频道发布测试期公告${a.announce_configured?'':'（公告频道未配置，将不会发布）'}</span></label>
+    <div style="margin-top:16px"><button class="btn primary" data-act="save-audit">保存</button></div>`;
+}
+async function saveAudit(){
+  const days = Number($('#aud_days').value);
+  if(!Number.isInteger(days) || days<1 || days>90){ toast('保留天数须为 1～90 的整数', 'err'); return; }
+  try{
+    opsData = await api('/admin/api/ops/audit', {method:'PUT', body:JSON.stringify({prompts:$('#aud_prompts').checked, thumbs:$('#aud_thumbs').checked, retention_days:days, notify:$('#aud_notify').checked})});
+    statusCache = null;
+    toast('生成记录设置已保存', 'ok'); renderOpsAudit();
+  }catch(e){ toastErr(e); }
+}
 
 /* ---------- keys ---------- */
 async function loadKeys(){
+  const tb = $('#keysTable tbody');
+  if(!keysCache.length) tb.innerHTML = '<tr><td colspan="6" class="empty-cell">加载中…</td></tr>';
   try{
     const d = await api('/admin/api/keys');
     keysCache = d.keys;
-    const tb = $('#keysTable tbody');
     tb.innerHTML = d.keys.map(k=>{
       const exp = k.expires_at ? new Date(k.expires_at*1000).toLocaleDateString() : '永久';
       return `<tr>
-        <td class="key-name">${esc(k.name)}</td>
-        <td><span class="mono" data-tok="${esc(k.token)}">${mask(k.token)}</span><br>
-            <button class="btn mini" onclick="copyKey(this)">复制</button></td>
-        <td>${k.enabled?'<span class="tag on">启用</span>':'<span class="tag off">禁用</span>'}
+        <td class="cell-name" data-label="名称">${esc(k.name)}
+          <div class="tags">
+            ${k.enabled?'<span class="tag on">启用</span>':'<span class="tag off">禁用</span>'}
+            ${k.is_admin?'<span class="tag info">站长</span>':''}
             ${k.allow_anlas?'<span class="tag warn">Anlas</span>':''}
-            ${k.is_admin?'<span class="tag on">站长</span>':''}
-            <span class="tag ${k.image_model_scope==='all'?'on':'off'}">${k.image_model_scope==='all'?'含 V5':'仅 V4.5↓'}</span>
-            ${k.allow_img2img?'<span class="tag warn">img2img</span>':''}</td>
-        <td class="key-summary">累计生成 ${k.used.generated_images_total||0} · 今日图片 ${k.used.images}<br>
-          <span class="muted">今日免费 ${k.used.legacy_free_images||0} · 今日 V5 ${k.used.v5||0}</span><br>
-          <span class="muted">Anlas ${k.used.anlas} · 文本 ${fmt(k.used.text_tokens)}</span></td>
-        <td class="key-summary">${k.is_admin ? '单 Key 不限<br><span class="muted">仍受全站保护</span>' : `
-          免费图 ${k.daily_images>0?k.daily_images:'∞'}/日${k.image_model_scope==='all' ? ` · V5 ${k.daily_v5>0?k.daily_v5:'∞'}/日` : ''}<br>
-          <span class="muted">Anlas ${k.allow_anlas ? `${k.daily_anlas>0?k.daily_anlas:'∞'}/日 · ${k.monthly_anlas>0?k.monthly_anlas:'∞'}/月` : '未开'} · 文本 ${fmt(k.daily_text_tokens)}/日</span>`}
-        </td>
-        <td>${k.rpm}</td>
-        <td>${k.last_used_at ? new Date(k.last_used_at*1000).toLocaleString() : '从未使用'}</td>
-        <td>${exp}</td>
-        <td><div class="row-actions">
-          <button class="btn mini" onclick="openEdit(${k.id})">编辑</button>
-          <button class="btn mini" onclick="toggleKey(${k.id},${k.enabled?0:1})">${k.enabled?'禁用':'启用'}</button>
-          <button class="btn mini" onclick="regenerateKey(${k.id},this)">重新生成 Key</button>
-          <button class="btn mini" onclick="resetDailyImageQuota(${k.id})">重置今日额度</button>
-          <button class="btn mini danger" onclick="delKey(${k.id})">删除</button>
+            <span class="tag ${k.image_model_scope==='all'?'info':'dim'}">${k.image_model_scope==='all'?'含 V5':'仅 V4.5↓'}</span>
+            ${k.allow_img2img?'<span class="tag warn">img2img</span>':''}
+          </div><div class="tags">${featChips(k.features)}</div></td>
+        <td data-label="Key"><div class="stack"><span class="mono" data-tok="${esc(k.token)}">${esc(mask(k.token))}</span>
+            <button class="btn mini" data-act="copy-key" style="margin-top:6px">${ic('copy')}复制</button></div></td>
+        <td data-label="今日用量"><div class="stack num"><span>今日 ${k.used.images} · 累计 ${k.used.generated_images_total||0}</span>
+          <span class="muted sm">免费 ${k.used.legacy_free_images||0} · V5 ${k.used.v5||0}</span>
+          <span class="muted sm">Anlas ${k.used.anlas} · 文本 ${fmt(k.used.text_tokens)}</span></div></td>
+        <td data-label="配额"><div class="stack num">${k.is_admin ? '<span>单 Key 不限</span><span class="muted sm">仍受全站保护 · RPM ${k.rpm}</span>' : `
+          <span>免费 ${k.daily_images>0?k.daily_images:'∞'}/日${k.image_model_scope==='all' ? ` · V5 ${k.daily_v5>0?k.daily_v5:'∞'}/日` : ''}</span>
+          <span class="muted sm">Anlas ${k.allow_anlas ? `${k.daily_anlas>0?k.daily_anlas:'∞'}/日 · ${k.monthly_anlas>0?k.monthly_anlas:'∞'}/月` : '未开'}</span>
+          <span class="muted sm">文本 ${fmt(k.daily_text_tokens)}/日 · RPM ${k.rpm}</span>`}</div></td>
+                <td data-label="最近使用 / 到期"><div class="stack"><span>${k.last_used_at ? esc(new Date(k.last_used_at*1000).toLocaleString()) : '从未使用'}</span><span class="muted sm">到期：${esc(exp)}</span></div></td>
+        <td data-label="操作" class="full"><div class="actions">
+          <button class="btn mini" data-act="edit-key" data-id="${k.id}">编辑</button>
+          <button class="btn mini" data-act="toggle-key" data-id="${k.id}" data-on="${k.enabled?0:1}">${k.enabled?'禁用':'启用'}</button>
+          <button class="btn mini" data-act="regen-key" data-id="${k.id}">重新生成 Key</button>
+          <button class="btn mini" data-act="reset-quota" data-id="${k.id}">重置今日额度</button>
+          <button class="btn mini danger" data-act="del-key" data-id="${k.id}">删除</button>
         </div></td>
       </tr>`;
-    }).join('') || '<tr><td colspan="9" class="muted">还没有 Key，点右上角「新建 Key」</td></tr>';
+    }).join('') || '<tr><td colspan="6" class="empty-cell">还没有 Key，点右上角「新建 Key」</td></tr>';
     $('#logFilter').innerHTML = '<option value="">全部 Key</option>' +
       d.keys.map(k=>`<option value="${k.id}">${esc(k.name)}</option>`).join('');
-  }catch(e){ toast(e.message); }
+  }catch(e){ toastErr(e); }
 }
 function mask(t){ return t.slice(0,8) + '····' + t.slice(-4); }
-function copyKey(btn){
+async function copyKey(btn){
   const t = btn.closest('td').querySelector('[data-tok]').dataset.tok;
-  if(!navigator.clipboard?.writeText){
-    prompt('请手动复制：', t); return;
-  }
-  navigator.clipboard.writeText(t).then(()=>toast('已复制'), ()=>{
-    prompt('请手动复制：', t);
-  });
+  if(!await copyText(t)) showKey('请手动复制', '浏览器不允许自动复制，请手动选择并复制：', t);
 }
 function openCreate(){
   editingId = null;
@@ -553,7 +1365,13 @@ function openCreate(){
   $('#f_expires').placeholder='';
   $('#f_allow_anlas').checked=false; $('#f_allow_img2img').checked=false;
   $('#f_exclude_global_v5').checked=false;
-  $('#modalErr').textContent=''; $('#modal').style.display='flex';
+  setFeatForm(null);
+  $('#modalErr').textContent=''; openOverlay('#modal');
+}
+function setFeatForm(list){
+  document.querySelector(`input[name="f_feat_mode"][value="${list==null?'legacy':'custom'}"]`).checked = true;
+  $('#f_feat_list').innerHTML = featChecks(list,'k');
+  syncFeatMode('f_feat_mode','#f_feat_list');
 }
 function openEdit(id){
   const k = keysCache.find(x=>x.id===id); if(!k) return;
@@ -573,9 +1391,10 @@ function openEdit(id){
   $('#f_allow_anlas').checked = k.allow_anlas;
   $('#f_allow_img2img').checked = k.allow_img2img;
   $('#f_exclude_global_v5').checked = k.exclude_global_v5;
-  $('#modalErr').textContent=''; $('#modal').style.display='flex';
+  setFeatForm(k.features == null ? null : k.features);
+  $('#modalErr').textContent=''; openOverlay('#modal');
 }
-function closeModal(){ $('#modal').style.display='none'; }
+function closeModal(){ closeOverlay('#modal'); }
 async function saveKey(){
   const body = {
     name: $('#f_name').value,
@@ -593,54 +1412,62 @@ async function saveKey(){
   try{
     if(editingId){
       if($('#f_expires').value.trim() !== '') body.expires_days = +$('#f_expires').value;
+      const cur = keysCache.find(x=>x.id===editingId), nf = readFeatMode('f_feat_mode','#f_feat_list');
+      if(!cur || !sameFeat(nf, cur.features)) body.features = nf;
       await api('/admin/api/keys/'+editingId, {method:'PATCH', body: JSON.stringify(body)});
-      toast('已保存');
+      toast('已保存', 'ok');
     }else{
       body.expires_days = +$('#f_expires').value;
+      body.features = readFeatMode('f_feat_mode','#f_feat_list');
       const d = await api('/admin/api/keys', {method:'POST', body: JSON.stringify(body)});
+      membersCache = null;
       await loadKeys(); closeModal();
-      prompt('请立即复制新 Key（发给用户）：', d.key.token);
+      showKey('新 Key 已创建', '请立即复制新 Key（发给用户）：', d.key.token);
       return;
     }
+    membersCache = null;
     closeModal(); loadKeys();
   }catch(e){ $('#modalErr').textContent = e.message; }
 }
 async function toggleKey(id, enabled){
-  await api('/admin/api/keys/'+id, {method:'PATCH', body: JSON.stringify({enabled})}).catch(e=>toast(e.message));
+  await api('/admin/api/keys/'+id, {method:'PATCH', body: JSON.stringify({enabled})}).catch(toastErr);
+  membersCache = null;
   loadKeys();
 }
 const regeneratingKeys = new Set();
 async function regenerateKey(id, button){
   const key = keysCache.find(k=>k.id===id);
   if(!key || regeneratingKeys.has(id)) return;
-  if(!confirm(`确定重新生成「${key.name}」的 Key？\n旧 Key 将立即失效，需在客户端替换。\n配额、权限、有效期和历史用量保留，已受理任务继续完成。`)) return;
+  if(!await askConfirm(`确定重新生成「${key.name}」的 Key？\n旧 Key 将立即失效，需在客户端替换。\n配额、权限、有效期和历史用量保留，已受理任务继续完成。`, '重新生成')) return;
   regeneratingKeys.add(id); button.disabled = true;
   try{
     const data = await api('/admin/api/keys/'+id+'/regenerate', {method:'POST'});
     key.token = data.token;
-    prompt('旧 Key 已失效，请复制新 Key 并更新客户端：', data.token);
-    toast('Key 已重新生成，配额和历史用量已保留');
-  }catch(e){ toast(e.message); }
+    showKey('Key 已重新生成', '旧 Key 已失效，请复制新 Key 并更新客户端：', data.token);
+    toast('Key 已重新生成，配额和历史用量已保留', 'ok');
+  }catch(e){ toastErr(e); }
   finally{
     await loadKeys();
-    regeneratingKeys.delete(id); button.disabled = false;
+    regeneratingKeys.delete(id);
   }
 }
 async function resetDailyImageQuota(id){
   const key = keysCache.find(k=>k.id===id); if(!key) return;
   const name = key.name;
-  if(!confirm(`确定重置「${name}」今日的 V5 和 Anlas 用量吗？\n图片、文本、请求数及用量日志不会删除。`)) return;
+  if(!await askConfirm(`确定重置「${name}」今日的 V5 和 Anlas 用量吗？\n图片、文本、请求数及用量日志不会删除。`, '重置')) return;
   try{
     await api('/admin/api/keys/'+id+'/reset-daily-image-quota', {method:'POST'});
-    toast('已重置「'+name+'」今日的 V5 和 Anlas 用量');
+    toast('已重置「'+name+'」今日的 V5 和 Anlas 用量', 'ok');
+    membersCache = null;
     loadKeys();
-  }catch(e){ toast(e.message); }
+  }catch(e){ toastErr(e); }
 }
 async function delKey(id){
   const key = keysCache.find(k=>k.id===id); if(!key) return;
   const name = key.name;
-  if(!confirm(`确定删除 Key「${name}」？该操作不可恢复。`)) return;
-  await api('/admin/api/keys/'+id, {method:'DELETE'}).catch(e=>toast(e.message));
+  if(!await askConfirm(`确定删除 Key「${name}」？该操作不可恢复。`, '删除')) return;
+  await api('/admin/api/keys/'+id, {method:'DELETE'}).catch(toastErr);
+  membersCache = null;
   loadKeys();
 }
 
@@ -648,24 +1475,21 @@ async function delKey(id){
 async function loadLogs(){
   try{
     const kf = $('#logFilter').value;
-    const d = await api('/admin/api/logs?' + (kf?`key_id=${kf}&`:'') + `page=${logPage}`);
+    const d = await api('/admin/api/logs?' + (kf?`key_id=${encodeURIComponent(kf)}&`:'') + `page=${logPage}`);
     logPage = d.page;
     $('#logBody').innerHTML = d.logs.map(l=>`
       <tr>
-        <td class="mono">${new Date(l.ts*1000).toLocaleString()}</td>
-        <td>${esc(l.key_name)}</td>
-        <td>${esc(l.kind)}</td>
-        <td class="mono">${esc(l.model)}</td>
-        <td>${l.status==='ok'?'<span class="tag on">ok</span>':l.status==='rejected'?'<span class="tag warn">拒绝</span>':'<span class="tag off">错误</span>'}</td>
-        <td>${l.images||''}</td><td>${l.anlas||''}</td>
-        <td>${l.unconfirmed_anlas>0?`<span class="tag warn">≈ ${l.unconfirmed_anlas}</span>`:'—'}</td><td>${l.tokens||''}</td>
-        <td class="muted">${esc(l.detail)}</td>
-      </tr>`).join('') || '<tr><td colspan="10" class="muted">暂无记录</td></tr>';
-    $('#logPager').innerHTML = `
-      <span class="muted">共 ${d.total} 条，第 ${d.page} / ${d.pages} 页（每页 ${d.per_page} 条）</span>
-      <button class="btn mini" onclick="changeLogPage(-1)" ${d.page<=1?'disabled':''}>上一页</button>
-      <button class="btn mini" onclick="changeLogPage(1)" ${d.page>=d.pages?'disabled':''}>下一页</button>`;
-  }catch(e){ toast(e.message); }
+        <td class="mono" data-label="时间">${esc(new Date(l.ts*1000).toLocaleString())}</td>
+        <td data-label="Key">${esc(l.key_name)}</td>
+        <td data-label="类型">${esc(l.kind)}</td>
+        <td class="mono" data-label="模型">${esc(l.model)}</td>
+        <td data-label="状态">${l.status==='ok'?'<span class="tag on">ok</span>':l.status==='rejected'?'<span class="tag warn">拒绝</span>':'<span class="tag off">错误</span>'}</td>
+        <td class="num" data-label="图">${esc(l.images||'')}</td><td class="num" data-label="Anlas">${esc(l.anlas||'')}</td>
+        <td data-label="可能消耗 Anlas">${l.unconfirmed_anlas>0?`<span class="tag warn">≈ ${esc(l.unconfirmed_anlas)}</span>`:'—'}</td><td class="num" data-label="tokens">${esc(l.tokens||'')}</td>
+        <td class="muted" data-label="备注">${esc(l.detail)}</td>
+      </tr>`).join('') || '<tr><td colspan="10" class="empty-cell">暂无记录</td></tr>';
+    pager($('#logPager'), d, 'log');
+  }catch(e){ toastErr(e); }
 }
 function changeLogPage(delta){ logPage=Math.max(1,logPage+delta); loadLogs(); }
 
@@ -684,19 +1508,21 @@ async function loadSettings(){
     }
     $('#cfgInfo').innerHTML =
       `上游令牌池：${o.pool_configured ? o.pool.map(p=>esc(p.token)).join(', ') : '未配置（设置 NAI_TOKENS）'}<br>` +
-      `本月 Anlas：${o.month.anlas} / 预算 ${o.anlas_budget>0?o.anlas_budget:'∞'}<br>` +
-      `今日请求：${o.today.requests} ｜ 图片 ${o.today.images} ｜ Anlas ${o.today.anlas}<br>` +
+      `本月 Anlas：${esc(o.month.anlas)} / 预算 ${o.anlas_budget>0?esc(o.anlas_budget):'∞'}<br>` +
+      `今日请求：${esc(o.today.requests)} ｜ 图片 ${esc(o.today.images)} ｜ Anlas ${esc(o.today.anlas)}<br>` +
       `敏感配置仍在 .env；更多说明见项目 README`;
-  }catch(e){ toast(e.message); }
+  }catch(e){ toastErr(e); }
 }
 async function saveBudget(){
-  const d = await api('/admin/api/settings', {method:'PUT', body: JSON.stringify({
-    global_monthly_anlas: +$('#s_budget').value,
-    global_daily_v5: +$('#s_v5').value,
-    v5_alert_threshold: +$('#s_v5_alert').value,
-  })});
-  toast('已保存：月预算 ' + d.global_monthly_anlas + 'A / V5 日限 ' + d.global_daily_v5);
-  loadAllowance();
+  try{
+    const d = await api('/admin/api/settings', {method:'PUT', body: JSON.stringify({
+      global_monthly_anlas: +$('#s_budget').value,
+      global_daily_v5: +$('#s_v5').value,
+      v5_alert_threshold: +$('#s_v5_alert').value,
+    })});
+    toast('已保存：月预算 ' + d.global_monthly_anlas + 'A / V5 日限 ' + d.global_daily_v5, 'ok');
+    loadAllowance();
+  }catch(e){ toastErr(e); }
 }
 async function saveRuntimeLimits(){
   const body = {};
@@ -705,21 +1531,110 @@ async function saveRuntimeLimits(){
   for(const [name,[min,max]] of Object.entries(bounds)){
     const value = Number($('#r_'+name).value);
     if(!Number.isInteger(value) || value<min || value>max){
-      toast(`${name} 必须是 ${min}～${max} 的整数`); return;
+      toast(`${name} 必须是 ${min}～${max} 的整数`, 'err'); return;
     }
     body[name] = value;
   }
   try{
     await api('/admin/api/runtime-limits', {method:'PUT',body:JSON.stringify(body)});
-    toast('运行限制已保存并生效');
-  }catch(e){ toast(e.message); }
+    toast('运行限制已保存并生效', 'ok');
+  }catch(e){ toastErr(e); }
 }
 async function saveAnnounce(){
-  await api('/admin/api/announcement', {method:'PUT', body: JSON.stringify({html: $('#announce').value})});
-  toast('公告已保存');
+  try{
+    await api('/admin/api/announcement', {method:'PUT', body: JSON.stringify({html: $('#announce').value})});
+    toast('公告已保存', 'ok');
+  }catch(e){ toastErr(e); }
 }
 
+/* ---------- events ---------- */
+document.addEventListener('click', ev=>{
+  const nav = ev.target.closest('.nav button[data-tab]');
+  if(nav){ tab(nav.dataset.tab); return; }
+  const el = ev.target.closest('[data-act]');
+  if(!el){
+    if(ev.target.classList && ev.target.classList.contains('overlay') && ev.target.id!=='confirmModal'){
+      closeOverlay('#'+ev.target.id);
+    }
+    return;
+  }
+  const id = Number(el.dataset.id);
+  switch(el.dataset.act){
+    case 'refresh-ov': loadOverview(); loadAllowance(); break;
+    case 'refresh-members': membersCache=null; loadMembers(); break;
+    case 'refresh-audit': loadAudit(); break;
+    case 'refresh-keys': loadKeys(); break;
+    case 'refresh-logs': loadLogs(); break;
+    case 'recon-reload': loadReconciliation(); break;
+    case 'recon-run': runReconciliation(); break;
+    case 'alert-test': sendTestAlert(el); break;
+    case 'up-enabled': setUpstreamEnabled(el.dataset.id, el.dataset.on==='1'); break;
+    case 'up-v5': saveUpstreamV5Limit(el.dataset.id); break;
+    case 'up-conc': saveUpstreamImageConcurrency(el.dataset.id); break;
+    case 'view-audit': viewAudit(id); break;
+    case 'zoom': openLightbox(id); break;
+    case 'close-lightbox': closeOverlay('#lightbox'); $('#lbImg').removeAttribute('src'); break;
+    case 'expand': el.classList.toggle('open'); break;
+    case 'copy-prompt': { const m = auditPrompts.get(id); if(m) copyText(m.p, '提示词已复制').then(ok=>{ if(!ok) toast('复制失败，请手动选择文本', 'err'); }); break; }
+    case 'audit-page': auditPage = Math.max(1, auditPage + Number(el.dataset.d)); loadAudit(); break;
+    case 'log-page': changeLogPage(Number(el.dataset.d)); break;
+    case 'refresh-ops': loadOps(); break;
+    case 'save-reg': saveReg(); break;
+    case 'save-audit': saveAudit(); break;
+    case 'new-key': openCreate(); break;
+    case 'edit-key': openEdit(id); break;
+    case 'close-modal': closeModal(); break;
+    case 'save-key': saveKey(); break;
+    case 'toggle-key': toggleKey(id, el.dataset.on==='1'?1:0); break;
+    case 'regen-key': regenerateKey(id, el); break;
+    case 'reset-quota': resetDailyImageQuota(id); break;
+    case 'del-key': delKey(id); break;
+    case 'copy-key': copyKey(el); break;
+    case 'copy-modal-key': { const v=$('#keyModalVal').value; copyText(v).then(ok=>{ if(!ok){ $('#keyModalVal').select(); toast('请按 Ctrl/Cmd+C 复制'); } }); break; }
+    case 'close-keymodal': closeOverlay('#keyModal'); $('#keyModalVal').value=''; break;
+    case 'save-budget': saveBudget(); break;
+    case 'save-runtime': saveRuntimeLimits(); break;
+    case 'save-announce': saveAnnounce(); break;
+  }
+});
+$('#loginBtn').addEventListener('click', doLogin);
+$('#pwd').addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
+$('#logoutBtn').addEventListener('click', logout);
+$('#themeBtn').addEventListener('click', toggleTheme);
+$('#themeBtn2').addEventListener('click', toggleTheme);
+$('#menuBtn').addEventListener('click', ()=>document.body.classList.toggle('nav-open'));
+$('#scrim').addEventListener('click', ()=>document.body.classList.remove('nav-open'));
+$('#confirmYes').addEventListener('click', ()=>settleConfirm(true));
+$('#confirmNo').addEventListener('click', ()=>settleConfirm(false));
+document.addEventListener('change', ev=>{
+  const t = ev.target;
+  if(t.dataset && t.dataset.feat) toggleFeature(t);
+  else if(t.id==='regOpen') toggleRegOpen(t);
+  else if(t.name==='reg_feat_mode') syncFeatMode('reg_feat_mode','#reg_feat_list');
+  else if(t.name==='f_feat_mode') syncFeatMode('f_feat_mode','#f_feat_list');
+});
+$('#logFilter').addEventListener('change', ()=>{ logPage=1; loadLogs(); });
+$('#auditFilter').addEventListener('change', ()=>{ auditPage=1; loadAudit(); });
+$('#memberSearch').addEventListener('input', e=>{ memberQuery = e.target.value; renderMembers(); });
+$('#memberSort').addEventListener('click', e=>{
+  const b = e.target.closest('button[data-sort]'); if(!b) return;
+  memberSort = b.dataset.sort;
+  $$('#memberSort button').forEach(x=>x.classList.toggle('active', x===b));
+  renderMembers();
+});
+document.addEventListener('keydown', e=>{
+  if(e.key!=='Escape') return;
+  if($('#confirmModal').classList.contains('show')) settleConfirm(false);
+  else if($('#lightbox').classList.contains('show')){ closeOverlay('#lightbox'); }
+  else if($('#keyModal').classList.contains('show')){ closeOverlay('#keyModal'); $('#keyModalVal').value=''; }
+  else if($('#modal').classList.contains('show')) closeModal();
+  document.body.classList.remove('nav-open');
+});
 document.addEventListener('visibilitychange', ()=>{ if(!document.hidden && allowanceTimer) loadAllowance(); });
+if(window.matchMedia) matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', applyThemeUi);
+
+hydrateIcons();
+applyThemeUi();
 boot();
 </script>
 </body>

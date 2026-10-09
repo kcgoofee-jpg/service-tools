@@ -14,9 +14,19 @@ BACKEND = os.getenv("REGISTRATION_BACKEND_URL", "http://127.0.0.1:3003").rstrip(
 SITE = os.getenv("SITE_URL", "").rstrip("/")
 
 
-async def backend(path: str, interaction: discord.Interaction, extra_id: str | None = None):
+FEATURE_CHOICES = [
+    app_commands.Choice(name=label, value=name) for name, label in (
+        ("image", "文生图"), ("upscale", "放大"), ("augment", "导演工具"), ("vibe", "Vibe 编码"),
+        ("tags", "标签补全"), ("text", "文本 / 聊天"), ("voice", "语音合成"))
+]
+STATUS_TEXT = {"ok": "🟢 正常", "idle": "🟢 正常（近期无请求）", "degraded": "🟠 不稳定（近期失败较多）"}
+
+
+async def backend(path: str, interaction: discord.Interaction, extra_id: str | None = None,
+                  extra: dict | None = None):
     """POST to the gateway bridge. Returns (status, json-or-detail-text)."""
-    payload = {"discord_id": extra_id or str(interaction.user.id), "guild_id": str(interaction.guild_id)}
+    payload = {"discord_id": extra_id or str(interaction.user.id), "guild_id": str(interaction.guild_id),
+               **(extra or {})}
     try:
         async with httpx.AsyncClient(timeout=8) as client:
             response = await client.post(BACKEND + path, json=payload,
@@ -48,6 +58,10 @@ def build_client() -> tuple[discord.Client, app_commands.CommandTree, discord.Ob
             lines.append(f"今日 V5：{data['v5']} / {data['daily_v5']}")
         scope = "含 V5" if data["image_model_scope"] == "all" else "仅 V4.5 及以下"
         lines.append(f"可用模型：{scope}")
+        lines.append("已开通功能：" + ("、".join(f["label"] for f in data["features"] if f["on"]) or "无"))
+        closed = [f["label"] for f in data["features"] if not f["on"]]
+        if closed:
+            lines.append("未开通：" + "、".join(closed))
         if data["expires_at"]:
             days = max(0, int((data["expires_at"] - time.time()) // 86400))
             lines.append(f"Key 剩余有效期：约 {days} 天")
@@ -67,15 +81,64 @@ def build_client() -> tuple[discord.Client, app_commands.CommandTree, discord.Ob
 
     @tree.command(name="help", description="怎么使用 NAI Gate", guild=guild)
     async def help_(interaction: discord.Interaction):
-        text = ("1. 用 `/register` 领取 Key，会私信发给你。\n"
-                f"2. 在柏宝绘等支持自定义 NovelAI 地址的客户端里，接口地址填 `{SITE}`，Key 填你领到的 `nai-…`。\n"
-                "3. `/quota` 查看今日额度，`/resetkey` 重置 Key。\n"
-                "4. 请勿分享 Key；额度用完次日重置。")
-        if os.getenv("AUDIT_PROMPTS", "").lower() in ("1", "true", "yes", "on") or \
-                os.getenv("AUDIT_THUMBS", "").lower() in ("1", "true", "yes", "on"):
-            text += (f"\n5. 为防止滥用，本站会保留图片提示词和小缩略图 {os.getenv('AUDIT_RETENTION_DAYS', '7')} 天后自动删除，"
-                     "仅站长可见。")
-        await interaction.response.send_message(text, ephemeral=True)
+        await interaction.response.defer(ephemeral=True)
+        status, data = await backend("/self-register/info", interaction)
+        lines = ["1. 用 `/register` 领取 Key，会私信发给你。",
+                 f"2. 在柏宝绘等支持自定义 NovelAI 地址的客户端里，接口地址填 `{SITE}`，Key 填你领到的 `nai-…`。",
+                 "3. `/quota` 查看今日额度和已开通功能，`/resetkey` 重置 Key，`/status` 看上游是否正常。",
+                 "4. 请勿分享 Key；额度用完次日重置。"]
+        if status == 200:
+            lines.append("新成员默认开通：" + "、".join(f["label"] for f in data["default_features"]) + "。")
+            if not data["open"]:
+                lines.append("⚠ 目前暂未开放注册。")
+            if data["notice"]:
+                lines.append("📢 " + data["notice"])
+        await interaction.followup.send("\n".join(lines), ephemeral=True)
+
+    @tree.command(name="status", description="查看上游（NovelAI）当前是否正常", guild=guild)
+    async def status_(interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        code, data = await backend("/self-register/info", interaction)
+        if code != 200:
+            await interaction.followup.send(str(data), ephemeral=True)
+            return
+        up = data["upstream"]
+        lines = [f"上游状态：{STATUS_TEXT.get(up['status'], up['status'])}"]
+        if up["recent"]:
+            lines.append(f"近 10 分钟：{up['recent']} 次请求，失败 {up['failed']} 次")
+        if up["image_cooldown_seconds"]:
+            lines.append(f"⏳ 上游限流冷却中，约 {up['image_cooldown_seconds']} 秒后恢复生图")
+        await interaction.followup.send("\n".join(lines), ephemeral=True)
+
+    async def run_ops(interaction: discord.Interaction, action: str, **extra):
+        await interaction.response.defer(ephemeral=True)
+        code, data = await backend("/self-register/ops", interaction, extra={"action": action, **extra})
+        await interaction.followup.send(data["message"] if code == 200 else str(data), ephemeral=True)
+
+    @tree.command(name="open", description="（管理员）开放或关闭自助注册", guild=guild)
+    @app_commands.default_permissions(manage_guild=True)
+    @app_commands.choices(state=[app_commands.Choice(name="开放", value="on"), app_commands.Choice(name="关闭", value="off")])
+    async def open_(interaction: discord.Interaction, state: app_commands.Choice[str]):
+        await run_ops(interaction, "open", value=state.value)
+
+    @tree.command(name="limit", description="（管理员）设置名额上限，0 为不限", guild=guild)
+    @app_commands.default_permissions(manage_guild=True)
+    async def limit(interaction: discord.Interaction, count: app_commands.Range[int, 0, 1000]):
+        await run_ops(interaction, "limit", value=str(count))
+
+    @tree.command(name="grant", description="（管理员）给成员开通或关闭某项功能", guild=guild)
+    @app_commands.default_permissions(manage_guild=True)
+    @app_commands.choices(feature=FEATURE_CHOICES,
+                          state=[app_commands.Choice(name="开通", value="on"), app_commands.Choice(name="关闭", value="off")])
+    async def grant(interaction: discord.Interaction, member: discord.Member,
+                    feature: app_commands.Choice[str], state: app_commands.Choice[str]):
+        await run_ops(interaction, "grant", target=str(member.id), feature=feature.value, value=state.value)
+
+    @tree.command(name="audit", description="（管理员）开关生成记录（提示词与缩略图）并通知成员", guild=guild)
+    @app_commands.default_permissions(manage_guild=True)
+    @app_commands.choices(state=[app_commands.Choice(name="开启", value="on"), app_commands.Choice(name="关闭", value="off")])
+    async def audit(interaction: discord.Interaction, state: app_commands.Choice[str]):
+        await run_ops(interaction, "audit", value=state.value)
 
     @tree.command(name="slots", description="（管理员）查看名额占用", guild=guild)
     @app_commands.default_permissions(manage_guild=True)
@@ -87,7 +150,8 @@ def build_client() -> tuple[discord.Client, app_commands.CommandTree, discord.Ob
             return
         cap = data["max"] or "不限"
         reset = f"，每天 {data['reset_at']} 自动清空" if data["reset_at"] else ""
-        await interaction.followup.send(f"已领取 {data['active']} / {cap}{reset}", ephemeral=True)
+        state = "开放中" if data.get("open", True) else "已关闭"
+        await interaction.followup.send(f"已领取 {data['active']} / {cap}{reset}；注册{state}", ephemeral=True)
 
     @tree.command(name="revoke", description="（管理员）撤销某位成员的 Key，释放名额", guild=guild)
     @app_commands.default_permissions(manage_guild=True)

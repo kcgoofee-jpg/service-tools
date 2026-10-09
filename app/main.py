@@ -47,7 +47,8 @@ from .policy import (
     text_model_host,
 )
 from .state import GateState
-from .audit import audit_notice, make_thumbnail, prompt_texts
+from . import features
+from .audit import audit_flags, audit_notice, make_thumbnail, prompt_texts
 from .upstream_errors import upstream_error_message, text_stream_events
 from .sse import encode_sse
 
@@ -200,6 +201,18 @@ async def authenticate(request: Request):
     return row
 
 
+async def require_feature(key, name: str) -> None:
+    reason = await features.check(STATE.db, key, name)
+    if reason:
+        raise err(403, reason)
+
+
+def upstream_outcome(ok: bool) -> None:
+    tracker = getattr(STATE, "record_upstream", None)
+    if tracker is not None:
+        tracker(ok)
+
+
 def notify_owner(kind: str, message: str, cooldown: float = 900) -> None:
     alerter = getattr(STATE, "alerter", None)
     if alerter is not None:
@@ -209,12 +222,16 @@ def notify_owner(kind: str, message: str, cooldown: float = 900) -> None:
 async def audit_generation(key, kind: str, model: str, status: str, body: dict, content: bytes | None = None) -> None:
     """按配置记录提示词和缩略图；任何失败都不得影响生图结果。"""
     cfg = STATE.settings
-    if not (getattr(cfg, "audit_prompts", False) or getattr(cfg, "audit_thumbs", False)):
+    try:
+        want_prompts, want_thumbs, _days = await audit_flags(STATE.db, cfg)
+    except Exception:
+        return
+    if not (want_prompts or want_thumbs):
         return
     try:
-        prompt, negative = prompt_texts(body) if cfg.audit_prompts else ("", "")
+        prompt, negative = prompt_texts(body) if want_prompts else ("", "")
         thumb = None
-        if cfg.audit_thumbs and content and status == "ok":
+        if want_thumbs and content and status == "ok":
             thumb = await anyio.to_thread.run_sync(make_thumbnail, content)
         await STATE.db.add_audit(key["id"], key["name"], kind, model, status, prompt, negative, thumb)
     except Exception:
@@ -225,7 +242,7 @@ async def maintenance_loop() -> None:
     """每 5 分钟：清理过期生成记录；磁盘与告警自检。"""
     while True:
         try:
-            days = max(1, STATE.settings.audit_retention_days)
+            days = max(1, (await audit_flags(STATE.db, STATE.settings))[2])
             await STATE.db.purge_audit(time.time() - days * 86400)
             usage = shutil.disk_usage(STATE.settings.data_dir)
             if usage.free / usage.total < 0.10:
@@ -531,6 +548,7 @@ async def image_tool(request: Request, operation: str):
     key = await authenticate(request)
     check_image_cooldown()
     await check_rpm(key)
+    await require_feature(key, "upscale" if operation == "upscale" else "augment")
     if not key["is_admin"] and not (key["allow_img2img"] and STATE.settings.allow_img2img):
         raise err(403, "此 Key 或本站未开放图片处理权限（img2img）")
     body = await read_image_payload(request)
@@ -590,6 +608,7 @@ async def encode_vibe(request: Request):
     key = await authenticate(request)
     check_image_cooldown()
     await check_rpm(key)
+    await require_feature(key, "vibe")
     body = await read_image_payload(request)
     # Accept Launcher's spelling as well as the existing Gate client field.
     if "information_extracted" in body:
@@ -661,6 +680,7 @@ async def _generate_image(request: Request, *, streaming: bool):
     key = await authenticate(request)
     check_image_cooldown()
     await check_rpm(key)
+    await require_feature(key, "image")
     body = await read_image_payload(request)
     model = str(body.get("model", "?"))
     if not isinstance(body.get("parameters"), dict):
@@ -764,11 +784,13 @@ async def _generate_image(request: Request, *, streaming: bool):
             await record(key, "image", model, "error", detail=exc.message,
                          unconfirmed_anlas=est["anlas"] if exc.billing_uncertain else 0)
             await audit_generation(key, "image", model, "error", body)
+            upstream_outcome(False)
             raise
         if resp.status_code not in (200, 201):
             await record(key, "image", model, "error", detail=f"upstream {resp.status_code}",
                          unconfirmed_anlas=est["anlas"] if resp.status_code >= 500 else 0)
             await audit_generation(key, "image", model, "error", body)
+            upstream_outcome(resp.status_code < 500)
             if resp.status_code >= 500:
                 notify_owner("upstream_5xx", f"NovelAI 图片接口返回 {resp.status_code}，上游可能故障。", 1800)
             raise err(resp.status_code, upstream_error_message(resp.status_code))
@@ -776,6 +798,7 @@ async def _generate_image(request: Request, *, streaming: bool):
                             v5=est["v5"], legacy_free_images=legacy_free_images,
                             detail=detail)
         await audit_generation(key, "image", model, "ok", body, resp.content)
+        upstream_outcome(True)
         return Response(resp.content, status_code=200,
                         media_type=resp.headers.get("content-type", "application/octet-stream"))
 
@@ -860,6 +883,7 @@ async def _generate_image(request: Request, *, streaming: bool):
                         detail=detail + (f"; 完成 {completed}/{image_count}" if completed < image_count else ""),
                     )
                 await audit_generation(key, "image_stream", model, "ok" if completed and not failure else "error", body)
+                upstream_outcome(bool(completed) and not failure)
                 if failure or not completed:
                     # 未结算部分单独记为待核对费用。
                     await record(key, "image_stream", model, "error",
@@ -892,6 +916,7 @@ async def _generate_image(request: Request, *, streaming: bool):
 async def suggest_tags(request: Request):
     key = await authenticate(request)
     check_image_cooldown()
+    await require_feature(key, "tags")
     admitted = False
     try:
         # Bound body reads, semaphore waiting and the optional upstream lookup.
@@ -979,6 +1004,7 @@ class TextStreamResponse(StreamingResponse):
 async def generate_stream(request: Request):
     key = await authenticate(request)
     await check_rpm(key)
+    await require_feature(key, "text")
     body = await read_json(request)
     model = str(body.get("model", "?"))
     _require_text_model(key, model, "text")
@@ -1035,6 +1061,7 @@ async def generate_stream(request: Request):
 async def generate_text(request: Request):
     key = await authenticate(request)
     await check_rpm(key)
+    await require_feature(key, "text")
     body = await read_json(request)
     model = str(body.get("model", "?"))
     _require_text_model(key, model, "text")
@@ -1065,6 +1092,7 @@ async def generate_text(request: Request):
 async def generate_voice(request: Request):
     key = await authenticate(request)
     await check_rpm(key)
+    await require_feature(key, "voice")
     if not (key["is_admin"] or key["allow_anlas"]):
         record(key, "voice", "", "rejected", detail="voice requires allow_anlas")
         raise err(403, "此 Key 无权使用语音合成")
@@ -1118,6 +1146,7 @@ async def v1_me(request: Request):
 async def v1_chat(request: Request):
     key = await authenticate(request)
     await check_rpm(key)
+    await require_feature(key, "text")
     body = await read_json(request)
     want_stream = bool(body.get("stream"))
 
@@ -1242,7 +1271,7 @@ _ANNOUNCEMENT_HEADERS = {"Content-Security-Policy": "sandbox allow-popups allow-
 async def index():
     p = SETTINGS.announcement_path
     html = p.read_text(encoding="utf-8") if p.exists() and p.read_text(encoding="utf-8").strip() else DEFAULT_ANNOUNCEMENT
-    notice = audit_notice(SETTINGS.audit_prompts, SETTINGS.audit_thumbs, SETTINGS.audit_retention_days)
+    notice = audit_notice(*(await audit_flags(STATE.db, SETTINGS)))
     if notice:  # 记录功能开启时，首页始终披露，站长无法在公告里漏掉
         footer = f'<p style="margin:24px auto;max-width:760px;padding:0 20px;font:13px system-ui;opacity:.7">{notice}</p>'
         html = html.replace("</body>", footer + "</body>", 1) if "</body>" in html else html + footer

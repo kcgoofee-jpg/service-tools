@@ -74,6 +74,7 @@ class Settings:
     alert_user_id: str = os.getenv("ALERT_USER_ID", "")        # 告警私信给此 Discord 用户（用机器人发）
     alert_channel_id: str = os.getenv("ALERT_CHANNEL_ID", "")  # 或发到某频道
     alert_webhook_url: str = os.getenv("ALERT_WEBHOOK_URL", "")  # 或使用 Webhook
+    announce_channel_id: str = os.getenv("ANNOUNCE_CHANNEL_ID", "")  # 给成员的公告频道
     audit_prompts: bool = _bool("AUDIT_PROMPTS", False)        # 记录图片请求的提示词
     audit_thumbs: bool = _bool("AUDIT_THUMBS", False)          # 记录成功结果的小缩略图
     audit_retention_days: int = _int("AUDIT_RETENTION_DAYS", 7)

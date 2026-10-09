@@ -14,6 +14,8 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Request, Response
 
+from . import features as feature_defs
+from . import ops
 from .policy import gen_key
 from .body import read_json_body
 from .allowance import SETTING, read_alert_threshold
@@ -198,6 +200,7 @@ def _key_json(row, counter, generated_images_total: int = 0) -> dict[str, Any]:
         "exclude_global_v5": bool(row["exclude_global_v5"]),
         "image_model_scope": row["image_model_scope"],
         "is_admin": bool(row["is_admin"]),
+        "features": feature_defs.key_features(row),
         "expires_at": row["expires_at"],
         "created_at": row["created_at"],
         "last_used_at": row["last_used_at"],
@@ -225,6 +228,16 @@ async def list_keys(request: Request):
         c = await st.db.get_counter(r["id"], today)
         out.append(_key_json(r, c, totals.get(r["id"], 0)))
     return {"keys": out}
+
+
+def _features_field(body: dict):
+    """features: null/缺省 = 沿用旧行为（全局开启的都可用）；列表 = 仅允许所列功能。"""
+    if "features" not in body or body["features"] is None:
+        return None
+    value = body["features"]
+    if not isinstance(value, list) or any(not isinstance(v, str) or v not in feature_defs.FEATURES for v in value):
+        raise HTTPException(422, "features 必须是功能名列表：" + ",".join(feature_defs.FEATURES))
+    return feature_defs.dump(value)
 
 
 def _num(value: Any, kind: type, lo, hi, name: str):
@@ -274,6 +287,7 @@ async def create_key(request: Request):
         "allow_img2img": bool(body.get("allow_img2img", False)),
         "exclude_global_v5": bool(body.get("exclude_global_v5", False)),
         "image_model_scope": image_model_scope,
+        "features": _features_field(body),
         "expires_at": expires_at,
     })
     c = await st.db.get_counter(row["id"], st.day())
@@ -322,6 +336,8 @@ async def patch_key(request: Request, key_id: int):
         fields["exclude_global_v5"] = bool(body["exclude_global_v5"])
     if "image_model_scope" in body:
         fields["image_model_scope"] = "all" if body["image_model_scope"] == "all" else "legacy"
+    if "features" in body:
+        fields["features"] = _features_field(body)
     if "expires_days" in body:
         d = _num(body["expires_days"], int, 0, 3650, "expires_days")
         fields["expires_at"] = (time.time() + d * 86400) if d > 0 else None
@@ -554,8 +570,8 @@ async def server_status(request: Request):
     usage = shutil.disk_usage(cfg.data_dir)
     return {
         "alerts": {"configured": st.alerter.configured, "sent": st.alerter.sent},
-        "audit": {"prompts": cfg.audit_prompts, "thumbs": cfg.audit_thumbs,
-                  "retention_days": cfg.audit_retention_days},
+        "audit": dict(zip(("prompts", "thumbs", "retention_days"), await ops.audit_flags(st.db, cfg))),
+        "upstream": st.upstream_health(),
         "protection": {"auth_fail_max": cfg.auth_fail_max, "auth_fail_window": cfg.auth_fail_window,
                        "auth_block_seconds": cfg.auth_block_seconds,
                        "login_max_attempts": cfg.login_max_attempts},
@@ -571,3 +587,67 @@ async def alerts_test(request: Request):
         raise HTTPException(409, "尚未配置告警渠道（ALERT_USER_ID / ALERT_CHANNEL_ID / ALERT_WEBHOOK_URL）")
     alerter.notify("test", "这是一条测试告警，收到说明告警渠道正常。", cooldown=0)
     return {"ok": True}
+
+
+# ----------------------------------------------------------- 运行中开关 ----
+
+async def _ops_snapshot(request: Request) -> dict:
+    st = request.app.state.gate
+    service = getattr(request.app.state, "registrar", None)
+    reg = await ops.registration_settings(st.db, service)
+    reg["active"] = await service.count_active() if service else 0
+    reg["reset_at"] = service.reset_at if service else ""
+    prompts, thumbs, days = await ops.audit_flags(st.db, st.settings)
+    return {
+        "registration": reg,
+        "features": {"global": await feature_defs.global_flags(st.db), "labels": feature_defs.FEATURES},
+        "audit": {"prompts": prompts, "thumbs": thumbs, "retention_days": days,
+                  "announce_configured": st.announcer.configured},
+        "upstream": st.upstream_health(),
+    }
+
+
+@router.get("/ops")
+async def ops_get(request: Request):
+    require_admin(request)
+    return await _ops_snapshot(request)
+
+
+@router.put("/ops/registration")
+async def ops_set_registration(request: Request):
+    """开放 / 关闭自助注册、名额上限、新成员默认功能与额度；机器人下一条命令即生效。"""
+    require_admin(request)
+    body = await read_json_body(request)
+    if "features" in body and body["features"] is not None:
+        if not isinstance(body["features"], list) or any(v not in feature_defs.FEATURES for v in body["features"]):
+            raise HTTPException(422, "features 必须是功能名列表")
+    try:
+        await ops.set_registration(request.app.state.gate.db, body)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(422, str(exc) or "参数无效") from None
+    return await _ops_snapshot(request)
+
+
+@router.put("/ops/features")
+async def ops_set_features(request: Request):
+    """全局功能开关：{"flags": {"text": false, ...}}。关闭后所有成员（管理员 Key 除外）立即不可用。"""
+    require_admin(request)
+    body = await read_json_body(request)
+    flags = body.get("flags")
+    if not isinstance(flags, dict) or not flags or any(
+            k not in feature_defs.FEATURES or type(v) is not bool for k, v in flags.items()):
+        raise HTTPException(422, "flags 必须是 {功能名: true/false}")
+    await ops.set_global_features(request.app.state.gate.db, flags)
+    return await _ops_snapshot(request)
+
+
+@router.put("/ops/audit")
+async def ops_set_audit(request: Request):
+    """开关生成记录。notify（默认 true）会向成员公告频道发出测试期声明。"""
+    require_admin(request)
+    body = await read_json_body(request)
+    try:
+        await ops.set_audit(request.app.state.gate, body)
+    except (TypeError, ValueError):
+        raise HTTPException(422, "参数无效") from None
+    return await _ops_snapshot(request)

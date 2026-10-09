@@ -9,6 +9,7 @@ from urllib.parse import urlencode
 
 import httpx
 
+from . import features
 from .policy import gen_key
 
 COMMAND_GUILD = "1480185480048808009"
@@ -28,8 +29,8 @@ class RegistrationService:
                  membership_role: str = MEMBERSHIP_ROLE, site_url: str = SITE_URL,
                  key_daily_images: int = 100, key_daily_v5: int = 50,
                  key_image_scope: str = "all", key_expires_days: int = 0, key_rpm: int = 5,
-                 max_users: int = 0, reset_at: str = ""):
-        self.max_users, self.reset_at = max_users, reset_at
+                 max_users: int = 0, reset_at: str = "", key_features: str | None = None):
+        self.max_users, self.reset_at, self.key_features = max_users, reset_at, key_features
         self.command_guild, self.membership_guild = command_guild, membership_guild
         self.membership_role, self.site_url = membership_role, site_url
         self.key_daily_images, self.key_daily_v5 = key_daily_images, key_daily_v5
@@ -47,9 +48,17 @@ class RegistrationService:
             "SELECT COUNT(*) FROM discord_registrations r JOIN api_keys k ON k.id=r.key_id")
         return int(rows[0][0])
 
-    async def _check_capacity(self) -> None:
-        if self.max_users and await self.count_active() >= self.max_users:
-            raise RegistrationError(f"名额已满（上限 {self.max_users} 人），请联系站长。")
+    async def settings(self) -> dict:
+        from .ops import registration_settings
+        return await registration_settings(self.db, self)
+
+    async def _check_capacity(self) -> dict:
+        cfg = await self.settings()
+        if not cfg["open"]:
+            raise RegistrationError("注册暂未开放，请等待站长开放。")
+        if cfg["max_users"] and await self.count_active() >= cfg["max_users"]:
+            raise RegistrationError(f"名额已满（上限 {cfg['max_users']} 人），请联系站长。")
+        return cfg
 
     async def key_row_for(self, discord_id: str):
         rows = await self.db._db.execute_fetchall(
@@ -110,7 +119,7 @@ class RegistrationService:
                 "SELECT 1 FROM discord_registrations WHERE discord_id=?", (expected_id,)
             )):
                 raise RegistrationError("这个 Discord 账号已经领取过 Key。")
-            await self._check_capacity()
+            cfg = await self._check_capacity()
             try:
                 response = await self.http.post("https://discord.com/api/oauth2/token", data={
                     "client_id": self.client_id, "client_secret": self.client_secret,
@@ -132,24 +141,26 @@ class RegistrationService:
                 key = gen_key("nai")
                 row = await self.db.create_key({
                     "name": "Discord:" + expected_id, "token": key,
-                    "daily_images": self.key_daily_images, "daily_v5": self.key_daily_v5,
+                    "daily_images": cfg["daily_images"], "daily_v5": cfg["daily_v5"],
+                    "features": features.dump(cfg["features"]) if cfg["features"] is not None else None,
                     "daily_anlas": 0, "monthly_anlas": 0, "daily_text_tokens": 0,
                     "rpm": self.key_rpm,
                     "allow_anlas": False, "allow_img2img": False,
-                    "exclude_global_v5": False, "image_model_scope": self.key_image_scope,
-                    "expires_at": (time.time() + self.key_expires_days * 86400)
-                                  if self.key_expires_days > 0 else None,
+                    "exclude_global_v5": False, "image_model_scope": cfg["image_scope"],
+                    "expires_at": (time.time() + cfg["expires_days"] * 86400)
+                                  if cfg["expires_days"] > 0 else None,
                 })
                 await self.db._db.execute(
                     "INSERT INTO discord_registrations(discord_id,key_id,created_at) VALUES (?,?,?)",
                     (expected_id, row["id"], time.time()))
                 await self.db._db.commit()
-                from .audit import audit_notice
-                notice = audit_notice(os.getenv("AUDIT_PROMPTS", "").lower() in ("1", "true", "yes", "on"),
-                                      os.getenv("AUDIT_THUMBS", "").lower() in ("1", "true", "yes", "on"),
-                                      int(os.getenv("AUDIT_RETENTION_DAYS", "7") or 7))
-                quota = f"V4.5 及以下 {self.key_daily_images} 张" + (
-                    f"；V5 {self.key_daily_v5} 张" if self.key_daily_v5 else "")
+                from .audit import audit_flags, audit_notice
+                from .ops import env_audit_defaults
+                notice = audit_notice(*(await audit_flags(self.db, env_audit_defaults())))
+                quota = f"V4.5 及以下 {cfg['daily_images']} 张" + (
+                    f"；V5 {cfg['daily_v5']} 张" if cfg["daily_v5"] else "")
+                if cfg["features"] is not None:
+                    quota += "。已开通：" + "、".join(features.FEATURES[f] for f in cfg["features"])
                 try:
                     await self._discord("POST", f"/channels/{channel['id']}/messages",
                         bearer="Bot " + self.bot_token,
@@ -188,4 +199,5 @@ def configured_service(db, http: httpx.AsyncClient) -> RegistrationService | Non
         key_daily_v5=number("REGISTER_DAILY_V5", 0),
         key_image_scope="all" if os.getenv("REGISTER_IMAGE_SCOPE") == "all" else "legacy",
         key_expires_days=number("REGISTER_EXPIRES_DAYS", 30), key_rpm=max(1, number("REGISTER_RPM", 5)),
-        max_users=number("REGISTER_MAX_USERS", 0), reset_at=os.getenv("REGISTER_RESET_AT", "").strip())
+        max_users=number("REGISTER_MAX_USERS", 0), reset_at=os.getenv("REGISTER_RESET_AT", "").strip(),
+        key_features=os.getenv("REGISTER_FEATURES", "image").strip())

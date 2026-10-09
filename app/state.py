@@ -46,8 +46,11 @@ class GateState:
             image_min_interval=settings.image_min_interval,
         )
         self.alerter = alerts.from_settings(settings)
+        self.announcer = alerts.announcer_from_settings(settings)
         self.nai.on_event = lambda kind, msg, cooldown=900: self.alerter.notify(kind, msg, cooldown=cooldown)
         self.nai.allowance.on_low = self.nai.on_event
+        self._upstream_events: deque[tuple[float, bool]] = deque(maxlen=40)
+        self._upstream_degraded = False
         self._auth_fails: dict[str, deque[float]] = {}
         self._auth_blocked_until: dict[str, float] = {}
         self._global_sem = asyncio.Semaphore(max(1, settings.global_concurrency))
@@ -233,6 +236,32 @@ class GateState:
                     if k != key_id:
                         self._rpm.pop(k, None)
             return True
+
+    def record_upstream(self, ok: bool) -> None:
+        """记录一次上游调用结果；近 10 分钟内失败率过高时标记为"不稳定"并告警，恢复后再通知。"""
+        now = time.time()
+        self._upstream_events.append((now, ok))
+        status = self.upstream_health()["status"]
+        if status == "degraded" and not self._upstream_degraded:
+            self._upstream_degraded = True
+            self.alerter.notify("upstream_degraded", "NovelAI 上游近 10 分钟失败率偏高（上游可能在故障），"
+                                "成员的生图会受影响。", cooldown=1800)
+        elif status == "ok" and self._upstream_degraded:
+            self._upstream_degraded = False
+            self.alerter.notify("upstream_recovered", "NovelAI 上游已恢复正常。", cooldown=0)
+
+    def upstream_health(self) -> dict:
+        cutoff = time.time() - 600
+        recent = [ok for ts, ok in self._upstream_events if ts >= cutoff]
+        failed = recent.count(False)
+        if len(recent) >= 4 and failed / len(recent) >= 0.5:
+            status = "degraded"
+        elif not recent:
+            status = "idle"
+        else:
+            status = "ok"
+        return {"status": status, "recent": len(recent), "failed": failed,
+                "image_cooldown_seconds": self.image_cooldown_remaining()}
 
     def auth_blocked(self, client_id: str) -> int:
         """该 IP 因多次无效 Key 被临时拦截时，返回剩余秒数；否则 0。"""
