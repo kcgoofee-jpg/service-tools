@@ -1137,7 +1137,7 @@ async function loadOverview(){
     const d = await api('/admin/api/overview');
     const t = d.today;
     $('#ovCards').innerHTML =
-      statCard('今日生成图片', t.images, '张', '', 'accent') +
+      statCard('今日生成图片', t.images, '张', t.member_images != null && t.member_images !== t.images ? `其中成员 ${t.member_images} 张，其余来自测试 / 已删除的 Key` : '', 'accent') +
       statCard('今日消耗 Anlas（估算）', t.anlas) +
       statCard('今日 V5 张数 / 全站日限', t.v5||0, '/ ' + (d.v5_limit>0?d.v5_limit:'∞')) +
       statCard('本月 Anlas / 全站预算', d.month.anlas, '/ ' + (d.anlas_budget>0?d.anlas_budget:'∞')) +

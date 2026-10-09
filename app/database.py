@@ -957,6 +957,10 @@ class Database:
         return {
             "today": {
                 "images": int(today_images),
+                # 成员出图：不含测试 Key 和已删除的 Key（例如早先的冒烟测试）；上面的总数是账号真实消耗
+                "member_images": int(await one(
+                    """SELECT COALESCE(SUM(c.images),0) FROM counters c JOIN api_keys k ON k.id=c.key_id
+                       WHERE c.day=? AND k.is_test=0""", (today,))),
                 "anlas": round(float(today_anlas), 2),
                 "text_tokens": int(today_tokens),
                 "requests": int(today_requests),
