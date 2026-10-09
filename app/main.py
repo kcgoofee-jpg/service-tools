@@ -323,8 +323,14 @@ async def reserve_image_budget(key, est, *, legacy_free_images=0):
                 reservations[id(reservation)] = reservation
                 if hasattr(STATE, "image_budget_idle"):
                     STATE.image_budget_idle.clear()
-    except TimeoutError:
-        raise err(429, "图片预算核对排队超时，请稍后再试") from None
+    except (TimeoutError, GateError) as exc:
+        # 尚未到达上游：归还用户 Key 的图片冷却占用，别让被拒的请求白占 15 秒。
+        refund = getattr(STATE, "refund_key_image_slot", None)
+        if refund is not None and not key["is_admin"]:
+            await refund(key["id"])
+        if isinstance(exc, TimeoutError):
+            raise err(429, "图片预算核对排队超时，请稍后再试") from None
+        raise
     try:
         yield reservation
     finally:
@@ -586,6 +592,8 @@ async def _generate_image(request: Request, *, streaming: bool):
     await check_rpm(key)
     body = await read_image_payload(request)
     model = str(body.get("model", "?"))
+    if not isinstance(body.get("parameters"), dict):
+        raise err(400, "缺少 parameters 对象")
     model_tier = image_model_tier(model)
     if model_tier is None:
         record(key, "image", model, "rejected", detail="未列入本站图片模型白名单")
@@ -909,10 +917,11 @@ async def generate_stream(request: Request):
     await _text_quota_check(key, body)
 
     daily_limit = -1 if key["is_admin"] else key["daily_text_tokens"]
-    already = (await STATE.db.get_counter(key["id"], STATE.day()))["text_tokens"]
 
     async with AsyncExitStack() as resources:
         await resources.enter_async_context(acquire_concurrency(key))
+        # 拿到并发槽之后再读已用量，排队的请求才不会共用一个过期的计数。
+        already = (await STATE.db.get_counter(key["id"], STATE.day()))["text_tokens"]
         try:
             resp = await STATE.nai.stream(_text_url(model, True), body)
         except UpstreamError as e:
@@ -939,7 +948,7 @@ async def generate_stream(request: Request):
             finally:
                 d = ("达到每日上限被截断; " if hard_cut else "") + "; ".join(notes)
                 if counted:
-                    record(key, "text", model, "ok", tokens=counted, detail=d.strip("; "))
+                    await settle_record(key, "text", model, "ok", tokens=counted, detail=d.strip("; "))
 
         return TextStreamResponse(passthrough(), resources, media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache",
@@ -1065,10 +1074,11 @@ async def v1_chat(request: Request):
     await _text_quota_check(key, nai_body)
 
     daily_limit = -1 if key["is_admin"] else key["daily_text_tokens"]
-    already = (await STATE.db.get_counter(key["id"], STATE.day()))["text_tokens"]
 
     async with AsyncExitStack() as resources:
         await resources.enter_async_context(acquire_concurrency(key))
+        # 拿到并发槽之后再读已用量，排队的请求才不会共用一个过期的计数。
+        already = (await STATE.db.get_counter(key["id"], STATE.day()))["text_tokens"]
         try:
             resp = await STATE.nai.stream(_text_url(model, True), nai_body)
         except UpstreamError as e:
@@ -1117,7 +1127,7 @@ async def v1_chat(request: Request):
                 yield b"data: [DONE]\n\n"
             finally:
                 if result["counted"]:
-                    record(key, "chat", model, "ok", tokens=result["counted"])
+                    await settle_record(key, "chat", model, "ok", tokens=result["counted"])
 
         if want_stream:
             return TextStreamResponse(run_stream(), resources, media_type="text/event-stream",

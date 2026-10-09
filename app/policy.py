@@ -295,7 +295,9 @@ def estimate_image_cost(params: dict, is_opus: bool = True, *,
         if str(params.get("model", "")).lower().startswith("nai-diffusion-4"):
             per *= strength
     elif p.get("image"):
-        strength = float(p.get("strength", 1.0))
+        strength = p.get("strength", 1.0)
+        if not _unit_value(strength):
+            raise ValueError("strength 必须是 0 到 1 的有限数值")
         per *= strength
     per = max(2, math.ceil(per))
 
