@@ -185,7 +185,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "2.0.3"
+__version__ = "2.0.4"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 

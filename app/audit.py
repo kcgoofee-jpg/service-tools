@@ -74,4 +74,4 @@ async def audit_flags(db, settings) -> tuple[bool, bool, int]:
         days = int(float(await read("audit_retention_days", getattr(settings, "audit_retention_days", 7))))
     except (TypeError, ValueError):
         days = 7
-    return prompts, thumbs, max(1, min(days, 90))
+    return prompts, thumbs, max(0, min(days, 3650))        # 0 = 长期保留
