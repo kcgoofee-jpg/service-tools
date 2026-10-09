@@ -22,6 +22,18 @@ class RegistrationError(Exception):
     pass
 
 
+def _clip(value, limit: int = 80):
+    return str(value)[:limit] if value else None
+
+
+def member_label(user: dict) -> str:
+    """后台里展示的成员名：显示名（@用户名），取不到时退回用户名或 ID。"""
+    username, display = _clip(user.get("username")), _clip(user.get("global_name"))
+    if display and username and display != username:
+        return f"{display} (@{username})"[:60]
+    return (display or username or "Discord:" + str(user.get("id", "")))[:60]
+
+
 class RegistrationService:
     def __init__(self, db, http: httpx.AsyncClient, *, client_id: str, client_secret: str,
                  bot_token: str, bridge_secret: str, redirect_uri: str,
@@ -104,6 +116,36 @@ class RegistrationService:
                 done += 1
         await self.db._db.commit()
         return done
+
+    async def backfill_profiles(self, limit: int = 5) -> int:
+        """给还没有 Discord 用户名 / 头像的登记补全（用机器人读取公开资料）；每次最多处理几条，避免触发限流。"""
+        rows = await self.db._db.execute_fetchall(
+            "SELECT discord_id, key_id FROM discord_registrations WHERE username IS NULL LIMIT ?", (limit,))
+        done = 0
+        for discord_id, key_id in rows:
+            try:
+                response = await self.http.get(f"https://discord.com/api/v10/users/{discord_id}",
+                                               headers={"Authorization": "Bot " + self.bot_token}, timeout=10)
+                if response.status_code != 200:
+                    continue
+                user = response.json()
+            except (httpx.HTTPError, ValueError):
+                continue
+            await self.db._db.execute(
+                "UPDATE discord_registrations SET username=?, display_name=?, avatar=? WHERE discord_id=?",
+                (_clip(user.get("username")) or "", _clip(user.get("global_name")), _clip(user.get("avatar")), str(discord_id)))
+            key = await self.db.get_key(key_id)
+            if key is not None and str(key["name"]).startswith("Discord:"):
+                await self.db.update_key(key_id, {"name": member_label(user)})
+            done += 1
+        if done:
+            await self.db._db.commit()
+        return done
+
+    async def registration_for_key(self, key_id: int):
+        rows = await self.db._db.execute_fetchall(
+            "SELECT discord_id FROM discord_registrations WHERE key_id=?", (key_id,))
+        return str(rows[0][0]) if rows else None
 
     async def is_banned(self, discord_id: str) -> bool:
         rows = await self.db._db.execute_fetchall("SELECT 1 FROM discord_bans WHERE discord_id=?", (discord_id,))
@@ -248,8 +290,10 @@ class RegistrationService:
                                   if cfg["expires_days"] > 0 else None,
                 })
                 await self.db._db.execute(
-                    "INSERT INTO discord_registrations(discord_id,key_id,created_at) VALUES (?,?,?)",
-                    (expected_id, row["id"], time.time()))
+                    "INSERT INTO discord_registrations(discord_id,key_id,created_at,username,display_name,avatar) VALUES (?,?,?,?,?,?)",
+                    (expected_id, row["id"], time.time(), _clip(user.get("username")), _clip(user.get("global_name")),
+                     _clip(user.get("avatar"))))
+                await self.db.update_key(row["id"], {"name": member_label(user)})
                 await self.db._db.commit()
                 from .audit import audit_flags, audit_notice
                 from .ops import env_audit_defaults

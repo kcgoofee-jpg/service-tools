@@ -151,3 +151,75 @@ async def test_usage_log_retention_and_login_window_pruning(db, tmp_path):
         state._login_attempts[f"ip{i}"] = __import__("collections").deque([time.time() - 10])
     await state.hit_login("fresh")
     assert len(state._login_attempts) < 100
+
+
+@pytest.mark.asyncio
+async def test_owner_can_change_admin_password_from_the_panel(tmp_path, db):
+    settings = Settings(admin_password="a-strong-password-123", secret_key="s", data_dir=tmp_path,
+                        admin_cookie_secure=False)
+    state = AdminState(settings)
+    state.db = db
+    app = FastAPI()
+    app.state.gate = state
+    app.include_router(admin_router)
+    hdr = {"Origin": "http://t"}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
+        assert (await c.post("/admin/api/login", json={"password": "a-strong-password-123"})).status_code == 200
+        assert (await c.put("/admin/api/password", headers=hdr, json={"current": "wrong", "new": "x" * 14})).status_code == 401
+        assert (await c.put("/admin/api/password", headers=hdr, json={"current": "a-strong-password-123", "new": "short"})).status_code == 422
+        done = await c.put("/admin/api/password", headers=hdr,
+                           json={"current": "a-strong-password-123", "new": "a-new-very-strong-pw"})
+        assert done.status_code == 200 and done.json()["relogin"] is True
+        assert (await c.get("/admin/api/me")).status_code == 401                              # old session is dead
+        assert (await c.post("/admin/api/login", json={"password": "a-strong-password-123"})).status_code == 401
+        assert (await c.post("/admin/api/login", json={"password": "a-new-very-strong-pw"})).status_code == 200
+        assert (await c.get("/admin/api/me")).status_code == 200
+    assert (await db.get_setting("admin_password_hash")).startswith("scrypt$")                # only a hash is stored
+    assert "a-new-very-strong-pw" not in (await db.get_setting("admin_password_hash"))
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_discord_member_clears_registration_and_can_ban_and_members_show_profile(tmp_path, db):
+    settings = Settings(admin_password="a-strong-password-123", secret_key="s", data_dir=tmp_path, admin_cookie_secure=False)
+    service = RegistrationService(db, None, client_id="c", client_secret="s", bot_token="b",
+                                  bridge_secret="x" * 40, redirect_uri="https://x/cb")
+
+    async def member(uid, name):
+        k = await db.create_key(dict(name=name, token="t" + uid, daily_images=5, monthly_anlas=0, daily_text_tokens=0, rpm=5))
+        await db._db.execute(
+            "INSERT INTO discord_registrations(discord_id,key_id,created_at,username,display_name,avatar) VALUES (?,?,?,?,?,?)",
+            (uid, k["id"], time.time(), "someone", "Some One", "abc123"))
+        await db._db.commit()
+        return k["id"]
+    first, second = await member("1110347922597478473", "Some One (@someone)"), await member("2220347922597478473", "Other")
+
+    class State(AdminState):
+        def __init__(self):
+            super().__init__(settings)
+            self.db = db
+            self.admin_pw_hash = None
+
+        def day(self):
+            return "2026-10-09"
+
+        def week_days(self, n=7):
+            return ["2026-10-09"]
+    app = FastAPI()
+    app.state.gate = State()
+    app.state.registrar = service
+    app.include_router(admin_router)
+    hdr = {"Origin": "http://t"}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
+        await c.post("/admin/api/login", json={"password": "a-strong-password-123"})
+        members = (await c.get("/admin/api/members")).json()["members"]
+        profile = next(m for m in members if m["id"] == first)["discord"]
+        assert profile["display_name"] == "Some One" and profile["username"] == "someone"
+        assert profile["avatar_url"].endswith("/avatars/1110347922597478473/abc123.png?size=64")
+        assert profile["profile_url"] == "https://discord.com/users/1110347922597478473"
+        gone = await c.delete(f"/admin/api/keys/{first}", headers=hdr)
+        assert gone.status_code == 200 and gone.json()["banned"] is False
+        assert await db.get_key(first) is None
+        assert await db._db.execute_fetchall("SELECT 1 FROM discord_registrations WHERE key_id=?", (first,)) == []
+        assert not await service.is_banned("1110347922597478473")                         # plain delete = can come back
+        banned = await c.delete(f"/admin/api/keys/{second}?ban=true", headers=hdr)
+        assert banned.json()["banned"] is True and await service.is_banned("2220347922597478473")
