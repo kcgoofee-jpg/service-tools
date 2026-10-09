@@ -10,7 +10,8 @@ COMMAND_GUILD = 1480185480048808009
 
 async def handle_register(interaction):
     # This is the sole untrusted-user exception to Hermes's normal allowlist.
-    if getattr(interaction, "guild_id", None) != COMMAND_GUILD or not getattr(
+    guild = int(os.getenv("DISCORD_GUILD_ID") or COMMAND_GUILD)
+    if getattr(interaction, "guild_id", None) != guild or not getattr(
         getattr(interaction, "user", None), "id", None
     ):
         await interaction.response.send_message("请在指定服务器使用 /register。", ephemeral=True)
@@ -21,8 +22,9 @@ async def handle_register(interaction):
         return
     await interaction.response.defer(ephemeral=True)
     try:
+        backend = os.getenv("REGISTRATION_BACKEND_URL", "http://127.0.0.1:3003").rstrip("/")
         async with httpx.AsyncClient(timeout=8) as client:
-            response = await client.post("http://127.0.0.1:3003/self-register/intent",
+            response = await client.post(backend + "/self-register/intent",
                 headers={"Authorization": "Bearer " + secret},
                 json={"discord_id": str(interaction.user.id), "guild_id": str(interaction.guild_id)})
         if response.status_code == 200:

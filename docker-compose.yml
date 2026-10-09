@@ -11,3 +11,19 @@ services:
       - TZ=Asia/Shanghai
     volumes:
       - ./data:/app/data
+
+  # 可选：Discord /register 机器人。配置好 .env 里的 DISCORD_* 后用
+  #   docker compose --profile discord up -d --build
+  # 只给它需要的三个变量，不带上游 Token。
+  discord-bot:
+    profiles: ["discord"]
+    build: ./integration
+    container_name: nai-gate-discord
+    restart: unless-stopped
+    depends_on:
+      - nai-gate
+    environment:
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
+      - DISCORD_GUILD_ID=${DISCORD_GUILD_ID}
+      - REGISTRATION_BRIDGE_SECRET=${REGISTRATION_BRIDGE_SECRET}
+      - REGISTRATION_BACKEND_URL=http://nai-gate:8000
