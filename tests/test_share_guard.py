@@ -89,6 +89,19 @@ async def test_vpn_rotating_exits_same_client_is_not_punished(guard):
 
 
 @pytest.mark.asyncio
+async def test_heavy_user_many_devices_alone_never_punished(guard):
+    """三台设备 + 每天用 20 小时，但从不跨网络同时用：辅助证据只记录不计分（盘点发现的风险 #1）。"""
+    c, t = Calls(), 7_000_000.0
+    for day in range(10):
+        for h in range(22):
+            ua = [WIN, AND, IOS][h % 3]
+            await guard.observe(KEY, "120.235.*.*", 4, ua, now=t + day * 86400 + h * 3600, **c.kw())
+    assert not c.member and not c.resets
+    ev = await guard.evidence(1)
+    assert ev and all(e["points"] == 0 for e in ev)
+
+
+@pytest.mark.asyncio
 async def test_overlap_two_devices_two_places(guard):
     c, t = Calls(), 6_000_000.0
     a = b = None
