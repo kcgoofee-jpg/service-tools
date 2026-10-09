@@ -314,7 +314,7 @@ class RegistrationService:
                 try:
                     await self._discord("POST", f"/channels/{channel['id']}/messages",
                         bearer="Bot " + self.bot_token,
-                        json={"content": f"你的 NAI Gate API Key：`{key}`\n网址：{self.site_url}\n每日额度：{quota}。请勿公开分享此 Key。" + (f"\n{notice}" if notice else ""),
+                        json={"content": f"你的猫头鹰公益站 API Key：`{key}`\n网址：{self.site_url}\n每日额度：{quota}。请勿公开分享此 Key。" + (f"\n{notice}" if notice else ""),
                               "allowed_mentions": {"parse": []}})
                 except Exception:
                     await self.db._db.execute("DELETE FROM discord_registrations WHERE discord_id=?", (expected_id,))

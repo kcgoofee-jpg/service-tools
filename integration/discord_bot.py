@@ -42,7 +42,7 @@ def build_client() -> tuple[discord.Client, app_commands.CommandTree, discord.Ob
     client = discord.Client(intents=discord.Intents.none())
     tree = app_commands.CommandTree(client)
 
-    @tree.command(name="register", description="领取你的 NAI Gate API Key", guild=guild)
+    @tree.command(name="register", description="领取你的猫头鹰公益站 API Key", guild=guild)
     async def register(interaction: discord.Interaction):
         await handle_register(interaction)
 
@@ -79,7 +79,7 @@ def build_client() -> tuple[discord.Client, app_commands.CommandTree, discord.Ob
         await interaction.followup.send(f"新的 Key（只有你能看到这条消息，请妥善保存）：\n`{data['key']}`\n旧 Key 已失效。",
                                         ephemeral=True)
 
-    @tree.command(name="help", description="怎么使用 NAI Gate", guild=guild)
+    @tree.command(name="help", description="怎么使用猫头鹰公益站", guild=guild)
     async def help_(interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         status, data = await backend("/self-register/info", interaction)
