@@ -897,15 +897,34 @@ async def scheduler_shadow(request: Request, hours: int = 24):
 
 
 @router.get("/actions")
-async def admin_actions(request: Request, page: int = 1):
+async def admin_actions(request: Request, page: int = 1, actor: str = "", action: str = ""):
     require_admin(request)
     per_page = 30
     db = request.app.state.gate.db
-    total = await db.count_admin_actions()
+    where, args = [], []
+    kind = (actor or "").strip()
+    if kind == "admin":
+        where.append("actor LIKE '后台%'")
+    elif kind == "system":
+        where.append("actor = '系统'")
+    elif kind == "member":
+        where.append("actor LIKE 'Discord:%'")
+    act = (action or "").strip()
+    if act:
+        where.append("action = ?")
+        args.append(act)
+    clause = (" WHERE " + " AND ".join(where)) if where else ""
+    total = int((await (await db._db.execute(
+        "SELECT COUNT(*) FROM admin_actions" + clause, tuple(args))).fetchone())[0])
     pages = max(1, (total + per_page - 1) // per_page)
     page = min(max(1, min(int(page), 1_000_000)), pages)
-    rows = await db.list_admin_actions(limit=per_page, offset=(page - 1) * per_page)
-    return {"actions": rows, "page": page, "per_page": per_page, "total": total, "pages": pages}
+    rows = [dict(r) for r in await (await db._db.execute(
+        "SELECT * FROM admin_actions" + clause + " ORDER BY id DESC LIMIT ? OFFSET ?",
+        tuple(args) + (per_page, (page - 1) * per_page))).fetchall()]
+    action_kinds = [r[0] for r in await (await db._db.execute(
+        "SELECT DISTINCT action FROM admin_actions ORDER BY action")).fetchall()]
+    return {"actions": rows, "page": page, "per_page": per_page, "total": total, "pages": pages,
+            "action_kinds": action_kinds}
 
 
 @router.get("/overview")

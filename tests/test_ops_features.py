@@ -206,3 +206,42 @@ async def test_registration_changes_are_announced_to_members(db):
     texts = state.announcer.sent
     assert len(texts) == 4 and "已开放" in texts[0] and "已暂停" in texts[1] and "已开放" in texts[2] and "10" in texts[2]
     assert "已调整" in texts[3] and "15" in texts[3]
+
+
+@pytest.mark.asyncio
+async def test_action_log_filters_by_actor_and_action(tmp_path, db):
+    from app.action_log import log_action
+    settings = Settings(admin_password="a-strong-password-123", secret_key="s", data_dir=tmp_path,
+                        admin_cookie_secure=False)
+    await log_action(db, "后台 *.*.1.2", "重置今日额度", "Key #7 甲", "", ok=True)
+    await log_action(db, "系统", "动态额度应用", "40 把 Key", "", ok=True)
+    await log_action(db, "Discord:123", "网页登录", "", "", ok=True)
+    await log_action(db, "后台 *.*.1.2", "重新生成 Key", "Key #7 甲", "", ok=True)
+
+    class State:
+        def __init__(self):
+            self.settings, self.db = settings, db
+
+        async def hit_login(self, _):
+            return True
+
+    app = FastAPI()
+    app.state.gate = State()
+    app.include_router(router)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as client:
+        assert (await client.get("/admin/api/actions")).status_code == 401
+        assert (await client.post("/admin/api/login", json={"password": "a-strong-password-123"})).status_code == 200
+        alld = (await client.get("/admin/api/actions")).json()
+        # 登录本身也记一条「登录后台」，所以总数 >= 我们插入的 4 条
+        assert alld["total"] >= 4 and "重置今日额度" in alld["action_kinds"]
+        admin_only = (await client.get("/admin/api/actions?actor=admin")).json()
+        assert all(a["actor"].startswith("后台") for a in admin_only["actions"])
+        assert any(a["action"] == "重置今日额度" for a in admin_only["actions"])
+        system_only = (await client.get("/admin/api/actions?actor=system")).json()
+        assert system_only["total"] == 1 and system_only["actions"][0]["actor"] == "系统"
+        member_only = (await client.get("/admin/api/actions?actor=member")).json()
+        assert member_only["total"] == 1 and member_only["actions"][0]["actor"].startswith("Discord:")
+        reset_only = (await client.get("/admin/api/actions?action=%E9%87%8D%E7%BD%AE%E4%BB%8A%E6%97%A5%E9%A2%9D%E5%BA%A6")).json()
+        assert reset_only["total"] == 1 and reset_only["actions"][0]["action"] == "重置今日额度"
+        combo = (await client.get("/admin/api/actions?actor=admin&action=%E9%87%8D%E7%BD%AE%E4%BB%8A%E6%97%A5%E9%A2%9D%E5%BA%A6")).json()
+        assert combo["total"] == 1
