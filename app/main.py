@@ -167,7 +167,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "1.7.0"
+__version__ = "1.8.0"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -232,8 +232,18 @@ class RequestContextMiddleware:
             return await self.app(scope, receive, send)
         key_token, logged_token = _REQUEST_KEY.set(None), _REQUEST_LOGGED.set(False)
         timing_token = request_timing.begin(scope)
+        rid = request_timing.rid().encode()
+
+        async def send_with_id(message):
+            if message["type"] == "http.response.start":
+                message = {**message, "headers": [*message.get("headers", []), (b"x-request-id", rid)]}
+            await send(message)
         try:
-            await self.app(scope, receive, send)
+            await self.app(scope, receive, send_with_id)
+        except Exception as exc:
+            # 500 处理器在这个中间件外面执行，那时上下文已还原：先把请求编号 / Key 挂到异常上
+            exc._gate_ctx = (rid.decode(), _REQUEST_KEY.get(), _REQUEST_LOGGED.get())
+            raise
         finally:
             _REQUEST_KEY.reset(key_token)
             _REQUEST_LOGGED.reset(logged_token)
@@ -268,16 +278,29 @@ async def gate_error_handler(request: Request, exc: GateError):
         # 鉴权之后被拒（Key 停用 / 过期、功能未开通、额度用完、限流、排队超时……）统一记一条，方便排查成员问题
         try:
             record(key, _kind_for_path(request.url.path), "", "rejected", detail=f"{exc.status} {exc.message}"[:160])
-        except Exception:
-            pass
-    return JSONResponse({"error": {"message": exc.message, "status": exc.status}},
+        except Exception as log_exc:
+            bug("log:rejected", log_exc, path=request.url.path)
+    if exc.status >= 500:          # 上游失败 / 网关故障：按消息归并，方便看出哪类问题在变多
+        bug("upstream" if exc.status in (502, 503, 504) else "gate", title=f"{exc.status} {exc.message}"[:200],
+            path=request.url.path, level="warn")
+    return JSONResponse({"error": {"message": exc.message, "status": exc.status, "request_id": request_timing.rid()}},
                         status_code=exc.status)
 
 
 @app.exception_handler(Exception)
 async def fallback_handler(request: Request, exc: Exception):
-    return JSONResponse({"error": {"message": "服务器内部错误，请联系站长", "status": 500}},
-                        status_code=500)
+    """没有预料到的异常 = bug：记录堆栈、私信站长，给成员一个可以报给站长的请求编号。"""
+    rid, key, logged = getattr(exc, "_gate_ctx", (request_timing.rid(), _REQUEST_KEY.get(), _REQUEST_LOGGED.get()))
+    bug("request", exc, path=request.url.path, rid=rid, key_id=key["id"] if key is not None else None)
+    if key is not None and not logged:
+        try:
+            await STATE.db.add_log(key["id"], key["name"], _kind_for_path(request.url.path), "", "error",
+                                   detail=f"500 {type(exc).__name__}"[:160], rid=rid)
+        except Exception:
+            pass
+    return JSONResponse({"error": {"message": f"服务器内部错误，已自动记录。反馈时请附上错误编号 {rid}",
+                                   "status": 500, "request_id": rid}}, status_code=500,
+                        headers={"X-Request-Id": rid} if rid else None)
 
 
 # ================================================================ helpers ====
@@ -313,8 +336,8 @@ async def authenticate(request: Request, *, passive: bool = False):
     if sources is not None:
         try:                            # 来源网段统计（防 Key 分享）；失败不能影响请求
             await sources.observe(row, client_id, client=request.headers.get("user-agent", ""))
-        except Exception:
-            print("[warn] key source tracking failed")
+        except Exception as exc:
+            bug("key_sources", exc)
     return row
 
 
@@ -328,6 +351,17 @@ def upstream_outcome(ok: bool) -> None:
     tracker = getattr(STATE, "record_upstream", None)
     if tracker is not None:
         tracker(ok)
+
+
+def bug(source: str, exc: BaseException | None = None, **kw) -> str:
+    """记一条 bug（见 errors.py）；自动带上当前请求的编号和 Key。"""
+    tracker = getattr(STATE, "bugs", None)
+    if tracker is None:
+        return ""
+    key = _REQUEST_KEY.get()
+    kw.setdefault("rid", request_timing.rid())
+    kw.setdefault("key_id", key["id"] if key is not None else None)
+    return tracker.capture(source, exc, **kw)
 
 
 def notify_owner(kind: str, message: str, cooldown: float = 900) -> None:
@@ -361,8 +395,8 @@ async def audit_generation(key, kind: str, model: str, status: str, body: dict, 
         if want_thumbs and content and status == "ok":
             thumb = await anyio.to_thread.run_sync(make_thumbnail, content)
         await STATE.db.add_audit(key["id"], key["name"], kind, model, status, prompt, negative, thumb)
-    except Exception:
-        print("[warn] audit write failed")
+    except Exception as exc:
+        bug("audit", exc)
 
 
 async def check_upstream_perf() -> None:
@@ -371,7 +405,7 @@ async def check_upstream_perf() -> None:
     try:
         report = await perf.collect(STATE, time.time())
     except Exception as exc:
-        print(f"[warn] upstream perf check failed: {type(exc).__name__}")
+        bug("maintenance:perf", exc)
         return
     for flag in report["flags"]:
         notify_owner(f"perf_{flag['family']}_{flag['code']}",
@@ -380,25 +414,37 @@ async def check_upstream_perf() -> None:
 
 async def maintenance_loop() -> None:
     """每 5 分钟：清理过期生成记录；磁盘与告警自检。"""
+    async def purge():
+        days = max(1, (await audit_flags(STATE.db, STATE.settings))[2])
+        await STATE.db.purge_audit(time.time() - days * 86400)
+        keep = max(7, STATE.settings.usage_log_retention_days)
+        await STATE.db.purge_usage_log(time.time() - keep * 86400)
+        await STATE.db.purge_key_sources(time.time() - KEY_SOURCE_RETENTION)
+        await STATE.db.purge_admin_actions(time.time() - ADMIN_ACTION_RETENTION_DAYS * 86400)
+        if getattr(STATE, "bugs", None) is not None:
+            await STATE.bugs.purge(time.time() - 30 * 86400)
+
+    async def registrar_jobs():
+        registrar = getattr(app.state, "registrar", None)
+        if registrar is not None:
+            for name in ("sync_roles", "backfill_profiles", "invite_waitlist"):
+                try:
+                    await getattr(registrar, name)()
+                except Exception as exc:
+                    bug(f"maintenance:{name}", exc)
+
+    async def disk():
+        usage = shutil.disk_usage(STATE.settings.data_dir)
+        if usage.free / usage.total < 0.10:
+            notify_owner("disk_low", f"服务器磁盘剩余不足 10%（剩 {usage.free // 2**20} MB），请清理或扩容。", 6 * 3600)
+
     while True:
-        try:
-            days = max(1, (await audit_flags(STATE.db, STATE.settings))[2])
-            await STATE.db.purge_audit(time.time() - days * 86400)
-            keep = max(7, STATE.settings.usage_log_retention_days)
-            await STATE.db.purge_usage_log(time.time() - keep * 86400)
-            await STATE.db.purge_key_sources(time.time() - KEY_SOURCE_RETENTION)
-            await STATE.db.purge_admin_actions(time.time() - ADMIN_ACTION_RETENTION_DAYS * 86400)
-            registrar = getattr(app.state, "registrar", None)
-            if registrar is not None:
-                await registrar.sync_roles()
-                await registrar.backfill_profiles()
-                await registrar.invite_waitlist()
-            await check_upstream_perf()
-            usage = shutil.disk_usage(STATE.settings.data_dir)
-            if usage.free / usage.total < 0.10:
-                notify_owner("disk_low", f"服务器磁盘剩余不足 10%（剩 {usage.free // 2**20} MB），请清理或扩容。", 6 * 3600)
-        except Exception as exc:
-            print(f"[warn] maintenance failed: {type(exc).__name__}")
+        # 每一步单独兜底：一步失败不影响后面的步骤，并且每种失败都进 Bug 追踪
+        for name, job in (("purge", purge), ("registrar", registrar_jobs), ("perf", check_upstream_perf), ("disk", disk)):
+            try:
+                await job()
+            except Exception as exc:
+                bug(f"maintenance:{name}", exc)
         await asyncio.sleep(300)
 
 
@@ -416,7 +462,7 @@ async def inactive_key_cleanup_loop() -> None:
                         await reg.send_dm(did, "🦉 猫头鹰公益站通知：" + text)
                 await anlas_pool.rebalance(STATE, notify=_dm)          # 每小时重算一次 Anlas 自动分配
             except Exception as exc:
-                print(f"[warn] anlas rebalance failed: {type(exc).__name__}")
+                bug("anlas_pool", exc)
             registrar = getattr(app.state, "registrar", None)
             if registrar is not None:
                 await STATE.remind_idle_keys(registrar.send_dm, SETTINGS.site_url.rstrip("/"))
@@ -424,7 +470,7 @@ async def inactive_key_cleanup_loop() -> None:
             if removed:
                 print(f"[info] deleted {removed} inactive API key(s)")
         except Exception as exc:
-            print(f"[warn] inactive key cleanup failed: {exc}")
+            bug("cleanup", exc)
         await asyncio.sleep(3600)
 
 
@@ -449,7 +495,7 @@ async def registration_reset_loop() -> None:
             removed = await service.reset_all()
             print(f"[info] scheduled registration reset: removed {removed} user(s)")
         except Exception as exc:
-            print(f"[warn] registration reset failed: {exc}")
+            bug("registration_reset", exc)
 
 
 async def check_rpm(key) -> None:
@@ -717,6 +763,7 @@ def record(key, kind: str, model: str, status: str, *, images: int = 0,
 def _log_task_failure(task: asyncio.Task) -> None:
     if not task.cancelled() and task.exception() is not None:
         print("[error] request accounting failed")
+        bug("accounting", task.exception())
 
 
 async def settle_record(*args, **kwargs) -> None:
@@ -751,6 +798,8 @@ async def complete_image_operation(operation, *, can_cancel=None):
                     task.cancel()
         result = task.result()
     if cancelled:
+        # 图已经生成（也已计数），但客户端先断开了：通常是客户端超时设得太短，成员会以为失败而重试
+        bug("disconnect", title="客户端在图片返回前断开连接（图已生成并计数）", level="warn")
         raise asyncio.CancelledError()
     return result
 
@@ -1606,6 +1655,36 @@ async def public_live(request: Request):
     """首页实时架构图：每秒轮询，只含汇总数字（请求数、额度、排队数、账号保护、名额与打码的候补名单）。"""
     body = await live.build(STATE, getattr(request.app.state, "registrar", None))
     return JSONResponse(body, headers={"Cache-Control": "no-store"})
+
+
+_CLIENT_ERR: dict = {"window": 0.0, "total": 0, "ip": {}}
+
+
+@app.post("/public/client-error")
+async def client_error(request: Request):
+    """首页 / 后台网页的脚本报错上报（只收本站页面的错误；每 IP 每 10 分钟 10 条，全站每 10 分钟 100 条）。"""
+    now = time.time()
+    if now - _CLIENT_ERR["window"] > 600:
+        _CLIENT_ERR.update(window=now, total=0, ip={})
+    ip = request.client.host if request.client else "?"
+    if _CLIENT_ERR["total"] >= 100 or _CLIENT_ERR["ip"].get(ip, 0) >= 10:
+        return Response(status_code=204)
+    _CLIENT_ERR["total"] += 1
+    _CLIENT_ERR["ip"][ip] = _CLIENT_ERR["ip"].get(ip, 0) + 1
+    try:
+        data = json.loads((await request.body())[:4096] or b"{}")
+    except ValueError:
+        return Response(status_code=204)
+    if not isinstance(data, dict):
+        return Response(status_code=204)
+    page = str(data.get("page") or "")[:20]
+    page = page if page in ("landing", "admin") else "other"
+    msg = request_timing.client_name(str(data.get("msg") or ""))[:200] or "unknown"
+    where = request_timing.client_name(f"{data.get('src') or ''}:{data.get('line') or ''}")
+    stack = str(data.get("stack") or "")[:1500]
+    ua = request_timing.client_name(request.headers.get("user-agent", ""))
+    bug(f"web:{page}", title=msg, detail=f"{where}\n{ua}\n{stack}", path=page, level="warn")
+    return Response(status_code=204)
 
 
 @app.get("/v1/live/me")

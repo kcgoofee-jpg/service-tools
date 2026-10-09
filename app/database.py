@@ -96,7 +96,8 @@ CREATE TABLE IF NOT EXISTS usage_log (
     wait_ms INTEGER NOT NULL DEFAULT 0,   -- 从收到请求到发往上游（排队 + 冷却）
     dur_ms INTEGER NOT NULL DEFAULT 0,    -- 上游处理耗时；没发到上游为 0
     client TEXT NOT NULL DEFAULT '',      -- User-Agent 摘要，客户端自报，仅供参考
-    up_status INTEGER NOT NULL DEFAULT 0  -- 上游最后返回的 HTTP 状态码；没收到响应为 0
+    up_status INTEGER NOT NULL DEFAULT 0, -- 上游最后返回的 HTTP 状态码；没收到响应为 0
+    rid TEXT NOT NULL DEFAULT ''          -- 请求编号（响应头 X-Request-Id），成员报错时据此定位
 );
 CREATE INDEX IF NOT EXISTS idx_log_ts ON usage_log (ts DESC);
 CREATE INDEX IF NOT EXISTS idx_log_key ON usage_log (key_id, ts DESC);
@@ -106,6 +107,20 @@ CREATE TABLE IF NOT EXISTS upstream_token_counters (
     images INTEGER NOT NULL DEFAULT 0,
     v5 INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (token_id, day)
+);
+CREATE TABLE IF NOT EXISTS error_events (
+    sig TEXT PRIMARY KEY,          -- 错误特征：异常类型 + 出错位置（或来源 + 去掉数字的消息）
+    source TEXT NOT NULL,          -- request / upstream / maintenance:xxx / web:landing / disconnect ...
+    level TEXT NOT NULL DEFAULT 'error',
+    title TEXT NOT NULL DEFAULT '',
+    detail TEXT NOT NULL DEFAULT '',   -- 最近一次的堆栈 / 上下文（只给站长看）
+    count INTEGER NOT NULL DEFAULT 0,
+    first_seen REAL NOT NULL,
+    last_seen REAL NOT NULL,
+    last_rid TEXT NOT NULL DEFAULT '',
+    last_key INTEGER,
+    last_path TEXT NOT NULL DEFAULT '',
+    resolved_at REAL               -- 站长标记已处理；之后再出现视为「复发」
 );
 CREATE TABLE IF NOT EXISTS waitlist (
     discord_id TEXT PRIMARY KEY,
@@ -182,8 +197,8 @@ NOT_TEST = "COALESCE(key_id, 0) NOT IN (SELECT id FROM api_keys WHERE is_test=1)
 
 _INSERT_LOG = """INSERT INTO usage_log (ts, key_id, key_name, kind, model, status,
                                       images, anlas, tokens, detail, unconfirmed_anlas,
-                                      wait_ms, dur_ms, client, up_status)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"""
+                                      wait_ms, dur_ms, client, up_status, rid)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"""
 _UPSERT_COUNTERS = """INSERT INTO counters
                      (key_id, day, images, anlas, text_tokens, requests, v5, legacy_free_images)
                      VALUES (?,?,?,?,?,?,?,?)
@@ -234,6 +249,7 @@ class Database:
             "ALTER TABLE usage_log ADD COLUMN up_status INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE api_keys ADD COLUMN is_test INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE api_keys ADD COLUMN anlas_auto INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE usage_log ADD COLUMN rid TEXT NOT NULL DEFAULT ''",
         ):
             try:
                 await self._db.execute(ddl)
@@ -644,7 +660,7 @@ class Database:
         self, key_id: int, key_name: str, kind: str, model: str, day: str, *,
         images: int = 0, anlas: float = 0.0, tokens: int = 0, v5: int = 0,
         legacy_free_images: int = 0, detail: str = "", unconfirmed_anlas: float = 0.0,
-        wait_ms: int = 0, dur_ms: int = 0, client: str = "", up_status: int = 0,
+        wait_ms: int = 0, dur_ms: int = 0, client: str = "", up_status: int = 0, rid: str = "",
     ) -> None:
         """成功日志、额度与使用时间一起提交；写入失败时整笔回退。"""
         # 不使用共享连接，避免其他请求的 commit 提前保存半笔记账。
@@ -655,7 +671,7 @@ class Database:
                 await db.execute(_INSERT_LOG, (
                     now, key_id, key_name, kind, model, "ok", images, anlas,
                     tokens, detail[:500], unconfirmed_anlas, max(0, int(wait_ms)),
-                    max(0, int(dur_ms)), client[:60], int(up_status),
+                    max(0, int(dur_ms)), client[:60], int(up_status), rid[:16],
                 ))
                 await db.execute(_UPSERT_COUNTERS, (
                     key_id, day, images, anlas, tokens, 1, v5, legacy_free_images,
@@ -781,20 +797,23 @@ class Database:
         self, key_id: Optional[int], key_name: str, kind: str, model: str,
         status: str, images: int = 0, anlas: float = 0.0, tokens: int = 0,
         detail: str = "", unconfirmed_anlas: float = 0.0,
-        wait_ms: int = 0, dur_ms: int = 0, client: str = "", up_status: int = 0,
+        wait_ms: int = 0, dur_ms: int = 0, client: str = "", up_status: int = 0, rid: str = "",
     ) -> None:
         await self._db.execute(
             _INSERT_LOG,
             (time.time(), key_id, key_name[:80], kind, model[:80], status,
              images, anlas, tokens, detail[:500], unconfirmed_anlas,
-             max(0, int(wait_ms)), max(0, int(dur_ms)), client[:60], int(up_status)),
+             max(0, int(wait_ms)), max(0, int(dur_ms)), client[:60], int(up_status), rid[:16]),
         )
         await self._db.commit()
 
     @staticmethod
     def _log_filter(key_id: Optional[int], kinds: Optional[list[str]],
-                    hide_test: bool = False) -> tuple[str, tuple]:
+                    hide_test: bool = False, rid: str = "") -> tuple[str, tuple]:
         clauses, args = [], []
+        if rid:
+            clauses.append("rid=?")
+            args.append(rid)
         if hide_test:
             clauses.append(NOT_TEST)
         if key_id:
@@ -807,17 +826,19 @@ class Database:
 
     async def list_logs(self, limit: int = 20, offset: int = 0,
                         key_id: Optional[int] = None,
-                        kinds: Optional[list[str]] = None, hide_test: bool = False) -> list[aiosqlite.Row]:
+                        kinds: Optional[list[str]] = None, hide_test: bool = False,
+                        rid: str = "") -> list[aiosqlite.Row]:
         limit = max(1, min(int(limit), 500))
         offset = max(0, int(offset))
-        where, args = self._log_filter(key_id, kinds, hide_test)
+        where, args = self._log_filter(key_id, kinds, hide_test, rid)
         cur = await self._db.execute(
             f"SELECT * FROM usage_log{where} ORDER BY id DESC LIMIT ? OFFSET ?", args + (limit, offset))
         return list(await cur.fetchall())
 
     async def count_logs(self, key_id: Optional[int] = None,
-                         kinds: Optional[list[str]] = None, hide_test: bool = False) -> int:
-        where, args = self._log_filter(key_id, kinds, hide_test)
+                         kinds: Optional[list[str]] = None, hide_test: bool = False,
+                         rid: str = "") -> int:
+        where, args = self._log_filter(key_id, kinds, hide_test, rid)
         cur = await self._db.execute(f"SELECT COUNT(*) AS c FROM usage_log{where}", args)
         row = await cur.fetchone()
         return int(row["c"])

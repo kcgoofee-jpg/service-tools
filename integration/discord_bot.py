@@ -150,6 +150,22 @@ def build_client() -> tuple[discord.Client, app_commands.CommandTree, discord.Ob
         await interaction.followup.send(f"已撤销 {member.mention} 的 Key。" if status == 200 else str(data),
                                         ephemeral=True)
 
+    @tree.error
+    async def on_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+        """命令出错：打印完整堆栈（监控会抓到），并告诉成员不是他的问题。"""
+        import traceback
+        name = interaction.command.name if interaction.command else "?"
+        print(f"[bug] bot command /{name} failed: {type(error).__name__}: {error}", flush=True)
+        traceback.print_exception(type(error), error, error.__traceback__)
+        text = "出了点问题，已自动记录，请稍后再试；一直不行请在频道里告诉站长。"
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(text, ephemeral=True)
+            else:
+                await interaction.response.send_message(text, ephemeral=True)
+        except discord.HTTPException:
+            pass
+
     @client.event
     async def on_ready():
         await tree.sync(guild=guild)

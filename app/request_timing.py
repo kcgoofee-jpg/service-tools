@@ -6,6 +6,7 @@ dict 本身是同一个对象），也能把“开始发送上游”的时间点
 from __future__ import annotations
 
 import re
+import secrets
 import time
 from contextvars import ContextVar
 from typing import Optional
@@ -27,7 +28,14 @@ def begin(scope) -> object:
         if name == b"user-agent":
             ua = value.decode("latin-1", "replace")
             break
-    return _TIMING.set({"t0": time.monotonic(), "sent": None, "client": client_name(ua), "status": 0})
+    return _TIMING.set({"t0": time.monotonic(), "sent": None, "client": client_name(ua), "status": 0,
+                        "rid": secrets.token_hex(4)})
+
+
+def rid() -> str:
+    """本请求的编号（8 位十六进制），写进响应头 X-Request-Id 和日志，成员报错时给站长看这个就能定位。"""
+    holder = _TIMING.get()
+    return holder["rid"] if holder is not None else ""
 
 
 def end(token) -> None:
@@ -62,7 +70,7 @@ def snapshot() -> dict:
     """wait_ms：收到请求到发往上游；dur_ms：上游耗时（没发到上游为 0）；up_status：上游状态码（没收到为 0）。"""
     holder = _TIMING.get()
     if holder is None:
-        return {"wait_ms": 0, "dur_ms": 0, "client": "", "up_status": 0}
+        return {"wait_ms": 0, "dur_ms": 0, "client": "", "up_status": 0, "rid": ""}
     now = time.monotonic()
     sent = holder["sent"]
     if sent is None:
@@ -70,4 +78,4 @@ def snapshot() -> dict:
     else:
         wait, dur = sent - holder["t0"], now - sent
     return {"wait_ms": int(wait * 1000), "dur_ms": int(dur * 1000), "client": holder["client"],
-            "up_status": holder["status"]}
+            "up_status": holder["status"], "rid": holder.get("rid", "")}

@@ -7,6 +7,18 @@
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <title>猫头鹰公益站 · NovelAI 公益中转</title>
 <script>
+/* 脚本报错自动上报给站长（只报本站页面自己的错误，不含 Key） */
+(function(page){ var sent = 0;
+  function report(msg, src, line, stack){
+    if(sent >= 5 || (src && src.indexOf(location.origin) !== 0)) return;
+    sent++;
+    try{ navigator.sendBeacon ? navigator.sendBeacon('/public/client-error', JSON.stringify({page:page, msg:String(msg).slice(0,200), src:String(src||'').replace(location.origin,''), line:line||0, stack:String(stack||'').slice(0,1500)}))
+      : fetch('/public/client-error', {method:'POST', body:JSON.stringify({page:page, msg:String(msg).slice(0,200)}), keepalive:true}); }catch(_){}
+  }
+  window.__owlReport = function(e, where){ report((where ? where + ': ' : '') + (e && e.message || e), location.href, 0, e && e.stack); };
+  window.addEventListener('error', function(e){ if(e.message) report(e.message, e.filename, e.lineno, e.error && e.error.stack); });
+  window.addEventListener('unhandledrejection', function(e){ var r = e.reason; report('Promise: ' + (r && r.message || r), location.href, 0, r && r.stack); });
+})('landing');
 try{var t=localStorage.getItem('nai-gate-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t;}catch(_){}
 </script>
 <style>
@@ -138,9 +150,22 @@ section{margin-top:40px;scroll-margin-top:72px}
 #liveSvg .val{fill:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
 #liveSvg .track{fill:var(--surface-3)}
 #liveSvg .line{stroke:var(--border-strong);stroke-width:1;fill:none}
-.live-me{font-size:13.5px;color:var(--text-2);margin-top:6px;min-height:20px}
+#liveSvg .gw{fill:var(--accent-soft);stroke:color-mix(in srgb,var(--accent) 45%,transparent);stroke-width:1.2}
+#liveSvg .lbl{fill:var(--text);font-size:12.5px;font-weight:600}
+#liveSvg .pulse{animation:livePulse 1.4s ease-in-out infinite;transform-origin:624px 90px}
+@keyframes livePulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.18);opacity:.35}}
+.live-say{font-size:15px;color:var(--text);margin:10px 0 2px;line-height:1.6}
+.live-say b{color:var(--accent-text)}
+.live-say .quiet{display:inline-block;margin-left:8px;font-size:12.5px;color:var(--muted)}
+.live-me{font-size:13.5px;color:var(--text-2);margin-top:8px}
 .live-me b{color:var(--warn)}
-@media (prefers-reduced-motion: reduce){#liveSvg *{transition:none!important}}
+.mesteps{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.mesteps span{padding:3px 10px;border-radius:999px;background:var(--surface-2);color:var(--muted);font-size:12.5px;border:1px solid var(--border)}
+.mesteps span.done{color:var(--text-2)}
+.mesteps span.now{background:var(--warn-soft);color:var(--warn);border-color:color-mix(in srgb,var(--warn) 40%,transparent);font-weight:600}
+.mesteps i{width:14px;height:1px;background:var(--border-strong)}
+.menote{margin-top:6px}
+@media (prefers-reduced-motion: reduce){#liveSvg *{transition:none!important;animation:none!important}}
 /* steps */
 .steps{display:grid;gap:16px;grid-template-columns:1fr}
 .step{position:relative;display:flex;flex-direction:column;gap:8px}
@@ -269,8 +294,9 @@ footer{max-width:960px;margin:0 auto;padding:24px 16px 40px;text-align:center;co
         </div>
       </form>
       <label class="remember"><input type="checkbox" id="rememberKey"><span>记住 Key，下次打开自动显示（只存在本机，公共电脑勿选）</span></label>
-      <svg id="liveSvg" viewBox="0 0 680 222" role="img" aria-label="网关实时状态：请求依次经过鉴权、额度、排队、账号保护，再到 NovelAI 生成，图片沿底线返回"></svg>
-      <div class="live-legend"><span><i style="background:var(--warn)"></i>你的图</span><span><i style="background:var(--accent)"></i>其他人</span></div>
+      <p class="live-say" id="liveSay" aria-live="polite">正在读取实时状态…</p>
+      <svg id="liveSvg" viewBox="0 0 680 236" role="img" aria-label="实时流程：你的客户端带 Key 发请求，经猫头鹰网关的验 Key、查额度、排队、控速四关，交给 NovelAI 画图，画好的图原路返回"></svg>
+      <div class="live-legend"><span><i style="background:var(--warn)"></i>你的图</span><span><i style="background:var(--accent)"></i>其他人的图</span><span><i style="background:var(--bad)"></i>被拒的请求</span></div>
       <div class="live-me" id="liveMe" aria-live="polite"></div>
       <div id="result" aria-live="polite"></div>
     </div>
@@ -658,96 +684,119 @@ $('chkForm').addEventListener('submit', function(e){
   if(!svg) return;
   var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
   function mk(tag, attrs, parent){ var e = document.createElementNS(NS, tag); for(var k in attrs) e.setAttribute(k, attrs[k]); (parent || svg).appendChild(e); return e; }
-  function txt(x, y, cls, anchor){ var t = mk('text', {x:x, y:y, 'class':cls, 'text-anchor':anchor || 'middle'}); return t; }
-  var T = [['mem',12,84,'成员'],['auth',106,78,'鉴权'],['quota',194,82,'额度'],['queue',286,150,'排队'],['guard',446,82,'保护'],['nai',538,130,'NovelAI']];
-  mk('line', {x1:54, y1:100, x2:600, y2:100, 'class':'line', 'stroke-dasharray':'2 4'});
-  mk('path', {d:'M600 168 L600 196 L54 196 L54 168', 'class':'line', 'stroke-dasharray':'4 4'});
-  var back = txt(327, 214, 'val'); back.textContent = '图片沿这条线回到客户端';
-  var V = {};
-  T.forEach(function(t){
-    mk('rect', {x:t[1], y:34, width:t[2], height:134, rx:10, 'class':'tile'});
-    var h = txt(t[1] + t[2]/2, 54, 'ttl'); h.textContent = t[3];
-    V[t[0]] = txt(t[1] + t[2]/2, 156, 'val');
-  });
-  /* 成员：四个小人点 */
-  [0,1,2,3].forEach(function(i){ mk('circle', {cx:40 + (i%2)*24, cy:88 + Math.floor(i/2)*24, r:6, fill:'var(--accent)', opacity:.7}); });
-  /* 鉴权：两根门柱 + 通过时的光 */
-  mk('rect', {x:130, y:84, width:3, height:32, rx:1.5, fill:'var(--muted)'}); mk('rect', {x:151, y:84, width:3, height:32, rx:1.5, fill:'var(--muted)'});
-  var beam = mk('rect', {x:133, y:98, width:18, height:4, rx:2, fill:'var(--ok)', opacity:0}); beam.style.transition = 'opacity .5s';
-  /* 额度：两根进度条 */
-  var lb1 = txt(235, 82, 'val'); lb1.textContent = 'V4.5'; mk('rect', {x:206, y:88, width:58, height:6, rx:3, 'class':'track'});
-  var b1 = mk('rect', {x:206, y:88, width:0, height:6, rx:3, fill:'var(--accent)'});
-  var lb2 = txt(235, 114, 'val'); lb2.textContent = 'V5'; mk('rect', {x:206, y:120, width:58, height:6, rx:3, 'class':'track'});
-  var b2 = mk('rect', {x:206, y:120, width:0, height:6, rx:3, fill:'var(--accent)'});
-  [b1, b2].forEach(function(b){ b.style.transition = 'width .6s'; });
-  /* 排队：最多 6 个位置 */
+  function txt(x, y, cls, s, anchor){ var t = mk('text', {x:x, y:y, 'class':cls, 'text-anchor':anchor || 'middle'}); if(s) t.textContent = s; return t; }
+  var LANE = 104;
+  var defs = mk('defs', {}), mrk = mk('marker', {id:'arr', viewBox:'0 0 8 8', refX:7, refY:4, markerWidth:7, markerHeight:7, orient:'auto'}, defs);
+  mk('path', {d:'M0 0 L8 4 L0 8 Z', fill:'var(--muted)'}, mrk);
+  /* 三个节点：你的客户端 → 猫头鹰网关 → NovelAI，图片沿底线原路返回 */
+  mk('rect', {x:6, y:44, width:100, height:120, rx:12, 'class':'tile'});
+  txt(56, 68, 'ttl', '你的客户端');
+  mk('rect', {x:36, y:84, width:40, height:26, rx:3, fill:'none', stroke:'var(--muted)', 'stroke-width':1.5});
+  mk('path', {d:'M30 114 H82', stroke:'var(--muted)', 'stroke-width':1.5});
+  txt(56, 150, 'val', '带 Key 发请求');
+  mk('rect', {x:126, y:20, width:428, height:166, rx:14, 'class':'gw'});
+  txt(144, 42, 'ttl', '🦉 猫头鹰网关', 'start');
+  txt(538, 42, 'val', '香港固定出口', 'end');
+  mk('rect', {x:574, y:44, width:100, height:120, rx:12, 'class':'tile'});
+  var naiRing = mk('circle', {cx:624, cy:90, r:22, fill:'none', stroke:'var(--accent)', 'stroke-width':2, opacity:0});
+  mk('circle', {cx:624, cy:90, r:17, fill:'#1d1d1f'});
+  mk('path', {d:'M624 78 L632 97 L624 103 L616 97 Z', fill:'#f5f5f7'});
+  mk('circle', {cx:624, cy:94, r:2.4, fill:'#1d1d1f'});
+  txt(624, 130, 'ttl', 'NovelAI');
+  var naiV = txt(624, 150, 'val', '空闲');
+  /* 主干线和箭头 */
+  mk('path', {d:'M106 ' + LANE + ' H124', 'class':'line', 'marker-end':'url(#arr)'});
+  mk('path', {d:'M554 ' + LANE + ' H572', 'class':'line', 'marker-end':'url(#arr)'});
+  mk('path', {d:'M144 ' + LANE + ' H536', 'class':'line', 'stroke-dasharray':'2 4'});
+  mk('path', {d:'M624 164 V206 H56 V166', 'class':'line', 'stroke-dasharray':'4 4', 'marker-end':'url(#arr)'});
+  txt(340, 226, 'val', '画好的图沿这条线直接回到你的客户端，本站不保存');
+  /* 网关里的四个关卡 */
+  function station(x, label){ txt(x, 146, 'lbl', label); return txt(x, 164, 'val', ''); }
+  function gate(x){
+    mk('rect', {x:x-12, y:LANE-16, width:3, height:32, rx:1.5, fill:'var(--muted)'});
+    mk('rect', {x:x+9, y:LANE-16, width:3, height:32, rx:1.5, fill:'var(--muted)'});
+    var b = mk('rect', {x:x-9, y:LANE-2, width:18, height:4, rx:2, fill:'var(--ok)', opacity:0}); b.style.transition = 'opacity .4s'; return b;
+  }
+  var g1 = gate(178), g2 = gate(262);
+  var v1 = station(178, '验 Key'), v2 = station(262, '查额度');
   var slots = [];
-  for(var i=0;i<6;i++){ mk('circle', {cx:306 + i*22, cy:100, r:7, fill:'none', stroke:'var(--border-strong)'}); slots.push(mk('circle', {cx:306 + i*22, cy:100, r:6, fill:'var(--accent)', opacity:0})); }
-  slots.forEach(function(c){ c.style.transition = 'opacity .4s, fill .4s'; });
-  var more = txt(361, 128, 'val');
-  /* 保护：本小时用量外圈 + 下一张倒计时内圈 + 月亮 */
-  mk('circle', {cx:487, cy:100, r:17, fill:'none', stroke:'var(--surface-3)', 'stroke-width':4});
-  var ring = mk('circle', {cx:487, cy:100, r:17, fill:'none', stroke:'var(--accent)', 'stroke-width':4, 'stroke-linecap':'round', transform:'rotate(-90 487 100)', 'stroke-dasharray':'0 107'});
-  mk('circle', {cx:487, cy:100, r:8, fill:'none', stroke:'var(--surface-3)', 'stroke-width':3});
-  var cd = mk('circle', {cx:487, cy:100, r:8, fill:'none', stroke:'var(--warn)', 'stroke-width':3, 'stroke-linecap':'round', transform:'rotate(-90 487 100)', 'stroke-dasharray':'0 51'});
-  ring.style.transition = 'stroke-dasharray .6s';
-  /* NovelAI：图标（官方样式的简化）+ 生成中脉冲 */
-  var naiG = mk('g', {});
-  var genDot = mk('circle', {cx:603, cy:124, r:6, fill:'var(--accent)', opacity:0});
-  var meLine = document.getElementById('liveMe'), dot = document.getElementById('liveDot');
-  function drawAccounts(list){
-    naiG.innerHTML = '';
-    if(list.length <= 1){
-      mk('circle', {cx:603, cy:92, r:16, fill:'#1d1d1f'}, naiG);
-      mk('path', {d:'M603 81 L610 98 L603 104 L596 98 Z', fill:'#f5f5f7'}, naiG);
-      mk('circle', {cx:603, cy:96, r:2.2, fill:'#1d1d1f'}, naiG);
-    } else {
-      list.slice(0, 4).forEach(function(a, i){
-        var y = 72 + i*20;
-        mk('rect', {x:556, y:y-8, width:94, height:16, rx:4, fill:a.usable ? 'var(--surface-3)' : 'none', stroke:a.usable ? 'none' : 'var(--bad)', 'stroke-dasharray':'2 2'}, naiG);
-        var t = mk('text', {x:603, y:y+4, 'class':'val', 'text-anchor':'middle'}, naiG);
-        t.textContent = '账号 ' + (i+1) + (a.usable ? '' : (a.cooling ? ' 冷却' : ' 停用'));
-      });
+  for(var i=0;i<6;i++){ var cx = 318 + i*22;
+    mk('circle', {cx:cx, cy:LANE, r:8, fill:'var(--surface)', stroke:'var(--border-strong)'});
+    var s = mk('circle', {cx:cx, cy:LANE, r:6.5, fill:'var(--accent)', opacity:0}); s.style.transition = 'opacity .4s, fill .4s'; slots.push(s); }
+  var more = txt(373, LANE - 16, 'val', '');
+  var v3 = station(373, '排队 · 先来先画');
+  mk('circle', {cx:494, cy:LANE, r:15, fill:'var(--surface)', stroke:'var(--surface-3)', 'stroke-width':4});
+  var cd = mk('circle', {cx:494, cy:LANE, r:15, fill:'none', stroke:'var(--warn)', 'stroke-width':4, 'stroke-linecap':'round', transform:'rotate(-90 494 ' + LANE + ')', 'stroke-dasharray':'0 95'});
+  var cdT = txt(494, LANE + 4, 'val', '');
+  var v4 = station(494, '控速');
+  var say = document.getElementById('liveSay'), meBox = document.getElementById('liveMe'), dot = document.getElementById('liveDot');
+  function flash(b){ b.setAttribute('opacity', '1'); setTimeout(function(){ b.setAttribute('opacity', '0'); }, 400); }
+  function move(points, color, ms, done){
+    if(reduce){ if(done) done(); return; }
+    var c = mk('circle', {cx:points[0][0], cy:points[0][1], r:6, fill:color});
+    var t0 = performance.now(), seg = [], total = 0;
+    for(var i=1;i<points.length;i++){ var l = Math.hypot(points[i][0]-points[i-1][0], points[i][1]-points[i-1][1]); seg.push(l); total += l; }
+    (function step(now){ var d = Math.min(1, (now - t0)/ms) * total, i = 0;
+      while(i < seg.length - 1 && d > seg[i]){ d -= seg[i]; i++; }
+      var k = seg[i] ? Math.min(1, d/seg[i]) : 1, a = points[i], b = points[i+1];
+      c.setAttribute('cx', (a[0] + (b[0]-a[0])*k).toFixed(1)); c.setAttribute('cy', (a[1] + (b[1]-a[1])*k).toFixed(1));
+      if(now - t0 < ms) requestAnimationFrame(step); else { c.remove(); if(done) done(); } })(t0);
+  }
+  /* 新请求：从客户端进入，过 ① ②；被拒的在 ② 变红掉出 */
+  function arrive(rejected){
+    flash(g1);
+    if(rejected) move([[56,LANE],[262,LANE]], 'var(--accent)', 700, function(){ move([[262,LANE],[262,LANE+28]], 'var(--bad)', 450); });
+    else move([[56,LANE],[306,LANE]], 'var(--accent)', 900, function(){ flash(g2); });
+  }
+  function giveBack(mineDone){ move([[624,LANE+10],[624,206],[56,206],[56,166]], mineDone ? 'var(--warn)' : 'var(--accent)', 1600); }
+  var lastReq = null, lastRej = 0, lastRunning = 0, mine = null, myRunning = false, doneAt = 0, failed = 0;
+  function steps(stage, note){
+    var names = ['已提交', '排队中', '生成中', '已返回'];
+    meBox.innerHTML = '<div class="mesteps">' + names.map(function(n, i){
+      return '<span class="' + (i < stage ? 'done' : i === stage ? 'now' : '') + '">' + n + '</span>'; }).join('<i></i>') +
+      '</div><div class="menote">' + note + '</div>';
+  }
+  function render(d, me){
+    var a = d.auth || {}, q = d.quota || {}, g = d.guard || {};
+    var qu = me || d.queue || {}, w = qu.waiting || 0, running = qu.running || 0;   /* 有 Key 时用不带缓存的数字，和「你排第几」保持一致 */
+    var interval = d.interval || 15;
+    var s;
+    if(g.cooldown) s = '⏸ 上游限流保护中，所有出图暂停约 <b>' + g.cooldown + ' 秒</b>';
+    else if(!w && !running) s = '现在<b>空闲</b>：新的图马上开始画';
+    else s = '现在 <b>' + running + '</b> 张在画、<b>' + w + '</b> 张在排队：新的图大约等 <b>' + Math.round((w + running) * interval) + ' 秒</b>';
+    if(g.quiet && !g.cooldown) s += '<span class="quiet">安静时段：每小时最多 ' + (g.hour_cap || 0) + ' 张</span>';
+    say.innerHTML = s;
+    if(lastReq !== null && a.requests > lastReq){
+      var n = Math.min(3, a.requests - lastReq), rej = Math.min(n, Math.max(0, (a.rejected || 0) - lastRej));
+      for(var i=0;i<n;i++) setTimeout(arrive.bind(null, i < rej), i * 250);
     }
-  }
-  var lastReq = null, lastRunning = 0, accN = -1, mine = null, failed = 0;
-  function fly(fromRunning){ if(reduce) return;
-    var c = mk('circle', {cx:600, cy:124, r:6, fill: fromRunning ? 'var(--warn)' : 'var(--accent)'});
-    var t0 = performance.now();
-    (function step(now){ var k = Math.min(1, (now - t0)/1400), x, y;
-      if(k < .15){ x = 600; y = 124 + (196-124)*(k/.15); } else if(k < .9){ x = 600 - (600-54)*((k-.15)/.75); y = 196; } else { x = 54; y = 196 - 28*((k-.9)/.1); }
-      c.setAttribute('cx', x.toFixed(1)); c.setAttribute('cy', y.toFixed(1));
-      if(k < 1) requestAnimationFrame(step); else c.remove(); })(t0);
-  }
-  function render(d){
-    var a = d.auth || {}, q = d.quota || {}, g = d.guard || {}, qu = d.queue || {}, m = d.members || {};
-    V.mem.textContent = m.max ? (m.active + ' / ' + m.max + (m.waitlist_total ? ' · 候补 ' + m.waitlist_total : '')) : '—';
-    V.auth.textContent = (a.requests || 0) + ' 次/分' + (a.rejected ? ' · 拒 ' + a.rejected : '');
-    if(lastReq !== null && a.requests > lastReq){ beam.setAttribute('opacity', '1'); setTimeout(function(){ beam.setAttribute('opacity', '0'); }, 450); }
-    lastReq = a.requests;
-    b1.setAttribute('width', String(q.images_cap ? Math.min(58, Math.round(58 * q.images_today / q.images_cap)) : 0));
-    b2.setAttribute('width', String(q.v5_cap ? Math.min(58, Math.round(58 * q.v5_today / q.v5_cap)) : 0));
-    V.quota.textContent = (q.images_today || 0) + (q.images_cap ? ' / ' + q.images_cap : '');
-    var w = qu.waiting || 0, myPos = mine && mine.filter(function(x){ return x.state === 'waiting'; })[0];
+    lastReq = a.requests || 0; lastRej = a.rejected || 0;
+    v1.textContent = (a.requests || 0) + ' 次/分' + (a.rejected ? ' · 拒 ' + a.rejected : '');
+    v2.textContent = '今日 ' + (q.images_today || 0) + ' 张';
+    var myPos = mine && mine.filter(function(x){ return x.state === 'waiting'; })[0];
     slots.forEach(function(c, i){ c.setAttribute('opacity', i < w ? '1' : '0'); c.setAttribute('fill', myPos && myPos.position === i+1 ? 'var(--warn)' : 'var(--accent)'); });
-    more.textContent = w > 6 ? '+' + (w - 6) : '';
-    V.queue.textContent = w ? w + ' 张在等' : '没人排队';
-    var hc = g.hour_cap || 0;
-    ring.setAttribute('stroke-dasharray', (hc ? (107 * Math.min(1, g.hour / hc)).toFixed(1) : 0) + ' 107');
-    cd.setAttribute('stroke-dasharray', (51 * (1 - Math.min(1, (g.next_in || 0) / 20))).toFixed(1) + ' 51');
-    V.guard.textContent = g.cooldown ? '冷却 ' + g.cooldown + 's' : g.quiet ? '安静时段 ' + g.hour + '/' + hc : g.hour + '/' + hc + ' · ' + (g.next_in > 0 ? Math.ceil(g.next_in) + 's' : '就绪');
-    var accs = d.accounts || [];
-    if(accs.length !== accN){ accN = accs.length; drawAccounts(accs); }
-    var running = qu.running || 0;
-    genDot.setAttribute('opacity', running ? '1' : '0');
-    genDot.setAttribute('fill', mine && mine.some(function(x){ return x.state === 'running'; }) ? 'var(--warn)' : 'var(--accent)');
-    V.nai.textContent = running ? '正在生成' : '空闲';
-    if(running < lastRunning) fly(false);
-    lastRunning = running;
-    if(mine === null) meLine.textContent = '';
-    else if(!mine.length) meLine.textContent = '你的图：现在没有进行中的请求。';
-    else if(mine.some(function(x){ return x.state === 'running'; })) meLine.innerHTML = '你的图：<b>正在生成</b>，马上就好。';
-    else meLine.innerHTML = '你的图：<b>排第 ' + myPos.position + ' 位</b>，预计约 ' + Math.max(5, myPos.eta) + ' 秒。';
+    more.textContent = w > 6 ? '还有 ' + (w - 6) + ' 张' : '';
+    v3.textContent = w ? w + ' 张在等' : '没人排队';
+    var nx = g.next_in || 0;
+    cd.setAttribute('stroke-dasharray', (95 * Math.min(1, nx / (interval + 5))).toFixed(1) + ' 95');
+    cd.setAttribute('opacity', nx > 0 ? '1' : '0');
+    cdT.textContent = nx > 0 ? Math.ceil(nx) : '';
+    v4.textContent = g.cooldown ? '冷却 ' + g.cooldown + ' 秒' : '本小时 ' + (g.hour || 0) + ' / ' + (g.hour_cap || 0) + ' 张';
+    var mineRun = !!(mine && mine.some(function(x){ return x.state === 'running'; }));
+    naiRing.setAttribute('opacity', running ? '1' : '0');
+    naiRing.setAttribute('stroke', mineRun ? 'var(--warn)' : 'var(--accent)');
+    naiRing.classList.toggle('pulse', !!running && !reduce);
+    naiV.textContent = running ? (mineRun ? '正在画你的图' : '正在画 ' + running + ' 张') : '空闲';
+    if(running > lastRunning) move([[536,LANE],[600,LANE]], mineRun ? 'var(--warn)' : 'var(--accent)', 500);
+    var myDone = myRunning && !mineRun;
+    if(running < lastRunning || myDone) giveBack(myDone);
+    if(myDone) doneAt = Date.now();
+    lastRunning = running; myRunning = mineRun;
+    if(mine === null) meBox.innerHTML = '';
+    else if(mineRun) steps(2, '<b>正在生成</b>，通常十几秒就好');
+    else if(myPos) steps(1, '<b>排第 ' + myPos.position + ' 位</b>，预计约 ' + Math.max(5, myPos.eta) + ' 秒后开始画');
+    else if(Date.now() - doneAt < 8000) steps(4, '<b>已返回</b>，去客户端看看吧');
+    else steps(-1, '没有进行中的图。在客户端点生成后，这里会显示它走到了哪一步');
   }
   /* 只用查询成功过的 Key，避免输错的 Key 每秒请求一次触发防暴力破解 */
   function keyNow(){ var k = window.__owlKey || ''; return /^nai-/.test(k) ? k : ''; }
@@ -756,11 +805,11 @@ $('chkForm').addEventListener('submit', function(e){
     fetch('/public/live', {cache:'no-store', credentials:'omit'}).then(function(r){ return r.ok ? r.json() : null; }).then(function(d){
       if(!d) throw 0; failed = 0; dot.style.background = 'var(--ok)';
       var key = keyNow();
-      if(!key){ mine = null; render(d); return; }
+      if(!key){ mine = null; render(d, null); return; }
       return fetch('/v1/live/me', {headers:{'Authorization':'Bearer ' + key}, cache:'no-store', credentials:'omit'})
         .then(function(r){ if(r.status === 401 || r.status === 403) window.__owlKey = ''; return r.ok ? r.json() : null; })
-        .then(function(me){ mine = me ? me.mine : null; render(d); });
-    }).catch(function(){ failed++; dot.style.background = 'var(--muted)'; })
+        .then(function(me){ mine = me ? me.mine : null; render(d, me); });
+    }).catch(function(e){ failed++; dot.style.background = 'var(--muted)'; if(e instanceof Error && window.__owlReport) window.__owlReport(e, 'live'); })
       .then(function(){ setTimeout(poll, visible ? (failed ? 5000 : 1000) : 10000); });
   }
   poll();

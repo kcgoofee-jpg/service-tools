@@ -37,6 +37,7 @@ ADMIN_ACTIONS = {
     ("PUT", "/ops/audit"): "修改生成记录设置",
     ("PUT", "/guard"): "修改账号保护与排队设置",
     ("PUT", "/anlas-pool"): "修改 Anlas 自动分配",
+    ("POST", "/errors/{sig}/resolve"): "标记 Bug 已处理",
 }
 
 

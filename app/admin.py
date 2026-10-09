@@ -599,7 +599,7 @@ async def delete_key(request: Request, key_id: int, ban: bool = False):
 
 @router.get("/logs")
 async def logs(request: Request, key_id: Optional[int] = None, page: int = 1,
-               feature: Optional[str] = None, hide_test: bool = False):
+               feature: Optional[str] = None, hide_test: bool = False, rid: str = ""):
     require_admin(request)
     per_page = 20
     page = max(1, min(int(page), 1_000_000))
@@ -607,11 +607,12 @@ async def logs(request: Request, key_id: Optional[int] = None, page: int = 1,
     if feature and feature not in feature_defs.FEATURES:
         raise HTTPException(422, "未知功能")
     kinds = feature_defs.kinds_for(feature) if feature else None
-    total = await db.count_logs(key_id=key_id, kinds=kinds, hide_test=hide_test)
+    rid = "".join(c for c in rid.strip().lower() if c in "0123456789abcdef")[:16]
+    total = await db.count_logs(key_id=key_id, kinds=kinds, hide_test=hide_test, rid=rid)
     pages = max(1, (total + per_page - 1) // per_page)
     page = min(page, pages)
     rows = await db.list_logs(limit=per_page, offset=(page - 1) * per_page,
-                              key_id=key_id, kinds=kinds, hide_test=hide_test)
+                              key_id=key_id, kinds=kinds, hide_test=hide_test, rid=rid)
     return {
         "logs": [dict(r) for r in rows],
         "page": page,
@@ -619,6 +620,32 @@ async def logs(request: Request, key_id: Optional[int] = None, page: int = 1,
         "total": total,
         "pages": pages,
     }
+
+
+@router.get("/errors")
+async def errors_list(request: Request, all: bool = False):
+    """Bug 追踪：按特征归并的错误（未处理的在前）。detail 含堆栈，只在后台显示。"""
+    require_admin(request)
+    tracker = request.app.state.gate.bugs
+    items = await tracker.list(include_resolved=all)
+    keys = {r["last_key"] for r in items if r["last_key"]}
+    names = {}
+    for key_id in keys:
+        row = await request.app.state.gate.db.get_key(key_id)
+        if row:
+            names[key_id] = row["name"]
+    for r in items:
+        r["key_name"] = names.get(r["last_key"], "")
+    return {"errors": items, "open": sum(1 for r in items if r["resolved_at"] is None)}
+
+
+@router.post("/errors/{sig}/resolve")
+async def errors_resolve(sig: str, request: Request):
+    """标记已处理；之后再出现会作为「复发」重新提醒。"""
+    require_admin(request)
+    if not await request.app.state.gate.bugs.resolve(sig[:12]):
+        raise HTTPException(404, "没有这条未处理的错误")
+    return {"ok": True}
 
 
 @router.get("/perf")
