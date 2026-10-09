@@ -144,12 +144,16 @@ class RegistrationService:
                     "INSERT INTO discord_registrations(discord_id,key_id,created_at) VALUES (?,?,?)",
                     (expected_id, row["id"], time.time()))
                 await self.db._db.commit()
+                from .audit import audit_notice
+                notice = audit_notice(os.getenv("AUDIT_PROMPTS", "").lower() in ("1", "true", "yes", "on"),
+                                      os.getenv("AUDIT_THUMBS", "").lower() in ("1", "true", "yes", "on"),
+                                      int(os.getenv("AUDIT_RETENTION_DAYS", "7") or 7))
                 quota = f"V4.5 及以下 {self.key_daily_images} 张" + (
                     f"；V5 {self.key_daily_v5} 张" if self.key_daily_v5 else "")
                 try:
                     await self._discord("POST", f"/channels/{channel['id']}/messages",
                         bearer="Bot " + self.bot_token,
-                        json={"content": f"你的 NAI Gate API Key：`{key}`\n网址：{self.site_url}\n每日额度：{quota}。请勿公开分享此 Key。",
+                        json={"content": f"你的 NAI Gate API Key：`{key}`\n网址：{self.site_url}\n每日额度：{quota}。请勿公开分享此 Key。" + (f"\n{notice}" if notice else ""),
                               "allowed_mentions": {"parse": []}})
                 except Exception:
                     await self.db._db.execute("DELETE FROM discord_registrations WHERE discord_id=?", (expected_id,))

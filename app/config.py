@@ -61,9 +61,22 @@ class Settings:
     image_min_interval: float = _float("IMAGE_MIN_INTERVAL", 15)  # 每把上游 Token 的图片请求间隔
     image_429_cooldown_seconds: float = _float("IMAGE_429_COOLDOWN_SECONDS", 60)
     admin_allowed_origins: tuple = tuple(o.strip() for o in os.getenv("ADMIN_ALLOWED_ORIGINS", "").split(",") if o.strip())
+    auth_fail_max: int = _int("AUTH_FAIL_MAX", 20)          # 单个 IP 在窗口内允许的无效 Key 次数
+    auth_fail_window: int = _int("AUTH_FAIL_WINDOW", 600)
+    auth_block_seconds: int = _int("AUTH_BLOCK_SECONDS", 900)
     login_max_attempts: int = _int("LOGIN_MAX_ATTEMPTS", 5)
     login_window_seconds: int = _int("LOGIN_WINDOW_SECONDS", 300)
     key_inactivity_delete_days: int = _int("KEY_INACTIVITY_DELETE_DAYS", 3)
+
+    # ---- 告警 / 生成记录 ----
+    discord_bot_token: str = os.getenv("DISCORD_BOT_TOKEN", "")
+    site_url: str = os.getenv("SITE_URL", "")
+    alert_user_id: str = os.getenv("ALERT_USER_ID", "")        # 告警私信给此 Discord 用户（用机器人发）
+    alert_channel_id: str = os.getenv("ALERT_CHANNEL_ID", "")  # 或发到某频道
+    alert_webhook_url: str = os.getenv("ALERT_WEBHOOK_URL", "")  # 或使用 Webhook
+    audit_prompts: bool = _bool("AUDIT_PROMPTS", False)        # 记录图片请求的提示词
+    audit_thumbs: bool = _bool("AUDIT_THUMBS", False)          # 记录成功结果的小缩略图
+    audit_retention_days: int = _int("AUDIT_RETENTION_DAYS", 7)
 
     # ---- 图片安全钳制（默认强制贴合 Opus 免费档）----
     safe_clamp: bool = _bool("SAFE_CLAMP", True)

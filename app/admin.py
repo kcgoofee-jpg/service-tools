@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import math
 import os
+import shutil
 import time
 from urllib.parse import urlsplit
 from typing import Any, Optional
@@ -490,4 +491,83 @@ async def put_announcement(request: Request):
     body = await read_json_body(request)
     html = str(body.get("html", ""))[:20000]
     request.app.state.gate.settings.announcement_path.write_text(html, encoding="utf-8")
+    return {"ok": True}
+
+
+# ----------------------------------------------------------- 成员与生成记录 ----
+
+@router.get("/members")
+async def members(request: Request):
+    """每位成员（Key）的今日 / 近 7 天 / 累计用量，以及来源。"""
+    require_admin(request)
+    st = request.app.state.gate
+    today = st.day()
+    week = await st.db.member_usage(st.week_days(7)[0])
+    totals = await st.db.generated_image_totals()
+    reg = {int(r[0]): str(r[1]) for r in await st.db._db.execute_fetchall(
+        "SELECT key_id, discord_id FROM discord_registrations")}
+    out = []
+    for row in await st.db.list_keys():
+        counter = await st.db.get_counter(row["id"], today)
+        w = week.get(row["id"], {})
+        out.append({
+            "id": row["id"], "name": row["name"], "enabled": bool(row["enabled"]),
+            "is_admin": bool(row["is_admin"]), "discord_id": reg.get(row["id"]),
+            "created_at": row["created_at"], "last_used_at": row["last_used_at"],
+            "expires_at": row["expires_at"],
+            "daily_images": row["daily_images"], "daily_v5": row["daily_v5"],
+            "today": {"images": counter["images"], "v5": counter["v5"], "anlas": round(float(counter["anlas"]), 2),
+                      "text_tokens": counter["text_tokens"], "requests": counter["requests"]},
+            "week": {"images": int(w.get("images", 0)), "v5": int(w.get("v5", 0)),
+                     "anlas": round(float(w.get("anlas", 0)), 2), "requests": int(w.get("requests", 0))},
+            "total_images": totals.get(row["id"], 0),
+        })
+    return {"members": out}
+
+
+@router.get("/audit")
+async def audit_list(request: Request, key_id: Optional[int] = None, page: int = 1):
+    require_admin(request)
+    st = request.app.state.gate
+    per_page = 24
+    page = max(1, min(int(page), 1_000_000))
+    rows, total = await st.db.list_audit(per_page, (page - 1) * per_page, key_id)
+    return {"items": [dict(r) for r in rows], "page": page, "per_page": per_page, "total": total,
+            "pages": max(1, (total + per_page - 1) // per_page)}
+
+
+@router.get("/audit/{audit_id}/thumb")
+async def audit_thumb(request: Request, audit_id: int):
+    require_admin(request)
+    data = await request.app.state.gate.db.audit_thumb(audit_id)
+    if data is None:
+        raise HTTPException(404, "没有缩略图")
+    return Response(data, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=3600"})
+
+
+@router.get("/status")
+async def server_status(request: Request):
+    """告警与记录功能的当前状态（不含任何密钥）。"""
+    require_admin(request)
+    st = request.app.state.gate
+    cfg = st.settings
+    usage = shutil.disk_usage(cfg.data_dir)
+    return {
+        "alerts": {"configured": st.alerter.configured, "sent": st.alerter.sent},
+        "audit": {"prompts": cfg.audit_prompts, "thumbs": cfg.audit_thumbs,
+                  "retention_days": cfg.audit_retention_days},
+        "protection": {"auth_fail_max": cfg.auth_fail_max, "auth_fail_window": cfg.auth_fail_window,
+                       "auth_block_seconds": cfg.auth_block_seconds,
+                       "login_max_attempts": cfg.login_max_attempts},
+        "disk": {"free_mb": usage.free // 2**20, "total_mb": usage.total // 2**20},
+    }
+
+
+@router.post("/alerts/test")
+async def alerts_test(request: Request):
+    require_admin(request)
+    alerter = request.app.state.gate.alerter
+    if not alerter.configured:
+        raise HTTPException(409, "尚未配置告警渠道（ALERT_USER_ID / ALERT_CHANNEL_ID / ALERT_WEBHOOK_URL）")
+    alerter.notify("test", "这是一条测试告警，收到说明告警渠道正常。", cooldown=0)
     return {"ok": True}
