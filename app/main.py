@@ -170,7 +170,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "1.9.2"
+__version__ = "1.9.3"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -1091,6 +1091,13 @@ async def _generate_image(request: Request, *, streaming: bool):
     if model_tier is None:
         record(key, "image", model, "rejected", detail="未列入本站图片模型白名单")
         raise err(400, "不支持或尚未开放的图片模型")
+    share = getattr(STATE, "share", None)
+    if share is not None:
+        try:                            # 防分享：出图习惯指纹（只在内存里保留哈希，见 share_guard.py）
+            await share.observe_habit(key, body, request_timing.snapshot().get("src", ""),
+                                      request.headers.get("user-agent", ""), **_share_callbacks(request))
+        except Exception as exc:
+            bug("share_guard", exc)
     if model_tier == "v5" and not key["is_admin"] and key["image_model_scope"] != "all":
         record(key, "image", model, "rejected", detail="模型权限：仅允许 V4.5 及更低")
         raise err(403, "你的 Key 目前只能用 V4.5 及更低模型（V5 是全站共享的有限额度，暂时只开放给早期成员）。"

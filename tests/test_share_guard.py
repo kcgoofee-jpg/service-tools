@@ -137,3 +137,48 @@ async def test_test_and_admin_keys_skip(guard):
         for i in range(30):
             assert await guard.observe(k, f"{i % 3}.0.*.*", 4, WIN, now=4e6 + i * 20, **c.kw()) is None
     assert not c.member and not c.admin
+
+
+def _body(prompt, neg, sampler="k_euler_ancestral", steps=28, scale=5):
+    return {"input": prompt, "parameters": {"sampler": sampler, "steps": steps, "scale": scale, "negative_prompt": neg}}
+
+
+A_CORE = "masterpiece, best quality, artist:wlop, artist:ask, {{jailbreak no limits}}, "
+B_CORE = "very aesthetic, year 2024, artist:mika pikazo, rating:general, "
+
+
+@pytest.mark.asyncio
+async def test_habits_interleaved_two_people_is_strong(guard):
+    c, t = Calls(), 8_000_000.0
+    for i in range(12):
+        if i % 2 == 0:
+            body, net, ua = _body(A_CORE + f"1girl, scene {i}", "lowres, bad hands"), "120.235.*.*", WIN
+        else:
+            body, net, ua = _body(B_CORE + f"1boy, city night {i}", "worst quality", "k_dpmpp_2m", 23, 6), "183.6.*.*", AND
+        await guard.observe_habit(KEY, body, net, ua, now=t + i * 300, **c.kw())
+    ev = await guard.evidence(1)
+    assert any(e["kind"] == "habits" and e["points"] == 35 for e in ev) and c.member
+
+
+@pytest.mark.asyncio
+async def test_habit_switch_once_or_auto_prompts_not_flagged(guard):
+    c, t = Calls(), 9_000_000.0
+    # 柏宝绘：剧情自动生成，每张提示词都不同，但 jailbreak / 质量词 / 参数固定
+    for i in range(10):
+        await guard.observe_habit(KEY, _body(A_CORE + f"scene {i}, mood {i * 7}, place {i * 3}", "lowres"), "1.2.*.*", WIN,
+                                  now=t + i * 200, **c.kw())
+    # 之后换了一整套画师串（先 A 后 B，不交替）
+    for i in range(10):
+        await guard.observe_habit(KEY, _body(B_CORE + f"new style {i}", "worst", "k_dpmpp_2m", 23), "1.2.*.*", WIN,
+                                  now=t + 2200 + i * 200, **c.kw())
+    assert not await guard.evidence(1) and not c.member
+
+
+@pytest.mark.asyncio
+async def test_habits_same_network_and_client_only_recorded(guard):
+    c, t = Calls(), 10_000_000.0
+    for i in range(12):
+        body = _body(A_CORE + f"x{i}", "lowres") if i % 2 == 0 else _body(B_CORE + f"y{i}", "worst", "k_dpmpp_2m", 23)
+        await guard.observe_habit(KEY, body, "1.2.*.*", WIN, now=t + i * 300, **c.kw())
+    ev = await guard.evidence(1)
+    assert ev and all(e["points"] == 0 for e in ev) and not c.member

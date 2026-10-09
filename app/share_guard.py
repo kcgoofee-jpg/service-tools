@@ -12,6 +12,10 @@
   multi_device +20  24 小时内 ≥ 3 种操作系统（Windows / Mac / Linux / Android / iOS）。
   many_clients +20  24 小时内 ≥ 4 种客户端指纹、≥ 2 种系统。
   allday       +15  近 24 小时里有 ≥ 20 个小时在用（作息不像一个人）。
+  habits       +35  2 小时内同一把 Key 交替出现两套完全不同的「出图习惯」（参数签名不同、提示词固定部分几乎不重合），
+                    并且两套习惯来自不同网络或不同客户端。每个人都有固定的画师串 / jailbreak / 质量词 / 采样器步数 CFG /
+                    负面词，换 VPN 改不掉；换了一套画师串的人是「先 A 后 B」，不会 A、B、A、B 来回交替。
+                    只有习惯交替、网络和客户端都相同 → 只记录不计分（可能是一个人开了两个对话）。
   同一类证据每把 Key 30 分钟（multi_device / many_clients / allday 为 24 小时）最多记一次。
 
   三重滤网（2026-10-10 盘点后修正）：multi_device / many_clients / allday 只看 UA 或作息，是「辅助证据」——
@@ -31,13 +35,15 @@
 """
 from __future__ import annotations
 
+import hashlib
 import math
+import re
 import time
 from collections import deque
 from typing import Any, Awaitable, Callable, Optional
 
-POINTS = {"overlap": 35, "concurrent": 35, "alternate": 15, "multi_device": 20, "many_clients": 20, "allday": 15}
-KIND_NAMES = {"overlap": "两地同时出图", "concurrent": "多地同时使用", "alternate": "网络来回切换", "multi_device": "多种设备",
+POINTS = {"habits": 35, "overlap": 35, "concurrent": 35, "alternate": 15, "multi_device": 20, "many_clients": 20, "allday": 15}
+KIND_NAMES = {"habits": "两套出图习惯交替", "overlap": "两地同时出图", "concurrent": "多地同时使用", "alternate": "网络来回切换", "multi_device": "多种设备",
               "many_clients": "客户端过多", "allday": "全天在用", "action": "处罚"}
 HALF_LIFE = 48 * 3600
 WARN, PAUSE, RESET = 30, 60, 100
@@ -47,9 +53,9 @@ WARN_COOLDOWN = 24 * 3600
 STRIKES_BAN = 3
 FAST_SWITCH = 90
 CONCURRENT_WINDOW = 1800
-DEDUPE = {"overlap": 1800, "concurrent": 1800, "alternate": 1800, "multi_device": 86400, "many_clients": 86400,
+DEDUPE = {"habits": 3600, "overlap": 1800, "concurrent": 1800, "alternate": 1800, "multi_device": 86400, "many_clients": 86400,
           "allday": 86400}
-STRONG = ("overlap", "concurrent", "alternate")
+STRONG = ("habits", "overlap", "concurrent", "alternate")
 CONFIRM_WINDOW = 72 * 3600     # 辅助证据只在 72 小时内有过强证据时计分
 OVERLAP_WINDOW = 180          # 「上一张还没完」只看最近 3 分钟内的请求
 MODE_SETTING = "share_guard_mode"          # enforce（默认）/ observe / off
@@ -83,13 +89,75 @@ def decayed(score: float, since: float, now: float) -> float:
     return score * math.pow(0.5, max(0.0, now - since) / HALF_LIFE)
 
 
+# ---------- 出图习惯指纹（只在内存里保留哈希，不存提示词原文）----------
+HABIT_WINDOW = 2 * 3600
+_WEIGHT = re.compile(r"^-?\d+(\.\d+)?::|::$|[{}\[\]()]")
+
+
+def _tokens(text: str) -> set[str]:
+    out = set()
+    for raw in re.split(r"[,\n|]", text or ""):
+        t = _WEIGHT.sub("", raw.strip().lower()).strip(" :.")
+        if 2 <= len(t) <= 60:
+            out.add(hashlib.sha1(t.encode()).hexdigest()[:10])
+    return out
+
+
+def habit_fingerprint(body: dict) -> tuple[str, frozenset]:
+    """(参数签名, 提示词词条哈希集合)。参数签名 = 采样器 / 步数 / CFG / 噪声表 / 负面词预设 / 质量词开关 / 负面词。"""
+    p = body.get("parameters") if isinstance(body.get("parameters"), dict) else {}
+    texts = [body.get("input") or "", p.get("prompt") or ""]
+    cap = (p.get("v4_prompt") or {}).get("caption") if isinstance(p.get("v4_prompt"), dict) else None
+    if isinstance(cap, dict):
+        texts.append(cap.get("base_caption") or "")
+        for c in cap.get("char_captions") or []:
+            if isinstance(c, dict):
+                texts.append(c.get("char_caption") or "")
+    neg = p.get("negative_prompt") or ""
+    ncap = (p.get("v4_negative_prompt") or {}).get("caption") if isinstance(p.get("v4_negative_prompt"), dict) else None
+    if isinstance(ncap, dict):
+        neg += "|" + (ncap.get("base_caption") or "")
+    try:
+        scale = round(float(p.get("scale") or 0), 1)
+    except (TypeError, ValueError):
+        scale = 0
+    sig = "|".join(str(x) for x in (p.get("sampler"), p.get("steps"), scale, p.get("noise_schedule"),
+                                   p.get("ucPreset"), p.get("qualityToggle"),
+                                   hashlib.sha1(neg.strip().lower().encode()).hexdigest()[:8]))
+    toks = set()
+    for t in texts:
+        toks |= _tokens(t)
+    return hashlib.sha1(sig.encode()).hexdigest()[:10], frozenset(toks)
+
+
+def _jaccard(a: set, b: set) -> float:
+    return len(a & b) / len(a | b) if a and b else 0.0
+
+
+class _Habit:
+    """一套出图习惯：参数签名 + 「固定部分」（出现在一半以上请求里的词条）。"""
+    def __init__(self, sig: str, toks: frozenset):
+        self.sig, self.n, self.counts = sig, 0, {}
+        self.add(toks)
+
+    def add(self, toks: frozenset) -> None:
+        self.n += 1
+        for t in toks:
+            self.counts[t] = self.counts.get(t, 0) + 1
+
+    def core(self) -> set:
+        need = max(1, self.n * 0.5)
+        return {t for t, c in self.counts.items() if c >= need}
+
+
 class ShareGuard:
     def __init__(self, db):
         self.db = db
         self._trail: dict[int, deque] = {}       # key_id → (ts, 网络标签, 地址族, 系统)
         self._hours: dict[int, set] = {}
         self._last: dict[tuple[int, str], float] = {}
-        self.paused: dict[int, float] = {}        # key_id → 暂停到期时间（启动时从库里读）
+        self.paused: dict[int, float] = {}
+        self._habits: dict[int, deque] = {}        # key_id → 暂停到期时间（启动时从库里读）
 
     async def load(self) -> None:
         rows = await self.db._db.execute_fetchall(
@@ -186,6 +254,17 @@ class ShareGuard:
         found = self.signals(kid, ip_label, family, user_agent, now, busy)
         if not found:
             return None
+        return await self._apply(key, found, now, member=member, admin=admin, reset=reset, ban=ban)
+
+    async def _apply(self, key, found: list[tuple[str, str]], now: float, *, member: Optional[Notify] = None,
+                     admin: Optional[Callable[[str], None]] = None,
+                     reset: Optional[Callable[[int], Awaitable[Optional[str]]]] = None,
+                     ban: Optional[Callable[[int], Awaitable[None]]] = None) -> Optional[str]:
+        """证据计分（三重滤网）→ 风险分 → 逐级处罚。"""
+        mode = await self.mode()
+        if mode == "off":
+            return None
+        kid = int(key["id"])
         s = await self._state(kid)
         if s["strikes"] >= STRIKES_BAN:          # 已停用，不再重复处罚
             return None
@@ -258,6 +337,61 @@ class ShareGuard:
         await self._save(kid, s)
         await self.db._db.commit()
         return action
+
+    def habit_signal(self, key_id: int, sig: str, toks: frozenset, label: str, ua: str, now: float) -> Optional[tuple[str, str, bool]]:
+        """返回 (kind, 说明, 是否有网络/客户端差异) 或 None。"""
+        hist = self._habits.setdefault(key_id, deque(maxlen=120))
+        hist.append((now, sig, toks, label or "", (ua or "")[:80]))
+        while hist and hist[0][0] < now - HABIT_WINDOW:
+            hist.popleft()
+        if len(hist) < 6:
+            return None
+        habits: list[_Habit] = []
+        seq, where = [], {}
+        for _, sg, tk, lb, fp in hist:              # 在线聚类：参数签名相同或和固定部分足够像就归为同一套习惯
+            for i, h in enumerate(habits):
+                if h.sig == sg or _jaccard(set(tk), h.core()) >= 0.3:
+                    h.add(tk)
+                    break
+            else:
+                habits.append(_Habit(sg, tk))
+                i = len(habits) - 1
+            seq.append(i)
+            where.setdefault(i, set()).add((lb, fp))
+        big = [i for i, h in enumerate(habits) if h.n >= 3]
+        if len(big) < 2:
+            return None
+        a, b = big[0], big[1]
+        if habits[a].sig == habits[b].sig or _jaccard(habits[a].core(), habits[b].core()) >= 0.15:
+            return None
+        ab = [x for x in seq if x in (a, b)]
+        switches = sum(1 for x, y in zip(ab, ab[1:]) if x != y)
+        if switches < 3:                             # 先 A 后 B 是换了画师串；A、B、A、B 才是两个人
+            return None
+        la, lb_ = {x[0] for x in where[a]}, {x[0] for x in where[b]}
+        fa, fb = {x[1] for x in where[a]}, {x[1] for x in where[b]}
+        differs = not (la & lb_) or not (fa & fb)
+        return ("habits", f"2 小时内两套出图习惯来回交替 {switches} 次（各 {habits[a].n} / {habits[b].n} 张，"
+                          f"参数和提示词固定部分都不同）" + ("，且来自不同网络或客户端" if differs else "，网络和客户端相同"), differs)
+
+    async def observe_habit(self, key, body: dict, label: Optional[str], user_agent: str, *,
+                            now: Optional[float] = None, **callbacks) -> Optional[str]:
+        """出图请求的习惯指纹；有差异的交替算强证据，走和 observe 一样的计分与处罚。"""
+        if _flag(key, "is_admin") or _flag(key, "is_test"):
+            return None
+        now = time.time() if now is None else now
+        kid = int(key["id"])
+        sig, toks = habit_fingerprint(body)
+        found = self.habit_signal(kid, sig, toks, label or "", user_agent, now)
+        if not found or now - self._last.get((kid, "habits"), 0) < DEDUPE["habits"]:
+            return None
+        self._last[(kid, "habits")] = now
+        kind, text, differs = found
+        if not differs:
+            await self._evidence(kid, kind, 0, text + "（只记录：可能是一个人开了两个对话）", now)
+            await self.db._db.commit()
+            return None
+        return await self._apply(key, [(kind, text)], now, **callbacks)
 
     async def clear(self, key_id: int) -> None:
         """站长判定误判：清零分数、解除暂停、违规次数归零（证据保留）。"""
