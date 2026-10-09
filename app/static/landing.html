@@ -93,14 +93,12 @@ section{margin-top:40px;scroll-margin-top:72px}
 .sec-head p{color:var(--muted);margin-top:4px;font-size:14px}
 .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-sm);padding:20px}
 
-/* hero */
-.hero{margin:0 -16px;padding:48px 16px 40px;text-align:center;
-  background:radial-gradient(900px 420px at 50% -20%,var(--accent-soft),transparent 72%)}
-.hero-in{max-width:640px;margin:0 auto}
-.hero h1{font-size:40px;line-height:1.15;letter-spacing:-.02em;font-weight:750}
-.hero h1 span{color:var(--accent)}
-.hero .tag{margin-top:16px;color:var(--text-2);font-size:16px}
-.pills{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:24px}
+.statusbar{padding:20px 0 4px}
+.pills{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+.step-act{margin-top:14px}
+.step-act .btn{min-height:44px;padding:8px 18px}
+.remember{display:flex;gap:8px;align-items:center;margin-top:12px;font-size:13.5px;color:var(--text-2);cursor:pointer}
+.remember input{width:18px;height:18px;accent-color:var(--accent)}
 .pill{display:inline-flex;align-items:center;gap:8px;padding:4px 12px;border-radius:999px;font-size:13.5px;font-weight:500;
   background:var(--surface);border:1px solid var(--border);color:var(--text-2);box-shadow:var(--shadow-sm);min-height:32px}
 .pill .dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:none}
@@ -113,8 +111,6 @@ section{margin-top:40px;scroll-margin-top:72px}
 .pill.bad{color:var(--bad);background:var(--bad-soft);border-color:color-mix(in srgb,var(--bad) 25%,transparent)}
 @keyframes pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--ok) 50%,transparent)}70%,100%{box-shadow:0 0 0 7px transparent}}
 .cooldown{margin:12px auto 0;max-width:420px;display:flex;gap:8px;align-items:center;justify-content:center;color:var(--warn);font-size:13.5px}
-.cta{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-top:24px}
-.cta .btn{min-height:44px;padding:8px 20px}
 .cta-note{color:var(--muted);font-size:13.5px;align-self:center}
 .skel{display:inline-block;height:32px;width:96px;border-radius:999px;background:linear-gradient(90deg,var(--surface-3),var(--surface-2),var(--surface-3));background-size:200% 100%;animation:sh 1.4s infinite linear}
 @keyframes sh{to{background-position:-200% 0}}
@@ -204,8 +200,6 @@ footer{max-width:960px;margin:0 auto;padding:24px 16px 40px;text-align:center;co
 @media (min-width:640px){
   body{font-size:15.5px}
   .top-link{display:inline-block}
-  .hero{padding:72px 16px 56px}
-  .hero h1{font-size:56px}
   .steps{grid-template-columns:repeat(3,1fr)}
   .guide{grid-template-columns:1fr 1fr}
   .kv{grid-template-columns:repeat(3,1fr)}
@@ -222,28 +216,39 @@ footer{max-width:960px;margin:0 auto;padding:24px 16px 40px;text-align:center;co
 <header class="topbar">
   <div class="topbar-in">
     <div class="brand"><span class="brand-mark" aria-hidden="true" style="font-size:20px">🦉</span>猫头鹰公益站</div>
-    <a class="top-link" href="#start">上手</a>
     <a class="top-link" href="#quota">查额度</a>
+    <a class="top-link" href="#start">上手</a>
     <a class="top-link" href="#rules">须知</a>
     <button class="btn ghost icon" id="themeBtn" type="button" aria-label="切换明暗主题" title="切换明暗主题"><span data-ic="theme"></span></button>
   </div>
 </header>
 
 <main>
-  <div class="hero">
-    <div class="hero-in">
-      <h1>NAI <span>Gate</span></h1>
-      <p class="tag">NovelAI 公益中转 · 用邀请制 Key 在常用客户端里生图</p>
-      <div class="pills" id="pills" aria-live="polite">
-        <span class="skel"></span><span class="skel"></span>
-      </div>
-      <p class="cooldown" id="cooldown" hidden><span data-ic="clock"></span><span id="cooldownTxt"></span></p>
-      <div class="cta">
-        <span id="discordSlot"></span>
-        <button class="btn" id="copySiteBtn" type="button"><span data-ic="copy"></span>复制接口地址</button>
-      </div>
+  <div class="statusbar">
+    <div class="pills" id="pills" aria-live="polite">
+      <span class="skel"></span><span class="skel"></span>
     </div>
+    <p class="cooldown" id="cooldown" hidden><span data-ic="clock"></span><span id="cooldownTxt"></span></p>
   </div>
+
+  <section id="quota">
+    <div class="sec-head"><h2>查看我的额度</h2><p>粘贴你的 Key，查看今日用量、到期时间和已开通功能。</p></div>
+    <div class="card">
+      <form id="chkForm" autocomplete="off" novalidate>
+        <label class="lb" for="keyIn">你的 Key</label>
+        <div class="chk-form">
+          <div class="inwrap">
+            <input id="keyIn" class="keyin" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="粘贴你的 Key" aria-describedby="privacy">
+            <button class="eye" id="eyeBtn" type="button" aria-label="显示 Key" aria-pressed="false"><span data-ic="eye"></span></button>
+          </div>
+          <button class="btn primary" id="chkBtn" type="submit"><span data-ic="search"></span>查询</button>
+        </div>
+      </form>
+      <label class="remember"><input type="checkbox" id="rememberKey"><span>在本机记住 Key，下次打开自动显示额度（公共电脑请勿勾选）</span></label>
+      <p class="privacy" id="privacy"><span data-ic="lock"></span><span id="privacyTxt">Key 只在你的浏览器里用于查询，不会上传保存。</span></p>
+      <div id="result" aria-live="polite"></div>
+    </div>
+  </section>
 
   <section id="announce" hidden>
     <div class="card"><div class="ah"><span data-ic="megaphone"></span>站长公告</div><div id="annBox"></div></div>
@@ -252,7 +257,8 @@ footer{max-width:960px;margin:0 auto;padding:24px 16px 40px;text-align:center;co
   <section id="start">
     <div class="sec-head"><h2>三步上手</h2><p>加入社区、领取 Key，再填进客户端就能用。</p></div>
     <ol class="steps">
-      <li class="card step"><span class="n">1</span><h3>加入 Discord</h3><p>通过邀请链接加入服务器，先读一下 📖｜新人必看。无需任何审批，名额先到先得。</p></li>
+      <li class="card step"><span class="n">1</span><h3>加入 Discord</h3><p>通过邀请链接加入服务器，先读一下 📖｜新人必看。无需任何审批，名额先到先得。</p>
+        <div class="step-act" id="discordSlot"></div></li>
       <li class="card step"><span class="n">2</span><h3>领取你的 Key</h3><p>在 <code>🔑｜领取key</code> 的输入框直接打 <code>/register</code>（提示「没有权限发送消息」是正常的，不用创建子区），Key 会通过私信发给你。</p></li>
       <li class="card step"><span class="n">3</span><h3>填入客户端</h3><p>把下面的接口地址和你的 Key 填进客户端。</p>
         <div class="copyline"><span class="mono" id="siteTxt1">—</span><button class="btn mini" type="button" data-copy="site"><span data-ic="copy"></span>复制</button></div>
@@ -275,24 +281,6 @@ footer{max-width:960px;margin:0 auto;padding:24px 16px 40px;text-align:center;co
         <div class="copyline"><span class="mono" id="siteTxt2">—</span><button class="btn mini" type="button" data-copy="v1"><span data-ic="copy"></span>复制</button></div>
         <p>文本功能是否对你开放，取决于站长授权。</p>
       </div>
-    </div>
-  </section>
-
-  <section id="quota">
-    <div class="sec-head"><h2>查看我的额度</h2><p>输入你的 Key，查看今日用量、到期时间和已开通功能。</p></div>
-    <div class="card">
-      <form id="chkForm" autocomplete="off" novalidate>
-        <label class="lb" for="keyIn">你的 Key</label>
-        <div class="chk-form">
-          <div class="inwrap">
-            <input id="keyIn" class="keyin" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="粘贴你的 Key" aria-describedby="privacy">
-            <button class="eye" id="eyeBtn" type="button" aria-label="显示 Key" aria-pressed="false"><span data-ic="eye"></span></button>
-          </div>
-          <button class="btn primary" id="chkBtn" type="submit"><span data-ic="search"></span>查询</button>
-        </div>
-      </form>
-      <p class="privacy" id="privacy"><span data-ic="lock"></span><span>Key 只在你的浏览器里用于查询，不会被保存。</span></p>
-      <div id="result" aria-live="polite"></div>
     </div>
   </section>
 
@@ -389,7 +377,6 @@ document.addEventListener('click', function(e){
   var b = e.target.closest('[data-copy]'); if(!b) return;
   copyText(b.getAttribute('data-copy') === 'v1' ? site + '/v1' : site);
 });
-$('copySiteBtn').addEventListener('click', function(){ copyText(site); });
 
 function pill(cls, text, dot){
   var p = el('span', 'pill ' + cls);
@@ -427,6 +414,15 @@ function renderStatus(d){
   if(st === 'ok') pills.appendChild(pill('ok', '服务正常', true));
   else if(st === 'degraded') pills.appendChild(pill('warn', '服务不稳定', true));
   else pills.appendChild(pill('ok', '服务正常 · 空闲', true));
+  var sb = d.stability || {}, total = (Number(sb.ok) || 0) + (Number(sb.error) || 0);
+  if(total > 0){
+    var rate = Math.round(sb.ok / total * 1000) / 10;
+    var cls = rate >= 95 ? 'ok' : (rate >= 80 ? 'warn' : 'bad');
+    var sp = pill(cls, '近 24 小时出图成功率 ' + rate + '%', false);
+    sp.insertBefore(ic(cls === 'ok' ? 'check' : 'alert'), sp.firstChild);
+    sp.title = '成功 ' + sb.ok + ' 次 · 上游失败 ' + sb.error + ' 次（不含参数填错等被拒请求）';
+    pills.appendChild(sp);
+  } else pills.appendChild(pill('idle', '近 24 小时暂无出图数据', false));
   var jobs = Number(d.image_jobs) || 0;
   if(jobs > 1) pills.appendChild(pill('info', '出图排队中 ' + jobs + ' 个任务 · 约 15 秒一张', false));
   if(reg.open){
@@ -558,6 +554,14 @@ function renderResult(m){
   res.appendChild(box);
 }
 var busy = false;
+var REMEMBER = 'owl-gate-key';
+function stored(){ try{ return localStorage.getItem(REMEMBER) || ''; }catch(_){ return ''; } }
+function store(v){ try{ if(v) localStorage.setItem(REMEMBER, v); else localStorage.removeItem(REMEMBER); }catch(_){} }
+var remember = $('rememberKey');
+remember.addEventListener('change', function(){
+  if(!remember.checked) store('');
+  $('privacyTxt').textContent = remember.checked ? 'Key 只保存在这台设备的浏览器里，不会上传；取消勾选即删除。' : 'Key 只在你的浏览器里用于查询，不会上传保存。';
+});
 $('chkForm').addEventListener('submit', function(e){
   e.preventDefault();
   if(busy) return;
@@ -571,8 +575,8 @@ $('chkForm').addEventListener('submit', function(e){
     .then(function(r){
       return r.json().catch(function(){ return null; }).then(function(j){
         var msg = j && j.error && j.error.message;
-        if(r.ok && j) return renderResult(j);
-        if(r.status === 401) return showAlert('bad', 'Key 无效，请检查是否复制完整（注意前后空格）。', 'alert');
+        if(r.ok && j){ store(remember.checked ? key : ''); return renderResult(j); }
+        if(r.status === 401){ store(''); remember.checked = false; return showAlert('bad', 'Key 无效，请检查是否复制完整（注意前后空格）。', 'alert'); }
         if(r.status === 403) return showAlert('warn', msg || '这个 Key 已被停用或已过期。', 'lock');
         if(r.status === 429) return showAlert('warn', '尝试次数过多，你的网络暂时被限制查询，请稍后再试。', 'clock');
         showAlert('bad', '查询失败（' + r.status + '），请稍后再试。', 'alert');
@@ -581,6 +585,14 @@ $('chkForm').addEventListener('submit', function(e){
     .catch(function(){ showAlert('bad', '无法连接到服务，请检查网络后重试。', 'alert'); })
     .then(function(){ busy = false; chkBtn.disabled = false; });
 });
+// 记住过 Key 的设备：打开页面直接显示额度
+(function(){
+  var saved = stored();
+  if(!saved) return;
+  keyIn.value = saved; remember.checked = true;
+  $('privacyTxt').textContent = 'Key 只保存在这台设备的浏览器里，不会上传；取消勾选即删除。';
+  $('chkForm').requestSubmit ? $('chkForm').requestSubmit() : $('chkForm').dispatchEvent(new Event('submit', {cancelable: true}));
+})();
 })();
 </script>
 </body>
