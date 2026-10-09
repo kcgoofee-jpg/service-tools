@@ -4,3 +4,9 @@ data/
 .env
 .venv/
 *.db
+.pytest_cache/
+.local/
+*.packed.html
+.DS_Store
+*.db-wal
+*.db-shm
