@@ -311,7 +311,10 @@ class GateState:
         for key_id in key_ids:
             await self.db.delete_key(key_id)
             # 释放对应的 Discord 领取记录，否则用户永远无法重新领取。
-            await self.db.forget_registration_for_key(key_id)
+            for discord_id in await self.db.forget_registration_for_key(key_id):
+                release = getattr(self, "on_registration_released", None)
+                if release is not None:
+                    await release(discord_id)
         return len(key_ids)
 
     # ---------- upstream image cooldown ----------

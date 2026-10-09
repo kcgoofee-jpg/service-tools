@@ -174,6 +174,7 @@ class Database:
             "ALTER TABLE api_keys ADD COLUMN image_model_scope TEXT NOT NULL DEFAULT 'legacy'",
             "ALTER TABLE api_keys ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE api_keys ADD COLUMN features TEXT",
+            "ALTER TABLE discord_registrations ADD COLUMN role_granted INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE upstream_token_counters ADD COLUMN images INTEGER NOT NULL DEFAULT 0",
         ):
             try:
@@ -563,9 +564,13 @@ class Database:
                 await db.rollback()
                 raise
 
-    async def forget_registration_for_key(self, key_id: int) -> None:
+    async def forget_registration_for_key(self, key_id: int) -> list[str]:
+        """删除该 Key 对应的领取记录，返回被删记录的 Discord ID（用于摘除身份组）。"""
+        rows = await self._db.execute_fetchall(
+            "SELECT discord_id FROM discord_registrations WHERE key_id=?", (key_id,))
         await self._db.execute("DELETE FROM discord_registrations WHERE key_id=?", (key_id,))
         await self._db.commit()
+        return [str(r[0]) for r in rows]
 
     async def execute_fetchall_compat(self, sql: str, args: tuple = ()) -> list:
         return list(await (await self._db.execute(sql, args)).fetchall())

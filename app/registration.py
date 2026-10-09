@@ -30,7 +30,8 @@ class RegistrationService:
                  key_daily_images: int = 100, key_daily_v5: int = 50,
                  key_image_scope: str = "all", key_expires_days: int = 0, key_rpm: int = 5,
                  max_users: int = 0, reset_at: str = "", key_features: str | None = None,
-                 min_account_days: int = 0):
+                 min_account_days: int = 0, member_role_id: str = ""):
+        self.member_role_id = member_role_id
         self.max_users, self.reset_at, self.key_features = max_users, reset_at, key_features
         self.min_account_days = min_account_days
         self.command_guild, self.membership_guild = command_guild, membership_guild
@@ -50,6 +51,41 @@ class RegistrationService:
             """SELECT COUNT(*) FROM discord_registrations r JOIN api_keys k ON k.id=r.key_id
                WHERE k.enabled=1 AND (k.expires_at IS NULL OR k.expires_at > ?)""", (time.time(),))
         return int(rows[0][0])
+
+    async def _set_role(self, discord_id: str, grant: bool) -> bool:
+        """给 / 摘「已领 Key」身份组。失败只记日志，不影响注册或撤销。"""
+        if not self.member_role_id:
+            return False
+        try:
+            response = await self.http.request(
+                "PUT" if grant else "DELETE",
+                f"https://discord.com/api/v10/guilds/{self.command_guild}/members/{discord_id}/roles/{self.member_role_id}",
+                headers={"Authorization": "Bot " + self.bot_token, "X-Audit-Log-Reason": "NAI Gate key " + ("issued" if grant else "ended")},
+                timeout=10)
+            return response.status_code in (200, 204, 404)     # 404: 成员已离开服务器，也算完成
+        except httpx.HTTPError:
+            return False
+
+    async def release_role(self, discord_id: str) -> None:
+        await self._set_role(discord_id, False)
+
+    async def sync_roles(self) -> int:
+        """Key 已过期、被停用或被删除的成员：摘掉身份组（每 5 分钟由后台任务调用）。"""
+        if not self.member_role_id:
+            return 0
+        rows = await self.db._db.execute_fetchall(
+            """SELECT r.discord_id FROM discord_registrations r LEFT JOIN api_keys k ON k.id=r.key_id
+               WHERE r.role_granted=1 AND (k.id IS NULL OR k.enabled=0
+                     OR (k.expires_at IS NOT NULL AND k.expires_at < ?))""", (time.time(),))
+        done = 0
+        for (discord_id,) in rows:
+            if await self._set_role(str(discord_id), False):
+                await self.db._db.execute("UPDATE discord_registrations SET role_granted=0 WHERE discord_id=?",
+                                          (str(discord_id),))
+                done += 1
+        if done:
+            await self.db._db.commit()
+        return done
 
     async def _release_if_expired(self, discord_id: str) -> None:
         """成员的 Key 已过期：自动清掉旧 Key 和记录，让他可以在有名额时重新领取（每个周期自然轮换）。"""
@@ -83,6 +119,7 @@ class RegistrationService:
         await self.db.delete_key(rows[0][0])
         await self.db._db.execute("DELETE FROM discord_registrations WHERE discord_id=?", (discord_id,))
         await self.db._db.commit()
+        await self.release_role(discord_id)
         return True
 
     async def reset_all(self) -> int:
@@ -185,6 +222,10 @@ class RegistrationService:
                     await self.db._db.execute("DELETE FROM discord_registrations WHERE discord_id=?", (expected_id,))
                     await self.db.delete_key(row["id"])
                     raise
+                if await self._set_role(expected_id, True):
+                    await self.db._db.execute("UPDATE discord_registrations SET role_granted=1 WHERE discord_id=?",
+                                              (expected_id,))
+                    await self.db._db.commit()
                 return "sent"
             except (httpx.HTTPError, KeyError, ValueError) as exc:
                 raise RegistrationError("Discord 服务暂时不可用，请稍后重试。") from exc
@@ -216,4 +257,5 @@ def configured_service(db, http: httpx.AsyncClient) -> RegistrationService | Non
         key_expires_days=number("REGISTER_EXPIRES_DAYS", 30), key_rpm=max(1, number("REGISTER_RPM", 5)),
         max_users=number("REGISTER_MAX_USERS", 0), reset_at=os.getenv("REGISTER_RESET_AT", "").strip(),
         key_features=os.getenv("REGISTER_FEATURES", "image").strip(),
-        min_account_days=number("REGISTER_MIN_ACCOUNT_DAYS", 7))
+        min_account_days=number("REGISTER_MIN_ACCOUNT_DAYS", 7),
+        member_role_id=os.getenv("DISCORD_MEMBER_ROLE_ID", "").strip())

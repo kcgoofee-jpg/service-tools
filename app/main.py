@@ -138,6 +138,8 @@ async def lifespan(app: FastAPI):
     app.state.gate = STATE
     registration_http = httpx.AsyncClient()
     app.state.registrar = configured_service(STATE.db, registration_http)
+    if app.state.registrar is not None:
+        STATE.on_registration_released = app.state.registrar.release_role
     cleanup_task = asyncio.create_task(inactive_key_cleanup_loop())
     reset_task = asyncio.create_task(registration_reset_loop())
     maintenance_task = asyncio.create_task(maintenance_loop())
@@ -244,6 +246,9 @@ async def maintenance_loop() -> None:
         try:
             days = max(1, (await audit_flags(STATE.db, STATE.settings))[2])
             await STATE.db.purge_audit(time.time() - days * 86400)
+            registrar = getattr(app.state, "registrar", None)
+            if registrar is not None:
+                await registrar.sync_roles()
             usage = shutil.disk_usage(STATE.settings.data_dir)
             if usage.free / usage.total < 0.10:
                 notify_owner("disk_low", f"服务器磁盘剩余不足 10%（剩 {usage.free // 2**20} MB），请清理或扩容。", 6 * 3600)
