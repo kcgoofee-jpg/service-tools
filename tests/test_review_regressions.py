@@ -1053,6 +1053,8 @@ def test_guard_quiet_hours_wrap_and_hourly_cap():
     from zoneinfo import ZoneInfo
     g = Guard()
     at = lambda h: datetime(2026, 10, 9, h, 30, tzinfo=ZoneInfo("Asia/Shanghai")).timestamp()
+    assert not g.in_quiet(at(3)) and g.hourly_cap(at(3)) == 80       # 默认不启用安静时段（夜里不限速）
+    g.values.update(quiet_start=3, quiet_end=8)
     assert g.in_quiet(at(3)) and not g.in_quiet(at(8)) and not g.in_quiet(at(1))
     assert g.hourly_cap(at(3)) == 20 and g.hourly_cap(at(12)) == 80
     g.values.update(quiet_start=23, quiet_end=6)
