@@ -21,7 +21,7 @@ HOUR = 3600
 FIELDS: dict[str, tuple[int, int, int, str]] = {
     "account_daily_cap": (1000, 0, 20000, "每个上游账号每天最多出图张数"),
     "account_hourly_cap": (80, 0, 240, "每个上游账号每小时最多出图张数"),
-    "quiet_start": (2, 0, 23, "安静时段开始（北京时间，整点）"),
+    "quiet_start": (3, 0, 23, "安静时段开始（北京时间，整点）"),
     "quiet_end": (8, 0, 23, "安静时段结束（北京时间，整点；与开始相同表示不设安静时段）"),
     "quiet_hourly_cap": (20, 0, 240, "安静时段每个账号每小时最多出图张数"),
     "interval_jitter": (5, 0, 30, "两次出图间隔额外随机增加 0～N 秒"),
