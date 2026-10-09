@@ -720,7 +720,7 @@ def test_welcome_dm_is_a_full_tutorial_and_fits_discord():
 def test_client_name_is_sanitized_and_bounded():
     from app.request_timing import client_name
     assert client_name("Mozilla/5.0\r\nX-Evil: 1") == "Mozilla/5.0 X-Evil: 1"
-    assert len(client_name("a" * 500)) == 60
+    assert len(client_name("a" * 500)) == 256
     assert client_name("") == ""
 
 
@@ -764,7 +764,7 @@ async def test_usage_log_timing_columns_round_trip(tmp_path):
         await db.record_success(1, "k", "image", "m", "2026-10-09", images=1, wait_ms=-5, dur_ms=10, client="c")
         rows = await db.list_logs(limit=5, offset=0)
         by_wait = {r["wait_ms"]: dict(r) for r in rows}
-        assert by_wait[1500]["dur_ms"] == 8200 and len(by_wait[1500]["client"]) == 60
+        assert by_wait[1500]["dur_ms"] == 8200 and len(by_wait[1500]["client"]) == 100
         assert by_wait[0]["client"] == "c" and by_wait[0]["dur_ms"] == 10
     finally:
         await db.close()

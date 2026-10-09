@@ -185,7 +185,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "2.0.4"
+__version__ = "2.1.0"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -298,7 +298,7 @@ async def gate_error_handler(request: Request, exc: GateError):
     if key is not None and 400 <= exc.status < 500 and not _REQUEST_LOGGED.get():
         # 鉴权之后被拒（Key 停用 / 过期、功能未开通、额度用完、限流、排队超时……）统一记一条，方便排查成员问题
         try:
-            record(key, _kind_for_path(request.url.path), "", "rejected", detail=f"{exc.status} {exc.message}"[:160])
+            record(key, _kind_for_path(request.url.path), request_timing.model(), "rejected", detail=f"{exc.status} {exc.message}"[:160])
         except Exception as log_exc:
             bug("log:rejected", log_exc, path=request.url.path)
     if exc.status >= 500:          # 上游失败 / 网关故障：按消息归并，方便看出哪类问题在变多
@@ -1077,6 +1077,7 @@ async def _generate_image(request: Request, *, streaming: bool):
     await check_rpm(key)
     await require_feature(key, "image")
     body = await read_image_payload(request)
+    request_timing.set_model(str(body.get("model") or ""))
     if not isinstance(body.get("parameters"), dict):
         raise err(400, "缺少 parameters 对象")
     try:

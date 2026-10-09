@@ -20,7 +20,7 @@
   · k 看账号当前剩余：剩得多就多发，把本来会浪费的额度用掉；剩得少就收紧，给账号回血。
         剩余 ≥ 90% → 1.3   70–90% → 1.1   40–70% → 0.9   20–40% → 0.6   < 20% → 0.3
     目标是让剩余长期稳定在 60%～80%：既不浪费（顶到 100% 就不再涨），又留出应对高峰的余量。
-  · 每人 D5 = G ÷ 最近 3 天在用的人数（至少按 10 人算，给新来的人留位置），限制在 3～30 张。
+  · 每人 D5 = G ÷ 最近 3 天用过 V5 的人数（至少按 10 人算，给新来的人留位置），限制在 3～30 张；每天只定一次。
     全站上限 G 兜底：哪怕每个人都用满，也不会超过当天可分配量。
 
 ━━ V4.5：上限 A 与保底 B 每天自动微调（「越用越有效」的部分）━━
@@ -65,7 +65,8 @@ DEFAULTS = {
 STATE_KEY = "quota_algo_last"
 HISTORY_KEY = "quota_algo_history"
 DAY_KEY = "quota_algo_day"
-NOTICE_KEY = "algo_notice"        # 首页一行提醒        # 最近一次做「每日微调」的日期，保证一天只调一次
+NOTICE_KEY = "algo_notice"
+V5_DAY_KEY = "quota_v5_day_plan"   # 当天的 V5 分配（每天只定一次）        # 首页一行提醒        # 最近一次做「每日微调」的日期，保证一天只调一次
 
 
 def v5_factor(percent: Optional[float]) -> float:
@@ -180,6 +181,15 @@ async def _active(db, days: int, now: float) -> int:
     return int(r[0][0])
 
 
+async def _active_v5(db, days: int, now: float) -> int:
+    """最近 days 天用过 V5 的成员数（不含测试 / 站长 Key）。"""
+    since = [(datetime.fromtimestamp(now) - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(days)]
+    r = await db._db.execute_fetchall(
+        f"SELECT COUNT(DISTINCT c.key_id) FROM counters c JOIN api_keys k ON k.id=c.key_id "
+        f"WHERE c.v5>0 AND k.is_test=0 AND k.is_admin=0 AND c.day IN ({','.join('?' * len(since))})", since)
+    return int(r[0][0])
+
+
 async def _allowance(state) -> tuple[Optional[float], Optional[float]]:
     """账号 V5 剩余 % 与实测恢复 %/天（多个账号时取平均）。"""
     nai = getattr(state, "nai", None)
@@ -241,8 +251,20 @@ async def run(state, now: Optional[float] = None) -> dict[str, Any]:
         a, b = a2, b2
 
     # ---- V5 ----
+    # 每人 V5 额度一天只定一次（每日重置时），当天不再随人数变化（统计审查：10-10 一天内 15→13→11→9→8，
+    # 先用的人用到 11 张后额度被降到 9 而被拦）。分母按最近 3 天真正用过 V5 的人数（原来按出过任何图的人，
+    # 23 人里只有 10 人用 V5，额度长期浪费在 97%）。只有账号剩余跌破 40% 才在当天收紧（安全优先）。
     pct, rate = await _allowance(state)
-    v5 = v5_plan(pct, rate, await _active(db, 3, now), lo=cfg["quota_v5_min"], hi=cfg["quota_v5_max"])
+    stored = json.loads(await db.get_setting(V5_DAY_KEY, "{}") or "{}")
+    fresh = v5_plan(pct, rate, await _active_v5(db, 3, now), lo=cfg["quota_v5_min"], hi=cfg["quota_v5_max"])
+    if stored.get("day") == today and stored.get("plan"):
+        v5 = stored["plan"]
+        if pct is not None and pct < P("allocation.v5_tighten_below", 40) and fresh["each"] < v5["each"]:
+            v5 = fresh
+            await db.set_setting(V5_DAY_KEY, json.dumps({"day": today, "plan": v5}, ensure_ascii=False))
+    else:
+        v5 = fresh
+        await db.set_setting(V5_DAY_KEY, json.dumps({"day": today, "plan": v5}, ensure_ascii=False))
 
     # ---- 应用：所有由算法管理的成员同一套额度 ----
     cur = await db._db.execute_fetchall(
