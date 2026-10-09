@@ -691,7 +691,6 @@ loadStatus();
 
 /* 成员网页登录（Discord）：登录后直接看状态、复制 Key，不用粘贴。数据来自 /public/me */
 function maskKey(k){ k = String(k || ''); return k.length > 14 ? k.slice(0, 7) + '…' + k.slice(-4) : k; }
-function copyText(t, msg){ if(navigator.clipboard){ navigator.clipboard.writeText(t).then(function(){ toast(msg); }, function(){}); } }
 var ME = null;
 function closeChip(){ var m = $('chipMenu'); if(m){ m.hidden = true; } var b = $('chipBtn'); if(b){ b.setAttribute('aria-expanded', 'false'); } }
 function renderChip(d){
