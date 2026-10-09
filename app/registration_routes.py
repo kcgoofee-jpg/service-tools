@@ -17,6 +17,7 @@ router = APIRouter(prefix="/self-register")
 class Intent(BaseModel):
     discord_id: str
     guild_id: str
+    name: str = ""          # Discord 用户名，仅用于候补名单展示
 
 
 def _service(request: Request):
@@ -160,11 +161,18 @@ async def quota(request: Request, body: Who):
     return JSONResponse({
         "enabled": bool(key["enabled"]), "expires_at": key["expires_at"],
         "daily_images": key["daily_images"], "images": counter["images"],
+        "daily_images_base": _base(gate, key),
         "daily_v5": key["daily_v5"], "v5": counter["v5"],
         "image_model_scope": key["image_model_scope"],
         "features": [{"id": n, "label": feature_defs.FEATURES[n], "on": n in granted and flags[n]}
                      for n in feature_defs.FEATURES],
     }, headers={"Cache-Control": "no-store"})
+
+
+def _base(gate, key) -> int:
+    guard = getattr(gate, "guard", None)
+    base = guard.values["base_daily_images"] if guard is not None else 0
+    return base if base and key["daily_images"] and base < key["daily_images"] else 0
 
 
 @router.post("/resetkey")
@@ -196,8 +204,11 @@ async def slots(request: Request, body: Who):
     _checked(service, body)
     _admin_actor(service, body)
     cfg = await service.settings()
+    wl = await service.waitlist()
     return JSONResponse({"active": await service.count_active(), "max": cfg["max_users"],
-                         "open": cfg["open"], "reset_at": service.reset_at}, headers={"Cache-Control": "no-store"})
+                         "open": cfg["open"], "reset_at": service.reset_at,
+                         "waitlist": len(wl), "invited": sum(1 for w in wl if w["invited_at"])},
+                        headers={"Cache-Control": "no-store"})
 
 
 @router.post("/intent")
@@ -209,7 +220,7 @@ async def intent(request: Request, body: Intent):
     if not hmac.compare_digest(given, "Bearer " + service.bridge_secret):
         raise HTTPException(401, "未授权")
     try:
-        url = await service.begin(body.discord_id, body.guild_id)
+        url = await service.begin(body.discord_id, body.guild_id, body.name[:80])
     except RegistrationError as exc:
         await _log_bot(request, body.discord_id, "领取 Key 失败（/register）", "", str(exc)[:200])
         raise HTTPException(403, str(exc)) from exc

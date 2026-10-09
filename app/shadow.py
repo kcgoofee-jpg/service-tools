@@ -14,9 +14,9 @@ import math
 from collections import defaultdict, deque
 from typing import Iterable, Optional
 
-BASE_QUOTA = 50            # 每把 Key 每天保底张数（V4.5）
-CEIL_QUOTA = 150           # 空闲时最多借到的张数
-ACCOUNT_DAILY_CAP = 1500   # 每个上游账号每天总上限（保守起点，官方未公布）
+BASE_QUOTA = 100           # 每把 Key 每天保底张数（V4.5）；线上以「账号保护与排队」的设置为准
+CEIL_QUOTA = 300           # 空闲时最多借到的张数（= 成员 Key 的每日上限）
+ACCOUNT_DAILY_CAP = 1000   # 每个上游账号每天总上限（fccc 的号在日均约 1370 张时被限）
 BUSY_UTIL = 0.70
 IDLE_UTIL = 0.50
 UTIL_WINDOW = 15 * 60      # 利用率按 15 分钟窗口计算
@@ -121,21 +121,22 @@ def busy_windows(reqs: list[dict], *, slots: int, interval: float) -> dict:
     return {"windows": windows, "busy_minutes": busy, "peak_util": max(x["util"] for x in windows), "state": state}
 
 
-def borrowing(day_images: dict, names: dict, *, accounts: int) -> dict:
+def borrowing(day_images: dict, names: dict, *, accounts: int, base: int = BASE_QUOTA,
+              ceil: int = CEIL_QUOTA, account_cap: int = ACCOUNT_DAILY_CAP) -> dict:
     """当天每把 Key 的张数相对保底 / 借用上限的位置，以及账号总量相对每日上限。"""
     rows = []
     for key, n in sorted(day_images.items(), key=lambda kv: -kv[1]):
         rows.append({"key": key, "name": names.get(key, f"#{key}"), "images": n,
-                     "borrowed": max(0, n - BASE_QUOTA), "over_ceil": max(0, n - CEIL_QUOTA)})
+                     "borrowed": max(0, n - base) if base else 0, "over_ceil": max(0, n - ceil)})
     total = sum(day_images.values())
-    cap = ACCOUNT_DAILY_CAP * max(1, accounts)
-    return {"members": rows, "total": total, "account_cap": cap, "cap_used": round(total / cap, 3),
+    cap = account_cap * max(1, accounts) if account_cap else 0
+    return {"members": rows, "total": total, "account_cap": cap, "cap_used": round(total / cap, 3) if cap else None,
             "borrowers": sum(1 for r in rows if r["borrowed"]), "borrowed_images": sum(r["borrowed"] for r in rows),
-            "base": BASE_QUOTA, "ceil": CEIL_QUOTA}
+            "base": base, "ceil": ceil}
 
 
 def analyze(rows: Iterable[tuple], *, slots: int = 1, interval: float = 15, key_interval: float = 15,
-            accounts: int = 1) -> dict:
+            accounts: int = 1, base: int = BASE_QUOTA, account_cap: int = ACCOUNT_DAILY_CAP) -> dict:
     rows = list(rows)
     reqs = _requests(rows)
     day_images: dict = defaultdict(int)
@@ -154,8 +155,8 @@ def analyze(rows: Iterable[tuple], *, slots: int = 1, interval: float = 15, key_
         "drr": replay(reqs, "drr", slots=slots, interval=interval, key_interval=key_interval) if reqs else None,
         "contention": contention(reqs),
         "load": busy_windows(reqs, slots=slots, interval=interval),
-        "quota": borrowing(day_images, names, accounts=accounts),
-        "params": {"base": BASE_QUOTA, "ceil": CEIL_QUOTA, "account_cap": ACCOUNT_DAILY_CAP,
+        "quota": borrowing(day_images, names, accounts=accounts, base=base, account_cap=account_cap),
+        "params": {"base": base, "ceil": CEIL_QUOTA, "account_cap": account_cap,
                    "busy_util": BUSY_UTIL, "idle_util": IDLE_UTIL, "slots": slots, "interval": interval},
     }
 
@@ -165,5 +166,7 @@ async def collect(state, since: float) -> dict:
     pool = getattr(getattr(state, "nai", None), "pool", []) or []
     usable = [t for t in pool if t.usable]
     slots = sum(t.image_slots.limit for t in usable) or 1
+    guard = getattr(state, "guard", None)
+    extra = {"base": guard.values["base_daily_images"], "account_cap": guard.values["account_daily_cap"]} if guard else {}
     return analyze(rows, slots=slots, interval=float(state.settings.image_min_interval),
-                   key_interval=float(state.settings.key_image_min_interval), accounts=max(1, len(usable)))
+                   key_interval=float(state.settings.key_image_min_interval), accounts=max(1, len(usable)), **extra)

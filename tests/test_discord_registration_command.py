@@ -30,7 +30,7 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
             client.return_value.__aenter__.return_value.post.return_value = fake
             await handle_register(interaction)
             args = client.return_value.__aenter__.return_value.post.await_args
-        self.assertEqual(args.kwargs["json"], {"discord_id": "777", "guild_id": "1480185480048808009"})
+        self.assertEqual(args.kwargs["json"], {"discord_id": "777", "guild_id": "1480185480048808009", "name": ""})
         self.assertTrue(interaction.response.defer.await_args.kwargs["ephemeral"])
         self.assertTrue(interaction.followup.send.await_args.kwargs["ephemeral"])
         self.assertIn("discord.com/oauth2", interaction.followup.send.await_args.args[0])

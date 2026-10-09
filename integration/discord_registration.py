@@ -26,7 +26,8 @@ async def handle_register(interaction):
         async with httpx.AsyncClient(timeout=8) as client:
             response = await client.post(backend + "/self-register/intent",
                 headers={"Authorization": "Bearer " + secret},
-                json={"discord_id": str(interaction.user.id), "guild_id": str(interaction.guild_id)})
+                json={"discord_id": str(interaction.user.id), "guild_id": str(interaction.guild_id),
+                      "name": str(getattr(interaction.user, "name", "") or "")[:80]})
         if response.status_code == 200:
             message = "点击以下链接授权核验身份组（10 分钟内有效）：\n" + response.json()["url"]
         elif response.status_code == 403:

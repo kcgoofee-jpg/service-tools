@@ -1012,3 +1012,143 @@ def test_welcome_dm_states_free_generation_rules():
     from app.registration import welcome_dm
     text = welcome_dm("nai-x", "https://g/", "q", 30, 3)
     assert "1024×1024" in text and "28 步" in text and "Anlas" in text
+
+
+# ---------------------------------------------------------------- v1.6：账号保护（P0）与排队上限（P1）
+
+class _CounterDB:
+    def __init__(self, images=0):
+        self.images, self.saved = images, {}
+
+    async def get_upstream_counter(self, token_id, day):
+        return {"images": self.images, "v5": 0}
+
+    async def get_setting(self, name, default):
+        return self.saved.get(name, default)
+
+    async def set_settings_bulk(self, values):
+        self.saved.update(values)
+
+
+@pytest.mark.asyncio
+async def test_guard_settings_validate_and_persist():
+    from app.guard import Guard
+    db = _CounterDB()
+    g = Guard(db)
+    await g.save({"account_daily_cap": 800, "unknown": 5})
+    assert g.values["account_daily_cap"] == 800 and db.saved == {"guard_account_daily_cap": 800}
+    for bad in ({"account_hourly_cap": 999}, {"quiet_start": 1.5}, {"base_daily_images": True}, {"interval_jitter": -1}):
+        with pytest.raises(ValueError):
+            await g.save(bad)
+    fresh = Guard(db)
+    await fresh.load()
+    assert fresh.values["account_daily_cap"] == 800 and fresh.values["account_hourly_cap"] == 80
+
+
+def test_guard_quiet_hours_wrap_and_hourly_cap():
+    from app.guard import Guard
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    g = Guard()
+    at = lambda h: datetime(2026, 10, 9, h, 30, tzinfo=ZoneInfo("Asia/Shanghai")).timestamp()
+    assert g.in_quiet(at(3)) and not g.in_quiet(at(8)) and not g.in_quiet(at(1))
+    assert g.hourly_cap(at(3)) == 20 and g.hourly_cap(at(12)) == 80
+    g.values.update(quiet_start=23, quiet_end=6)
+    assert g.in_quiet(at(23)) and g.in_quiet(at(2)) and not g.in_quiet(at(12))
+    g.values.update(quiet_start=4, quiet_end=4)
+    assert not g.in_quiet(at(4))
+
+
+@pytest.mark.asyncio
+async def test_guard_blocks_token_on_daily_and_hourly_caps():
+    from app.guard import Guard
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    noon = datetime(2026, 10, 9, 12, 0, tzinfo=ZoneInfo("Asia/Shanghai")).timestamp()
+    g = Guard()
+    assert await g.token_block_reason(_CounterDB(999), "t", "d", noon) is None
+    assert "明天 0 点" in await g.token_block_reason(_CounterDB(1000), "t", "d", noon)
+    for i in range(80):
+        g.record_start("t", noon - 3000 + i)
+    reason = await g.token_block_reason(_CounterDB(0), "t", "d", noon)
+    assert "每小时 80 张" in reason and "分钟后" in reason
+    assert g.hour_count("t", noon + 700) == 0                 # 一小时滑出窗口后恢复
+    g.values["account_daily_cap"] = g.values["account_hourly_cap"] = 0
+    assert await g.token_block_reason(_CounterDB(10 ** 6), "t", "d", noon) is None
+
+
+def test_guard_image_queue_per_key_and_site():
+    from app.guard import Guard
+    g = Guard()
+    assert g.admit_image(1, accounts=1) is None and g.admit_image(1, accounts=1) is None
+    assert "上一张图还没出完" in g.admit_image(1, accounts=1)          # 1 张生成 + 1 张排队
+    g.release_image(1)
+    assert g.admit_image(1, accounts=1) is None
+    g.values["queue_per_account"] = 3
+    assert g.admit_image(2, accounts=1) is None
+    assert "排队的人太多" in g.admit_image(3, accounts=1)
+    for _ in range(3):
+        g.release_image(1)
+    assert 1 not in g.image_inflight
+
+
+def test_guard_site_idle_for_borrowing():
+    from app.guard import Guard
+    g = Guard()
+    now = 1_000_000.0
+    assert g.site_idle(1, ["t"], now)
+    g.image_inflight[2] = 1
+    assert not g.site_idle(1, ["t"], now)                      # 别人在排队就不借
+    g.image_inflight.clear()
+    g.image_inflight[1] = 1
+    assert g.site_idle(1, ["t"], now)                          # 自己的不算
+    for i in range(int(0.6 * g.hourly_cap(now))):
+        g.record_start("t", now - 10 - i)
+    assert not g.site_idle(1, ["t"], now)                      # 本小时用量达到上限的 60%
+
+
+@pytest.mark.asyncio
+async def test_second_image_from_same_key_is_rejected_while_first_runs(state):
+    from app.guard import Guard
+    state.guard = Guard()
+    state.guard.values["key_image_queue"] = 0
+    state.nai.release = asyncio.Event()
+    first = asyncio.create_task(post("/ai/generate-image", image_body()))
+    await asyncio.wait_for(state.nai.entered.wait(), 2)
+    second = await post("/ai/generate-image", image_body())
+    assert second.status_code == 429 and "上一张图还没出完" in second.json()["error"]["message"]
+    state.nai.release.set()
+    assert (await first).status_code == 200
+    assert state.guard.image_inflight == {}
+    assert (await post("/ai/generate-image", image_body())).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_base_quota_borrowing_only_when_site_is_idle(state):
+    from app.guard import Guard
+    state.guard = Guard()
+    state.guard.values["base_daily_images"] = 1
+    state.db.keys["fixture-1"]["daily_images"] = 5
+    assert (await post("/ai/generate-image", image_body())).status_code == 200      # 保底内
+    state.guard.image_inflight[999] = 1                                               # 另一位成员在排队
+    busy = await post("/ai/generate-image", image_body())
+    assert busy.status_code == 429 and "保底 1 张已用完" in busy.json()["error"]["message"]
+    state.guard.image_inflight.clear()
+    assert (await post("/ai/generate-image", image_body())).status_code == 200      # 空闲时借用
+
+
+@pytest.mark.asyncio
+async def test_nai_pick_token_refuses_when_every_account_is_capped():
+    from app.guard import Guard
+    db = NaiDB()
+    db.get_upstream_counter = lambda token_id, day: asyncio.sleep(0, {"images": 5, "v5": 0})
+    client = NaiClient(["pst-a"], "https://image.invalid", "https://text.invalid", "https://text.invalid",
+                       db=db, day_fn=lambda: "2026-10-09", v5_daily_limits=[], allow_anlas=[False])
+    client.guard = Guard()
+    client.guard.values["account_daily_cap"] = 5
+    with pytest.raises(UpstreamError) as caught:
+        await client.pick_token(image_job=True)
+    assert caught.value.status == 429 and "出图总量已达上限" in caught.value.message
+    assert await client.pick_token() is not None                # 文本 / 标签补全不受出图上限影响
+    client.guard.values["account_daily_cap"] = 6
+    assert await client.pick_token(image_job=True) is not None

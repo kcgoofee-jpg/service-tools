@@ -212,8 +212,43 @@ class OpenRegistrationTests(RegistrationTests):
         await self.db._db.execute("UPDATE api_keys SET expires_at=?", (time.time() - 5,))
         await self.db._db.commit()
         self.assertEqual(await self.service.count_active(), 0)           # expired key no longer holds the slot
-        self.assertEqual(await self.mint("777"), "sent")                 # same person renews
-        self.assertEqual((await self.db._db.execute_fetchall("SELECT count(*) FROM api_keys"))[0][0], 1)
+        self.assertEqual([w["discord_id"] for w in await self.service.waitlist()], ["888"])   # 名额满时进了候补
+        with self.assertRaises(RegistrationError) as caught:
+            await self.service.begin("777", "1480185480048808009")      # 候补排在前面，后来者不能插队
+        self.assertIn("第 2 位", str(caught.exception))
+        self.assertIn("state=", await self.service.begin("888", "1480185480048808009"))   # 排第一的候补可以领
+        self.assertEqual([w["discord_id"] for w in await self.service.waitlist()], ["888", "777"])
+
+    async def test_waitlist_invites_in_order_and_holds_slot_24h(self):
+        from unittest.mock import AsyncMock
+        from app.registration import WAITLIST_HOLD
+        self.service.max_users = 1
+        self.service.send_dm = AsyncMock(return_value=True)
+        await self.mint()
+        for who in ("901", "902"):
+            with self.assertRaises(RegistrationError):
+                await self.service.begin(who, "1480185480048808009", name="u" + who)
+        self.assertEqual([w["name"] for w in await self.service.waitlist()], ["u901", "u902"])
+        self.assertEqual(await self.service.invite_waitlist(), 0)                     # 没有空位
+        await self.db._db.execute("UPDATE api_keys SET expires_at=?", (time.time() - 5,))
+        await self.db._db.commit()
+        self.assertEqual(await self.service.invite_waitlist(), 1)                     # 只邀请第一位
+        self.assertEqual(self.service.send_dm.await_args.args[0], "901")
+        with self.assertRaises(RegistrationError):
+            await self.service.begin("903", "1480185480048808009")                    # 名额为 901 保留
+        self.assertIn("state=", await self.service.begin("901", "1480185480048808009"))
+        later = time.time() + WAITLIST_HOLD + 1
+        self.assertEqual(await self.service.invite_waitlist(now=later), 1)            # 901 过期 → 邀请 902
+        self.assertEqual(self.service.send_dm.await_args.args[0], "902")
+        self.assertEqual([w["discord_id"] for w in await self.service.waitlist()], ["902", "903"])
+
+    async def test_registration_and_ban_leave_the_waitlist(self):
+        self.service.max_users = 1
+        await self.db._db.execute("INSERT INTO waitlist(discord_id, name, joined_at) VALUES ('777','',0), ('999','',1)")
+        await self.db._db.commit()
+        self.assertEqual(await self.mint("777"), "sent")
+        await self.service.ban("999")
+        self.assertEqual(await self.service.waitlist(), [])
 
     async def test_young_discord_accounts_cannot_grab_slots(self):
         self.service.min_account_days = 7
