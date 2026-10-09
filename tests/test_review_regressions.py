@@ -1045,7 +1045,7 @@ async def test_guard_settings_validate_and_persist():
             await g.save(bad)
     fresh = Guard(db)
     await fresh.load()
-    assert fresh.values["account_daily_cap"] == 800 and fresh.values["account_hourly_cap"] == 80
+    assert fresh.values["account_daily_cap"] == 800 and fresh.values["account_hourly_cap"] == 150
 
 
 def test_guard_quiet_hours_wrap_and_hourly_cap():
@@ -1053,6 +1053,7 @@ def test_guard_quiet_hours_wrap_and_hourly_cap():
     from datetime import datetime
     from zoneinfo import ZoneInfo
     g = Guard()
+    g.values["account_hourly_cap"] = 80
     at = lambda h: datetime(2026, 10, 9, h, 30, tzinfo=ZoneInfo("Asia/Shanghai")).timestamp()
     assert not g.in_quiet(at(3)) and g.hourly_cap(at(3)) == 80       # 默认不启用安静时段（夜里不限速）
     g.values.update(quiet_start=3, quiet_end=8)
@@ -1071,6 +1072,7 @@ async def test_guard_blocks_token_on_daily_and_hourly_caps():
     from zoneinfo import ZoneInfo
     noon = datetime(2026, 10, 9, 12, 0, tzinfo=ZoneInfo("Asia/Shanghai")).timestamp()
     g = Guard()
+    g.values["account_hourly_cap"] = 80
     assert await g.token_block_reason(_CounterDB(999), "t", "d", noon) is None
     assert "明天 0 点" in await g.token_block_reason(_CounterDB(1000), "t", "d", noon)
     for i in range(80):

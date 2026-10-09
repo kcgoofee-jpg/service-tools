@@ -174,7 +174,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "1.9.5"
+__version__ = "1.9.6"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -528,6 +528,13 @@ async def anlas_rebalance_loop() -> None:
             await quota_algo.run(STATE)
         except Exception as exc:
             bug("quota_algo", exc)
+        try:
+            changed = await STATE.guard.adapt_daily()
+            if changed:
+                from .action_log import log_action
+                await log_action(STATE.db, "系统", "自动调整：每小时上限", "", f"一天没有上游限流：{changed[0]} → {changed[1]}")
+        except Exception as exc:
+            bug("guard_adapt", exc)
         try:
             from . import autopilot
             await autopilot.run(STATE, getattr(app.state, "registrar", None))

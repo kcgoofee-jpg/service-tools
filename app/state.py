@@ -401,6 +401,12 @@ class GateState:
         )
         await self.db.set_setting("image_cooldown_until", self._image_blocked_until)
         remaining = max(1, int(self._image_blocked_until - time.time()))
+        guard = getattr(self, "guard", None)
+        if guard is not None:
+            changed = await guard.on_upstream_429()
+            if changed:
+                self.alerter.notify("guard_hourly_down", f"上游限流：每小时出图上限自动从 {changed[0]} 降到 {changed[1]}，"
+                                    "之后连续一天没有限流会每天 +10。", cooldown=0)
         self.alerter.notify("upstream_429", f"NovelAI 对图片请求返回 429（限流），全站生图已暂停 {remaining} 秒。"
                             "如果频繁出现，请降低成员人数或调大图片间隔。", cooldown=1800)
         return remaining

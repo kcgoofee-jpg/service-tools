@@ -17,10 +17,13 @@ from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 HOUR = 3600
+WINDOW_3H = 3 * HOUR
+HOURLY_MIN, HOURLY_MAX, HOURLY_STEP = 100, 200, 10     # 每小时上限的自动调整范围（加性增、乘性减）
 # 名称: (默认值, 最小, 最大, 说明)
 FIELDS: dict[str, tuple[int, int, int, str]] = {
     "account_daily_cap": (1000, 0, 20000, "每个上游账号每天最多出图张数"),
-    "account_hourly_cap": (80, 0, 240, "每个上游账号每小时最多出图张数"),
+    "account_hourly_cap": (150, 0, 240, "每个上游账号每小时最多出图张数（自动调整：上游 429 减半，一天没有 429 就 +10，范围 100～200）"),
+    "account_3h_cap": (400, 0, 720, "每个上游账号连续 3 小时最多出图张数（防止连续几小时都在冲）"),
     "quiet_start": (0, 0, 23, "安静时段开始（北京时间，整点）；与结束相同 = 不启用（2026-10-10 起不启用：夜里不限速）"),
     "quiet_end": (0, 0, 23, "安静时段结束（北京时间，整点；与开始相同表示不设安静时段）"),
     "quiet_hourly_cap": (20, 0, 240, "安静时段每个账号每小时最多出图张数"),
@@ -95,12 +98,12 @@ class Guard:
         q.append(time.time() if now is None else now)
 
     async def seed_hour(self, db, token_ids: list[str], now: Optional[float] = None) -> int:
-        """启动时从用量日志补回最近 1 小时的出图，避免重启（部署）把每小时计数清零、绕过上限。
+        """启动时从用量日志补回最近 3 小时的出图，避免重启（部署）把每小时计数清零、绕过上限。
         日志里没有记是哪个上游账号，所以每个账号都按全站数量计（偏保守）。2026-10-10 00 点连部署 4 次，实际出了 85 张 > 80。"""
         now = time.time() if now is None else now
         rows = await db._db.execute_fetchall(
             "SELECT ts, images FROM usage_log WHERE ts>? AND status='ok' AND kind LIKE 'image%' AND images>0 ORDER BY ts",
-            (now - HOUR,))
+            (now - WINDOW_3H,))
         stamps = [float(ts) for ts, n in rows for _ in range(int(n))]
         for tid in token_ids:
             q = self._starts.setdefault(tid, deque())
@@ -108,24 +111,70 @@ class Guard:
             self._starts[tid] = deque(merged)
         return len(stamps)
 
-    def hour_count(self, token_id: str, now: Optional[float] = None) -> int:
-        now = time.time() if now is None else now
+    def _window(self, token_id: str, now: float, span: float) -> list[float]:
         q = self._starts.get(token_id)
         if not q:
-            return 0
-        while q and q[0] <= now - HOUR:
+            return []
+        while q and q[0] <= now - WINDOW_3H:
             q.popleft()
-        return len(q)
+        return [t for t in q if t > now - span]
+
+    def hour_count(self, token_id: str, now: Optional[float] = None) -> int:
+        return len(self._window(token_id, time.time() if now is None else now, HOUR))
+
+    def count_3h(self, token_id: str, now: Optional[float] = None) -> int:
+        return len(self._window(token_id, time.time() if now is None else now, WINDOW_3H))
 
     def minutes_until_free(self, token_id: str, now: Optional[float] = None) -> int:
         """到计数降回上限以下要等多久：超了 n 张就要等第 n+1 早的那张滑出 60 分钟窗口（不是最早那一张）。"""
         now = time.time() if now is None else now
-        q = self._starts.get(token_id)
+        q = self._window(token_id, now, HOUR)
         if not q:
             return 1
         cap = self.hourly_cap(now)
         idx = max(0, min(len(q) - 1, len(q) - cap)) if cap else 0
         return max(1, math.ceil((q[idx] + HOUR - now) / 60))
+
+    def minutes_until_free_3h(self, token_id: str, now: Optional[float] = None) -> int:
+        now = time.time() if now is None else now
+        q = self._window(token_id, now, WINDOW_3H)
+        cap = self.values["account_3h_cap"]
+        if not q or not cap:
+            return 1
+        idx = max(0, min(len(q) - 1, len(q) - cap))
+        return max(1, math.ceil((q[idx] + WINDOW_3H - now) / 60))
+
+    # ---------- 每小时上限自动调整（AIMD：上游 429 减半，平稳一天 +10）----------
+    async def on_upstream_429(self, now: Optional[float] = None) -> Optional[tuple[int, int]]:
+        """上游限流是我们唯一能拿到的「红线」信号：立刻把每小时上限减半（不低于 100），返回 (旧, 新)。"""
+        now = time.time() if now is None else now
+        old = self.values["account_hourly_cap"]
+        new = max(HOURLY_MIN, old // 2)
+        await self._set_adaptive(new, now, last_429=now)
+        return (old, new) if new != old else None
+
+    async def adapt_daily(self, now: Optional[float] = None) -> Optional[tuple[int, int]]:
+        """每 24 小时最多一次：过去 24 小时没有上游 429 → +10（不超过 200）。"""
+        if self.db is None:
+            return None
+        now = time.time() if now is None else now
+        last_429 = float(await self.db.get_setting("guard_last_upstream_429", 0) or 0)
+        last_step = float(await self.db.get_setting("guard_hourly_adapted_at", 0) or 0)
+        if now - last_step < 86400 or now - last_429 < 86400:
+            return None
+        old = self.values["account_hourly_cap"]
+        new = min(HOURLY_MAX, old + HOURLY_STEP)
+        await self._set_adaptive(new, now)
+        return (old, new) if new != old else None
+
+    async def _set_adaptive(self, value: int, now: float, last_429: Optional[float] = None) -> None:
+        self.values["account_hourly_cap"] = value
+        if self.db is None:
+            return
+        data = {_key("account_hourly_cap"): value, "guard_hourly_adapted_at": now}
+        if last_429 is not None:
+            data["guard_last_upstream_429"] = last_429
+        await self.db.set_settings_bulk(data)
 
     def jitter(self) -> float:
         span = self.values["interval_jitter"]
@@ -145,6 +194,10 @@ class Guard:
                 return (f"现在是安静时段（{self.values['quiet_start']}:00–{self.values['quiet_end']}:00），"
                         f"出图放慢到每小时 {cap} 张，约 {wait} 分钟后有空位")
             return f"本小时出图量已达上限（每小时 {cap} 张，用来保护上游账号），约 {wait} 分钟后有空位"
+        cap3 = self.values["account_3h_cap"]
+        if cap3 and self.count_3h(token_id, now) >= cap3:
+            wait = self.minutes_until_free_3h(token_id, now)
+            return f"最近 3 小时出图量已达上限（{cap3} 张，用来保护上游账号），约 {wait} 分钟后有空位"
         return None
 
     # ---------- 排队（P1） ----------
