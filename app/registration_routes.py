@@ -75,12 +75,12 @@ async def admin_ops(request: Request, body: Ops):
     from . import features as feature_defs, ops
     on = body.value.lower() in ("1", "on", "true", "开")
     if body.action == "open":
-        await ops.set_registration(gate.db, {"open": on})
+        await ops.set_registration(gate.db, {"open": on}, gate, service)
         return JSONResponse({"message": "已开放注册。" if on else "已关闭注册（已领取的人不受影响）。"})
     if body.action == "limit":
         if not body.value.isdecimal():
             raise HTTPException(422, "请输入数字")
-        await ops.set_registration(gate.db, {"max_users": int(body.value)})
+        await ops.set_registration(gate.db, {"max_users": int(body.value)}, gate, service)
         return JSONResponse({"message": f"名额上限已设为 {int(body.value) or '不限'}。"})
     if body.action == "grant":
         if body.feature not in feature_defs.FEATURES:

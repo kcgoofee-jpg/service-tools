@@ -1140,7 +1140,15 @@ async def v1_me(request: Request):
             "requests": c["requests"],
         },
         "expires_at": key["expires_at"],
+        "features": await _feature_view(key),
     }
+
+
+async def _feature_view(key) -> list[dict]:
+    """该 Key 当前各项功能是否可用（已计入全局开关）。"""
+    return [{"id": name, "label": label,
+             "on": await features.check(STATE.db, key, name) is None}
+            for name, label in features.FEATURES.items()]
 
 
 async def v1_chat(request: Request):
@@ -1267,15 +1275,56 @@ async def healthz():
 _ANNOUNCEMENT_HEADERS = {"Content-Security-Policy": "sandbox allow-popups allow-popups-to-escape-sandbox", "X-Content-Type-Options": "nosniff"}
 
 
+LANDING_HEADERS = {
+    "Content-Security-Policy": ("default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; "
+                                "connect-src 'self'; img-src 'self' data:; frame-src 'self'; "
+                                "base-uri 'none'; form-action 'none'; frame-ancestors 'none'"),
+    "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", "Cache-Control": "no-cache",
+}
+
+
 @app.get("/")
 async def index():
+    """成员落地页：自包含的静态页面，数据来自 /public/status 与 /v1/me。"""
+    return FileResponse(Path(__file__).parent / "static" / "landing.html", headers=LANDING_HEADERS)
+
+
+@app.get("/announcement")
+async def announcement():
+    """站长在后台编写的公告 HTML：沙箱化后嵌入落地页，其中脚本不会执行。"""
     p = SETTINGS.announcement_path
-    html = p.read_text(encoding="utf-8") if p.exists() and p.read_text(encoding="utf-8").strip() else DEFAULT_ANNOUNCEMENT
-    notice = audit_notice(*(await audit_flags(STATE.db, SETTINGS)))
-    if notice:  # 记录功能开启时，首页始终披露，站长无法在公告里漏掉
-        footer = f'<p style="margin:24px auto;max-width:760px;padding:0 20px;font:13px system-ui;opacity:.7">{notice}</p>'
-        html = html.replace("</body>", footer + "</body>", 1) if "</body>" in html else html + footer
+    html = p.read_text(encoding="utf-8") if p.exists() else ""
+    if not html.strip():
+        raise HTTPException(404, "没有公告")
     return Response(html, media_type="text/html", headers=_ANNOUNCEMENT_HEADERS)
+
+
+@app.get("/public/status")
+async def public_status(request: Request):
+    """落地页使用的公开状态：不含任何密钥、成员信息或计数细节。"""
+    from . import features as feature_defs
+    from .audit import audit_flags, audit_notice
+    service = getattr(request.app.state, "registrar", None)
+    flags = await feature_defs.global_flags(STATE.db)
+    reg = {"open": False, "slots_left": None}
+    defaults = [n for n in feature_defs.FEATURES if flags[n]]
+    if service is not None:
+        cfg = await service.settings()
+        reg["open"] = cfg["open"]
+        if cfg["max_users"]:
+            reg["slots_left"] = max(0, cfg["max_users"] - await service.count_active())
+        if cfg["features"] is not None:
+            defaults = [n for n in cfg["features"] if flags.get(n)]
+    p = SETTINGS.announcement_path
+    return JSONResponse({
+        "site": SETTINGS.site_url.rstrip("/"),
+        "upstream": {k: v for k, v in STATE.upstream_health().items() if k in ("status", "image_cooldown_seconds")},
+        "registration": reg,
+        "default_features": [{"id": n, "label": feature_defs.FEATURES[n]} for n in defaults],
+        "audit_notice": audit_notice(*(await audit_flags(STATE.db, SETTINGS))),
+        "discord_invite": SETTINGS.discord_invite_url,
+        "has_announcement": bool(p.exists() and p.read_text(encoding="utf-8").strip()),
+    }, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/admin")

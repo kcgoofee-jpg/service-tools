@@ -49,7 +49,15 @@ async def registration_settings(db, service) -> dict[str, Any]:
     }
 
 
-async def set_registration(db, body: dict) -> None:
+async def _active_count(db) -> int:
+    rows = await db.execute_fetchall_compat(
+        "SELECT COUNT(*) FROM discord_registrations r JOIN api_keys k ON k.id=r.key_id")
+    return int(rows[0][0])
+
+
+async def set_registration(db, body: dict, state=None, service=None) -> None:
+    """保存注册设置；传入 state 时，开放/关闭或名额上限变化会在公告频道通知成员（body.notify=false 可关闭）。"""
+    before = await registration_settings(db, service) if state is not None else None
     values: dict[str, Any] = {}
     if "open" in body:
         values["register_open"] = "1" if body["open"] else "0"
@@ -66,6 +74,20 @@ async def set_registration(db, body: dict) -> None:
         values["register_features"] = features.dump(body["features"]) or ""
     if values:
         await db.set_settings_bulk(values)
+    announcer = getattr(state, "announcer", None) if state is not None else None
+    if announcer is not None and body.get("notify", True):
+        after = await registration_settings(db, service)
+        if (before["open"], before["max_users"]) != (after["open"], after["max_users"]):
+            active = await _active_count(db)
+            cap = after["max_users"]
+            left = f"，当前剩余名额 {max(0, cap - active)}（上限 {cap}）" if cap else "，名额不限"
+            if not after["open"]:
+                text = "📢 **名额公告**：自助领取已暂停，已领取的成员不受影响。"
+            elif not before["open"]:
+                text = f"📢 **名额公告**：自助领取已开放{left}。在 🔑｜领取key 输入 `/register` 即可。"
+            else:
+                text = f"📢 **名额公告**：名额上限已调整{left}。"
+            announcer.post(text)
 
 
 async def set_global_features(db, flags: dict) -> dict[str, bool]:

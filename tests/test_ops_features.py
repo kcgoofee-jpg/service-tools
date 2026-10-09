@@ -181,3 +181,25 @@ async def test_registration_runtime_settings_override_env_defaults(db):
         await service.begin("1", service.command_guild)                  # closed -> refuses
     with pytest.raises(ValueError):
         await ops.set_registration(db, {"max_users": 5000})
+
+
+@pytest.mark.asyncio
+async def test_registration_changes_are_announced_to_members(db):
+    from app import ops
+
+    class Announcer:
+        def __init__(self):
+            self.sent = []
+
+        def post(self, text):
+            self.sent.append(text)
+
+    state = SimpleNamespace(announcer=Announcer())
+    await ops.set_registration(db, {"open": False}, state)
+    await ops.set_registration(db, {"max_users": 10, "open": True}, state)
+    await ops.set_registration(db, {"daily_images": 50}, state)             # not a headcount/open change -> silent
+    await ops.set_registration(db, {"max_users": 12, "notify": False}, state)   # explicitly silent
+    await ops.set_registration(db, {"max_users": 15}, state)
+    texts = state.announcer.sent
+    assert len(texts) == 3 and "已暂停" in texts[0] and "已开放" in texts[1] and "10" in texts[1]
+    assert "已调整" in texts[2] and "15" in texts[2]
