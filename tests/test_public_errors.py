@@ -58,5 +58,5 @@ async def test_unexpected_exception_returns_safe_json(state, monkeypatch):
     monkeypatch.setattr(state.db, "get_key_by_token", broken)
     response = await post("/ai/generate-image", image_body())
     assert response.status_code == 500
-    assert response.json()["error"]["message"] == "服务器内部错误，请联系站长"
+    assert response.json()["error"]["message"].startswith("服务器内部错误，已自动记录")
     assert "fixture-private" not in response.text and not state.nai.calls

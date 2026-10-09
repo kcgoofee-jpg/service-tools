@@ -486,6 +486,11 @@ details.neg div{margin-top:6px;white-space:pre-wrap;overflow-wrap:anywhere;max-h
             <div class="chart" id="chart"></div></div>
             <div class="card panel"><div class="panel-head"><h2>状态与防护</h2></div><div class="status-list" id="statusPanel"></div></div>
           </div>
+          <div class="card panel" id="bugPanel">
+            <div class="panel-head"><h2>Bug 追踪 <span class="tag" id="bugCount"></span></h2><div class="desc">程序没预料到的错误、上游故障、后台任务失败、成员在出图完成前断开、网页脚本报错，按特征归并；新 bug 和复发会私信提醒。点「错误编号」可查对应日志</div>
+              <label class="check" style="white-space:nowrap"><input type="checkbox" id="bugAll"><span>含已处理</span></label></div>
+            <div class="table-wrap"><table class="rt"><thead><tr><th>级别</th><th>来源</th><th>内容</th><th>次数</th><th>首次 / 最近</th><th>最近错误编号</th><th></th></tr></thead><tbody id="bugBody"></tbody></table></div>
+          </div>
           <div class="card panel">
             <div class="panel-head"><h2>各功能用量</h2><div class="desc">按用量日志统计（日志保留期内）；点功能名查看对应日志</div></div>
             <div class="table-wrap"><table class="rt"><thead><tr><th>功能</th><th>今日 成功 / 失败 / 拒绝</th><th>今日产出</th><th>近 7 天 成功 / 失败 / 拒绝</th><th>近 7 天产出</th></tr></thead><tbody id="featUsage"></tbody></table></div>
@@ -606,6 +611,7 @@ NAI_TOKEN_V5_DAILY_LIMITS=0,150</pre><button class="btn mini" type="button" data
               <select id="logFeature" aria-label="按功能筛选" style="width:160px"><option value="">全部功能</option>
                 <option value="image">文生图</option><option value="upscale">放大</option><option value="augment">导演工具</option>
                 <option value="vibe">Vibe 编码</option><option value="tags">标签补全</option><option value="text">文本 / 聊天</option><option value="voice">语音合成</option></select>
+              <input id="logRid" class="mono" placeholder="错误编号" aria-label="按错误编号查找" style="width:110px">
               <label class="check" style="white-space:nowrap"><input type="checkbox" id="logHideTest" checked><span>隐藏测试 Key</span></label>
               <select id="logFilter" aria-label="按 Key 筛选" style="width:200px"><option value="">全部 Key</option></select>
               <button class="btn" data-act="refresh-logs"><span data-ic="refresh"></span>刷新</button>
@@ -788,6 +794,18 @@ NAI_TOKEN_V5_DAILY_LIMITS=0,150</pre><button class="btn mini" type="button" data
 <div id="toasts" aria-live="polite"></div>
 
 <script>
+/* 脚本报错自动上报给站长（只报本站页面自己的错误，不含 Key） */
+(function(page){ var sent = 0;
+  function report(msg, src, line, stack){
+    if(sent >= 5 || (src && src.indexOf(location.origin) !== 0)) return;
+    sent++;
+    try{ navigator.sendBeacon ? navigator.sendBeacon('/public/client-error', JSON.stringify({page:page, msg:String(msg).slice(0,200), src:String(src||'').replace(location.origin,''), line:line||0, stack:String(stack||'').slice(0,1500)}))
+      : fetch('/public/client-error', {method:'POST', body:JSON.stringify({page:page, msg:String(msg).slice(0,200)}), keepalive:true}); }catch(_){}
+  }
+  window.__owlReport = function(e, where){ report((where ? where + ': ' : '') + (e && e.message || e), location.href, 0, e && e.stack); };
+  window.addEventListener('error', function(e){ if(e.message) report(e.message, e.filename, e.lineno, e.error && e.error.stack); });
+  window.addEventListener('unhandledrejection', function(e){ var r = e.reason; report('Promise: ' + (r && r.message || r), location.href, 0, r && r.stack); });
+})('admin');
 const $ = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
 let editingId = null, keysCache = [], logPage = 1, auditPage = 1;
@@ -1170,7 +1188,36 @@ function drawChart(){
   document.querySelectorAll('[data-chart]').forEach(b => b.classList.toggle('on', b.dataset.chart === k));
 }
 document.addEventListener('click', e => { const b = e.target.closest('[data-chart]'); if(b){ chartMetric = b.dataset.chart; drawChart(); } });
+const BUG_SRC = {request:'接口异常', upstream:'上游故障', gate:'网关故障', accounting:'记账写入', disconnect:'客户端提前断开',
+  audit:'生成记录', key_sources:'来源统计', anlas_pool:'Anlas 分配', cleanup:'闲置回收', registration_reset:'定时清空'};
+function bugSource(s){ return BUG_SRC[s] || (s.startsWith('maintenance:') ? '维护任务 · ' + s.slice(12) : s.startsWith('web:') ? '网页脚本 · ' + (s.slice(4)==='admin'?'后台':'首页') : s); }
+async function loadBugs(){
+  try{
+    const d = await api('/admin/api/errors' + ($('#bugAll').checked ? '?all=true' : ''));
+    $('#bugCount').textContent = d.open ? d.open + ' 个未处理' : '无未处理';
+    $('#bugCount').className = 'tag ' + (d.open ? 'warn' : 'on');
+    const t = x => new Date(x*1000).toLocaleString();
+    $('#bugBody').innerHTML = d.errors.map(e=>`
+      <tr${e.resolved_at?' class="muted"':''}>
+        <td data-label="级别">${e.level==='error'?'<span class="tag off">错误</span>':'<span class="tag warn">注意</span>'}</td>
+        <td data-label="来源">${esc(bugSource(e.source))}</td>
+        <td data-label="内容"><details><summary>${esc(e.title)}</summary><pre class="mono" style="white-space:pre-wrap;font-size:11.5px;max-height:320px;overflow:auto">${esc(e.detail||'（无堆栈）')}${e.last_path?'\n路径：'+esc(e.last_path):''}${e.key_name?'\nKey：'+esc(e.key_name):''}</pre></details></td>
+        <td class="num" data-label="次数">${esc(e.count)}</td>
+        <td class="mono" data-label="首次 / 最近" style="font-size:11.5px">${esc(t(e.first_seen))}<br>${esc(t(e.last_seen))}</td>
+        <td class="mono" data-label="错误编号">${e.last_rid?`<a href="#" data-rid="${esc(e.last_rid)}">${esc(e.last_rid)}</a>`:'—'}</td>
+        <td>${e.resolved_at?'已处理':`<button class="btn mini" data-bug="${esc(e.sig)}">标记已处理</button>`}</td>
+      </tr>`).join('') || '<tr><td colspan="7" class="empty-cell">没有发现 bug 🎉</td></tr>';
+  }catch(e){ $('#bugBody').innerHTML = '<tr><td colspan="7" class="empty-cell">读取失败</td></tr>'; }
+}
+document.addEventListener('change', e => { if(e.target.id === 'bugAll') loadBugs(); });
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-bug]');
+  if(b){ try{ await api('/admin/api/errors/' + encodeURIComponent(b.dataset.bug) + '/resolve', {method:'POST'}); loadBugs(); }catch(err){ toastErr(err); } return; }
+  const r = e.target.closest('[data-rid]');
+  if(r){ e.preventDefault(); logRid = r.dataset.rid; logPage = 1; tab('logs'); }
+});
 async function loadOverview(){
+  loadBugs();
   loadReconciliation();
   loadPerf();
   loadShadow();
@@ -1919,10 +1966,13 @@ function fmtTiming(l){
   if(l.dur_ms) parts.push('生成 ' + sec(l.dur_ms));
   return esc(parts.join(' · ') || '—');
 }
+let logRid = '';
+document.addEventListener('change', e => { if(e.target.id === 'logRid'){ logRid = e.target.value.trim().toLowerCase().replace(/[^0-9a-f]/g, ''); logPage = 1; loadLogs(); } });
 async function loadLogs(){
   try{
-    const kf = $('#logFilter').value, ff = $('#logFeature').value, ht = $('#logHideTest').checked && !kf;
-    const d = await api('/admin/api/logs?' + (kf?`key_id=${encodeURIComponent(kf)}&`:'') +
+    const kf = $('#logFilter').value, ff = $('#logFeature').value, ht = $('#logHideTest').checked && !kf && !logRid;
+    $('#logRid').value = logRid;
+    const d = await api('/admin/api/logs?' + (kf?`key_id=${encodeURIComponent(kf)}&`:'') + (logRid?`rid=${encodeURIComponent(logRid)}&`:'') +
                         (ff?`feature=${encodeURIComponent(ff)}&`:'') + (ht?'hide_test=true&':'') + `page=${logPage}`);
     logPage = d.page;
     $('#logBody').innerHTML = d.logs.map(l=>`
@@ -1934,7 +1984,7 @@ async function loadLogs(){
         <td data-label="状态">${l.status==='ok'?'<span class="tag on">ok</span>':l.status==='rejected'?'<span class="tag warn">拒绝</span>':'<span class="tag off">错误</span>'}</td>
         <td class="num" data-label="图">${esc(l.images||'')}</td><td class="num" data-label="耗时">${fmtTiming(l)}</td><td class="num" data-label="Anlas">${esc(l.anlas||'')}</td>
         <td data-label="可能消耗 Anlas">${l.unconfirmed_anlas>0?`<span class="tag warn">≈ ${esc(l.unconfirmed_anlas)}</span>`:'—'}</td><td class="num" data-label="tokens">${esc(l.tokens||'')}</td>
-        <td class="muted" data-label="备注">${esc(l.detail)}</td>
+        <td class="muted" data-label="备注">${esc(l.detail)}${l.rid?`<div class="mono" style="font-size:11px" title="错误编号（响应头 X-Request-Id）">#${esc(l.rid)}</div>`:''}</td>
       </tr>`).join('') || '<tr><td colspan="11" class="empty-cell">暂无记录</td></tr>';
     pager($('#logPager'), d, 'log');
   }catch(e){ toastErr(e); }

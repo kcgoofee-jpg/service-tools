@@ -71,6 +71,7 @@ async def build(state, registrar, now: Optional[float] = None) -> dict[str, Any]
                   "cooldown": state.image_cooldown_remaining() if hasattr(state, "image_cooldown_remaining") else 0},
         "accounts": [{"usable": a["usable"], "cooling": a["cooling"]} for a in accounts],
         "members": {},
+        "interval": round(float(getattr(state.settings, "image_min_interval", 15) or 15) + gv.get("interval_jitter", 0) / 2, 1),
     }
     if registrar is not None:
         cfg = await registrar.settings()
