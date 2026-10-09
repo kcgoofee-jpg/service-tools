@@ -1038,6 +1038,8 @@ async def v1_chat(request: Request):
             "temperature": float(body.get("temperature", 0.9) or 0.9),
             "top_p": float(body.get("top_p", 0.9) or 0.9),
             "top_k": 40,
+            # 上游默认把 input 当 base64 token 解析；OpenAI 兼容入口传的是明文。
+            "use_string": True,
         },
     }
     nai_body, _, problem = clamp_text_params(
