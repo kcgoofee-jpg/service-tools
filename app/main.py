@@ -192,6 +192,28 @@ class AdminNoStoreMiddleware:
 
 
 app.add_middleware(AdminNoStoreMiddleware)
+
+
+class NaiPathAliasMiddleware:
+    """成员常把 OpenAI 文本用的 Base URL（…/v1）填进 NovelAI 客户端的接口地址，
+    导致请求变成 /v1/ai/…、/v1/user/… 而 404。这里把多出来的 /v1 去掉，两种填法都能用。"""
+
+    _PREFIXES = ("/v1/ai/", "/v1/user/")
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope.get("path", "").startswith(self._PREFIXES):
+            scope = dict(scope)
+            scope["path"] = scope["path"][3:]
+            raw = scope.get("raw_path")
+            if isinstance(raw, (bytes, bytearray)) and raw.startswith(b"/v1/"):
+                scope["raw_path"] = bytes(raw[3:])
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(NaiPathAliasMiddleware)
 if SETTINGS.cors_origins:
     app.add_middleware(CORSMiddleware, allow_origins=SETTINGS.cors_origins,
                        allow_methods=["*"], allow_headers=["*"], allow_credentials=False)
