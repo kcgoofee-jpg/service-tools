@@ -423,6 +423,14 @@ def _text_url(model: str, stream: bool = True) -> str:
     return f"{host}/ai/generate{'-stream' if stream else ''}"
 
 
+def _require_text_model(key, model: str, kind: str) -> None:
+    """原生文本入口只放行白名单模型，避免任意 model 字符串打到上游。"""
+    if key["is_admin"] or model in TEXT_MODELS:
+        return
+    record(key, kind, model, "rejected", detail="model not allowed")
+    raise err(400, "不支持的文本模型")
+
+
 async def _text_quota_check(key, payload: dict) -> None:
     if key["is_admin"]:
         return
@@ -888,6 +896,7 @@ async def generate_stream(request: Request):
     await check_rpm(key)
     body = await read_json(request)
     model = str(body.get("model", "?"))
+    _require_text_model(key, model, "text")
 
     body, notes, problem = clamp_text_params(
         body,
@@ -942,6 +951,7 @@ async def generate_text(request: Request):
     await check_rpm(key)
     body = await read_json(request)
     model = str(body.get("model", "?"))
+    _require_text_model(key, model, "text")
 
     body, notes, problem = clamp_text_params(
         body,
@@ -969,6 +979,9 @@ async def generate_text(request: Request):
 async def generate_voice(request: Request):
     key = await authenticate(request)
     await check_rpm(key)
+    if not (key["is_admin"] or key["allow_anlas"]):
+        record(key, "voice", "", "rejected", detail="voice requires allow_anlas")
+        raise err(403, "此 Key 无权使用语音合成")
     body = await read_json(request, limit_mb=1)
     async with acquire_concurrency(key):
         resp = await upstream_call(f"{STATE.nai.legacy_text_host}/ai/generate-voice", body)
