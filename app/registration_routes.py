@@ -209,6 +209,7 @@ async def intent(request: Request, body: Intent):
     try:
         url = await service.begin(body.discord_id, body.guild_id)
     except RegistrationError as exc:
+        await _log_bot(request, body.discord_id, "领取 Key 失败（/register）", "", str(exc)[:200])
         raise HTTPException(403, str(exc)) from exc
     return JSONResponse({"url": url}, headers={"Cache-Control": "no-store"})
 
@@ -222,8 +223,10 @@ async def callback(request: Request, code: str = "", state: str = "", error: str
                "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'"}
     if error:
         return HTMLResponse("Discord 授权未完成，请重新使用 /register。", status_code=400, headers=headers)
+    who = (service.pending.get(state) or ("未知",))[0]
     try:
         await service.finish(code, state)
     except RegistrationError as exc:
+        await _log_bot(request, who, "领取 Key 失败（授权回调）", "", str(exc)[:200])
         return HTMLResponse(str(exc), status_code=403, headers=headers)
     return HTMLResponse("注册成功。API Key 和网址已发送到你的 Discord 私信，请勿分享 Key。", headers=headers)

@@ -612,3 +612,83 @@ async def test_rotating_24s_inside_one_16_count_as_one_source():
         assert await db.key_source_labels(key["id"], 0) == ["104.28.*.*"] and not alerts.sent
         assert (await db.key_source_summary(0))[key["id"]] == ["104.28.*.*"]
         await db.close()
+
+
+# ---------------------------------------------------------------- v1.2：被拒请求统一记日志
+
+def _rejections(state):
+    return [(a[2], a[4], kw.get("detail", "")) for a, kw in state.db.logs if a[4] == "rejected"]
+
+
+@pytest.mark.asyncio
+async def test_disabled_key_rejection_is_logged(state):
+    state.db.keys["fixture-1"]["enabled"] = 0
+    assert (await post("/ai/generate-image", image_body())).status_code == 403
+    await asyncio.sleep(0)
+    assert _rejections(state) == [("image", "rejected", "403 该 Key 已被禁用")]
+
+
+@pytest.mark.asyncio
+async def test_quota_exhausted_rejection_is_logged_once(state):
+    state.db.keys["fixture-1"]["daily_images"] = 1
+    assert (await post("/ai/generate-image", image_body())).status_code == 200
+    assert (await post("/ai/generate-image", image_body())).status_code == 429
+    await asyncio.sleep(0)
+    rejected = _rejections(state)
+    assert len(rejected) == 1 and "额度已用完" in rejected[0][2]
+
+
+@pytest.mark.asyncio
+async def test_already_recorded_rejection_is_not_duplicated(state):
+    assert (await post("/ai/generate-image", image_body(width=786))).status_code == 400
+    await asyncio.sleep(0)
+    assert len(_rejections(state)) == 1
+
+
+@pytest.mark.asyncio
+async def test_invalid_key_is_not_attributed_to_anyone(state):
+    assert (await post("/ai/generate-image", image_body(), token="nai-unknown")).status_code == 401
+    await asyncio.sleep(0)
+    assert not state.db.logs
+
+
+def test_kind_for_path_maps_member_routes():
+    assert main._kind_for_path("/ai/generate-image") == "image"
+    assert main._kind_for_path("/nai/ai/generate-image-stream") == "image_stream"
+    assert main._kind_for_path("/ai/generate-image/suggest-tags") == "tags"
+    assert main._kind_for_path("/ai/generate") == "text"
+    assert main._kind_for_path("/v1/chat/completions") == "chat"
+    assert main._kind_for_path("/user/subscription") == "account"
+
+
+@pytest.mark.asyncio
+async def test_idle_reminder_sent_once_24h_before_reclaim(tmp_path):
+    from types import SimpleNamespace
+    from app.state import GateState
+    db = Database(str(tmp_path / "g.sqlite"))
+    await db.connect()
+    sent = []
+
+    async def dm(discord_id, text):
+        sent.append((discord_id, text))
+        return True
+
+    fake = SimpleNamespace(db=db, settings=SimpleNamespace(key_inactivity_delete_days=3))
+    fresh = await db.create_key({"name": "fresh", "token": "nai-f", "daily_images": 1, "monthly_anlas": 0,
+                                 "daily_text_tokens": 0, "rpm": 5})
+    idle = await db.create_key({"name": "idle", "token": "nai-i", "daily_images": 1, "monthly_anlas": 0,
+                                "daily_text_tokens": 0, "rpm": 5})
+    await db._db.execute("UPDATE api_keys SET created_at=? WHERE id=?", (time.time() - 2.2 * 86400, idle["id"]))
+    for discord_id, key in (("111", fresh), ("222", idle)):
+        await db._db.execute("INSERT INTO discord_registrations(discord_id,key_id,created_at) VALUES (?,?,?)",
+                             (discord_id, key["id"], time.time()))
+    await db._db.commit()
+    assert await GateState.remind_idle_keys(fake, dm, "https://gate.example") == 1
+    assert sent[0][0] == "222" and "还没有成功生成过图片" in sent[0][1] and "https://gate.example" in sent[0][1]
+    assert await GateState.remind_idle_keys(fake, dm, "https://gate.example") == 0          # 同一段闲置只提醒一次
+    await db._db.execute("UPDATE api_keys SET last_used_at=? WHERE id=?", (time.time() - 2.1 * 86400, idle["id"]))
+    await db._db.commit()
+    assert await GateState.remind_idle_keys(fake, dm, "https://gate.example") == 1          # 有过活动后重新计时
+    actions = await db.list_admin_actions()
+    assert actions[0]["action"] == "闲置回收前提醒"
+    await db.close()

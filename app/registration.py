@@ -250,6 +250,17 @@ class RegistrationService:
             "response_type": "code", "scope": "identify guilds.members.read", "state": state,
         })
 
+    async def send_dm(self, discord_id: str, text: str) -> bool:
+        """机器人私信成员；对方关闭私信等失败返回 False，不抛异常。"""
+        try:
+            channel = await self._discord("POST", "/users/@me/channels", bearer="Bot " + self.bot_token,
+                                          json={"recipient_id": str(discord_id)})
+            await self._discord("POST", f"/channels/{channel['id']}/messages", bearer="Bot " + self.bot_token,
+                                json={"content": text[:1900], "allowed_mentions": {"parse": []}})
+            return True
+        except (RegistrationError, httpx.HTTPError, KeyError, ValueError):
+            return False
+
     async def _discord(self, method: str, path: str, *, bearer: str, **kwargs) -> dict:
         response = await self.http.request(method, "https://discord.com/api" + path,
                                            headers={"Authorization": bearer}, timeout=12, **kwargs)
