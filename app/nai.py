@@ -491,6 +491,7 @@ class NaiClient:
                                 resp = httpx.Response(stream.status_code, headers=headers,
                                                       content=bytes(data))
                 response_status = resp.status_code
+                request_timing.mark_status(resp.status_code)
                 if resp.status_code in (200, 201) and image_count > 0:
                     try:
                         await anyio.to_thread.run_sync(lambda: validate_result(
@@ -624,6 +625,7 @@ class NaiClient:
                 send_started = True
                 request_timing.mark_sent()
                 resp = await self._client.send(req, stream=True)
+                request_timing.mark_status(resp.status_code)
             if resp.status_code == 429:
                 await self._rate_limit(ts, resp, on_rate_limited)
                 raise UpstreamError(429, "上游限流(429)，全站图片生成已进入冷却")

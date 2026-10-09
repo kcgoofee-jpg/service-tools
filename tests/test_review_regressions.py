@@ -807,3 +807,105 @@ def test_bot_command_set_is_trimmed():
         if isinstance(node, ast.Call) and getattr(node.func, "attr", "") == "command":
             names |= {kw.value.value for kw in node.keywords if kw.arg == "name"}
     assert names == {"register", "quota", "resetkey", "help", "open", "limit", "ban", "unban", "slots", "revoke"}
+
+
+# ---------------------------------------------------------------- v1.4：V5 名额提醒、上游表现分析
+
+@pytest.mark.asyncio
+async def test_v5_capacity_warns_when_seats_exceed_global(tmp_path):
+    from types import SimpleNamespace
+    from app import ops
+    db = Database(str(tmp_path / "c.db"))
+    await db.connect()
+    try:
+        settings = SimpleNamespace(global_daily_v5=150)
+        await db.set_settings_bulk({"register_max_users": 10, "register_daily_v5": 15, "register_image_scope": "all"})
+        cap = await ops.v5_capacity(db, settings, None)
+        assert cap == {"need": 150, "global": 150, "short": False, "message": ""}
+        await db.set_setting("register_max_users", 12)
+        cap = await ops.v5_capacity(db, settings, None)
+        assert cap["short"] and cap["need"] == 180 and "180" in cap["message"]
+        await db.set_setting("register_image_scope", "legacy")          # 不含 V5 时不提醒
+        assert not (await ops.v5_capacity(db, settings, None))["short"]
+        await db.set_settings_bulk({"register_image_scope": "all", "global_daily_v5": 0})   # 0 = 不限
+        assert not (await ops.v5_capacity(db, settings, None))["short"]
+    finally:
+        await db.close()
+
+
+def _perf_row(ts, model="nai-diffusion-4-5-full", status="ok", dur=8000, wait=500, up=200, detail=""):
+    return (ts, model, status, 1 if status == "ok" else 0, wait, dur, up, detail)
+
+
+def test_perf_family_split_and_capacity():
+    from app import perf
+    now = 1_000_000.0
+    rows = [_perf_row(now - 60 * i) for i in range(10)] + [_perf_row(now - 30, "nai-diffusion-5", dur=20000)]
+    r = perf.analyze(rows, now, slots=1, site_interval=15, key_interval=15)
+    v45, v5 = r["families"]["V4.5"]["h1"], r["families"]["V5"]["h1"]
+    assert v45["requests"] == 10 and v45["p50_ms"] == 8000 and v45["success_rate"] == 1.0
+    assert v45["capacity_per_hour"] == 240 and v45["member_capacity_per_hour"] == 240   # 受 15s 间隔限制
+    assert v5["capacity_per_hour"] == 180                                               # 受 20s 生成耗时限制
+    assert r["flags"] == []
+
+
+def test_perf_flags_slowdown_throttle_failures_and_account():
+    from app import perf
+    now = 2_000_000.0
+    base = [_perf_row(now - 3 * 86400 - 60 * i, dur=8000) for i in range(20)]
+    slow = [_perf_row(now - 60 * i, dur=16000) for i in range(6)]
+    throttled = [_perf_row(now - 100 - i, status="error", dur=300, up=429) for i in range(3)]
+    old_text_429 = [_perf_row(now - 200, status="error", dur=0, up=0, detail="上游限流(429)，全站图片生成已进入冷却")]
+    account = [_perf_row(now - 3600 * 5, status="error", up=403)]
+    r = perf.analyze(base + slow + throttled + old_text_429 + account, now)
+    codes = {f["code"] for f in r["flags"]}
+    assert {"slow", "throttle", "account"} <= codes
+    throttle = next(f for f in r["flags"] if f["code"] == "throttle")
+    assert "4 次" in throttle["text"] and throttle["family"] == "V4.5"
+    assert r["families"]["V4.5"]["baseline_ready"]
+
+
+def test_perf_needs_samples_before_judging_slowdown():
+    from app import perf
+    now = 3_000_000.0
+    rows = [_perf_row(now - 3 * 86400, dur=1000), _perf_row(now - 60, dur=60000)]
+    r = perf.analyze(rows, now)
+    assert not any(f["code"] == "slow" for f in r["flags"])
+    assert not r["families"]["V4.5"]["baseline_ready"]
+
+
+def test_perf_hourly_buckets_cover_24h():
+    from app import perf
+    now = 3600 * 1000 + 1800.0
+    rows = [_perf_row(now - 10), _perf_row(now - 10, status="error", up=429), _perf_row(now - 23 * 3600 - 1700)]
+    hours = perf.analyze(rows, now)["families"]["V4.5"]["hourly"]
+    assert len(hours) == 24 and hours[-1]["ok"] == 1 and hours[-1]["r429"] == 1 and hours[0]["ok"] == 1
+
+
+@pytest.mark.asyncio
+async def test_upstream_status_is_logged(state, monkeypatch):
+    from app import request_timing
+    real = state.nai.request
+
+    async def tagged(*args, **kwargs):
+        request_timing.mark_sent()
+        request_timing.mark_status(200)
+        return await real(*args, **kwargs)
+    monkeypatch.setattr(state.nai, "request", tagged)
+    assert (await post("/ai/generate-image", image_body())).status_code == 200
+    await asyncio.sleep(0)
+    assert state.db.logs[-1][1]["up_status"] == 200
+
+
+@pytest.mark.asyncio
+async def test_image_perf_rows_reads_usage_log(tmp_path):
+    db = Database(str(tmp_path / "p.db"))
+    await db.connect()
+    try:
+        await db.add_log(1, "k", "image", "nai-diffusion-5", "error", wait_ms=10, dur_ms=20, up_status=429)
+        await db.add_log(1, "k", "tags", "", "ok")
+        await db.add_log(1, "k", "image", "nai-diffusion-5", "rejected")
+        rows = await db.image_perf_rows(0)
+        assert len(rows) == 1 and rows[0][1:] == ("nai-diffusion-5", "error", 0, 10, 20, 429, "")
+    finally:
+        await db.close()

@@ -166,7 +166,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "1.3.1"
+__version__ = "1.4.0"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -362,6 +362,19 @@ async def audit_generation(key, kind: str, model: str, status: str, body: dict, 
         print("[warn] audit write failed")
 
 
+async def check_upstream_perf() -> None:
+    """上游变慢 / 限流增多 / 失败率上升 / 账号受限时私信站长；同类提醒 3 小时内只发一次。"""
+    from . import perf
+    try:
+        report = await perf.collect(STATE, time.time())
+    except Exception as exc:
+        print(f"[warn] upstream perf check failed: {type(exc).__name__}")
+        return
+    for flag in report["flags"]:
+        notify_owner(f"perf_{flag['family']}_{flag['code']}",
+                     "📉 上游表现变化 · " + flag["text"] + " 详情见后台「总览 → 上游表现」。", 3 * 3600)
+
+
 async def maintenance_loop() -> None:
     """每 5 分钟：清理过期生成记录；磁盘与告警自检。"""
     while True:
@@ -376,6 +389,7 @@ async def maintenance_loop() -> None:
             if registrar is not None:
                 await registrar.sync_roles()
                 await registrar.backfill_profiles()
+            await check_upstream_perf()
             usage = shutil.disk_usage(STATE.settings.data_dir)
             if usage.free / usage.total < 0.10:
                 notify_owner("disk_low", f"服务器磁盘剩余不足 10%（剩 {usage.free // 2**20} MB），请清理或扩容。", 6 * 3600)
@@ -600,8 +614,7 @@ def record(key, kind: str, model: str, status: str, *, images: int = 0,
            unconfirmed_anlas: float = 0.0) -> asyncio.Task:
     """写日志；成功请求额外计入每日配额。"""
     _REQUEST_LOGGED.set(True)
-    wait_ms, dur_ms, client = request_timing.snapshot()
-    timing = {"wait_ms": wait_ms, "dur_ms": dur_ms, "client": client}
+    timing = request_timing.snapshot()
     async def _go():
         if status == "ok":
             await STATE.db.record_success(

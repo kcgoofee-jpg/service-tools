@@ -49,6 +49,21 @@ async def registration_settings(db, service) -> dict[str, Any]:
     }
 
 
+async def v5_capacity(db, settings, service) -> dict[str, Any]:
+    """名额 × 每人每日 V5 是否超过全站 V5 日限；超过时后来的人当天可能用不到 V5。全站日限不随名额自动变化。"""
+    reg = await registration_settings(db, service)
+    try:
+        glob = max(0, int(float(await db.get_setting("global_daily_v5", settings.global_daily_v5) or 0)))
+    except (TypeError, ValueError):
+        glob = 0
+    seats, per = reg["max_users"], reg["daily_v5"]
+    need = seats * per if reg["image_scope"] == "all" and seats and per else 0
+    short = bool(need and glob and need > glob)
+    message = (f"名额 {seats} × 每人 V5 {per} = {need} 张/天，超过全站 V5 日限 {glob}："
+               f"先用的人用满后，后面的人当天没有 V5。建议把全站 V5 调到 {need}，或降低每人 V5。") if short else ""
+    return {"need": need, "global": glob, "short": short, "message": message}
+
+
 async def _active_count(db) -> int:
     from .registration import count_registered      # 与实际名额检查同一口径
     return await count_registered(db)
