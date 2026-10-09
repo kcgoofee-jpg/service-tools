@@ -331,6 +331,8 @@ footer{max-width:960px;margin:0 auto;padding:24px 16px 40px;text-align:center;co
 .me-grid b{font-size:17px;font-variant-numeric:tabular-nums}
 .me-key{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .me-key code{font-family:ui-monospace,Menlo,monospace;background:var(--surface);border:1px solid var(--line);border-radius:7px;padding:5px 9px;font-size:13px}
+.me-export{margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
+.me-export-btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
 @media(max-width:560px){.me-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .topbar-in .spacer{flex:1}
 .guest-only{}
@@ -735,7 +737,10 @@ function renderMe(d){
       + '<div><span>到期</span><b>' + (d.expires_at ? fmtDate(d.expires_at) : '长期') + '</b></div></div>'
       + '<div class="me-key"><code>' + esc(maskKey(d.key)) + '</code>'
       + '<button class="btn" id="copyKeyBtn" type="button">' + icon('copy') + '复制 Key</button>'
-      + '<span class="muted sm">填进 SillyTavern 等客户端</span></div>';
+      + '<span class="muted sm">填进 SillyTavern 等客户端</span></div>'
+      + (d.images_stored ? '<div class="me-export"><span class="muted sm">你有 ' + d.images_stored + ' 张原图存在服务器，约 ' + (d.image_retention_days||3) + ' 天后自动删除。想留请打包下载（二选一）：</span>'
+        + '<div class="me-export-btns"><a class="btn mini" href="/public/my-export?format=epub">' + icon('image') + '下载 EPUB 画册</a>'
+        + '<a class="btn mini" href="/public/my-export?format=zip">' + icon('image') + '下载原图 ZIP</a></div></div>' : '');
     var ck = $('copyKeyBtn'); if(ck) ck.onclick = function(){ copyText(d.key, '已复制 Key'); };
   }
   hydrate(me);

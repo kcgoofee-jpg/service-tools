@@ -185,7 +185,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "2.6.0"
+__version__ = "2.7.0"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -493,6 +493,13 @@ async def maintenance_loop() -> None:
         await STATE.db.purge_admin_actions(time.time() - ADMIN_ACTION_RETENTION_DAYS * 86400)
         if getattr(STATE, "bugs", None) is not None:
             await STATE.bugs.purge(time.time() - 30 * 86400)
+        # 原图只保留最近几天（缩略图、提示词、参数长期留）；天数可在设置里调
+        try:
+            days = int(float(await STATE.db.get_setting("audit_image_retention_days", 3) or 3))
+            if days > 0:
+                await STATE.db.purge_audit_images(time.time() - days * 86400)
+        except Exception as exc:
+            bug("audit_image_purge", exc)
 
     async def registrar_jobs():
         registrar = getattr(app.state, "registrar", None)
