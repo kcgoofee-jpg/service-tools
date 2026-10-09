@@ -19,7 +19,7 @@ FEATURES: dict[str, str] = {
 }
 GLOBAL_KEY = "features_global"
 # 需要消耗 Anlas 的功能：本站只提供免费出图，拒绝时说明原因，免得成员以为是 Key 坏了。
-ANLAS_FEATURES = {"vibe": "每次编码参考图约 2 Anlas"}
+ANLAS_FEATURES = {"vibe": "每次编码参考图约 2 Anlas", "upscale": "按图片大小扣 Anlas", "augment": "按图片大小扣 Anlas"}
 
 # 用量日志 usage_log.kind → 功能。后台按功能统计与筛选日志时使用。
 KIND_FEATURE: dict[str, str] = {
@@ -83,6 +83,12 @@ async def check(db, key, name: str) -> Optional[str]:
     if not (await global_flags(db)).get(name, True):
         return f"站长暂未开放此功能：{FEATURES[name]}"
     allowed = key_features(key)
+    try:
+        has_anlas = bool(key["allow_anlas"])
+    except (KeyError, IndexError, TypeError):
+        has_anlas = False
+    if name in ANLAS_FEATURES and has_anlas:
+        return None          # 2026-10-10 放开 Anlas：有 Anlas 权限（含自动分配）的成员可以用付费功能，费用按每日 Anlas 上限扣
     if allowed is not None and name not in allowed:
         if name in ANLAS_FEATURES:
             return (f"{FEATURES[name]}会消耗 Anlas（{ANLAS_FEATURES[name]}），本站只提供免费出图，暂不开放。"

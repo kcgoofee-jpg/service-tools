@@ -185,7 +185,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "2.1.1"
+__version__ = "2.2.0"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -755,9 +755,8 @@ async def quota_image_check(key, est: dict, *, legacy_free_images: int = 0,
     if est["anlas"] > 0:
         if not key["allow_anlas"]:
             raise err(402, "该请求会消耗 Anlas，此 Key 未开通付费额度权限")
-        if _anlas_auto(key) and not est.get("topup"):
-            # 自动分配的 Anlas 只给「V5 续杯」用：放大、导演工具、Vibe、超规格尺寸等都不能用它
-            raise err(402, "系统自动分配给你的 Anlas 只能在当天 V5 用完后继续生成免费规格的 V5 图，这个请求不在此列")
+        # 2026-10-10 站长：放开 Anlas。只用于 NovelAI 一定按 Anlas 收费的操作（超规格尺寸 / 步数、一次多张、
+        # Vibe、放大、导演工具）：这些不占 V5 免费额度（官方 FAQ #38），也不影响 V4.5（Opus 不限）。每人仍受每日 Anlas 上限约束。
         if key["daily_anlas"] > 0 and c["anlas"] + sum(r.anlas for r in own_day) + est["anlas"] > key["daily_anlas"]:
             raise err(402, f"今日 Anlas 额度不足（已用 {c['anlas']:.0f} / 上限 "
                            f"{key['daily_anlas']:.0f}），明日恢复")
@@ -1124,8 +1123,8 @@ async def _generate_image(request: Request, *, streaming: bool):
             record(key, "image", model, "rejected", detail="img2img 未开通 Anlas 权限")
             raise err(402, "该 Key 未开通 Anlas 权限，无法使用图生图 / 局部重绘")
 
-    # 免费档钳制：对未开通 Anlas 的 Key 生效；自动分配 Anlas 的 Key 也保留钳制（Anlas 只用于 V5 续杯）
-    if STATE.settings.safe_clamp and not key["is_admin"] and (not key["allow_anlas"] or _anlas_auto(key)):
+    # 免费档钳制：只对没有 Anlas 权限的 Key 生效；有 Anlas（含自动分配）的 Key 可以用超规格参数，按 Anlas 扣
+    if STATE.settings.safe_clamp and not key["is_admin"] and not key["allow_anlas"]:
         try:
             body, notes, problem = clamp_image_params(
                 body,
@@ -1154,7 +1153,11 @@ async def _generate_image(request: Request, *, streaming: bool):
     except (TypeError, ValueError, OverflowError) as exc:
         raise err(400, "图片参数无效，无法估算费用") from exc
     # V5 续杯：自动分配了 Anlas 的成员，当天个人 V5 用完后改用 Anlas 生成同规格 V5（受每日 Anlas 限额约束）
-    if est["v5"] and _anlas_auto(key) and key["allow_anlas"] and key["daily_v5"] > 0:
+    # 注意：账号 V5 额度还有剩余时，NovelAI 对免费规格 V5 扣的是 V5 额度而不是 Anlas。所以「续杯」只在账号 V5
+    # 额度真的用完（≤ 1%）时才走 Anlas，否则会悄悄多用全站共享的 V5 额度、影响其他人。
+    v5_left = (json.loads(await STATE.db.get_setting("quota_algo_last", "{}") or "{}").get("v5") or {}).get("percent")
+    if (est["v5"] and _anlas_auto(key) and key["allow_anlas"] and key["daily_v5"] > 0
+            and v5_left is not None and v5_left <= 1):
         if (await STATE.db.get_counter(key["id"], STATE.day()))["v5"] >= key["daily_v5"]:
             est = {**estimate_image_cost(body, is_opus=True, v5_allowance_available=False), "topup": True}
             notes = list(notes) + ["今日 V5 已用完，使用自动分配的 Anlas 续杯"]
