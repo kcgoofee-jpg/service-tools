@@ -1172,10 +1172,10 @@ async def members(request: Request):
 
 
 @router.get("/audit")
-async def audit_list(request: Request, key_id: Optional[int] = None, page: int = 1):
+async def audit_list(request: Request, key_id: Optional[int] = None, page: int = 1, per_page: int = 24):
     require_admin(request)
     st = request.app.state.gate
-    per_page = 24
+    per_page = per_page if per_page in (24, 48, 96) else 24
     page = max(1, min(int(page), 1_000_000))
     rows, total = await st.db.list_audit(per_page, (page - 1) * per_page, key_id)
     return {"items": [dict(r) for r in rows], "page": page, "per_page": per_page, "total": total,

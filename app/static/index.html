@@ -355,6 +355,18 @@ details.help ol{margin:8px 0 8px;padding-left:20px}
 .thumb .zoom{position:absolute;right:8px;bottom:8px;background:rgba(10,12,20,.6);color:#fff;border-radius:8px;padding:4px;opacity:0;transition:opacity .15s;display:grid}
 .thumb:hover .zoom{opacity:1}
 .thumb.none .zoom{display:none}
+.gallery.large{grid-template-columns:repeat(auto-fill,minmax(360px,1fr))}
+.gallery.list{display:flex;flex-direction:column;gap:8px}
+.gallery.list .shot{flex-direction:row;align-items:stretch}
+.gallery.list .thumb{width:120px;flex:none;aspect-ratio:1/1}
+.gallery.list .shot-body{flex:1;min-width:0;padding:10px 12px}
+.gallery.list .prompt{-webkit-line-clamp:2}
+.pg-nav{display:flex;gap:4px;flex-wrap:wrap;align-items:center}
+.btn.mini.pg{min-width:30px;padding:4px 7px}
+.btn.mini.pg.on{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.pg-dots{color:var(--muted);padding:0 2px}
+.pg-jump{display:inline-flex;align-items:center;gap:4px;color:var(--muted);font-size:12.5px}
+.pg-jump input{width:52px}
 .shot-body{padding:16px;display:flex;flex-direction:column;gap:12px;flex:1}
 .shot-top{display:flex;align-items:center;gap:8px;justify-content:space-between}
 .shot-top .who{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -632,7 +644,6 @@ td.note{min-width:220px}
             <div class="panel-head"><h2>上游表现</h2><div class="desc">按 V4.5 / V5 分开，对比过去 7 天</div></div>
             <div id="perfFlags"></div>
             <div class="table-wrap"><table class="rt"><thead><tr><th>模型</th><th class="nw">时段</th><th class="num">请求 / 成功率</th><th class="num" title="上游返回 429 的次数">限流</th><th class="num" title="上游返回 401/402/403/5xx 或连接失败">其他失败</th><th class="num">中位生成</th><th class="num">P90 生成</th><th class="num" title="收到请求到发往上游：排队 + 冷却">平均排队</th><th class="num" title="按中位生成耗时和请求间隔估算：全站 / 单个成员">估算产能 / 小时</th></tr></thead><tbody id="perfBody"></tbody></table></div>
-            <div id="perfHourly" style="margin-top:12px"></div>
           </div>
           <div class="card panel">
             <div class="panel-head"><h2>调度影子模式</h2><div class="desc" title="用真实请求回放「保底 + 空闲借用 + 成员间轮流 + 账号每日上限」">只回放计算，不改变实际出图顺序</div>
@@ -693,7 +704,9 @@ td.note{min-width:220px}
         <section id="tab-audit" hidden>
           <div class="page-head"><div class="ttl"><h1>生成记录</h1></div>
             <div class="tools">
-              <select id="auditFilter" aria-label="按成员筛选" style="width:200px"><option value="">全部成员</option></select>
+              <select id="auditFilter" aria-label="按成员筛选" style="width:180px"><option value="">全部成员</option></select>
+              <select id="auditView" aria-label="视图" style="width:110px"><option value="grid">画廊</option><option value="large">大图</option><option value="list">列表</option></select>
+              <select id="auditPer" aria-label="每页数量" style="width:110px"><option value="24">每页 24</option><option value="48">每页 48</option><option value="96">每页 96</option></select>
               <button class="btn rf" data-act="refresh-audit" aria-label="刷新" title="刷新"><span data-ic="refresh"></span><span class="lbl">刷新</span></button>
             </div></div>
           <div class="card panel" id="auditSettings"><div class="skel" style="height:56px"></div></div>
@@ -935,7 +948,7 @@ td.note{min-width:220px}
 })('admin');
 const $ = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
-let editingId = null, keysCache = [], logPage = 1, auditPage = 1;
+let editingId = null, keysCache = [], logPage = 1, auditPage = 1, auditPer = 24, auditView = 'grid';
 let membersCache = null, statusCache = null, memberSort = 'today', memberQuery = '', memberFilter = 'all', memberMeta = {};
 let allowanceTimer = null, allowanceLoading = false;
 let reconBusy = false, reconReady = false, reconRemoteRunning = false, reconRetryAt = 0, reconTimer = null, reconVersion = 0;
@@ -1248,15 +1261,6 @@ async function loadPerf(){
       if(!f.baseline_ready) rows.push(`<tr><td></td><td colspan="8" class="hint">${esc(fam)} 基线样本不足：需要积累几天带耗时的日志（1.3.0 起记录）才能判断「变慢」。</td></tr>`);
     }
     $('#perfBody').innerHTML = rows.join('') || '<tr><td colspan="9" class="empty-cell">暂无出图记录</td></tr>';
-    $('#perfHourly').innerHTML = Object.entries(d.families).filter(([,f])=>f.d1.requests).map(([fam, f])=>{
-      const max = Math.max(1, ...f.hourly.map(h=>h.ok+h.err));
-      const bars = f.hourly.map((h,i)=>{
-        const okH = Math.round(h.ok/max*36), errH = Math.round(h.err/max*36);
-        const t = new Date(h.t*1000).getHours() + ':00 · 成功 ' + h.ok + ' · 失败 ' + h.err + (h.r429?' · 限流 '+h.r429:'') + (h.p50_ms?' · 中位 '+(h.p50_ms/1000).toFixed(1)+'s':'');
-        return `<g><title>${esc(t)}</title><rect x="${i*10}" y="${40-okH}" width="8" height="${okH}" fill="var(--ok)" opacity=".75"/><rect x="${i*10}" y="${40-okH-errH}" width="8" height="${errH}" fill="var(--bad)"/></g>`;
-      }).join('');
-      return `<div style="display:flex;align-items:center;gap:12px;margin-top:6px"><span class="hint" style="width:90px">${esc(fam)} 24 小时</span><svg viewBox="0 0 240 40" width="240" height="40" role="img" aria-label="${esc(fam)} 近 24 小时每小时成功与失败">${bars}</svg></div>`;
-    }).join('');
   }catch(e){ $('#perfBody').innerHTML = '<tr><td colspan="9" class="empty-cell">读取失败</td></tr>'; }
 }
 async function loadShadow(){
@@ -1876,7 +1880,8 @@ async function loadAudit(){
     fillMemberFilter();
     if(!statusCache){ try{ statusCache = await api('/admin/api/status'); }catch(_){} }
     const kf = $('#auditFilter').value;
-    const d = await api('/admin/api/audit?' + (kf?`key_id=${encodeURIComponent(kf)}&`:'') + `page=${auditPage}`);
+    const d = await api('/admin/api/audit?' + (kf?`key_id=${encodeURIComponent(kf)}&`:'') + `page=${auditPage}&per_page=${auditPer}`);
+    grid.className = 'gallery' + (auditView==='large'?' large':auditView==='list'?' list':'');
     if(ver !== auditVer) return;
     auditPage = d.page;
     auditPrompts.clear();
@@ -1914,9 +1919,15 @@ function openLightbox(id){
   openOverlay('#lightbox');
 }
 function pager(el, d, kind){
-  el.innerHTML = `<span class="info num">共 ${d.total} 条，第 ${d.page} / ${d.pages} 页（每页 ${d.per_page} 条）</span>
-    <button class="btn mini" data-act="${kind}-page" data-d="-1" ${d.page<=1?'disabled':''}>上一页</button>
-    <button class="btn mini" data-act="${kind}-page" data-d="1" ${d.page>=d.pages?'disabled':''}>下一页</button>`;
+  const p = d.page, n = d.pages;
+  if(n <= 1){ el.innerHTML = `<span class="info num">共 ${d.total} 条</span>`; return; }
+  const nums = [], win = 2; let last = 0;
+  for(let i = 1; i <= n; i++){ if(i === 1 || i === n || (i >= p - win && i <= p + win)){ if(last && i - last > 1) nums.push('…'); nums.push(i); last = i; } }
+  const btns = nums.map(x => x === '…' ? '<span class="pg-dots">…</span>'
+    : `<button class="btn mini pg${x === p ? ' on' : ''}" data-act="${kind}-goto" data-p="${x}" ${x === p ? 'aria-current="page"' : ''}>${x}</button>`).join('');
+  el.innerHTML = `<span class="info num">共 ${d.total} 条 · 第 ${p} / ${n} 页</span>
+    <div class="pg-nav"><button class="btn mini" data-act="${kind}-page" data-d="-1" ${p <= 1 ? 'disabled' : ''}>上一页</button>${btns}<button class="btn mini" data-act="${kind}-page" data-d="1" ${p >= n ? 'disabled' : ''}>下一页</button>
+    <label class="pg-jump">跳到<input type="number" min="1" max="${n}" data-act="${kind}-jump" aria-label="跳到第几页">页</label></div>`;
 }
 
 /* ---------- features ---------- */
@@ -2510,8 +2521,11 @@ document.addEventListener('click', ev=>{
     case 'expand': el.classList.toggle('open'); break;
     case 'copy-prompt': { const m = auditPrompts.get(id); if(m) copyText(m.p, '提示词已复制').then(ok=>{ if(!ok) toast('复制失败，请手动选择文本', 'err'); }); break; }
     case 'audit-page': auditPage = Math.max(1, auditPage + Number(el.dataset.d)); loadAudit(); break;
+    case 'audit-goto': auditPage = Math.max(1, Number(el.dataset.p)); loadAudit(); break;
     case 'log-page': changeLogPage(Number(el.dataset.d)); break;
+    case 'log-goto': logPage = Math.max(1, Number(el.dataset.p)); loadLogs(); break;
     case 'action-page': actionPage=Math.max(1,actionPage+Number(el.dataset.d)); loadActions(); break;
+    case 'action-goto': actionPage = Math.max(1, Number(el.dataset.p)); loadActions(); break;
     case 'refresh-ops': loadOps(); break;
     case 'save-reg': saveReg(); break;
     case 'save-audit': saveAudit(); break;
@@ -2568,6 +2582,9 @@ $('#logFeature').addEventListener('change', ()=>{ logPage=1; loadLogs(); });
 $('#logHideTest').addEventListener('change', ()=>{ logPage=1; loadLogs(); });
 $('#shadowRange').addEventListener('change', loadShadow);
 $('#auditFilter').addEventListener('change', ()=>{ auditPage=1; loadAudit(); });
+$('#auditView').addEventListener('change', e=>{ auditView=e.target.value; loadAudit(); });
+$('#auditPer').addEventListener('change', e=>{ auditPer=Number(e.target.value); auditPage=1; loadAudit(); });
+document.addEventListener('change', e=>{ const a=e.target.dataset&&e.target.dataset.act; if(a&&a.endsWith('-jump')){ const kind=a.slice(0,-5); const v=Math.max(1,Number(e.target.value)||1); if(kind==='audit'){auditPage=v;loadAudit();}else if(kind==='log'){logPage=v;loadLogs();}else if(kind==='action'){actionPage=v;loadActions();} } });
 $('#memberSearch').addEventListener('input', e=>{ memberQuery = e.target.value; renderMembers(); });
 $('#memberFilter').addEventListener('click', e=>{
   const b = e.target.closest('[data-mfilter]'); if(!b || b.disabled) return;

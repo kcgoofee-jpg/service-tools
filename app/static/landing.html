@@ -320,7 +320,7 @@ footer{max-width:960px;margin:0 auto;padding:24px 16px 40px;text-align:center;co
 .loginrow{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:4px 0 14px}
 .btn.dc{background:#5865F2;border-color:#5865F2;color:#fff}
 .muted.sm{color:var(--text-2);font-size:12.5px}
-.me{margin:4px 0 14px;padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:var(--surface-2)}
+.me{margin:4px 0 0;padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:var(--surface-2)}
 .me-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
 .me-head b{font-size:16px}
 .me .tag.ok{font-size:11.5px;padding:2px 8px;border-radius:999px;background:var(--ok-soft);color:var(--ok)}
@@ -335,6 +335,7 @@ footer{max-width:960px;margin:0 auto;padding:24px 16px 40px;text-align:center;co
 .topbar-in .spacer{flex:1}
 .guest-only{}
 body.authed .guest-only{display:none!important}
+body.authed #board{margin-top:22px}
 .userchip{position:relative}
 .chip-btn{display:inline-flex;align-items:center;gap:8px;background:var(--surface-2);border:1px solid var(--line);border-radius:999px;padding:4px 10px 4px 4px;cursor:pointer;color:var(--text);font-size:13.5px}
 .chip-btn:hover{background:var(--surface-3)}
@@ -376,10 +377,8 @@ body.authed .guest-only{display:none!important}
       <div class="me" id="meCard" hidden></div>
       <div class="loginrow" id="loginRow" hidden>
         <a class="btn primary dc" href="/login"><span data-ic="discord"></span>用 Discord 登录</a>
-        <span class="muted sm">用 Discord 登录后，直接看自己的额度、排队和 Key</span>
       </div>
       <p class="cooldown" id="cooldown" hidden><span data-ic="clock"></span><span id="cooldownTxt"></span></p>
-
     </div>
   </section>
 
@@ -388,11 +387,11 @@ body.authed .guest-only{display:none!important}
   </section>
 
   <section id="start" class="guest-only">
-    <div class="sec-head"><h2>三步上手</h2><p>加入社区、领取 Key，再填进客户端就能用。</p></div>
+    <div class="sec-head"><h2>三步上手</h2></div>
     <ol class="steps">
       <li class="card step"><h3><span class="n">1</span>加入 Discord</h3>
         <div class="step-act" id="discordSlot"></div></li>
-      <li class="card step"><h3><span class="n">2</span>领取你的 Key</h3><p>在 <code>🔑｜领取key</code> 输入 <code>/register</code>，Key 会私信发给你。<small>提示「没有权限发送消息」是正常的。</small></p></li>
+      <li class="card step"><h3><span class="n">2</span>领取你的 Key</h3><p>在 <code>🔑｜领取key</code> 输入 <code>/register</code>，Key 会私信发给你。</p></li>
       <li class="card step"><h3><span class="n">3</span>填入客户端</h3><p>接口地址（不加 /v1）和你的 Key 填进客户端：</p>
         <div class="copyline"><span class="mono" id="siteTxt1">—</span><button class="btn mini" type="button" data-copy="site"><span data-ic="copy"></span>复制</button></div>
       </li>
