@@ -191,7 +191,7 @@ async def test_deleting_a_discord_member_clears_registration_and_can_ban_and_mem
             (uid, k["id"], time.time(), "someone", "Some One", "abc123"))
         await db._db.commit()
         return k["id"]
-    first, second = await member("1110347922597478473", "Some One (@someone)"), await member("2220347922597478473", "Other")
+    first, second = await member("1010000000000000001", "Some One (@someone)"), await member("2020000000000000002", "Other")
 
     class State(AdminState):
         def __init__(self):
@@ -214,15 +214,15 @@ async def test_deleting_a_discord_member_clears_registration_and_can_ban_and_mem
         members = (await c.get("/admin/api/members")).json()["members"]
         profile = next(m for m in members if m["id"] == first)["discord"]
         assert profile["display_name"] == "Some One" and profile["username"] == "someone"
-        assert profile["avatar_url"].endswith("/avatars/1110347922597478473/abc123.png?size=64")
-        assert profile["profile_url"] == "https://discord.com/users/1110347922597478473"
+        assert profile["avatar_url"].endswith("/avatars/1010000000000000001/abc123.png?size=64")
+        assert profile["profile_url"] == "https://discord.com/users/1010000000000000001"
         gone = await c.delete(f"/admin/api/keys/{first}", headers=hdr)
         assert gone.status_code == 200 and gone.json()["banned"] is False
         assert await db.get_key(first) is None
         assert await db._db.execute_fetchall("SELECT 1 FROM discord_registrations WHERE key_id=?", (first,)) == []
-        assert not await service.is_banned("1110347922597478473")                         # plain delete = can come back
+        assert not await service.is_banned("1010000000000000001")                         # plain delete = can come back
         banned = await c.delete(f"/admin/api/keys/{second}?ban=true", headers=hdr)
-        assert banned.json()["banned"] is True and await service.is_banned("2220347922597478473")
+        assert banned.json()["banned"] is True and await service.is_banned("2020000000000000002")
 
 
 # ---------------------------------------------------------------- upstream tokens managed from the panel
