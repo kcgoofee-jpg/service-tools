@@ -99,7 +99,8 @@ CREATE TABLE IF NOT EXISTS usage_log (
     client TEXT NOT NULL DEFAULT '',      -- User-Agent 摘要，客户端自报，仅供参考
     up_status INTEGER NOT NULL DEFAULT 0, -- 上游最后返回的 HTTP 状态码；没收到响应为 0
     rid TEXT NOT NULL DEFAULT '',         -- 请求编号（响应头 X-Request-Id），成员报错时据此定位
-    src TEXT NOT NULL DEFAULT ''          -- 来源网络打码标签（如 120.235.*.*），防分享溯源用，不存完整 IP
+    src TEXT NOT NULL DEFAULT '',         -- 来源网络打码标签（如 120.235.*.*），防分享溯源用，不存完整 IP
+    ver TEXT NOT NULL DEFAULT ''          -- 网关版本（规则版本）：回测按参数版本分段，避免把不同规则下的数据混在一起
 );
 CREATE INDEX IF NOT EXISTS idx_log_ts ON usage_log (ts DESC);
 CREATE INDEX IF NOT EXISTS idx_log_key ON usage_log (key_id, ts DESC);
@@ -228,8 +229,9 @@ NOT_TEST = "COALESCE(key_id, 0) NOT IN (SELECT id FROM api_keys WHERE is_test=1)
 
 _INSERT_LOG = """INSERT INTO usage_log (ts, key_id, key_name, kind, model, status,
                                       images, anlas, tokens, detail, unconfirmed_anlas,
-                                      wait_ms, dur_ms, client, up_status, rid, src)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"""
+                                      wait_ms, dur_ms, client, up_status, rid, src, ver)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"""
+RULE_VERSION = ""                     # 启动时由 main.py 设为网关版本
 _UPSERT_COUNTERS = """INSERT INTO counters
                      (key_id, day, images, anlas, text_tokens, requests, v5, legacy_free_images)
                      VALUES (?,?,?,?,?,?,?,?)
@@ -283,6 +285,7 @@ class Database:
             "ALTER TABLE usage_log ADD COLUMN rid TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE api_keys ADD COLUMN quota_auto INTEGER NOT NULL DEFAULT 1",
             "ALTER TABLE usage_log ADD COLUMN src TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE usage_log ADD COLUMN ver TEXT NOT NULL DEFAULT ''",
         ):
             try:
                 await self._db.execute(ddl)
@@ -704,7 +707,7 @@ class Database:
                 await db.execute(_INSERT_LOG, (
                     now, key_id, key_name, kind, model, "ok", images, anlas,
                     tokens, detail[:500], unconfirmed_anlas, max(0, int(wait_ms)),
-                    max(0, int(dur_ms)), client[:60], int(up_status), rid[:16], src[:40],
+                    max(0, int(dur_ms)), client[:60], int(up_status), rid[:16], src[:40], RULE_VERSION,
                 ))
                 await db.execute(_UPSERT_COUNTERS, (
                     key_id, day, images, anlas, tokens, 1, v5, legacy_free_images,
@@ -838,7 +841,7 @@ class Database:
             _INSERT_LOG,
             (time.time(), key_id, key_name[:80], kind, model[:80], status,
              images, anlas, tokens, detail[:500], unconfirmed_anlas,
-             max(0, int(wait_ms)), max(0, int(dur_ms)), client[:60], int(up_status), rid[:16], src[:40]),
+             max(0, int(wait_ms)), max(0, int(dur_ms)), client[:60], int(up_status), rid[:16], src[:40], RULE_VERSION),
         )
         await self._db.commit()
 

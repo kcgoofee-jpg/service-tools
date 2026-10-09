@@ -51,30 +51,26 @@ async def test_one_person_switching_networks_is_not_punished(guard):
 
 @pytest.mark.asyncio
 async def test_three_places_at_once_escalates_to_reset_and_ban(guard):
+    """逐级：提醒 → 暂停（暂停中的请求在线上会被挡掉）→ 暂停结束后再犯才重置 → 第 3 次重置停用。每次最多升一级。"""
     c, t = Calls(), 2_000_000.0
     nets = ["120.235.*.*", "183.6.*.*", "112.97.*.*"]
     actions = []
-    for burst in range(12):
-        base = t + burst * 1900                       # 每 ~30 分钟一轮，三地轮流出图
+    for burst in range(400):
+        until = guard.paused_until(1, t)
+        if until:
+            t = until + 1                                 # 暂停期间线上请求进不来
         for i in range(9):
-            a = await guard.observe(KEY, nets[i % 3], 4, [WIN, AND, IOS][i % 3], now=base + i * 30, **c.kw())
+            a = await guard.observe(KEY, nets[i % 3], 4, [WIN, AND, IOS][i % 3], now=t + i * 30, **c.kw())
             if a:
                 actions.append(a)
-        if guard.paused_until(1, base + 300):
-            assert "暂停" in c.member[-1] or "重置" in c.member[-1]
-    # 三地 + 三种设备同时出现，第一轮就够暂停（跳过提醒）
-    assert actions[0] in ("warn", "pause") and "pause" in actions and "reset" in actions
+        t += 1900
+        if c.bans:
+            break
+    assert actions[:2] == ["warn", "pause"]                # 第一次不能直接跳到暂停 / 重置
+    assert actions.index("reset") > actions.index("pause")
     assert c.resets and "nai-NEW" in next(m for m in c.member if "新的 Key" in m)
     ev = await guard.evidence(1)
     assert any(e["kind"] == "concurrent" for e in ev) and any(e["kind"] == "action" for e in ev)
-    # 继续违规到第 3 次 → 停用并禁止再领取
-    for burst in range(12, 80):
-        base = t + burst * 1900
-        for i in range(9):
-            if await guard.observe(KEY, nets[i % 3], 4, WIN, now=base + i * 30, **c.kw()) == "ban":
-                break
-        if c.bans:
-            break
     assert c.bans == [1]
 
 
@@ -218,8 +214,12 @@ async def test_hourly_cap_aimd_and_3h_window(guard):
     assert await g.on_upstream_429(now) == (150, 100)          # 上游限流：减半，不低于 100
     assert await g.on_upstream_429(now + 1) is None             # 已经在下限
     assert await g.adapt_daily(now + 3600) is None               # 24 小时内有过限流：不加
-    assert await g.adapt_daily(now + 86401) == (100, 110)        # 平稳一天 +10
-    assert await g.adapt_daily(now + 86500) is None              # 一天最多一次
+    assert await g.adapt_daily(now + 86401) is None              # 没顶到过上限：没信息，不加
+    await db._db.execute("INSERT INTO usage_log(ts, key_id, key_name, kind, status, detail) VALUES (?,?,?,?,?,?)",
+                         (now + 2 * 86400 + 3600, 1, "m", "image", "rejected", "429 本小时出图量已达上限（每小时 100 张）"))
+    await db._db.commit()
+    assert await g.adapt_daily(now + 2 * 86400 + 86401) == (100, 110)   # 顶到过上限且平稳一天 +10
+    assert await g.adapt_daily(now + 2 * 86400 + 86500) is None   # 一天最多一次
     g2 = Guard(db); await g2.load()
     assert g2.values["account_hourly_cap"] == 110                # 持久化
     # 3 小时窗口：每小时都在上限内，但 3 小时累计到 400 也要拦
