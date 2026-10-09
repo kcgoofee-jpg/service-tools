@@ -318,6 +318,21 @@ footer{max-width:960px;margin:0 auto;padding:24px 16px 40px;text-align:center;co
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}
 }
+.loginrow{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:4px 0 14px}
+.btn.dc{background:#5865F2;border-color:#5865F2;color:#fff}
+.muted.sm{color:var(--text-2);font-size:12.5px}
+.me{margin:4px 0 14px;padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:var(--surface-2)}
+.me-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+.me-head b{font-size:16px}
+.me .tag.ok{font-size:11.5px;padding:2px 8px;border-radius:999px;background:var(--ok-soft);color:var(--ok)}
+.me .link{background:none;border:0;color:var(--text-2);cursor:pointer;font-size:13px;margin-left:auto;text-decoration:underline}
+.me-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:12px}
+.me-grid>div{background:var(--surface);border-radius:9px;padding:8px 10px}
+.me-grid span{display:block;font-size:11.5px;color:var(--text-2)}
+.me-grid b{font-size:17px;font-variant-numeric:tabular-nums}
+.me-key{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.me-key code{font-family:ui-monospace,Menlo,monospace;background:var(--surface);border:1px solid var(--line);border-radius:7px;padding:5px 9px;font-size:13px}
+@media(max-width:560px){.me-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style>
 </head>
 <body>
@@ -339,6 +354,11 @@ footer{max-width:960px;margin:0 auto;padding:24px 16px 40px;text-align:center;co
       <div class="live-head"><div class="t" id="liveTitle"><span data-ic="key"></span>查额度</div>
         <div class="pills" id="pills" aria-live="polite"><span class="skel"></span><span class="skel"></span></div></div>
       <p class="algo-note" id="algoNote" hidden></p>
+      <div class="me" id="meCard" hidden></div>
+      <div class="loginrow" id="loginRow" hidden>
+        <a class="btn primary dc" href="/login"><span data-ic="discord"></span>用 Discord 登录</a>
+        <span class="muted sm">登录后直接看状态、一键复制 Key，不用再粘贴</span>
+      </div>
       <p class="cooldown" id="cooldown" hidden><span data-ic="clock"></span><span id="cooldownTxt"></span></p>
       <form id="chkForm" autocomplete="off" novalidate>
         <label class="sr" for="keyIn">你的 Key</label>
@@ -658,6 +678,39 @@ function loadStatus(){
     .then(function(){ clearTimeout(to); loading = false; }, function(){ clearTimeout(to); loading = false; });
 }
 loadStatus();
+
+/* 成员网页登录（Discord）：登录后直接看状态、复制 Key，不用粘贴。数据来自 /public/me */
+function maskKey(k){ k = String(k || ''); return k.length > 14 ? k.slice(0, 7) + '…' + k.slice(-4) : k; }
+function renderMe(d){
+  var me = $('meCard'), lr = $('loginRow'), form = $('chkForm'), rem = document.querySelector('.remember');
+  if(!d || !d.logged_in){ me.hidden = true; lr.hidden = false; if(form) form.hidden = false; if(rem) rem.hidden = false; return; }
+  lr.hidden = true; if(form) form.hidden = true; if(rem) rem.hidden = true; me.hidden = false;
+  var dc = d.discord || {}, nm = esc(dc.display_name || dc.username || '成员');
+  if(!d.has_key){
+    var tip = d.in_server ? (d.has_role ? '在 🔑｜领取key 频道输入 <code>/register</code> 即可领取。'
+                : '需要先获得「' + esc(d.role_note || '指定') + '」身份组才能领取。')
+              : '请先加入社区服务器，再领取 Key。';
+    me.innerHTML = '<div class="me-head"><b>' + nm + '</b><button class="link" id="logoutBtn" type="button">退出</button></div>'
+      + '<p class="muted sm" style="font-size:14px">你还没有领取 Key。' + tip + '</p>';
+  }else{
+    var t = d.today || {}, q = d.queue || [];
+    var v45 = Math.max(0, (t.images || 0) - (t.v5 || 0));
+    var pos = q.length ? (q[0].state === 'running' ? '生成中' : '排队第 ' + q[0].position + ' 位') : '空闲';
+    me.innerHTML = '<div class="me-head"><b>' + nm + '</b><span class="tag ok">已登录</span><button class="link" id="logoutBtn" type="button">退出</button></div>'
+      + '<div class="me-grid"><div><span>今日 V4.5</span><b>' + v45 + ' / ' + (t.daily_images || 0) + '</b></div>'
+      + '<div><span>今日 V5</span><b>' + (t.v5 || 0) + ' / ' + (t.daily_v5 || 0) + '</b></div>'
+      + '<div><span>当前</span><b>' + pos + '</b></div>'
+      + '<div><span>到期</span><b>' + (d.expires_at ? fmtDate(d.expires_at) : '长期') + '</b></div></div>'
+      + '<div class="me-key"><code>' + esc(maskKey(d.key)) + '</code>'
+      + '<button class="btn" id="copyKeyBtn" type="button"><span data-ic="copy"></span>复制 Key</button>'
+      + '<span class="muted sm">填进 SillyTavern 等客户端</span></div>';
+    var ck = $('copyKeyBtn'); if(ck) ck.onclick = function(){ if(navigator.clipboard){ navigator.clipboard.writeText(d.key).then(function(){ toast('已复制 Key'); }, function(){}); } };
+  }
+  hydrate(me);
+  var lo = $('logoutBtn'); if(lo) lo.onclick = function(){ fetch('/logout', {method:'POST', credentials:'include'}).then(function(){ location.reload(); }); };
+}
+function loadMe(){ fetch('/public/me', {cache:'no-store', credentials:'include'}).then(function(r){ return r.ok ? r.json() : null; }).then(renderMe, function(){}); }
+loadMe();
 setInterval(function(){ if(document.visibilityState === 'visible') loadStatus(); }, 30000);
 document.addEventListener('visibilitychange', function(){ if(document.visibilityState === 'visible') loadStatus(); });
 

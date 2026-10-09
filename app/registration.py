@@ -289,6 +289,14 @@ class RegistrationService:
                              "已私信" if sent else "私信失败（对方可能关闭了私信），名额仍保留 24 小时", ok=sent)
         return len(rows)
 
+    async def registration_profile(self, discord_id: str) -> Optional[dict]:
+        rows = await self.db._db.execute_fetchall(
+            "SELECT username, display_name, avatar FROM discord_registrations WHERE discord_id=?", (discord_id,))
+        if not rows:
+            return {"id": str(discord_id)}
+        u, d, a = rows[0]
+        return {"id": str(discord_id), "username": u, "display_name": d, "avatar": a}
+
     async def key_row_for(self, discord_id: str):
         rows = await self.db._db.execute_fetchall(
             "SELECT key_id FROM discord_registrations WHERE discord_id=?", (discord_id,))
@@ -346,6 +354,37 @@ class RegistrationService:
             "client_id": self.client_id, "redirect_uri": self.redirect_uri,
             "response_type": "code", "scope": "identify guilds.members.read", "state": state,
         })
+
+    def web_login_url(self, state: str) -> str:
+        """网页「用 Discord 登录」的授权链接（回调到 /login/callback，与机器人领取用的回调分开）。"""
+        return "https://discord.com/oauth2/authorize?" + urlencode({
+            "client_id": self.client_id, "redirect_uri": self.site_url + "login/callback",
+            "response_type": "code", "scope": "identify guilds.members.read", "state": state,
+        })
+
+    async def web_identify(self, code: str) -> dict:
+        """网页登录：用授权码换身份，返回 Discord 资料 + 是否在服务器 / 有指定身份组。不发 Key。"""
+        response = await self.http.post("https://discord.com/api/oauth2/token", data={
+            "client_id": self.client_id, "client_secret": self.client_secret,
+            "grant_type": "authorization_code", "code": code,
+            "redirect_uri": self.site_url + "login/callback",
+        }, timeout=12)
+        if response.status_code != 200:
+            raise RegistrationError("Discord 授权失败，请重试。")
+        token = response.json()["access_token"]
+        user = await self._discord("GET", "/users/@me", bearer="Bearer " + token)
+        cfg = await self.settings()
+        guild_id = cfg.get("role_guild") or self.membership_guild
+        role_id = cfg.get("role_id") if cfg.get("role_guild") else self.membership_role
+        in_server = has_role = False
+        r = await self.http.get(f"https://discord.com/api/users/@me/guilds/{guild_id}/member",
+                                headers={"Authorization": "Bearer " + token}, timeout=12)
+        if r.status_code == 200:
+            in_server = True
+            has_role = (not role_id) or (role_id in (r.json().get("roles") or []))
+        return {"id": str(user.get("id")), "username": user.get("username"),
+                "global_name": user.get("global_name"), "avatar": user.get("avatar"),
+                "in_server": in_server, "has_role": has_role, "role_note": cfg.get("role_note") or ""}
 
     async def send_dm(self, discord_id: str, text: str) -> bool:
         """机器人私信成员；对方关闭私信等失败返回 False，不抛异常。"""

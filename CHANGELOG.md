@@ -3,6 +3,15 @@
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 每个版本分「成员可感知」与「站长 / 运维」两部分；成员公告只发前者。
 
+## [2.4.0] - 2026-10-10（前台改动，待站长审核后上线）
+
+### 成员可感知
+- 首页支持「用 Discord 登录」：登录后直接看自己的今日额度、排队、到期，并一键复制 Key，不用再粘贴。未登录仍可粘贴 Key 查询（兜底）。没领 Key 的登录者会看到领取指引。
+
+### 站长 / 运维
+- 复用现有 Discord OAuth；新增 /login、/login/callback、/logout、/public/me。会话用 HttpOnly+Secure 签名 Cookie（30 天），密钥复用 data/secret_key。
+- 需要在 Discord 应用后台把 `SITE_URL + /login/callback` 加进 OAuth2 Redirect URIs。
+
 ## [2.3.0] - 2026-10-10
 
 ### 站长 / 运维

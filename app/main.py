@@ -185,7 +185,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "2.3.0"
+__version__ = "2.4.0"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -274,6 +274,7 @@ if SETTINGS.cors_origins:
                        allow_methods=["*"], allow_headers=["*"], allow_credentials=False)
 app.include_router(admin.router)
 app.include_router(registration_routes.router)
+app.include_router(registration_routes.member_router)
 
 
 # 当前请求已认出的 Key，以及本请求是否已写过用量日志；用于在统一错误处理里补记“被拒绝”。
