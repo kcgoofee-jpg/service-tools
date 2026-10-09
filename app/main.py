@@ -1786,6 +1786,7 @@ async def _public_status_body(request: Request) -> dict:
         "registration": reg,
         "default_features": [{"id": n, "label": feature_defs.FEATURES[n]} for n in defaults],
         "audit_notice": audit_notice(*(await audit_flags(STATE.db, SETTINGS))),
+        "algo_notice": str(await STATE.db.get_setting("algo_notice", "") or "")[:300],
         "discord_invite": SETTINGS.discord_invite_url,
         "key_inactivity_delete_days": SETTINGS.key_inactivity_delete_days,
         "limits": _public_limits(),
