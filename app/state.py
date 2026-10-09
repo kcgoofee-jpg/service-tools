@@ -9,7 +9,9 @@ from datetime import datetime
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from . import alerts
+from pathlib import Path
+
+from . import alerts, token_store
 from .config import Settings
 from .database import Database
 from .nai import NaiClient
@@ -34,17 +36,22 @@ class GateState:
         self.settings = settings
         self.db = Database(str(settings.db_path), settings.tz)
         self.tz = ZoneInfo(settings.tz)
+        # 后台“接管”过上游 Token 后，令牌池以 data/upstream_tokens.json 为准；否则使用 .env 里的 NAI_TOKENS。
+        self.token_store_path = Path(settings.data_dir) / "upstream_tokens.json"
+        managed = token_store.load(self.token_store_path)
         self.nai = NaiClient(
-            tokens=settings.nai_tokens,
+            tokens=[e["token"] for e in managed] if managed else settings.nai_tokens,
             image_host=settings.image_host,
             text_host=settings.text_host,
             legacy_text_host=settings.text_host_legacy,
             db=self.db,
             day_fn=self.day,
-            v5_daily_limits=settings.nai_token_v5_daily_limits,
-            allow_anlas=settings.nai_token_allow_anlas,
+            v5_daily_limits=[] if managed else settings.nai_token_v5_daily_limits,
+            allow_anlas=[e["allow_anlas"] for e in managed] if managed else settings.nai_token_allow_anlas,
             image_min_interval=settings.image_min_interval,
         )
+        self.nai.managed_path = self.token_store_path
+        self.upstream_managed = bool(managed)
         self.alerter = alerts.from_settings(settings)
         self.announcer = alerts.announcer_from_settings(settings)
         self.nai.on_event = lambda kind, msg, cooldown=900: self.alerter.notify(kind, msg, cooldown=cooldown)

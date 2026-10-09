@@ -223,3 +223,108 @@ async def test_deleting_a_discord_member_clears_registration_and_can_ban_and_mem
         assert not await service.is_banned("1110347922597478473")                         # plain delete = can come back
         banned = await c.delete(f"/admin/api/keys/{second}?ban=true", headers=hdr)
         assert banned.json()["banned"] is True and await service.is_banned("2220347922597478473")
+
+
+# ---------------------------------------------------------------- upstream tokens managed from the panel
+from app.nai import NaiClient
+from app import token_store
+
+TOKEN_A = "pst-" + "A" * 40
+TOKEN_B = "pst-" + "B" * 40
+TOKEN_C = "pst-" + "C" * 40
+
+
+async def make_nai(db, tmp_path, tokens=(TOKEN_A,), subscription=200):
+    seen = []
+
+    def upstream(request):
+        seen.append(request.headers["authorization"])
+        if subscription == 200:
+            return httpx.Response(200, json={"tier": 3, "active": True})
+        return httpx.Response(subscription, json={})
+    nai = NaiClient(list(tokens), "https://image.example", "https://text.example", "https://legacy.example",
+                    db=db, day_fn=lambda: "2026-10-09", v5_daily_limits=[], allow_anlas=[True] * len(tokens))
+    nai._client = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+    nai.managed_path = tmp_path / "upstream_tokens.json"
+    return nai, seen
+
+
+@pytest.mark.asyncio
+async def test_token_store_roundtrip_is_private_and_tolerates_garbage(tmp_path):
+    path = tmp_path / "t.json"
+    assert token_store.load(path) is None
+    token_store.save(path, [{"token": TOKEN_A, "allow_anlas": True}])
+    assert token_store.load(path) == [{"token": TOKEN_A, "allow_anlas": True}]
+    assert path.stat().st_mode & 0o777 == 0o600
+    path.write_text("not json")
+    assert token_store.load(path) is None
+    assert not token_store.valid_token("pst-short") and not token_store.valid_token("nai-" + "A" * 40)
+
+
+@pytest.mark.asyncio
+async def test_add_replace_remove_keep_settings_and_never_touch_the_database_with_raw_tokens(db, tmp_path):
+    nai, _ = await make_nai(db, tmp_path)
+    old = nai.pool[0]
+    await nai.set_v5_daily_limit(old.token_id, 40)
+    await nai.set_image_concurrency(old.token_id, 2)
+    await db.bump_upstream_counter(old.token_id, "2026-10-09", 3) if hasattr(db, "bump_upstream_counter") else None
+    added = await nai.add_token(TOKEN_B, allow_anlas=False)
+    assert [t.position for t in nai.pool] == [1, 2] and added.allow_anlas is False
+    with pytest.raises(ValueError):
+        await nai.add_token(TOKEN_B)                                           # duplicate
+    replaced = await nai.replace_token(old.token_id, TOKEN_C)
+    assert replaced.token_id != old.token_id and replaced.v5_daily_limit == 40 and replaced.image_slots.limit == 2
+    assert (await db.get_upstream_token_limits()).get(replaced.token_id) == 40            # settings moved to the new id
+    assert old.token_id not in await db.get_upstream_token_limits()
+    saved = token_store.load(tmp_path / "upstream_tokens.json")
+    assert [e["token"] for e in saved] == [TOKEN_C, TOKEN_B]
+    with pytest.raises(LookupError):
+        await nai.replace_token("token-nope", TOKEN_A)
+    assert await nai.remove_token(added.token_id) is True
+    with pytest.raises(ValueError):
+        await nai.remove_token(nai.pool[0].token_id)                           # never remove the last token
+    raw = "".join(str(r) for r in await db._db.execute_fetchall("SELECT * FROM site_settings"))
+    assert "pst-" not in raw
+
+
+@pytest.mark.asyncio
+async def test_verify_token_maps_upstream_answers(db, tmp_path):
+    nai, seen = await make_nai(db, tmp_path)
+    assert await nai.verify_token(TOKEN_B) == {"ok": True, "tier": 3}
+    assert seen[-1] == f"Bearer {TOKEN_B}"
+    bad, _ = await make_nai(db, tmp_path, subscription=401)
+    assert (await bad.verify_token(TOKEN_B))["ok"] is False
+
+
+@pytest.mark.asyncio
+async def test_admin_token_endpoints_validate_then_change_the_pool(tmp_path, db):
+    nai, _ = await make_nai(db, tmp_path)
+    settings = Settings(admin_password="a-strong-password-123", secret_key="s", data_dir=tmp_path, admin_cookie_secure=False)
+    announced = []
+
+    class State(AdminState):
+        def __init__(self):
+            super().__init__(settings)
+            self.db, self.nai, self.admin_pw_hash = db, nai, None
+            self.alerter = SimpleNamespace(notify=lambda kind, text, cooldown=0: announced.append(text))
+    app = FastAPI()
+    app.state.gate = State()
+    app.include_router(admin_router)
+    hdr = {"Origin": "http://t"}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
+        assert (await c.post("/admin/api/upstream-tokens", headers=hdr, json={"token": TOKEN_B})).status_code == 401
+        await c.post("/admin/api/login", json={"password": "a-strong-password-123"})
+        assert (await c.post("/admin/api/upstream-tokens", headers=hdr, json={"token": "nope"})).status_code == 422
+        ok = await c.post("/admin/api/upstream-tokens", headers=hdr, json={"token": TOKEN_B, "allow_anlas": False})
+        assert ok.status_code == 200 and len(ok.json()["pool"]) == 2 and ok.json()["tier"] == 3
+        assert TOKEN_A not in ok.text and TOKEN_B not in ok.text                    # raw tokens are never returned
+        assert all("…" in row["token"] for row in ok.json()["pool"])                 # only masked forms
+        assert (await c.post("/admin/api/upstream-tokens", headers=hdr, json={"token": TOKEN_B})).status_code == 409
+        first_id = ok.json()["pool"][0]["token_id"]
+        rep = await c.put(f"/admin/api/upstream-tokens/{first_id}", headers=hdr, json={"token": TOKEN_C})
+        assert rep.status_code == 200 and rep.json()["pool"][0]["token_id"] != first_id
+        gone = await c.delete(f"/admin/api/upstream-tokens/{rep.json()['pool'][1]['token_id']}", headers=hdr)
+        assert gone.status_code == 200 and len(gone.json()["pool"]) == 1
+        last = await c.delete(f"/admin/api/upstream-tokens/{gone.json()['pool'][0]['token_id']}", headers=hdr)
+        assert last.status_code == 409
+    assert len(announced) == 3                                                   # owner is told about every change

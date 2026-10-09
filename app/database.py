@@ -292,6 +292,16 @@ class Database:
                 )
         await self._db.commit()
 
+    async def move_upstream_token(self, old_id: str, new_id: str) -> None:
+        """令牌被替换（同一账号重置了 Token）：把设置和计数从旧标识迁移到新标识。"""
+        if old_id == new_id:
+            return
+        for table in ("upstream_token_settings", "upstream_token_enabled", "upstream_token_image_concurrency",
+                      "upstream_token_counters"):
+            await self._db.execute(f"DELETE FROM {table} WHERE token_id=?", (new_id,))
+            await self._db.execute(f"UPDATE {table} SET token_id=? WHERE token_id=?", (new_id, old_id))
+        await self._db.commit()
+
     async def get_upstream_token_limits(self) -> dict[str, int]:
         rows = await (await self._db.execute(
             "SELECT token_id, v5_daily_limit FROM upstream_token_settings"

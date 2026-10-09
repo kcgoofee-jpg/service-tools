@@ -12,6 +12,7 @@ from typing import Any, AsyncIterator, Awaitable, Callable, Optional
 import anyio
 import httpx
 
+from . import token_store
 from .policy import mask_token
 from .allowance import AllowanceCache, AllowanceUnavailable
 from .concurrency import AdjustableLimiter
@@ -123,6 +124,86 @@ class NaiClient:
             await self._client.aclose()
 
     # ---------------- token pool ----------------
+    # ---------------- 后台增删改令牌（持久化到 token_store 文件，不进数据库）----------------
+    def _persist_pool(self) -> None:
+        path = getattr(self, "managed_path", None)
+        if path is not None:
+            token_store.save(path, [{"token": t.token, "allow_anlas": t.allow_anlas} for t in self.pool])
+
+    def _renumber(self, pool: list) -> list:
+        for index, token in enumerate(pool):
+            token.position = index + 1
+        return pool
+
+    async def verify_token(self, token: str) -> dict:
+        """向上游查询订阅信息来确认 Token 有效（只读，不消耗额度，不记录 Token）。"""
+        if self._client is None:
+            return {"ok": False, "error": "服务尚未就绪"}
+        try:
+            response = await self._client.get(f"{self.image_host}/user/subscription",
+                                              headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+                                              timeout=12)
+        except httpx.HTTPError:
+            return {"ok": False, "error": "无法连接 NovelAI 验证这把 Token，请稍后再试"}
+        if response.status_code in (401, 403):
+            return {"ok": False, "error": "NovelAI 拒绝了这把 Token（无效，或已被重置）"}
+        if response.status_code != 200:
+            return {"ok": False, "error": f"NovelAI 返回 {response.status_code}，暂时无法验证"}
+        try:
+            info = response.json()
+            tier, active = int(info.get("tier", 0)), bool(info.get("active"))
+        except (ValueError, TypeError, AttributeError):
+            return {"ok": False, "error": "NovelAI 返回了无法识别的订阅信息"}
+        if not active:
+            return {"ok": False, "error": "这把 Token 对应的账号没有有效订阅"}
+        return {"ok": True, "tier": tier}
+
+    async def add_token(self, token: str, allow_anlas: bool = False) -> TokenState:
+        async with self._lock:
+            new = TokenState(token, len(self.pool), 0, allow_anlas)
+            if any(t.token_id == new.token_id for t in self.pool):
+                raise ValueError("这把 Token 已经在令牌池里")
+            saved = await self._db.get_upstream_token_limits()
+            enabled = await self._db.get_upstream_token_enabled()
+            if new.token_id in saved:
+                new.v5_daily_limit = saved[new.token_id]
+            if new.token_id in enabled:
+                new.admin_enabled = enabled[new.token_id]
+            new.image_slots.resize(1)
+            self.pool = self._renumber([*self.pool, new])
+            self._persist_pool()
+            return new
+
+    async def replace_token(self, token_id: str, token: str) -> TokenState:
+        """用新 Token 替换某个槽位（典型场景：在 NovelAI 重置了 Token）。设置与当天计数延续。"""
+        async with self._lock:
+            index = next((i for i, t in enumerate(self.pool) if t.token_id == token_id), None)
+            if index is None:
+                raise LookupError("令牌不存在")
+            old = self.pool[index]
+            new = TokenState(token, index, old.v5_daily_limit, old.allow_anlas)
+            if new.token_id != old.token_id and any(t.token_id == new.token_id for t in self.pool):
+                raise ValueError("这把 Token 已经在令牌池的另一个位置")
+            new.admin_enabled = old.admin_enabled
+            new.image_slots.resize(old.image_slots.limit)
+            await self._db.move_upstream_token(old.token_id, new.token_id)
+            pool = list(self.pool)
+            pool[index] = new
+            self.pool = self._renumber(pool)
+            self._persist_pool()
+            return new
+
+    async def remove_token(self, token_id: str) -> bool:
+        async with self._lock:
+            if len(self.pool) <= 1:
+                raise ValueError("至少需要保留一把上游 Token")
+            remaining = [t for t in self.pool if t.token_id != token_id]
+            if len(remaining) == len(self.pool):
+                return False
+            self.pool = self._renumber(remaining)
+            self._persist_pool()
+            return True
+
     async def load_saved_limits(self) -> None:
         saved = await self._db.get_upstream_token_limits()
         enabled = await self._db.get_upstream_token_enabled()

@@ -15,6 +15,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, Request, Response
 
 from . import features as feature_defs
+from . import token_store
 from . import ops
 from .policy import gen_key
 from .body import read_json_body
@@ -511,6 +512,70 @@ async def put_runtime_limits(request: Request):
 async def allowance(request: Request):
     require_admin(request)
     return await request.app.state.gate.nai.allowance.snapshot(request.app.state.gate.nai.pool)
+
+
+async def _token_payload(request: Request) -> tuple[str, dict]:
+    body = await read_json_body(request, limit=4096)
+    token = str(body.get("token", "")).strip()
+    if not token_store.valid_token(token):
+        raise HTTPException(422, "Token 格式不对：应以 pst- 开头（在 NovelAI 的 账号设置 → Get Persistent API Token 里获取）")
+    return token, body
+
+
+def _announce_token_change(request: Request, text: str) -> None:
+    alerter = getattr(request.app.state.gate, "alerter", None)
+    if alerter is not None:
+        alerter.notify("upstream_token_changed", text, cooldown=0)
+
+
+@router.post("/upstream-tokens")
+async def add_upstream_token(request: Request):
+    """后台添加一把上游 Token：先向 NovelAI 验证，通过后加入令牌池（保存到权限 600 的文件，不进数据库）。"""
+    require_admin(request)
+    token, body = await _token_payload(request)
+    nai = request.app.state.gate.nai
+    check = await nai.verify_token(token)
+    if not check["ok"]:
+        raise HTTPException(422, check["error"])
+    try:
+        await nai.add_token(token, allow_anlas=bool(body.get("allow_anlas", False)))
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from None
+    _announce_token_change(request, f"后台添加了一把上游 Token（订阅等级 {check['tier']}）。如果这不是你操作的，请立刻更换后台密码。")
+    return {"ok": True, "tier": check["tier"], "pool": await nai.status()}
+
+
+@router.put("/upstream-tokens/{token_id}")
+async def replace_upstream_token(request: Request, token_id: str):
+    """替换某个槽位的 Token（例如在 NovelAI 重置了 Token 后粘贴新的）；V5 日限、启停、并发和当天计数延续。"""
+    require_admin(request)
+    token, _ = await _token_payload(request)
+    nai = request.app.state.gate.nai
+    check = await nai.verify_token(token)
+    if not check["ok"]:
+        raise HTTPException(422, check["error"])
+    try:
+        await nai.replace_token(token_id, token)
+    except LookupError:
+        raise HTTPException(404, "上游 Token 不存在") from None
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from None
+    _announce_token_change(request, "后台替换了一把上游 Token。如果这不是你操作的，请立刻更换后台密码。")
+    return {"ok": True, "tier": check["tier"], "pool": await nai.status()}
+
+
+@router.delete("/upstream-tokens/{token_id}")
+async def remove_upstream_token(request: Request, token_id: str):
+    require_admin(request)
+    nai = request.app.state.gate.nai
+    try:
+        removed = await nai.remove_token(token_id)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from None
+    if not removed:
+        raise HTTPException(404, "上游 Token 不存在")
+    _announce_token_change(request, "后台删除了一把上游 Token。")
+    return {"ok": True, "pool": await nai.status()}
 
 
 @router.put("/upstream-tokens/{token_id}/v5-limit")
