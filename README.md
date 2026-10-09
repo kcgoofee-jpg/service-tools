@@ -124,9 +124,20 @@ curl http://127.0.0.1:3003/healthz        # {"ok":true,"upstream":true}
 - 开启生成记录会保存成员的提示词与缩略图：请确保向成员明示，并设置合理的保留天数；图片本体不保存。
 - 备份运行中的 SQLite 数据库请用 SQLite 的在线备份（`sqlite3 … ".backup"`），不要直接复制文件。
 
+## 更新 / 轮换密钥
+
+不想把密钥发给别人或贴进聊天时，用这个脚本在服务器上隐藏输入并自动重启：
+
+```bash
+ssh -t root@你的服务器 "cd /opt/service-tools && bash deploy/set-secret.sh NAI_TOKENS"
+# 同理可用于 DISCORD_BOT_TOKEN、DISCORD_CLIENT_SECRET、REGISTRATION_BRIDGE_SECRET 等
+```
+
+添加更多上游 Token：把它们用英文逗号接在 `NAI_TOKENS` 后面（顺序有意义），可选地在同一顺序下设置 `NAI_TOKEN_ALLOW_ANLAS=1,0`、`NAI_TOKEN_V5_DAILY_LIMITS=0,150`，再 `docker compose up -d`；重启后每把 Token 都会出现在后台“总览 → 上游令牌池”，可单独启停并设置各自的 V5 日限额和图片并发。后台密码可在“设置 → 后台密码”里直接修改。
+
 ## 配置与测试
 
-完整环境变量见 [.env.example](.env.example)。`ADMIN_PASSWORD`、`NAI_TOKENS` 必须自行设置，不要提交 `.env`。
+给安全审查者的说明见 [docs/REVIEW_BRIEF.md](docs/REVIEW_BRIEF.md)。完整环境变量见 [.env.example](.env.example)。`ADMIN_PASSWORD`、`NAI_TOKENS` 必须自行设置，不要提交 `.env`。
 
 ```bash
 python -m venv .venv && .venv/bin/pip install -r requirements.txt pytest pytest-asyncio pytest-timeout
