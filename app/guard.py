@@ -18,18 +18,18 @@ from zoneinfo import ZoneInfo
 
 HOUR = 3600
 WINDOW_3H = 3 * HOUR
-HOURLY_MIN, HOURLY_MAX, HOURLY_STEP = 100, 200, 10     # 每小时上限的自动调整范围（加性增、乘性减）
+HOURLY_MIN, HOURLY_MAX, HOURLY_STEP = 100, 160, 10     # 上限 ≤ 0.8 × 单线程物理极限 ≈ 205 张/小时     # 每小时上限的自动调整范围（加性增、乘性减）
 # 名称: (默认值, 最小, 最大, 说明)
 FIELDS: dict[str, tuple[int, int, int, str]] = {
     "account_daily_cap": (1000, 0, 20000, "每个上游账号每天最多出图张数"),
-    "account_hourly_cap": (150, 0, 240, "每个上游账号每小时最多出图张数（自动调整：上游 429 减半，一天没有 429 就 +10，范围 100～200）"),
+    "account_hourly_cap": (150, 0, 240, "每个上游账号每小时最多出图张数（自动调整：上游 429 减半；前一天顶到过上限且没有 429 才 +10，范围 100～160）"),
     "account_3h_cap": (400, 0, 720, "每个上游账号连续 3 小时最多出图张数（防止连续几小时都在冲）"),
     "quiet_start": (0, 0, 23, "安静时段开始（北京时间，整点）；与结束相同 = 不启用（2026-10-10 起不启用：夜里不限速）"),
     "quiet_end": (0, 0, 23, "安静时段结束（北京时间，整点；与开始相同表示不设安静时段）"),
     "quiet_hourly_cap": (20, 0, 240, "安静时段每个账号每小时最多出图张数"),
     "interval_jitter": (5, 0, 30, "两次出图间隔额外随机增加 0～N 秒"),
     "key_image_queue": (1, 0, 3, "每把 Key 在生成中的那张之外，最多再排几张"),
-    "queue_per_account": (10, 0, 100, "每个上游账号全站最多同时排几张图"),
+    "queue_per_account": (5, 0, 100, "每个上游账号全站最多同时排几张图"),
     "base_daily_images": (100, 0, 100000, "V4.5 每人每天保底张数；超过后只在全站空闲时放行，直到 Key 的每日上限"),
 }
 IDLE_SHARE = 0.6
@@ -165,6 +165,12 @@ class Guard:
             await self.db.set_setting("guard_hourly_adapted_at", now)
             return None
         if now - last_step < 86400 or now - last_429 < 86400:
+            return None
+        # 只有上限真的「顶到过」才有信息：需求没碰到上限时，没有 429 不能说明上限可以更高（TCP 只在窗口用满时加窗）
+        hit = await self.db._db.execute_fetchall(
+            "SELECT 1 FROM usage_log WHERE ts>? AND detail LIKE '%本小时出图量已达上限%' LIMIT 1", (now - 86400,))
+        if not hit:
+            await self.db.set_setting("guard_hourly_adapted_at", now)
             return None
         old = self.values["account_hourly_cap"]
         new = min(P("capacity.hourly_max", HOURLY_MAX), old + P("capacity.hourly_step", HOURLY_STEP))

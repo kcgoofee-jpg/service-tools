@@ -10,7 +10,7 @@
    名额满了或有人在候补 → 2 天（让名额流转起来）；空位超过 30% → 5 天（没人等，不必急着回收）；其余 3 天。
 2. slots 名额上限（原来手动改；2026-10-10 起执行）
    名额快满（空位 ≤ 2）或有人在候补，且昨天日用量 < 60%、被每小时上限拦的小时 < 3 → +5（最多 100），
-   两次之间至少隔 6 小时。只加不减（人多了由动态额度调小每人份额，不踢人）。
+   每天最多一次，且昨天数据要覆盖 ≥ 20 小时。只加不减（人多了由动态额度调小每人份额，不踢人）。
 3. reset_hour 每日额度重置时间（原来固定北京时间 0 点）
    取最近 7 天出图最少的那个整点作为建议重置时间，避免大家在 0 点一起抢 V5。
    改日期边界会影响当天计数，所以这条只给建议，执行要在运维审核后单独做迁移。
@@ -56,7 +56,7 @@ def idle_days_rule(active: int, cap: int, waitlist: int) -> tuple[int, str]:
 
 SLOTS_MAX = 100
 SLOTS_STEP = 5
-SLOTS_COOLDOWN = 6 * 3600     # 两次自动加名额至少隔 6 小时，先看加进来的人用得怎么样
+SLOTS_COOLDOWN = 24 * 3600    # 每天最多加一次：判断用的是「昨天」的复盘，一天内重复判断是同一份数据（统计审查：会自我加速）
 
 
 def slots_rule(cap: int, active: int, waitlist: int, day_util: float, blocked_hours: int) -> tuple[int, str]:
@@ -109,6 +109,8 @@ async def run(state, registrar=None, now: Optional[float] = None) -> dict[str, A
     day_util = (last.get("used", 0) / last["cap"]) if last.get("cap") else 0.0
     cap_now = cfg.get("max_users") or 0
     slots, why = slots_rule(cap_now, active, waitlist, day_util, int(last.get("hourly_blocks", 0)))
+    if last.get("coverage_hours", 0) < 20:                 # 昨天数据不完整：不据此加名额
+        slots, why = cap_now, f"昨天只有 {last.get('coverage_hours', 0)} 小时数据，名额不变"
     mode = await _mode(db, "slots")
     out["rules"]["slots"] = {"mode": mode, "value": slots, "why": why}
     if mode == "enforce" and slots > cap_now and registrar is not None:

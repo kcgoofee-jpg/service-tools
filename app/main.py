@@ -120,6 +120,8 @@ async def lifespan(app: FastAPI):
     install_access_log_filter()
     STATE = GateState(SETTINGS)
     await STATE.db.connect()
+    from . import database as _database
+    _database.RULE_VERSION = __version__
     await STATE.load_runtime_limits()
     await STATE.db.migrate_upstream_token_ids([token.token_id for token in STATE.nai.pool])
     await STATE.nai.load_saved_limits()
@@ -183,7 +185,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "2.0.1"
+__version__ = "2.0.2"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 

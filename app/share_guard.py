@@ -20,7 +20,7 @@
 
   三重滤网（2026-10-10 盘点后修正）：multi_device / many_clients / allday 只看 UA 或作息，是「辅助证据」——
   只有最近 72 小时内出现过「网络 + 客户端」的强证据（overlap / concurrent / alternate）才计分，否则只记录、0 分。
-  这样一个有三台设备、每天用很久的老实人永远不会被处罚；处罚至少需要一条强证据 + 其他证据印证。
+  （统计审查指出：强证据之间高度相关、加分没有校准，误判率未知 —— 2026-10-10 起默认只观察，校准前不执行。）
 
 ━━ 风险分 ━━
   所有证据分数按半衰期 48 小时衰减后相加。正常换网络的人分数会自己降下来。
@@ -277,7 +277,7 @@ class ShareGuard:
             return None
         score = decayed(s["score"], s["score_ts"], now)
         strong_recent = any(k in STRONG for k, _ in found) or bool(await self.db._db.execute_fetchall(
-            f"SELECT 1 FROM share_evidence WHERE key_id=? AND ts>=? AND kind IN ({','.join('?' * len(STRONG))}) LIMIT 1",
+            f"SELECT 1 FROM share_evidence WHERE key_id=? AND ts>=? AND points>0 AND kind IN ({','.join('?' * len(STRONG))}) LIMIT 1",
             (kid, now - P("share.confirm_window", CONFIRM_WINDOW), *STRONG)))
         counted = []
         for kind, text in found:
@@ -294,8 +294,13 @@ class ShareGuard:
         name = key["name"]
         why = "；".join(t for _, t in found)
         action = None
+        # 逐级处罚（2026-10-10 统计审查后修正）：每次最多升一级，重置前必须先暂停过、暂停前必须先提醒过（7 天内）。
+        # 否则一次请求触发多条相关证据就能从 0 分直接跳到重置。
+        recent = now - 7 * 86400
+        warned_before = s["warned_ts"] >= recent
+        paused_before = s["paused_ts"] >= recent
         if mode == "enforce":
-            if score >= P("share.reset", RESET):
+            if score >= P("share.reset", RESET) and paused_before and now >= s["paused_until"]:
                 s["strikes"] += 1
                 s["score"] = 0.0
                 if s["strikes"] >= P("share.strikes_ban", STRIKES_BAN) and ban is not None:
@@ -319,7 +324,8 @@ class ShareGuard:
                 if admin:
                     admin(f"🔁 防分享：「{name}」风险分达到 {RESET}，已重置 Key（第 {s['strikes']} 次）。证据：{why}")
                 return action
-            if score >= P("share.pause", PAUSE) and now - s["paused_ts"] >= P("share.pause_cooldown", PAUSE_COOLDOWN):
+            if (score >= P("share.pause", PAUSE) and warned_before
+                    and now - s["paused_ts"] >= P("share.pause_cooldown", PAUSE_COOLDOWN)):
                 action = "pause"
                 s["paused_until"], s["paused_ts"] = now + P("share.pause_seconds", PAUSE_SECONDS), now
                 self.paused[kid] = s["paused_until"]

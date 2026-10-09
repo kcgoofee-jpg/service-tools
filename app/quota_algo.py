@@ -125,6 +125,16 @@ async def _cfg(db) -> dict[str, int]:
     return out
 
 
+async def day_coverage(db, day: str) -> float:
+    """这一天有日志覆盖的小时数（从系统开始记录算起）。覆盖不足的「残缺天」不能拿来调参（统计审查 P6：
+    10-09 只有 18:18 之后的数据，却被当成「全天用量 20%」去放宽额度和名额）。"""
+    start = time.mktime(time.strptime(day, "%Y-%m-%d"))
+    first = (await db._db.execute_fetchall("SELECT MIN(ts) FROM usage_log"))[0][0]
+    if first is None:
+        return 0.0
+    return max(0.0, (start + 86400 - max(start, float(first))) / 3600)
+
+
 async def _yesterday(db, day: str, members: list[int]) -> dict[str, int]:
     """前一天的统计：成员出图总数、每小时 / 每日总量拦截次数、顶到上限的人数、被保底规则拦下的次数。"""
     start = time.mktime(time.strptime(day, "%Y-%m-%d"))
@@ -216,7 +226,12 @@ async def run(state, now: Optional[float] = None) -> dict[str, Any]:
     if await db.get_setting(DAY_KEY, None) != today:
         yday = (datetime.fromtimestamp(now) - timedelta(days=1)).strftime("%Y-%m-%d")
         stats = await _yesterday(db, yday, members)
-        a2, b2, reasons = daily_adjust(a, b, cap=cap, cfg=cfg, **stats)
+        covered = await day_coverage(db, yday)
+        if covered < P("allocation.min_coverage_hours", 20):
+            a2, b2, reasons = a, b, [f"昨天只有 {covered:.1f} 小时数据（不足 20 小时），不调整"]
+        else:
+            a2, b2, reasons = daily_adjust(a, b, cap=cap, cfg=cfg, **stats)
+        stats["coverage_hours"] = round(covered, 1)
         review = {"day": yday, **stats, "cap": cap, "from": [a, b], "to": [a2, b2], "reasons": reasons}
         history = json.loads(await db.get_setting(HISTORY_KEY, "[]") or "[]")[-29:] + [review]
         await db.set_settings_bulk({"quota_ceiling": a2, "quota_base_now": b2, DAY_KEY: today,
