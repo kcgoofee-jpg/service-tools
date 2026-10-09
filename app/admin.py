@@ -1223,22 +1223,8 @@ async def audit_export(request: Request, key_id: Optional[int] = None):
         raise HTTPException(404, "该成员没有可导出的原图")
     name = await db._db.execute_fetchall("SELECT name FROM api_keys WHERE id=?", (key_id,))
     who = (name[0][0] if name else str(key_id)) or str(key_id)
-
-    def build() -> bytes:
-        import io as _io, zipfile as _zip, time as _t
-        ext = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}
-        buf = _io.BytesIO()
-        lines = []
-        with _zip.ZipFile(buf, "w", _zip.ZIP_STORED) as z:
-            for i, r in enumerate(rows, 1):
-                stamp = _t.strftime("%Y%m%d-%H%M%S", _t.localtime(r[1]))
-                fn = f"{i:04d}_{stamp}.{ext.get(r[2], 'png')}"
-                z.writestr(fn, bytes(r[5]))
-                lines.append("[{}]\n正面：{}\n负面：{}\n".format(fn, r[3] or "", r[4] or ""))
-            z.writestr("prompts.txt", "\n".join(lines))
-        return buf.getvalue()
-
-    blob = await run_in_threadpool(build)
+    from . import exporter
+    blob = await run_in_threadpool(exporter.build_zip, rows, who)
     fname = f"owl-{_safe_filename(who)}-{len(rows)}.zip"
     return Response(blob, media_type="application/zip",
                     headers={"Content-Disposition": f"attachment; filename=\"{fname}\"", "Cache-Control": "no-store"})

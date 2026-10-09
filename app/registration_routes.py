@@ -4,7 +4,7 @@ from __future__ import annotations
 import hmac
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel
 
 from .action_log import log_action
@@ -366,9 +366,52 @@ async def public_me(request: Request):
         c = await gate.db.get_counter(key["id"], gate.day())
         guard = getattr(gate, "guard", None)
         qv = guard.queue_view(key["id"]) if guard is not None else {}
+        try:
+            img_days = int(float(await gate.db.get_setting("audit_image_retention_days", 3) or 3))
+        except (TypeError, ValueError):
+            img_days = 3
         out.update(has_key=True, key=key["token"], name=key["name"],
                    expires_at=key["expires_at"], image_scope=key["image_model_scope"],
                    today={"images": c["images"], "v5": c["v5"],
                           "daily_images": key["daily_images"], "daily_v5": key["daily_v5"]},
-                   queue=qv.get("mine", []))
+                   queue=qv.get("mine", []),
+                   images_stored=await gate.db.audit_image_count(key["id"]), image_retention_days=img_days)
     return JSONResponse(out, headers={"Cache-Control": "no-store"})
+
+
+_EXPORT_AT: dict[str, float] = {}      # 每人上次打包时间（内存）：打包较重，限 1 次 / 60 秒
+
+
+@member_router.get("/public/my-export")
+async def my_export(request: Request, format: str = "zip"):
+    """成员自助打包自己的全部原图：format=epub（电子书）或 zip（原图）。单次一种。"""
+    import time as _t
+    from starlette.concurrency import run_in_threadpool
+    from . import exporter
+    discord_id = _member_session(request)
+    if discord_id is None:
+        raise HTTPException(401, "请先用 Discord 登录")
+    if format not in ("zip", "epub"):
+        raise HTTPException(400, "format 只能是 zip 或 epub")
+    now = _t.time()
+    if now - _EXPORT_AT.get(discord_id, 0) < 60:
+        raise HTTPException(429, "打包有点重，请 1 分钟后再试")
+    service = getattr(request.app.state, "registrar", None)
+    key = await service.key_row_for(discord_id) if service is not None else None
+    if key is None:
+        raise HTTPException(404, "你还没有领取 Key")
+    db = request.app.state.gate.db
+    rows = await db.audit_images_for(key["id"])
+    if not rows:
+        raise HTTPException(404, "暂时没有可打包的原图（原图只保留最近几天）")
+    _EXPORT_AT[discord_id] = now
+    who = key["name"] or "我的作品"
+    if format == "epub":
+        blob = await run_in_threadpool(exporter.build_epub, rows, who)
+        media, ext = "application/epub+zip", "epub"
+    else:
+        blob = await run_in_threadpool(exporter.build_zip, rows, who)
+        media, ext = "application/zip", "zip"
+    fname = f"owl-{len(rows)}.{ext}"
+    return Response(blob, media_type=media,
+                    headers={"Content-Disposition": f'attachment; filename="{fname}"', "Cache-Control": "no-store"})

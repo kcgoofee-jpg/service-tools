@@ -772,11 +772,27 @@ class Database:
         return None, ""
 
     async def audit_images_for(self, key_id: int):
-        """导出用：某成员所有带原图的记录，产出 (id, ts, image_type, prompt, negative, image)。"""
+        """导出用：某成员所有带原图的记录，产出 (id, ts, image_type, prompt, negative, extra, image)。"""
         rows = await self._db.execute_fetchall(
-            "SELECT id, ts, image_type, prompt, negative, image FROM generation_audit "
+            "SELECT id, ts, image_type, prompt, negative, extra, image FROM generation_audit "
             "WHERE key_id=? AND image IS NOT NULL ORDER BY ts", (key_id,))
         return rows
+
+    async def audit_image_count(self, key_id: int) -> int:
+        r = await self._db.execute_fetchall(
+            "SELECT COUNT(*) FROM generation_audit WHERE key_id=? AND image IS NOT NULL", (key_id,))
+        return int(r[0][0])
+
+    async def purge_audit_images(self, older_than: float) -> int:
+        """只清原图 BLOB（置空），保留缩略图、提示词、参数。"""
+        cur = await self._db.execute(
+            "UPDATE generation_audit SET image=NULL, image_type='' WHERE image IS NOT NULL AND ts<?", (older_than,))
+        await self._db.commit()
+        return cur.rowcount or 0
+
+    async def audit_image_bytes(self) -> int:
+        r = await self._db.execute_fetchall("SELECT COALESCE(SUM(LENGTH(image)),0) FROM generation_audit")
+        return int(r[0][0] or 0)
 
     async def touch_key_source(self, key_id: int, net_hash: str, label: str,
                                now: float, window_start: float) -> bool:

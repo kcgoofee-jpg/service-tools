@@ -9,6 +9,12 @@ summary(){
   echo "🖥 服务器：负载 $(cut -d' ' -f1-3 /proc/loadavg) · 可用内存 ${mem}MB · 磁盘已用 ${disk}%"
   [ "$mem" -lt 300 ] && echo "🚨 服务器可用内存只剩 ${mem}MB，考虑升级配置"
   [ "$disk" -gt 80 ] && echo "🚨 服务器磁盘已用 ${disk}%"
+  dbmb=$(du -m /opt/service-tools/data/nai_gate.db 2>/dev/null | cut -f1)
+  imgmb=$(q "SELECT CAST(COALESCE(SUM(LENGTH(image)),0)/1048576 AS INT) FROM generation_audit")
+  imgn=$(q "SELECT COUNT(*) FROM generation_audit WHERE image IS NOT NULL")
+  irdays=$(q "SELECT COALESCE(value,3) FROM site_settings WHERE key=\"audit_image_retention_days\""); irdays=${irdays:-3}
+  echo "💾 数据库 ${dbmb}MB · 原图 ${imgmb}MB（${imgn} 张，约 ${irdays} 天后自动清）"
+  [ "${imgmb:-0}" -gt 5000 ] && echo "🚨 原图已占 ${imgmb}MB，考虑调小保留天数"
 }
 
 algo(){
