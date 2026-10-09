@@ -16,7 +16,7 @@
 - **成员落地页**（`/`）：实时上游状态、注册名额、三步接入教程、输入 Key 查额度（Key 只在浏览器里使用，不保存）。
 - **告警**：上游 Token 失效 / 限流 / 故障、V5 额度低、磁盘快满、有人刷无效 Key，通过 Discord 私信、频道或 Webhook 通知站长，同类事件有冷却不刷屏。
 - **防护**：单 IP 无效 Key 临时拦截、后台登录限流、请求体与响应大小限制、并发与排队保护上游账号。
-- **生成记录（可选，默认关）**：保存图片提示词和小缩略图用于防滥用，自动过期；开启后会在首页、`/help`、领 Key 私信里向成员明示。
+- **生成记录（可选，默认关）**：保存图片提示词，以及非流式请求结果的小缩略图（流式请求只记提示词），用于防滥用，自动过期；开启后会在首页、`/help`、领 Key 私信里向成员明示。
 
 ## 架构
 
@@ -43,6 +43,7 @@ curl http://127.0.0.1:3003/healthz        # {"ok":true,"upstream":true}
 `docker-compose.yml` 已把端口绑定为 `127.0.0.1:3003`，不会直接暴露公网。接着用 Caddy 配置 HTTPS（见 [deploy/Caddyfile.example](deploy/Caddyfile.example)），把域名的 A 记录指向服务器，打开 `https://你的域名/admin` 登录。后台默认只接受 HTTPS Cookie。
 
 - 使用 Nginx 时必须保留原始 Host：`proxy_set_header Host $host;`（后台的跨站防护依赖它）；Caddy 默认已保留。
+- 机器人与网关之间的桥接接口（`/self-register/*` 除 `callback` 外）只在容器内网使用，**不要通过反向代理对公网开放**，示例 Caddyfile 已把它们屏蔽。
 - Cloudflare：把记录设为**仅 DNS（灰云）**。开启代理会对非浏览器请求触发人机验证，导致客户端连不上；如需代理，务必对 `/ai/*`、`/v1/*`、`/user/*` 放行。
 - 服务器基础加固（防火墙、SSH 仅密钥、fail2ban、自动更新、交换分区、每日备份）可参考 [deploy/harden.sh](deploy/harden.sh)，运行前确认你已能用密钥登录。
 
@@ -68,10 +69,12 @@ curl http://127.0.0.1:3003/healthz        # {"ok":true,"upstream":true}
    REGISTRATION_BRIDGE_SECRET=<随机长字符串>  DISCORD_GUILD_ID=<服务器ID>  SITE_URL=https://你的域名
    # 可选：DISCORD_MEMBER_ROLE_ID（领到 Key 自动挂身份组）、DISCORD_INVITE_URL、ANNOUNCE_CHANNEL_ID、ALERT_USER_ID
    REGISTER_MAX_USERS=10  REGISTER_EXPIRES_DAYS=7  REGISTER_MIN_ACCOUNT_DAYS=7
+   ADMIN_DISCORD_IDS=<你的Discord用户ID，逗号分隔>   # 允许使用管理类命令的人；留空则所有管理命令被拒绝
    ```
+   `REGISTRATION_BRIDGE_SECRET` 至少 32 个字符，否则自助注册不会启用。**新部署默认不接受注册**，需要你在后台“功能与开放”或用 `/open` 明确开放。
 4. 启动机器人：`docker compose --profile discord up -d --build`。
 
-**机制**：先到先得；名额只统计“启用且未过期”的 Key，到期自动释放，原成员可再次 `/register`；Discord 账号需注册满 `REGISTER_MIN_ACCOUNT_DAYS` 天；每个 Discord 账号同一时间一把 Key。设置了 `DISCORD_ROLE_ID` 才会额外要求某个身份组。
+**机制**：先到先得；名额只统计“启用且未过期”的 Key，到期自动释放，原成员可再次 `/register`；被站长**停用**的成员不会被自动释放或清空，永久禁止请用 `/ban`；Discord 账号需注册满 `REGISTER_MIN_ACCOUNT_DAYS` 天；每个 Discord 账号同一时间一把 Key。设置了 `DISCORD_ROLE_ID` 才会额外要求某个身份组。
 
 | 命令 | 谁能用 | 作用 |
 | --- | --- | --- |
@@ -80,7 +83,7 @@ curl http://127.0.0.1:3003/healthz        # {"ok":true,"upstream":true}
 | `/resetkey` | 已领取者 | 重置 Key，旧 Key 立即失效 |
 | `/status` | 所有人 | 上游是否正常、是否在限流冷却 |
 | `/help` | 所有人 | 使用说明（含记录声明） |
-| `/slots` `/open` `/limit` `/grant` `/audit` `/revoke` | 管理员（“管理服务器”权限） | 查看名额、开关注册、改名额上限、给成员开关功能、开关生成记录、撤销某人的 Key |
+| `/slots` `/open` `/limit` `/grant` `/audit` `/revoke` `/ban` `/unban` | 管理员（Discord 的“管理服务器”权限**且**在 `ADMIN_DISCORD_IDS` 名单内） | 查看名额、开关注册、改名额上限、给成员开关功能、开关生成记录、撤销某人的 Key、永久禁止 / 解禁某个账号 |
 
 后台和机器人读取同一份运行时设置，**改完立刻生效**，不需要重启。开启 / 关闭生成记录、开放 / 暂停注册、调整名额时，会在 `ANNOUNCE_CHANNEL_ID` 频道自动发公告。
 
@@ -116,7 +119,8 @@ curl http://127.0.0.1:3003/healthz        # {"ok":true,"upstream":true}
 - 管理后台：会话 Cookie 绑定管理员密码摘要（改密码即令旧会话失效），所有写操作校验 `Origin`，登录有限流，示例密码 `changeme-please` 会被拒绝登录。
 - 首页公告以沙箱化 iframe 展示，其中的脚本不会执行；落地页使用严格 CSP 且不含后台入口。
 - 对反向代理：容器内设置了 `FORWARDED_ALLOW_IPS=*`，**仅因为端口只绑定在 127.0.0.1**，只有本机反向代理能连上；若你改成对外暴露端口，请同时收紧该变量。
-- 无效 Key 请求按真实访客 IP 计数，超过阈值（`AUTH_FAIL_MAX` 等）会被临时拦截并告警。
+- 无效 Key 请求按真实访客 IP 计数，超过阈值（`AUTH_FAIL_MAX` 等）会被临时拦截并告警；被拦截的 IP 只拦“无效 Key”，持有有效 Key 的成员不受影响。
+- 语音合成按 Anlas 计费但尚未接入额度统计，目前仅管理员 Key 可用。
 - 开启生成记录会保存成员的提示词与缩略图：请确保向成员明示，并设置合理的保留天数；图片本体不保存。
 - 备份运行中的 SQLite 数据库请用 SQLite 的在线备份（`sqlite3 … ".backup"`），不要直接复制文件。
 

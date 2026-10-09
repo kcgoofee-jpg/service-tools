@@ -62,6 +62,7 @@ class GateState:
         self._tag_next_at: dict[int, float] = {}
         self._tag_condition = asyncio.Condition()
         self._tag_waiting = 0
+        self._tag_waiting_by_key: dict[int, int] = {}
         self._login_attempts: dict[str, deque[float]] = {}
         self._lock = asyncio.Lock()
         self._image_blocked_until = 0.0
@@ -194,7 +195,10 @@ class GateState:
             # Bound idle requests independently of the outer queue timeout.
             if self._tag_waiting >= max(16, self.settings.global_concurrency * 16):
                 return False
+            if self._tag_waiting_by_key.get(key_id, 0) >= 2:      # 单个 Key 最多排 2 个，防止独占共享队列
+                return False
             self._tag_waiting += 1
+            self._tag_waiting_by_key[key_id] = self._tag_waiting_by_key.get(key_id, 0) + 1
             try:
                 while True:
                     now = time.monotonic()
@@ -214,6 +218,11 @@ class GateState:
                         await self._tag_condition.wait()
             finally:
                 self._tag_waiting -= 1
+                left = self._tag_waiting_by_key.get(key_id, 1) - 1
+                if left > 0:
+                    self._tag_waiting_by_key[key_id] = left
+                else:
+                    self._tag_waiting_by_key.pop(key_id, None)
 
     async def finish_tag_request(self, key_id: int) -> None:
         async with self._tag_condition:
@@ -300,6 +309,9 @@ class GateState:
             if len(win) >= max(1, self.settings.login_max_attempts):
                 return False
             win.append(now)
+            if len(self._login_attempts) > 2048:
+                for k in [k for k, w in self._login_attempts.items() if not w or now - w[-1] > window]:
+                    self._login_attempts.pop(k, None)
             return True
 
     async def delete_inactive_keys(self) -> int:

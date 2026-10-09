@@ -37,6 +37,7 @@ class RegistrationTests(unittest.IsolatedAsyncioTestCase):
                 self.dm_body = request.content.decode()
                 return httpx.Response(403 if self.dm_fails else 200, json={})
             raise AssertionError(f"Unexpected Discord request {request.method} {request.url}")
+        await self.db.set_setting("register_open", "1")        # registration is closed by default (safe default)
         self.http = httpx.AsyncClient(transport=httpx.MockTransport(discord), base_url="https://discord.com")
         self.service = RegistrationService(self.db, self.http, client_id="client-id", client_secret="client-secret",
             bot_token="fake-bot-token", bridge_secret="bridge-secret",
@@ -111,7 +112,7 @@ class RegistrationTests(unittest.IsolatedAsyncioTestCase):
 class ConfiguredServiceTests(unittest.IsolatedAsyncioTestCase):
     def _env(self, **extra):
         base = dict(DISCORD_CLIENT_ID="c", DISCORD_CLIENT_SECRET="s", DISCORD_BOT_TOKEN="b",
-                    REGISTRATION_BRIDGE_SECRET="x", DISCORD_GUILD_ID="123", SITE_URL="https://gate.example.com")
+                    REGISTRATION_BRIDGE_SECRET="x" * 32, DISCORD_GUILD_ID="123", SITE_URL="https://gate.example.com")
         base.update(extra)
         return base
 
@@ -257,7 +258,7 @@ class MemberRoleTests(RegistrationTests):
         self.role_status = 403
         self.assertEqual(await self.mint(), "sent")
         flag = (await self.db._db.execute_fetchall("SELECT role_granted FROM discord_registrations"))[0][0]
-        self.assertEqual(flag, 0)                                       # not marked, will not try to remove
+        self.assertEqual(flag, 1)                    # marked first so a later expiry sync always tries to remove it
 
     async def test_sync_removes_role_when_key_expires_or_is_deleted(self):
         await self.mint()
@@ -273,3 +274,55 @@ class MemberRoleTests(RegistrationTests):
         key_id = (await self.db._db.execute_fetchall("SELECT key_id FROM discord_registrations"))[0][0]
         ids = await self.db.forget_registration_for_key(key_id)
         self.assertEqual(ids, ["777"])
+
+
+class HardeningTests(MemberRoleTests):
+    """Bans, suspended members, deferred role removal retries."""
+
+    async def test_short_bridge_secret_keeps_feature_off(self):
+        from unittest.mock import patch
+        from app.registration import configured_service
+        env = dict(DISCORD_CLIENT_ID="c", DISCORD_CLIENT_SECRET="s", DISCORD_BOT_TOKEN="b",
+                   REGISTRATION_BRIDGE_SECRET="short", DISCORD_GUILD_ID="123", SITE_URL="https://x")
+        with patch.dict("os.environ", env, clear=True):
+            self.assertIsNone(configured_service(None, None))
+
+    async def test_ban_blocks_registration_and_survives_reset_and_expiry(self):
+        await self.mint("777")
+        await self.service.ban("777")
+        self.assertEqual((await self.db._db.execute_fetchall("SELECT count(*) FROM api_keys"))[0][0], 0)
+        with self.assertRaises(RegistrationError):
+            await self.service.begin("777", "1480185480048808009")
+        await self.service.reset_all()
+        with self.assertRaises(RegistrationError):
+            await self.service.begin("777", "1480185480048808009")            # still banned
+        self.assertTrue(await self.service.unban("777"))
+        self.assertIn("state=", await self.service.begin("777", "1480185480048808009"))
+
+    async def test_disabled_member_is_not_released_by_expiry_or_reset_all(self):
+        await self.mint("777")
+        await self.db._db.execute("UPDATE api_keys SET enabled=0, expires_at=?", (time.time() - 5,))
+        await self.db._db.commit()
+        with self.assertRaises(RegistrationError):
+            await self.service.begin("777", "1480185480048808009")            # suspended, not auto-released
+        self.assertEqual(await self.service.reset_all(), 0)
+        self.assertEqual((await self.db._db.execute_fetchall("SELECT count(*) FROM discord_registrations"))[0][0], 1)
+        self.assertEqual(await self.db.inactive_key_ids(time.time() + 10 * 86400), [])   # inactivity cleanup skips it too
+
+    async def test_failed_role_removal_is_retried_after_the_registration_row_is_gone(self):
+        await self.mint("777")
+        self.role_status = 429
+        await self.service.revoke("777")                                        # key + row gone, role DELETE failed
+        pending = await self.db._db.execute_fetchall("SELECT discord_id FROM pending_role_removals")
+        self.assertEqual([r[0] for r in pending], ["777"])
+        self.role_status = 204
+        self.assertEqual(await self.service.sync_roles(), 1)                    # retried successfully
+        self.assertEqual(await self.db._db.execute_fetchall("SELECT 1 FROM pending_role_removals"), [])
+
+    async def test_expiry_release_inside_finish_defers_role_http(self):
+        await self.mint("777")
+        await self.db._db.execute("UPDATE api_keys SET expires_at=?", (time.time() - 5,))
+        await self.db._db.commit()
+        before = len(self.role_calls)
+        link = await self.service.begin("777", "1480185480048808009")           # outside lock: removes now
+        self.assertGreater(len(self.role_calls), before)

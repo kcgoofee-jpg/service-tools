@@ -20,10 +20,10 @@ def state(monkeypatch):
     return value
 
 
-async def post(path, body):
+async def post(path, body, token="fixture-1"):
     transport = httpx.ASGITransport(app=main.app, raise_app_exceptions=False)
     async with httpx.AsyncClient(transport=transport, base_url="http://fixture.invalid") as client:
-        return await client.post(path, json=body, headers={"Authorization": "Bearer fixture-1"})
+        return await client.post(path, json=body, headers={"Authorization": "Bearer " + token})
 
 
 @pytest.mark.asyncio
@@ -39,6 +39,8 @@ async def post(path, body):
 ])
 async def test_http_errors_keep_status_without_upstream_body(state, path, body, status, content_type, content):
     state.nai.status, state.nai.content_type, state.nai.content = status, content_type, content
+    if path == "/ai/generate-voice":          # voice is admin-only (it is billed in Anlas but not metered)
+        state.db.keys["fixture-1"]["is_admin"] = True
     response = await post(path, body)
     await asyncio.sleep(0)
     assert len(state.nai.calls) == 1

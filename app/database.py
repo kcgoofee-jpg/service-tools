@@ -45,6 +45,14 @@ CREATE TABLE IF NOT EXISTS discord_registrations (
     key_id INTEGER NOT NULL UNIQUE,
     created_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS discord_bans (
+    discord_id TEXT PRIMARY KEY,
+    created_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS pending_role_removals (
+    discord_id TEXT PRIMARY KEY,
+    created_at REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS counters (
     key_id INTEGER NOT NULL,
     day TEXT NOT NULL,            -- YYYY-MM-DD (按配置时区)
@@ -428,7 +436,7 @@ class Database:
             return []
         cur = await self._db.execute(
             """SELECT id FROM api_keys
-               WHERE is_admin=0 AND MAX(COALESCE(last_used_at, created_at), ?) < ?
+               WHERE is_admin=0 AND enabled=1 AND MAX(COALESCE(last_used_at, created_at), ?) < ?
                ORDER BY id ASC""",
             (grace_started_at, cutoff),
         )
@@ -596,6 +604,12 @@ class Database:
     async def audit_thumb(self, audit_id: int) -> Optional[bytes]:
         row = await (await self._db.execute("SELECT thumb FROM generation_audit WHERE id=?", (audit_id,))).fetchone()
         return bytes(row["thumb"]) if row and row["thumb"] is not None else None
+
+    async def purge_usage_log(self, older_than: float) -> int:
+        """只清理明细日志；每日计数器和账本不受影响。"""
+        cur = await self._db.execute("DELETE FROM usage_log WHERE ts<?", (older_than,))
+        await self._db.commit()
+        return cur.rowcount
 
     async def purge_audit(self, older_than: float) -> int:
         cur = await self._db.execute("DELETE FROM generation_audit WHERE ts<?", (older_than,))

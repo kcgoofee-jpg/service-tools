@@ -23,14 +23,25 @@ def _service(request: Request):
     if service is None:
         raise HTTPException(503, "自助注册尚未配置")
     given = request.headers.get("Authorization", "")
-    if not hmac.compare_digest(given, "Bearer " + service.bridge_secret):
+    if not hmac.compare_digest(given.encode(), ("Bearer " + service.bridge_secret).encode()):
+        gate = getattr(request.app.state, "gate", None)
+        if gate is not None and request.client:          # 猜桥接密钥也计入无效请求限流
+            getattr(gate, "record_auth_failure", lambda _ip: None)(request.client.host)
         raise HTTPException(401, "未授权")
     return service
+
+
+def _admin_actor(service, body) -> None:
+    """管理类操作需要“发起者”在管理员白名单（ADMIN_DISCORD_IDS）里；白名单为空则一律拒绝（默认安全）。"""
+    actor = getattr(body, "actor_id", "")
+    if not service.admin_ids or actor not in service.admin_ids:
+        raise HTTPException(403, "没有管理员权限。")
 
 
 class Who(BaseModel):
     discord_id: str
     guild_id: str
+    actor_id: str = ""        # 实际发出命令的 Discord 用户（由机器人填写，管理类操作据此校验）
 
 
 def _checked(service, body: Who) -> str:
@@ -71,6 +82,7 @@ async def admin_ops(request: Request, body: Ops):
     """管理员命令（Discord 端已限制为"管理服务器"权限）：开关注册、名额、授权功能、记录开关。"""
     service = _service(request)
     _checked(service, body)
+    _admin_actor(service, body)
     gate = request.app.state.gate
     from . import features as feature_defs, ops
     on = body.value.lower() in ("1", "on", "true", "开")
@@ -93,6 +105,14 @@ async def admin_ops(request: Request, body: Ops):
         (names.add if on else names.discard)(body.feature)
         await gate.db.update_key(key["id"], {"features": feature_defs.dump(names)})
         return JSONResponse({"message": f"已{'开通' if on else '关闭'}：{feature_defs.FEATURES[body.feature]}。"})
+    if body.action == "ban":
+        if not body.target.isdecimal():
+            raise HTTPException(422, "缺少目标成员")
+        await service.ban(body.target)
+        return JSONResponse({"message": "已永久禁止该账号领取，并撤销其 Key 与身份组。"})
+    if body.action == "unban":
+        done = await service.unban(body.target)
+        return JSONResponse({"message": "已解除禁止。" if done else "该账号不在禁止名单中。"})
     if body.action == "audit":
         result = await ops.set_audit(gate, {"prompts": on, "thumbs": on, "notify": True})
         return JSONResponse({"message": "已开启生成记录并通知成员。" if on else "已关闭生成记录并通知成员。",
@@ -136,7 +156,9 @@ async def resetkey(request: Request, body: Who):
 @router.post("/revoke")
 async def revoke(request: Request, body: Who):
     service = _service(request)
-    if not await service.revoke(_checked(service, body)):
+    _checked(service, body)
+    _admin_actor(service, body)
+    if not await service.revoke(body.discord_id):
         raise HTTPException(404, "该用户没有已领取的 Key。")
     return JSONResponse({"ok": True}, headers={"Cache-Control": "no-store"})
 
@@ -145,6 +167,7 @@ async def revoke(request: Request, body: Who):
 async def slots(request: Request, body: Who):
     service = _service(request)
     _checked(service, body)
+    _admin_actor(service, body)
     cfg = await service.settings()
     return JSONResponse({"active": await service.count_active(), "max": cfg["max_users"],
                          "open": cfg["open"], "reset_at": service.reset_at}, headers={"Cache-Control": "no-store"})

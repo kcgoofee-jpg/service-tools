@@ -48,6 +48,7 @@ from .policy import (
 )
 from .state import GateState
 from . import features
+from .policy import REFERENCE_FIELDS
 from .audit import audit_flags, audit_notice, make_thumbnail, prompt_texts
 from .upstream_errors import upstream_error_message, text_stream_events
 from .sse import encode_sse
@@ -184,14 +185,17 @@ async def authenticate(request: Request):
     """校验虚拟 Key。"""
     client_id = request.client.host if request.client else "unknown"
     wait = getattr(STATE, "auth_blocked", lambda _ip: 0)(client_id)
-    if wait:
-        raise GateError(429, f"无效请求过多，请 {wait // 60 + 1} 分钟后再试")
     auth = request.headers.get("authorization", "")
     token = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
     if not token:
+        if wait:
+            raise GateError(429, f"无效请求过多，请 {wait // 60 + 1} 分钟后再试")
         raise err(401, "缺少 API Key")
     row = await STATE.db.get_key_by_token(token)
     if not row:
+        # 被拦截的 IP 只拦“无效 Key”；持有有效 Key 的成员（如同一出口 IP 的其他人）不受影响。
+        if wait:
+            raise GateError(429, f"无效请求过多，请 {wait // 60 + 1} 分钟后再试")
         getattr(STATE, "record_auth_failure", lambda _ip: None)(client_id)
         raise err(401, "无效的 API Key")
     if not row["enabled"]:
@@ -221,6 +225,16 @@ def notify_owner(kind: str, message: str, cooldown: float = 900) -> None:
         alerter.notify(kind, message, cooldown=cooldown)
 
 
+_AUDIT_TASKS: set = set()
+
+
+def schedule_audit(*args) -> None:
+    """缩略图编码较慢：放到后台任务里做，不占用图片并发槽和预算锁，也不拖慢返回。"""
+    task = asyncio.get_running_loop().create_task(audit_generation(*args))
+    _AUDIT_TASKS.add(task)
+    task.add_done_callback(_AUDIT_TASKS.discard)
+
+
 async def audit_generation(key, kind: str, model: str, status: str, body: dict, content: bytes | None = None) -> None:
     """按配置记录提示词和缩略图；任何失败都不得影响生图结果。"""
     cfg = STATE.settings
@@ -246,6 +260,8 @@ async def maintenance_loop() -> None:
         try:
             days = max(1, (await audit_flags(STATE.db, STATE.settings))[2])
             await STATE.db.purge_audit(time.time() - days * 86400)
+            keep = max(7, STATE.settings.usage_log_retention_days)
+            await STATE.db.purge_usage_log(time.time() - keep * 86400)
             registrar = getattr(app.state, "registrar", None)
             if registrar is not None:
                 await registrar.sync_roles()
@@ -690,6 +706,8 @@ async def _generate_image(request: Request, *, streaming: bool):
     model = str(body.get("model", "?"))
     if not isinstance(body.get("parameters"), dict):
         raise err(400, "缺少 parameters 对象")
+    if any(body["parameters"].get(name) for name in REFERENCE_FIELDS):
+        await require_feature(key, "vibe")      # 参考图 / Vibe 经由 generate-image 传入时同样受功能开关约束
     model_tier = image_model_tier(model)
     if model_tier is None:
         record(key, "image", model, "rejected", detail="未列入本站图片模型白名单")
@@ -802,7 +820,7 @@ async def _generate_image(request: Request, *, streaming: bool):
         await settle_record(key, "image", model, "ok", images=image_count, anlas=est["anlas"],
                             v5=est["v5"], legacy_free_images=legacy_free_images,
                             detail=detail)
-        await audit_generation(key, "image", model, "ok", body, resp.content)
+        schedule_audit(key, "image", model, "ok", body, resp.content)
         upstream_outcome(True)
         return Response(resp.content, status_code=200,
                         media_type=resp.headers.get("content-type", "application/octet-stream"))
@@ -1098,9 +1116,10 @@ async def generate_voice(request: Request):
     key = await authenticate(request)
     await check_rpm(key)
     await require_feature(key, "voice")
-    if not (key["is_admin"] or key["allow_anlas"]):
-        record(key, "voice", "", "rejected", detail="voice requires allow_anlas")
-        raise err(403, "此 Key 无权使用语音合成")
+    if not key["is_admin"]:
+        # 语音合成按 Anlas 计费，但目前没有接入额度与预算统计，因此仅管理员 Key 可用。
+        record(key, "voice", "", "rejected", detail="voice is admin-only")
+        raise err(403, "语音合成目前仅限管理员 Key（它按 Anlas 计费，暂未接入额度统计）")
     body = await read_json(request, limit_mb=1)
     async with acquire_concurrency(key):
         resp = await upstream_call(f"{STATE.nai.legacy_text_host}/ai/generate-voice", body)
@@ -1304,9 +1323,21 @@ async def announcement():
     return Response(html, media_type="text/html", headers=_ANNOUNCEMENT_HEADERS)
 
 
+_PUBLIC_STATUS_CACHE: dict = {"at": 0.0, "body": None}
+
+
 @app.get("/public/status")
 async def public_status(request: Request):
-    """落地页使用的公开状态：不含任何密钥、成员信息或计数细节。"""
+    """落地页使用的公开状态：不含任何密钥、成员信息或计数细节。缓存 8 秒，避免匿名请求放大数据库压力。"""
+    now = time.monotonic()
+    if _PUBLIC_STATUS_CACHE["body"] is not None and now - _PUBLIC_STATUS_CACHE["at"] < 8:
+        return JSONResponse(_PUBLIC_STATUS_CACHE["body"], headers={"Cache-Control": "no-store"})
+    body = await _public_status_body(request)
+    _PUBLIC_STATUS_CACHE.update(at=now, body=body)
+    return JSONResponse(body, headers={"Cache-Control": "no-store"})
+
+
+async def _public_status_body(request: Request) -> dict:
     from . import features as feature_defs
     from .audit import audit_flags, audit_notice
     service = getattr(request.app.state, "registrar", None)
@@ -1321,7 +1352,7 @@ async def public_status(request: Request):
         if cfg["features"] is not None:
             defaults = [n for n in cfg["features"] if flags.get(n)]
     p = SETTINGS.announcement_path
-    return JSONResponse({
+    return {
         "site": SETTINGS.site_url.rstrip("/"),
         "upstream": {k: v for k, v in STATE.upstream_health().items() if k in ("status", "image_cooldown_seconds")},
         "registration": reg,
@@ -1329,7 +1360,7 @@ async def public_status(request: Request):
         "audit_notice": audit_notice(*(await audit_flags(STATE.db, SETTINGS))),
         "discord_invite": SETTINGS.discord_invite_url,
         "has_announcement": bool(p.exists() and p.read_text(encoding="utf-8").strip()),
-    }, headers={"Cache-Control": "no-store"})
+    }
 
 
 @app.get("/admin")

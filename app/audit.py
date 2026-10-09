@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import io
+import warnings
 import zipfile
 from typing import Optional
 
 from PIL import Image
 
+Image.MAX_IMAGE_PIXELS = 25_000_000      # 超过即报错（默认只是警告），防止解压炸弹
 THUMB_SIDE = 320
 THUMB_QUALITY = 55
 
@@ -14,6 +16,7 @@ THUMB_QUALITY = 55
 def make_thumbnail(payload: bytes) -> Optional[bytes]:
     """从上游返回的 zip（或裸图片）里取第一张图，缩成小 JPEG；失败返回 None。"""
     try:
+        warnings.simplefilter("error", Image.DecompressionBombWarning)
         data = payload
         if payload[:2] == b"PK":
             with zipfile.ZipFile(io.BytesIO(payload)) as archive:
@@ -49,7 +52,7 @@ def audit_notice(prompts: bool, thumbs: bool, days: int) -> str:
     """向成员披露记录范围；未开启记录则返回空串。"""
     if not (prompts or thumbs):
         return ""
-    what = "、".join(x for x, on in (("图片提示词", prompts), ("生成结果的小缩略图", thumbs)) if on)
+    what = "、".join(x for x, on in (("图片提示词", prompts), ("生成结果的小缩略图（视请求方式而定，部分请求只有提示词）", thumbs)) if on)
     return f"为防止滥用，本站会保留你的{what}，{max(1, days)} 天后自动删除，仅站长可见。"
 
 

@@ -38,6 +38,7 @@ async def test_landing_page_is_served_with_strict_csp_and_no_admin_link(env):
 
 @pytest.mark.asyncio
 async def test_public_status_exposes_only_safe_fields(env):
+    main._PUBLIC_STATUS_CACHE["body"] = None
     response = await env.client.get("/public/status")
     data = response.json()
     assert response.status_code == 200 and response.headers["cache-control"] == "no-store"
@@ -57,6 +58,8 @@ async def test_announcement_is_sandboxed_and_404_when_empty(env):
     response = await env.client.get("/announcement")
     assert response.status_code == 200 and "<h1>hi</h1>" in response.text
     assert response.headers["content-security-policy"].startswith("sandbox")          # scripts cannot run
+    main._PUBLIC_STATUS_CACHE["body"] = None
     assert (await env.client.get("/public/status")).json()["has_announcement"] is True
     await env.db.set_settings_bulk({"audit_prompts": "1", "audit_thumbs": "1", "audit_retention_days": 7})
+    main._PUBLIC_STATUS_CACHE["body"] = None
     assert "7 天" in (await env.client.get("/public/status")).json()["audit_notice"]
