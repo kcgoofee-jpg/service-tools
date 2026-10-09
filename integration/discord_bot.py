@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 
@@ -38,7 +39,9 @@ async def backend(path: str, interaction: discord.Interaction, extra_id: str | N
 
 def build_client() -> tuple[discord.Client, app_commands.CommandTree, discord.Object]:
     guild = discord.Object(id=int(os.environ["DISCORD_GUILD_ID"]))
-    client = discord.Client(intents=discord.Intents.none())
+    intents = discord.Intents.none()
+    intents.guilds = True            # 只为收到「论坛新帖」事件（给跑图分享自动点赞）；不读消息内容
+    client = discord.Client(intents=intents)
     tree = app_commands.CommandTree(client)
 
     @tree.command(name="register", description="领取你的猫头鹰公益站 API Key", guild=guild)
@@ -149,6 +152,26 @@ def build_client() -> tuple[discord.Client, app_commands.CommandTree, discord.Ob
         status, data = await backend("/self-register/revoke", interaction, extra_id=str(member.id))
         await interaction.followup.send(f"已撤销 {member.mention} 的 Key。" if status == 200 else str(data),
                                         ephemeral=True)
+
+    gallery_name = os.getenv("GALLERY_FORUM_NAME", "跑图分享")
+
+    @client.event
+    async def on_thread_create(thread: discord.Thread):
+        """「跑图分享」论坛有新帖：奶妹自动点赞，并在日志里记一笔（运维监控据此去写评论）。"""
+        parent = thread.parent
+        if parent is None or gallery_name not in (parent.name or ""):
+            return
+        print(f"[gallery] new post thread={thread.id} owner={thread.owner_id} title={thread.name[:40]}", flush=True)
+        for attempt in range(3):            # 论坛帖的首条消息可能比建帖事件晚一点到
+            try:
+                starter = thread.starter_message or await thread.fetch_message(thread.id)
+                await starter.add_reaction("❤️")
+                return
+            except discord.NotFound:
+                await asyncio.sleep(2)
+            except discord.HTTPException as exc:
+                print(f"[bug] gallery reaction failed: {exc}", flush=True)
+                return
 
     @tree.error
     async def on_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
