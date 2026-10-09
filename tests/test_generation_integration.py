@@ -141,6 +141,7 @@ class FakeState:
         self._tag_condition = asyncio.Condition()
         self._tag_waiting = 0
         self._tag_waiting_by_key = {}
+        self._tag_latest = {}
 
     def key_sem(self, key_id, capacity):
         return self.semaphores.setdefault(key_id, asyncio.Semaphore(capacity))

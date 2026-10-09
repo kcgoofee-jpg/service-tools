@@ -107,8 +107,8 @@ async def test_one_key_cannot_fill_the_shared_tag_queue(tmp_path):
         results.append(await state.wait_for_tag_request(1))
     tasks = [asyncio.create_task(attempt()) for _ in range(6)]
     await asyncio.sleep(0.2)
-    # one admitted, at most two keep waiting, the rest are refused immediately
-    assert results.count(True) == 1 and results.count(False) == 3
+    # one admitted; older waiters are superseded by newer ones (None), only the newest keeps waiting
+    assert results.count(True) == 1 and results.count(None) == 4 and results.count(False) == 0
     for t in tasks:
         t.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)

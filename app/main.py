@@ -472,9 +472,14 @@ ANLAS_REBALANCE_SECONDS = 600
 
 
 async def anlas_rebalance_loop() -> None:
-    """每 10 分钟按上游实际剩余 Anlas 重算一次自动分配（实际扣费在每次请求时按每人每日上限实时检查）。"""
-    from . import anlas_pool
+    """每 10 分钟：动态额度（V4.5 上限 / 保底 / V5，见 quota_algo.py）+ Anlas 自动分配（见 anlas_pool.py）。
+    两者只改额度数字，实际扣减都在每次请求时实时检查。"""
+    from . import anlas_pool, quota_algo
     while True:
+        try:
+            await quota_algo.run(STATE)
+        except Exception as exc:
+            bug("quota_algo", exc)
         try:
             reg = getattr(app.state, "registrar", None)
 
@@ -1276,6 +1281,8 @@ async def suggest_tags(request: Request):
         # Bound body reads, semaphore waiting and the optional upstream lookup.
         async with asyncio.timeout(STATE.settings.queue_timeout):
             admitted = await STATE.wait_for_tag_request(key["id"])
+            if admitted is None:              # 已被同一 Key 更新的补全查询取代：回空结果，不记拒绝
+                return JSONResponse({"tags": []})
             if not admitted:
                 raise err(429, "补全查询排队人数过多，请稍后再试")
             return await _suggest_tags(request, key)
@@ -1308,6 +1315,7 @@ async def _suggest_tags(request: Request, key):
 
     async with acquire_concurrency(key):
         if await request.is_disconnected():
+            _REQUEST_LOGGED.set(True)         # 客户端已经换了新的查询，不算拒绝
             raise err(499, "补全查询已取消")
         check_image_cooldown()
         query = urlencode({

@@ -33,6 +33,9 @@ def _mask_ip(value: str) -> str:
     return ".".join(["*"] * (len(parts) - 2) + parts[-2:]) if len(parts) == 4 else "…" + value[-6:]
 
 
+TAG_MIN_INTERVAL = 2.0     # 同一把 Key 两次标签补全至少间隔 2 秒（补全很轻，旧查询会被新查询取代）
+
+
 class GateState:
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -78,6 +81,7 @@ class GateState:
         self._tag_condition = asyncio.Condition()
         self._tag_waiting = 0
         self._tag_waiting_by_key: dict[int, int] = {}
+        self._tag_latest: dict[int, int] = {}       # 每把 Key 最新一次补全查询的编号：新查询到来时，旧的排队查询直接作废
         self._login_attempts: dict[str, deque[float]] = {}
         self._lock = asyncio.Lock()
         self._image_blocked_until = 0.0
@@ -204,26 +208,30 @@ class GateState:
             "image_min_interval": self.settings.image_min_interval,
         }
 
-    async def wait_for_tag_request(self, key_id: int) -> bool:
-        """Queue autocomplete without reserving future image slots or buffering bodies."""
+    async def wait_for_tag_request(self, key_id: int) -> Optional[bool]:
+        """标签补全排队。客户端每输入一个字就会查一次补全，只有最新那次有意义：
+        新查询到来时，同一把 Key 还在排队的旧查询作废（返回 None，回空结果，不算拒绝）。
+        True = 放行；False = 全站排队已满；None = 被更新的查询取代。"""
         async with self._tag_condition:
             # Bound idle requests independently of the outer queue timeout.
             if self._tag_waiting >= max(16, self.settings.global_concurrency * 16):
                 return False
-            if self._tag_waiting_by_key.get(key_id, 0) >= 2:      # 单个 Key 最多排 2 个，防止独占共享队列
-                return False
+            ticket = self._tag_latest.get(key_id, 0) + 1
+            self._tag_latest[key_id] = ticket
+            self._tag_condition.notify_all()           # 叫醒同一 Key 的旧查询，让它们发现自己已作废
             self._tag_waiting += 1
             self._tag_waiting_by_key[key_id] = self._tag_waiting_by_key.get(key_id, 0) + 1
             try:
                 while True:
+                    if self._tag_latest.get(key_id) != ticket:
+                        return None
                     now = time.monotonic()
                     delay = max(0.0, self._tag_next_at.get(key_id, 0) - now)
                     capacity = min(8, max(1, self.settings.global_concurrency))
                     if key_id not in self._tag_active and len(self._tag_active) < capacity:
                         if not delay:
                             self._tag_active.add(key_id)
-                            self._tag_next_at[key_id] = now + max(
-                                1.0, self.settings.key_image_min_interval)
+                            self._tag_next_at[key_id] = now + min(TAG_MIN_INTERVAL, self.settings.key_image_min_interval)
                             return True
                         try:
                             await asyncio.wait_for(self._tag_condition.wait(), delay)

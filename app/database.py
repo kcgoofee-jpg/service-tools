@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS api_keys (
     image_model_scope TEXT NOT NULL DEFAULT 'legacy',
     is_admin INTEGER NOT NULL DEFAULT 0,
     is_test INTEGER NOT NULL DEFAULT 0,   -- 测试 Key：不计入成员统计、上游表现，不会被闲置回收
-    anlas_auto INTEGER NOT NULL DEFAULT 0, -- 1 自动分配管理（只用于 V5 续杯）；0 交给算法；-1 站长手动（关闭或手动额度）
+    anlas_auto INTEGER NOT NULL DEFAULT 0,
+    quota_auto INTEGER NOT NULL DEFAULT 1,   -- 1 额度由动态额度算法管理（quota_algo.py）；-1 站长手动 -- 1 自动分配管理（只用于 V5 续杯）；0 交给算法；-1 站长手动（关闭或手动额度）
     expires_at REAL,
     created_at REAL NOT NULL,
     last_used_at REAL
@@ -250,6 +251,7 @@ class Database:
             "ALTER TABLE api_keys ADD COLUMN is_test INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE api_keys ADD COLUMN anlas_auto INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE usage_log ADD COLUMN rid TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE api_keys ADD COLUMN quota_auto INTEGER NOT NULL DEFAULT 1",
         ):
             try:
                 await self._db.execute(ddl)
