@@ -1495,6 +1495,16 @@ async def public_status(request: Request):
     return JSONResponse(body, headers={"Cache-Control": "no-store"})
 
 
+async def _image_stability() -> dict:
+    getter = getattr(STATE.db, "image_stability", None)
+    if getter is None:
+        return {"ok": 0, "error": 0}
+    try:
+        return await getter(time.time() - 24 * 3600)
+    except Exception:
+        return {"ok": 0, "error": 0}
+
+
 async def _public_status_body(request: Request) -> dict:
     from . import features as feature_defs
     from .audit import audit_flags, audit_notice
@@ -1521,6 +1531,7 @@ async def _public_status_body(request: Request) -> dict:
         "key_inactivity_delete_days": SETTINGS.key_inactivity_delete_days,
         # 正在处理的出图任务数（含正在生成的那一个）；全站串行出图，成员据此估计等待时间
         "image_jobs": len(getattr(STATE, "image_reservations", {}) or {}),
+        "stability": await _image_stability(),
         "has_announcement": bool(p.exists() and p.read_text(encoding="utf-8").strip()),
     }
 

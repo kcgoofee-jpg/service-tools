@@ -790,6 +790,17 @@ class Database:
         row = await cur.fetchone()
         return int(row["c"])
 
+    async def image_stability(self, since: float) -> dict[str, int]:
+        """since 之后出图请求的成功 / 上游失败次数（不含参数错误等被拒请求），用于首页稳定性图标。"""
+        cur = await self._db.execute(
+            """SELECT status, COUNT(*) FROM usage_log
+               WHERE ts>=? AND kind IN ('image','image_stream') AND status IN ('ok','error')
+               GROUP BY status""", (since,))
+        out = {"ok": 0, "error": 0}
+        for status, n in await cur.fetchall():
+            out[status] = int(n)
+        return out
+
     async def usage_by_kind(self, since: float) -> list[dict[str, Any]]:
         """按 kind / status 汇总 since 之后的用量日志（日志保留期内有效）。"""
         cur = await self._db.execute(
