@@ -217,7 +217,8 @@ async def intent(request: Request, body: Intent):
     if service is None:
         raise HTTPException(503, "自助领 Key 尚未配置")
     given = request.headers.get("Authorization", "")
-    if not hmac.compare_digest(given, "Bearer " + service.bridge_secret):
+    # 用 bytes 比较：非 ASCII 的 Authorization 头在 str 上会让 compare_digest 抛 TypeError → 500
+    if not hmac.compare_digest(given.encode("utf-8", "ignore"), ("Bearer " + service.bridge_secret).encode("utf-8")):
         raise HTTPException(401, "未授权")
     try:
         url = await service.begin(body.discord_id, body.guild_id, body.name[:80])

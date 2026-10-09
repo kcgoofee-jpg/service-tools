@@ -1239,6 +1239,11 @@ async def test_public_live_has_only_aggregates(tmp_path):
         assert body["auth"]["rejected"] >= 1
         me = live.mine(st, 7)
         assert me["mine"] == [{"state": "waiting", "position": 1, "eta": 15}]
+        # 回归：/public/live 绝不能就地改 live.build() 的共享缓存对象——
+        # 否则两个并发请求会在 await 处交错，把 A 的「我的排队」泄给没 Key 的 B。
+        assert "me" not in body                      # 缓存对象本身不带 me
+        resp = {**body, "me": me}                    # 处理器必须用浅拷贝拼响应（见 main.py public_live）
+        assert resp["me"] is not None and "me" not in live._cache["body"]   # 缓存未被污染
     finally:
         await db.close()
 

@@ -17,7 +17,7 @@ import time
 from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
 from typing import Any, AsyncIterator, Optional
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import anyio
 import httpx
@@ -185,7 +185,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "2.7.3"
+__version__ = "2.8.0"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -1774,15 +1774,18 @@ async def public_live(request: Request):
     """首页实时架构图：每秒轮询，只含汇总数字（请求数、额度、排队数、账号保护、名额与打码的候补名单）。"""
     body = await live.build(STATE, getattr(request.app.state, "registrar", None))
     # 登录的成员：附上「我的排队」，看板第一格直接显示排第几（不用再粘贴 Key）
+    # 注意：live.build() 返回的是全站共享的缓存字典（1 秒内复用），绝不能就地改它——
+    # 否则两个并发请求会在 await 处交错，把 A 的「我的排队」泄给没 Key 的 B。
+    # 先把成员数据算好，再用浅拷贝拼成本次响应，保证按人隔离。
     from .registration_routes import _member_session
     discord_id = _member_session(request)
-    body["me"] = None
+    me = None
     if discord_id:
         reg = getattr(request.app.state, "registrar", None)
         key = await reg.key_row_for(discord_id) if reg is not None else None
         if key is not None and key["enabled"]:
-            body["me"] = live.mine(STATE, key["id"])
-    return JSONResponse(body, headers={"Cache-Control": "no-store"})
+            me = live.mine(STATE, key["id"])
+    return JSONResponse({**body, "me": me}, headers={"Cache-Control": "no-store"})
 
 
 _CLIENT_ERR: dict = {"window": 0.0, "total": 0, "ip": {}}
@@ -1791,6 +1794,13 @@ _CLIENT_ERR: dict = {"window": 0.0, "total": 0, "ip": {}}
 @app.post("/public/client-error")
 async def client_error(request: Request):
     """首页 / 后台网页的脚本报错上报（只收本站页面的错误；每 IP 每 10 分钟 10 条，全站每 10 分钟 100 条）。"""
+    # 只收本站页面的上报：Origin/Referer 必须与访问的 Host 同源，挡掉外站往 Bug 面板灌垃圾
+    _ref = request.headers.get("origin") or request.headers.get("referer") or ""
+    if _ref:
+        _oh = urlsplit(_ref).netloc.lower()
+        _host = (request.headers.get("host") or "").lower()
+        if _oh and _host and _oh != _host:
+            return Response(status_code=204)
     now = time.time()
     if now - _CLIENT_ERR["window"] > 600:
         _CLIENT_ERR.update(window=now, total=0, ip={})
