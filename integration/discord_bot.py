@@ -177,7 +177,7 @@ def build_client() -> tuple[discord.Client, app_commands.CommandTree, discord.Ob
                 return
         if starter is None:
             return
-        # 配置了 ANTHROPIC_API_KEY 时，奶妹看图写一段夸奖（gallery_praise.py）
+        # 配置了 PRAISE_API_KEY 时，奶妹看图写一段夸奖（gallery_praise.py）
         images = [a.url for a in starter.attachments if (a.content_type or "").split(";")[0] in gallery_praise.IMAGE_TYPES]
         text = await gallery_praise.write_praise(thread.name, starter.content, images)
         if text:
