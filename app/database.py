@@ -173,6 +173,7 @@ class Database:
             "ALTER TABLE api_keys ADD COLUMN exclude_global_v5 INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE api_keys ADD COLUMN image_model_scope TEXT NOT NULL DEFAULT 'legacy'",
             "ALTER TABLE api_keys ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE api_keys ADD COLUMN features TEXT",
             "ALTER TABLE upstream_token_counters ADD COLUMN images INTEGER NOT NULL DEFAULT 0",
         ):
             try:
@@ -349,8 +350,8 @@ class Database:
         cur = await self._db.execute(
             """INSERT INTO api_keys
                (name, token, enabled, daily_images, daily_anlas, daily_v5, monthly_anlas,
-               daily_text_tokens, rpm, allow_anlas, allow_img2img, exclude_global_v5, image_model_scope, is_admin, expires_at, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               daily_text_tokens, rpm, allow_anlas, allow_img2img, exclude_global_v5, image_model_scope, is_admin, expires_at, created_at, features)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 fields["name"],
                 fields["token"],
@@ -368,6 +369,7 @@ class Database:
                 1 if fields.get("is_admin") else 0,
                 fields.get("expires_at"),
                 now,
+                fields.get("features"),
             ),
         )
         await self._db.commit()
@@ -392,7 +394,7 @@ class Database:
     async def update_key(self, key_id: int, fields: dict[str, Any]) -> None:
         allowed = {
             "name", "enabled", "daily_images", "daily_anlas", "daily_v5", "monthly_anlas",
-            "daily_text_tokens", "rpm", "allow_anlas", "allow_img2img", "exclude_global_v5", "image_model_scope", "expires_at",
+            "daily_text_tokens", "rpm", "allow_anlas", "allow_img2img", "exclude_global_v5", "image_model_scope", "expires_at", "features",
         }
         sets, vals = [], []
         for k, v in fields.items():

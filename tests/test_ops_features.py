@@ -114,6 +114,10 @@ async def test_members_audit_status_endpoints_require_session_and_return_data(tm
         def __init__(self):
             self.settings, self.db = settings, db
             self.alerter = Alerter()
+            self.announcer = Alerter()
+
+        def upstream_health(self):
+            return {"status": "idle", "recent": 0, "failed": 0, "image_cooldown_seconds": 0}
 
         async def hit_login(self, _):
             return True
@@ -142,3 +146,38 @@ async def test_members_audit_status_endpoints_require_session_and_return_data(tm
         status = (await client.get("/admin/api/status")).json()
         assert status["audit"]["prompts"] is True and status["alerts"]["configured"] is False
         assert (await client.post("/admin/api/alerts/test", headers={"Origin": "http://t"})).status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_feature_flags_global_and_per_key(db):
+    from app import features
+    key = await db.create_key(dict(name="k", token="t", daily_images=5, monthly_anlas=0,
+                                   daily_text_tokens=0, rpm=5, features="image"))
+    legacy = await db.create_key(dict(name="old", token="t2", daily_images=5, monthly_anlas=0,
+                                      daily_text_tokens=0, rpm=5))
+    assert await features.check(db, key, "image") is None
+    assert "暂无权" in await features.check(db, key, "text")           # not granted to this key
+    assert await features.check(db, legacy, "text") is None             # NULL = legacy behaviour
+    from app import ops
+    await ops.set_global_features(db, {"image": False})
+    assert "暂未开放" in await features.check(db, key, "image")        # global switch beats grant
+    assert "暂未开放" in await features.check(db, legacy, "image")
+    admin = dict(is_admin=1, features=None)
+    assert await features.check(db, admin, "image") is None              # admin bypass
+
+
+@pytest.mark.asyncio
+async def test_registration_runtime_settings_override_env_defaults(db):
+    from app import ops
+    from app.registration import RegistrationService
+    service = RegistrationService(db, None, client_id="c", client_secret="s", bot_token="b", bridge_secret="x",
+                                  redirect_uri="https://x/cb", key_daily_images=30, key_daily_v5=0, max_users=10)
+    cfg = await ops.registration_settings(db, service)
+    assert (cfg["open"], cfg["max_users"], cfg["daily_images"]) == (True, 10, 30)
+    await ops.set_registration(db, {"open": False, "max_users": 3, "features": ["image", "text"], "daily_v5": 15})
+    cfg = await ops.registration_settings(db, service)
+    assert (cfg["open"], cfg["max_users"], cfg["daily_v5"], cfg["features"]) == (False, 3, 15, ["image", "text"])
+    with pytest.raises(Exception):
+        await service.begin("1", service.command_guild)                  # closed -> refuses
+    with pytest.raises(ValueError):
+        await ops.set_registration(db, {"max_users": 5000})

@@ -1,0 +1,104 @@
+"""站长可在运行中调整的开关（后台与 Discord 机器人共用）：注册、功能、生成记录。
+
+所有值保存在 site_settings，优先于环境变量；机器人每次命令都实时读取，所以改了立刻生效。
+"""
+from __future__ import annotations
+
+import os
+from types import SimpleNamespace
+from typing import Any, Optional
+
+from . import features
+from .audit import audit_flags
+
+
+def env_audit_defaults() -> SimpleNamespace:
+    truth = lambda name: os.getenv(name, "").strip().lower() in ("1", "true", "yes", "on")
+    try:
+        days = int(os.getenv("AUDIT_RETENTION_DAYS", "7") or 7)
+    except ValueError:
+        days = 7
+    return SimpleNamespace(audit_prompts=truth("AUDIT_PROMPTS"), audit_thumbs=truth("AUDIT_THUMBS"),
+                           audit_retention_days=days)
+
+
+async def registration_settings(db, service) -> dict[str, Any]:
+    """生效的注册设置：数据库里保存的优先，其次是服务启动时的环境默认值。"""
+    async def read(name):
+        return await db.get_setting(name, None)
+
+    def to_int(value, default):
+        try:
+            return max(0, int(float(value)))
+        except (TypeError, ValueError):
+            return default
+
+    defaults = service
+    open_raw = await read("register_open")
+    feats_raw = await read("register_features")
+    return {
+        "configured": service is not None,
+        "open": True if open_raw is None else str(open_raw) in ("1", "true", "True"),
+        "max_users": to_int(await read("register_max_users"), defaults.max_users if defaults else 0),
+        "features": features.parse_list(feats_raw) if feats_raw is not None else
+                    (features.parse_list(defaults.key_features) if defaults else None),
+        "daily_images": to_int(await read("register_daily_images"), defaults.key_daily_images if defaults else 30),
+        "daily_v5": to_int(await read("register_daily_v5"), defaults.key_daily_v5 if defaults else 0),
+        "image_scope": (await read("register_image_scope")) or (defaults.key_image_scope if defaults else "legacy"),
+        "expires_days": to_int(await read("register_expires_days"), defaults.key_expires_days if defaults else 30),
+    }
+
+
+async def set_registration(db, body: dict) -> None:
+    values: dict[str, Any] = {}
+    if "open" in body:
+        values["register_open"] = "1" if body["open"] else "0"
+    for name, low, high in (("max_users", 0, 1000), ("daily_images", 0, 100000), ("daily_v5", 0, 100000),
+                            ("expires_days", 0, 3650)):
+        if name in body:
+            number = int(body[name])
+            if not low <= number <= high:
+                raise ValueError(f"{name} 超出范围 {low}～{high}")
+            values["register_" + name] = number
+    if "image_scope" in body:
+        values["register_image_scope"] = "all" if body["image_scope"] == "all" else "legacy"
+    if "features" in body:
+        values["register_features"] = features.dump(body["features"]) or ""
+    if values:
+        await db.set_settings_bulk(values)
+
+
+async def set_global_features(db, flags: dict) -> dict[str, bool]:
+    import json
+    current = await features.global_flags(db)
+    for name, value in flags.items():
+        if name in features.FEATURES and isinstance(value, bool):
+            current[name] = value
+    await db.set_setting(features.GLOBAL_KEY, json.dumps(current))
+    return current
+
+
+async def set_audit(state, body: dict) -> dict:
+    """保存记录开关；notify 为真时向成员公告频道发出说明（测试期声明）。"""
+    prompts, thumbs, days = await audit_flags(state.db, state.settings)
+    before = (prompts, thumbs)
+    if "prompts" in body:
+        prompts = bool(body["prompts"])
+    if "thumbs" in body:
+        thumbs = bool(body["thumbs"])
+    if "retention_days" in body:
+        days = max(1, min(int(body["retention_days"]), 90))
+    await state.db.set_settings_bulk({"audit_prompts": "1" if prompts else "0",
+                                      "audit_thumbs": "1" if thumbs else "0",
+                                      "audit_retention_days": days})
+    if body.get("notify", True) and (prompts, thumbs) != before:
+        announcer = getattr(state, "announcer", None)
+        if announcer is not None:
+            if prompts or thumbs:
+                what = "、".join(x for x, on in (("图片提示词", prompts), ("生成结果的小缩略图", thumbs)) if on)
+                text = (f"📢 **测试期公告**：站长已开启生成记录。本站处于测试阶段，会保留成员的{what}，"
+                        f"{days} 天后自动删除，仅站长可见，用于防止生成违禁内容（如政治相关等）。")
+            else:
+                text = "📢 **测试期公告**：站长已关闭生成记录，不再保存新的提示词和缩略图（已有记录到期自动删除）。"
+            announcer.post(text)
+    return {"prompts": prompts, "thumbs": thumbs, "retention_days": days}

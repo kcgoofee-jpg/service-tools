@@ -43,6 +43,17 @@ class Alerter:
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
 
+    def post(self, text: str) -> None:
+        """发送一条不带告警前缀的普通通知（如给成员的公告）；无冷却。"""
+        if not self.configured:
+            return
+        try:
+            task = asyncio.get_running_loop().create_task(self._send(text))
+        except RuntimeError:
+            return
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
     async def _send(self, text: str) -> None:
         try:
             async with httpx.AsyncClient(timeout=10) as client:
@@ -65,6 +76,12 @@ class Alerter:
                 self.sent += 1
         except Exception as exc:  # 告警失败不能影响服务
             print(f"[warn] alert delivery failed: {type(exc).__name__}")
+
+
+def announcer_from_settings(settings) -> Alerter:
+    """成员公告通道：用同一个机器人发到公告频道（ANNOUNCE_CHANNEL_ID）。"""
+    return Alerter(bot_token=settings.discord_bot_token, channel_id=settings.announce_channel_id,
+                   site=settings.site_url)
 
 
 def from_settings(settings) -> Alerter:
