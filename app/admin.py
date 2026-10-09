@@ -622,7 +622,8 @@ async def ops_set_registration(request: Request):
         if not isinstance(body["features"], list) or any(v not in feature_defs.FEATURES for v in body["features"]):
             raise HTTPException(422, "features 必须是功能名列表")
     try:
-        await ops.set_registration(request.app.state.gate.db, body)
+        await ops.set_registration(request.app.state.gate.db, body, request.app.state.gate,
+                                   getattr(request.app.state, "registrar", None))
     except (TypeError, ValueError) as exc:
         raise HTTPException(422, str(exc) or "参数无效") from None
     return await _ops_snapshot(request)

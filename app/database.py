@@ -567,6 +567,9 @@ class Database:
         await self._db.execute("DELETE FROM discord_registrations WHERE key_id=?", (key_id,))
         await self._db.commit()
 
+    async def execute_fetchall_compat(self, sql: str, args: tuple = ()) -> list:
+        return list(await (await self._db.execute(sql, args)).fetchall())
+
     async def add_audit(self, key_id, key_name: str, kind: str, model: str, status: str,
                         prompt: str, negative: str, thumb: Optional[bytes]) -> None:
         await self._db.execute(
