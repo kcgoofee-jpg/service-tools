@@ -144,16 +144,41 @@ section{margin-top:40px;scroll-margin-top:72px}
 .live-dot{width:8px;height:8px;border-radius:50%;background:var(--ok);display:inline-block}
 .live-legend{font-size:12.5px;color:var(--muted);display:flex;gap:12px;align-items:center}
 .live-legend i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:4px;vertical-align:-1px}
-#liveSvg{width:100%;height:auto;display:block}
-#liveSvg .tile{fill:var(--surface-2);stroke:var(--border);stroke-width:1}
-#liveSvg .ttl{fill:var(--text);font-size:13px;font-weight:600}
-#liveSvg .val{fill:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
-#liveSvg .track{fill:var(--surface-3)}
-#liveSvg .line{stroke:var(--border-strong);stroke-width:1;fill:none}
-#liveSvg .gw{fill:var(--accent-soft);stroke:color-mix(in srgb,var(--accent) 45%,transparent);stroke-width:1.2}
-#liveSvg .lbl{fill:var(--text);font-size:12.5px;font-weight:600}
-#liveSvg .pulse{animation:livePulse 1.4s ease-in-out infinite;transform-origin:624px 90px}
-@keyframes livePulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.18);opacity:.35}}
+.flow{position:relative;display:grid;gap:10px;margin:14px 0 4px}
+.flow .st{display:grid;grid-template-columns:34px 1fr auto;grid-template-areas:"nd t v" "nd d v";column-gap:10px;align-items:center;padding:6px 0}
+.flow .nd{grid-area:nd;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font-size:13px;font-weight:700;background:var(--surface-2);color:var(--text-2);border:1px solid var(--border-strong);transition:background .3s,color .3s,box-shadow .3s}
+.flow .nd svg,.flow .nd .ic{width:16px;height:16px}
+.flow .t{grid-area:t;font-weight:600;font-size:13.5px}
+.flow .d{grid-area:d;font-size:12px;color:var(--muted)}
+.flow .v{grid-area:v;font-size:12.5px;color:var(--text-2);font-variant-numeric:tabular-nums;text-align:right}
+.flow .st.hit .nd{background:var(--ok-soft);color:var(--ok);border-color:var(--ok)}
+.flow .st.wait .nd{box-shadow:0 0 0 3px var(--warn-soft);border-color:var(--warn)}
+.flow .nai.busy .nd{background:var(--accent);color:var(--on-accent);border-color:var(--accent);animation:flowBusy 1.4s ease-in-out infinite}
+.flow .nai.mine .nd{background:var(--warn);border-color:var(--warn)}
+@keyframes flowBusy{50%{box-shadow:0 0 0 6px color-mix(in srgb,var(--accent) 25%,transparent)}}
+.flow .slots{width:auto;height:auto;border:0;background:none;display:flex;gap:3px;flex-wrap:wrap;max-width:34px}
+.flow .slots i{width:7px;height:7px;border-radius:50%;border:1px solid var(--border-strong);background:var(--surface)}
+.flow .slots i.on{background:var(--accent);border-color:var(--accent)}
+.flow .slots i.me{background:var(--warn);border-color:var(--warn)}
+.flow .gwband,.flow .pk{display:none}
+.flow-back{font-size:12px;color:var(--muted);margin:2px 0 0}
+@media (min-width:640px){
+  .flow{grid-template-columns:repeat(6,1fr);gap:0;padding-top:30px}
+  .flow .st{grid-template-columns:1fr;grid-template-areas:"nd" "t" "d" "v";justify-items:center;text-align:center;row-gap:3px;padding:0 4px;position:relative;z-index:1}
+  .flow .nd{width:38px;height:38px;font-size:14px;margin-bottom:4px}
+  .flow .v{text-align:center;margin-top:2px;color:var(--text)}
+  .flow .slots{max-width:none;height:38px;align-items:center;justify-content:center;flex-wrap:nowrap}
+  .flow .slots i{width:9px;height:9px}
+  .flow .gwband{display:block;position:absolute;left:calc(100%/6);width:calc(400%/6);top:0;bottom:-6px;border-radius:12px;background:var(--accent-soft);border:1px solid color-mix(in srgb,var(--accent) 30%,transparent)}
+  .flow .gwband span{position:absolute;top:6px;left:0;right:0;text-align:center;font-size:12px;font-weight:600;color:var(--accent-text)}
+  .flow .pk{display:block;position:absolute;left:0;right:0;top:49px;height:0}
+  .flow .pk::before{content:"";position:absolute;left:calc(100%/12);right:calc(100%/12);border-top:1px dashed var(--border-strong)}
+  .pkt{position:absolute;top:-5px;width:10px;height:10px;margin-left:-5px;border-radius:50%;background:var(--accent);transition:left .7s ease-in-out,top .4s,opacity .4s;z-index:2}
+  .pkt.me{background:var(--warn)}
+  .pkt.rej{background:var(--bad)}
+  .pkt.drop{top:22px;opacity:0}
+  .pkt.back{opacity:.5}
+}
 .live-say{font-size:15px;color:var(--text);margin:10px 0 2px;line-height:1.6}
 .live-say b{color:var(--accent-text)}
 .live-say .quiet{display:inline-block;margin-left:8px;font-size:12.5px;color:var(--muted)}
@@ -165,7 +190,7 @@ section{margin-top:40px;scroll-margin-top:72px}
 .mesteps span.now{background:var(--warn-soft);color:var(--warn);border-color:color-mix(in srgb,var(--warn) 40%,transparent);font-weight:600}
 .mesteps i{width:14px;height:1px;background:var(--border-strong)}
 .menote{margin-top:6px}
-@media (prefers-reduced-motion: reduce){#liveSvg *{transition:none!important;animation:none!important}}
+@media (prefers-reduced-motion: reduce){.flow *{transition:none!important;animation:none!important}}
 /* steps */
 .steps{display:grid;gap:16px;grid-template-columns:1fr}
 .step{position:relative;display:flex;flex-direction:column;gap:8px}
@@ -295,7 +320,17 @@ footer{max-width:960px;margin:0 auto;padding:24px 16px 40px;text-align:center;co
       </form>
       <label class="remember"><input type="checkbox" id="rememberKey"><span>记住 Key，下次打开自动显示（只存在本机，公共电脑勿选）</span></label>
       <p class="live-say" id="liveSay" aria-live="polite">正在读取实时状态…</p>
-      <svg id="liveSvg" viewBox="0 0 680 236" role="img" aria-label="实时流程：你的客户端带 Key 发请求，经猫头鹰网关的验 Key、查额度、排队、控速四关，交给 NovelAI 画图，画好的图原路返回"></svg>
+      <div class="flow" id="flow" role="img" aria-label="实时流程：你的客户端带 Key 发请求，经猫头鹰网关验 Key、查额度、排队、控速，再交给 NovelAI 画图，画好的图直接回到客户端">
+        <div class="gwband" aria-hidden="true"><span>🦉 猫头鹰网关 · 香港固定出口</span></div>
+        <div class="pk" id="flowPk" aria-hidden="true"></div>
+        <div class="st end"><div class="nd"><span data-ic="code"></span></div><div class="t">你的客户端</div><div class="d">带 Key 发请求</div></div>
+        <div class="st"><div class="nd">1</div><div class="t">验 Key</div><div class="d">确认是本站成员</div><div class="v" id="fAuth">—</div></div>
+        <div class="st"><div class="nd">2</div><div class="t">查额度</div><div class="d">你今天还能画吗</div><div class="v" id="fQuota">—</div></div>
+        <div class="st q"><div class="nd slots" id="fSlots"></div><div class="t">3 排队</div><div class="d">一次画一张，先来先画</div><div class="v" id="fQueue">—</div></div>
+        <div class="st"><div class="nd">4</div><div class="t">控速</div><div class="d" id="fPaceD">每张间隔一段时间，保护账号</div><div class="v" id="fPace">—</div></div>
+        <div class="st end nai"><div class="nd"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4 L17 15 L12 19 L7 15 Z" fill="currentColor"/><circle cx="12" cy="14" r="1.6" fill="var(--surface)"/></svg></div><div class="t">NovelAI</div><div class="d">官方服务器画图</div><div class="v" id="fNai">—</div></div>
+      </div>
+      <p class="flow-back">画好的图直接回到你的客户端，本站不保存图片。</p>
       <div class="live-legend"><span><i style="background:var(--warn)"></i>你的图</span><span><i style="background:var(--accent)"></i>其他人的图</span><span><i style="background:var(--bad)"></i>被拒的请求</span></div>
       <div class="live-me" id="liveMe" aria-live="polite"></div>
       <div id="result" aria-live="polite"></div>
@@ -678,77 +713,30 @@ $('chkForm').addEventListener('submit', function(e){
 })();
 })();
 
-/* ---------- 实时架构图：每秒拉取 /public/live（只有汇总数字），有 Key 时再拉 /v1/live/me ---------- */
+/* ---------- 实时流程：每秒拉取 /public/live（只有汇总数字），有 Key 时再拉 /v1/live/me ---------- */
 (function(){
-  var NS = 'http://www.w3.org/2000/svg', svg = document.getElementById('liveSvg');
-  if(!svg) return;
+  var flow = document.getElementById('flow');
+  if(!flow) return;
   var reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
-  function mk(tag, attrs, parent){ var e = document.createElementNS(NS, tag); for(var k in attrs) e.setAttribute(k, attrs[k]); (parent || svg).appendChild(e); return e; }
-  function txt(x, y, cls, s, anchor){ var t = mk('text', {x:x, y:y, 'class':cls, 'text-anchor':anchor || 'middle'}); if(s) t.textContent = s; return t; }
-  var LANE = 104;
-  var defs = mk('defs', {}), mrk = mk('marker', {id:'arr', viewBox:'0 0 8 8', refX:7, refY:4, markerWidth:7, markerHeight:7, orient:'auto'}, defs);
-  mk('path', {d:'M0 0 L8 4 L0 8 Z', fill:'var(--muted)'}, mrk);
-  /* 三个节点：你的客户端 → 猫头鹰网关 → NovelAI，图片沿底线原路返回 */
-  mk('rect', {x:6, y:44, width:100, height:120, rx:12, 'class':'tile'});
-  txt(56, 68, 'ttl', '你的客户端');
-  mk('rect', {x:36, y:84, width:40, height:26, rx:3, fill:'none', stroke:'var(--muted)', 'stroke-width':1.5});
-  mk('path', {d:'M30 114 H82', stroke:'var(--muted)', 'stroke-width':1.5});
-  txt(56, 150, 'val', '带 Key 发请求');
-  mk('rect', {x:126, y:20, width:428, height:166, rx:14, 'class':'gw'});
-  txt(144, 42, 'ttl', '🦉 猫头鹰网关', 'start');
-  txt(538, 42, 'val', '香港固定出口', 'end');
-  mk('rect', {x:574, y:44, width:100, height:120, rx:12, 'class':'tile'});
-  var naiRing = mk('circle', {cx:624, cy:90, r:22, fill:'none', stroke:'var(--accent)', 'stroke-width':2, opacity:0});
-  mk('circle', {cx:624, cy:90, r:17, fill:'#1d1d1f'});
-  mk('path', {d:'M624 78 L632 97 L624 103 L616 97 Z', fill:'#f5f5f7'});
-  mk('circle', {cx:624, cy:94, r:2.4, fill:'#1d1d1f'});
-  txt(624, 130, 'ttl', 'NovelAI');
-  var naiV = txt(624, 150, 'val', '空闲');
-  /* 主干线和箭头 */
-  mk('path', {d:'M106 ' + LANE + ' H124', 'class':'line', 'marker-end':'url(#arr)'});
-  mk('path', {d:'M554 ' + LANE + ' H572', 'class':'line', 'marker-end':'url(#arr)'});
-  mk('path', {d:'M144 ' + LANE + ' H536', 'class':'line', 'stroke-dasharray':'2 4'});
-  mk('path', {d:'M624 164 V206 H56 V166', 'class':'line', 'stroke-dasharray':'4 4', 'marker-end':'url(#arr)'});
-  txt(340, 226, 'val', '画好的图沿这条线直接回到你的客户端，本站不保存');
-  /* 网关里的四个关卡 */
-  function station(x, label){ txt(x, 146, 'lbl', label); return txt(x, 164, 'val', ''); }
-  function gate(x){
-    mk('rect', {x:x-12, y:LANE-16, width:3, height:32, rx:1.5, fill:'var(--muted)'});
-    mk('rect', {x:x+9, y:LANE-16, width:3, height:32, rx:1.5, fill:'var(--muted)'});
-    var b = mk('rect', {x:x-9, y:LANE-2, width:18, height:4, rx:2, fill:'var(--ok)', opacity:0}); b.style.transition = 'opacity .4s'; return b;
+  function $id(id){ return document.getElementById(id); }
+  var say = $id('liveSay'), meBox = $id('liveMe'), dot = $id('liveDot'), pk = $id('flowPk');
+  var slots = $id('fSlots'), V = {auth:$id('fAuth'), quota:$id('fQuota'), queue:$id('fQueue'), pace:$id('fPace'), nai:$id('fNai'), paceD:$id('fPaceD')};
+  var nodes = flow.querySelectorAll('.st');
+  for(var i=0;i<8;i++){ var s = document.createElement('i'); slots.appendChild(s); }
+  var horizontal = function(){ return window.matchMedia('(min-width:640px)').matches; };
+  /* 一个小圆点从第 a 站走到第 b 站（横排时才画；6 站，中心在 (i+.5)/6） */
+  function hop(a, b, cls, done){
+    if(reduce || !horizontal()){ if(done) done(); return; }
+    var p = document.createElement('span'); p.className = 'pkt ' + (cls || '');
+    p.style.left = ((a + .5) / 6 * 100) + '%'; pk.appendChild(p);
+    requestAnimationFrame(function(){ requestAnimationFrame(function(){ p.style.left = ((b + .5) / 6 * 100) + '%'; }); });
+    setTimeout(function(){ if(cls === 'rej'){ p.classList.add('drop'); setTimeout(function(){ p.remove(); }, 450); } else p.remove(); if(done) done(); }, 750);
   }
-  var g1 = gate(178), g2 = gate(262);
-  var v1 = station(178, '验 Key'), v2 = station(262, '查额度');
-  var slots = [];
-  for(var i=0;i<6;i++){ var cx = 318 + i*22;
-    mk('circle', {cx:cx, cy:LANE, r:8, fill:'var(--surface)', stroke:'var(--border-strong)'});
-    var s = mk('circle', {cx:cx, cy:LANE, r:6.5, fill:'var(--accent)', opacity:0}); s.style.transition = 'opacity .4s, fill .4s'; slots.push(s); }
-  var more = txt(373, LANE - 16, 'val', '');
-  var v3 = station(373, '排队 · 先来先画');
-  mk('circle', {cx:494, cy:LANE, r:15, fill:'var(--surface)', stroke:'var(--surface-3)', 'stroke-width':4});
-  var cd = mk('circle', {cx:494, cy:LANE, r:15, fill:'none', stroke:'var(--warn)', 'stroke-width':4, 'stroke-linecap':'round', transform:'rotate(-90 494 ' + LANE + ')', 'stroke-dasharray':'0 95'});
-  var cdT = txt(494, LANE + 4, 'val', '');
-  var v4 = station(494, '控速');
-  var say = document.getElementById('liveSay'), meBox = document.getElementById('liveMe'), dot = document.getElementById('liveDot');
-  function flash(b){ b.setAttribute('opacity', '1'); setTimeout(function(){ b.setAttribute('opacity', '0'); }, 400); }
-  function move(points, color, ms, done){
-    if(reduce){ if(done) done(); return; }
-    var c = mk('circle', {cx:points[0][0], cy:points[0][1], r:6, fill:color});
-    var t0 = performance.now(), seg = [], total = 0;
-    for(var i=1;i<points.length;i++){ var l = Math.hypot(points[i][0]-points[i-1][0], points[i][1]-points[i-1][1]); seg.push(l); total += l; }
-    (function step(now){ var d = Math.min(1, (now - t0)/ms) * total, i = 0;
-      while(i < seg.length - 1 && d > seg[i]){ d -= seg[i]; i++; }
-      var k = seg[i] ? Math.min(1, d/seg[i]) : 1, a = points[i], b = points[i+1];
-      c.setAttribute('cx', (a[0] + (b[0]-a[0])*k).toFixed(1)); c.setAttribute('cy', (a[1] + (b[1]-a[1])*k).toFixed(1));
-      if(now - t0 < ms) requestAnimationFrame(step); else { c.remove(); if(done) done(); } })(t0);
-  }
-  /* 新请求：从客户端进入，过 ① ②；被拒的在 ② 变红掉出 */
+  function blink(i){ var n = nodes[i]; n.classList.add('hit'); setTimeout(function(){ n.classList.remove('hit'); }, 500); }
   function arrive(rejected){
-    flash(g1);
-    if(rejected) move([[56,LANE],[262,LANE]], 'var(--accent)', 700, function(){ move([[262,LANE],[262,LANE+28]], 'var(--bad)', 450); });
-    else move([[56,LANE],[306,LANE]], 'var(--accent)', 900, function(){ flash(g2); });
+    hop(0, 1, '', function(){ blink(1);
+      if(rejected) hop(1, 2, 'rej'); else hop(1, 3, '', function(){ blink(2); }); });
   }
-  function giveBack(mineDone){ move([[624,LANE+10],[624,206],[56,206],[56,166]], mineDone ? 'var(--warn)' : 'var(--accent)', 1600); }
   var lastReq = null, lastRej = 0, lastRunning = 0, mine = null, myRunning = false, doneAt = 0, failed = 0;
   function steps(stage, note){
     var names = ['已提交', '排队中', '生成中', '已返回'];
@@ -758,9 +746,8 @@ $('chkForm').addEventListener('submit', function(e){
   }
   function render(d, me){
     var a = d.auth || {}, q = d.quota || {}, g = d.guard || {};
-    var qu = me || d.queue || {}, w = qu.waiting || 0, running = qu.running || 0;   /* 有 Key 时用不带缓存的数字，和「你排第几」保持一致 */
-    var interval = d.interval || 15;
-    var s;
+    var qu = me || d.queue || {}, w = qu.waiting || 0, running = qu.running || 0;   /* 有 Key 时用不带缓存的数字，和「你排第几」一致 */
+    var interval = d.interval || 15, s;
     if(g.cooldown) s = '⏸ 上游限流保护中，所有出图暂停约 <b>' + g.cooldown + ' 秒</b>';
     else if(!w && !running) s = '现在<b>空闲</b>：新的图马上开始画';
     else s = '现在 <b>' + running + '</b> 张在画、<b>' + w + '</b> 张在排队：新的图大约等 <b>' + Math.round((w + running) * interval) + ' 秒</b>';
@@ -768,28 +755,25 @@ $('chkForm').addEventListener('submit', function(e){
     say.innerHTML = s;
     if(lastReq !== null && a.requests > lastReq){
       var n = Math.min(3, a.requests - lastReq), rej = Math.min(n, Math.max(0, (a.rejected || 0) - lastRej));
-      for(var i=0;i<n;i++) setTimeout(arrive.bind(null, i < rej), i * 250);
+      for(var i=0;i<n;i++) setTimeout(arrive.bind(null, i < rej), i * 300);
     }
     lastReq = a.requests || 0; lastRej = a.rejected || 0;
-    v1.textContent = (a.requests || 0) + ' 次/分' + (a.rejected ? ' · 拒 ' + a.rejected : '');
-    v2.textContent = '今日 ' + (q.images_today || 0) + ' 张';
+    V.auth.textContent = '近 1 分钟 ' + (a.requests || 0) + ' 次' + (a.rejected ? '，拒 ' + a.rejected : '');
+    V.quota.textContent = '全站今日 ' + (q.images_today || 0) + ' 张';
     var myPos = mine && mine.filter(function(x){ return x.state === 'waiting'; })[0];
-    slots.forEach(function(c, i){ c.setAttribute('opacity', i < w ? '1' : '0'); c.setAttribute('fill', myPos && myPos.position === i+1 ? 'var(--warn)' : 'var(--accent)'); });
-    more.textContent = w > 6 ? '还有 ' + (w - 6) + ' 张' : '';
-    v3.textContent = w ? w + ' 张在等' : '没人排队';
+    Array.prototype.forEach.call(slots.children, function(c, i){
+      c.className = i < w ? (myPos && myPos.position === i+1 ? 'on me' : 'on') : ''; });
+    V.queue.textContent = w ? w + ' 张在等' + (w > 8 ? '（显示前 8）' : '') : '没人排队';
     var nx = g.next_in || 0;
-    cd.setAttribute('stroke-dasharray', (95 * Math.min(1, nx / (interval + 5))).toFixed(1) + ' 95');
-    cd.setAttribute('opacity', nx > 0 ? '1' : '0');
-    cdT.textContent = nx > 0 ? Math.ceil(nx) : '';
-    v4.textContent = g.cooldown ? '冷却 ' + g.cooldown + ' 秒' : '本小时 ' + (g.hour || 0) + ' / ' + (g.hour_cap || 0) + ' 张';
+    V.paceD.textContent = '每张约隔 ' + Math.round(interval) + ' 秒，保护账号';
+    V.pace.textContent = g.cooldown ? '冷却 ' + g.cooldown + ' 秒' : nx > 0 ? '下一张 ' + Math.ceil(nx) + ' 秒后' : '就绪';
+    nodes[4].classList.toggle('wait', nx > 0 || !!g.cooldown);
     var mineRun = !!(mine && mine.some(function(x){ return x.state === 'running'; }));
-    naiRing.setAttribute('opacity', running ? '1' : '0');
-    naiRing.setAttribute('stroke', mineRun ? 'var(--warn)' : 'var(--accent)');
-    naiRing.classList.toggle('pulse', !!running && !reduce);
-    naiV.textContent = running ? (mineRun ? '正在画你的图' : '正在画 ' + running + ' 张') : '空闲';
-    if(running > lastRunning) move([[536,LANE],[600,LANE]], mineRun ? 'var(--warn)' : 'var(--accent)', 500);
+    nodes[5].classList.toggle('busy', !!running); nodes[5].classList.toggle('mine', mineRun);
+    V.nai.textContent = running ? (mineRun ? '正在画你的图' : '正在画 ' + running + ' 张') : '空闲';
+    if(running > lastRunning) hop(4, 5, mineRun ? 'me' : '');
     var myDone = myRunning && !mineRun;
-    if(running < lastRunning || myDone) giveBack(myDone);
+    if(running < lastRunning || myDone) hop(5, 0, (myDone ? 'me ' : '') + 'back');
     if(myDone) doneAt = Date.now();
     lastRunning = running; myRunning = mineRun;
     if(mine === null) meBox.innerHTML = '';

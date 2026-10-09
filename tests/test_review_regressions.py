@@ -53,7 +53,7 @@ async def test_model_name_is_normalized_before_forwarding(state):
 async def test_non_integer_image_numbers_rejected(state, field, value):
     state.db.keys["fixture-1"].update(allow_anlas=False)
     r = await post("/ai/generate-image", image_body(**{field: value}))
-    assert r.status_code == 400 and r.json()["error"]["message"].startswith("图片参数无效")
+    assert r.status_code == 400 and r.json()["error"]["message"].removeprefix("猫头鹰公益站提醒：").startswith("图片参数无效")
     assert not state.nai.calls and not state.db.charges
 
 
@@ -1311,6 +1311,17 @@ async def test_v5_top_up_uses_anlas_after_daily_v5(state):
     big["model"] = "nai-diffusion-4-5-full"
     assert (await post("/ai/generate-image", big)).status_code == 200
     assert state.nai.calls[-1][2]["parameters"]["width"] * state.nai.calls[-1][2]["parameters"]["height"] <= 1024 * 1024   # 仍钳制
+
+
+@pytest.mark.asyncio
+async def test_auto_anlas_only_pays_for_v5_top_up(state):
+    from app.main import GateError
+    key = state.db.keys["fixture-1"]
+    key.update(allow_anlas=True, anlas_auto=1, daily_v5=1, daily_anlas=100, image_model_scope="all")
+    with pytest.raises(GateError) as caught:          # 放大 / 导演工具 / 超规格等其他付费请求
+        await main.quota_image_check(key, {"anlas": 20, "v5": 0, "images": 1})
+    assert caught.value.status == 402 and "V5" in caught.value.message
+    await main.quota_image_check(key, {"anlas": 20, "v5": 0, "images": 1, "topup": True})
 
 
 def test_admin_change_description_for_member_dm():

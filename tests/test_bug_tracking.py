@@ -124,3 +124,10 @@ async def test_maintenance_step_failure_does_not_skip_later_steps(state, monkeyp
         await main.maintenance_loop()
     assert calls == ["perf", "disk"]
     assert any(c[0] == "maintenance:perf" for c in state.captured)
+
+
+@pytest.mark.asyncio
+async def test_member_errors_carry_site_prefix(state):
+    async with await _client() as client:
+        bad = await client.post("/ai/generate-image", json=image_body(), headers={"Authorization": "Bearer nope"})
+    assert bad.json()["error"]["message"].startswith("猫头鹰公益站提醒：")
