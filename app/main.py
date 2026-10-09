@@ -25,7 +25,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-from . import admin, registration_routes
+from . import admin, registration_routes, request_timing
 from .registration import configured_service
 from .body import read_bounded_body, read_json_body
 from .config import load_settings
@@ -166,7 +166,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "1.2.1"
+__version__ = "1.3.0"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -230,11 +230,13 @@ class RequestContextMiddleware:
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
         key_token, logged_token = _REQUEST_KEY.set(None), _REQUEST_LOGGED.set(False)
+        timing_token = request_timing.begin(scope)
         try:
             await self.app(scope, receive, send)
         finally:
             _REQUEST_KEY.reset(key_token)
             _REQUEST_LOGGED.reset(logged_token)
+            request_timing.end(timing_token)
 
 
 app.add_middleware(RequestContextMiddleware)
@@ -598,18 +600,20 @@ def record(key, kind: str, model: str, status: str, *, images: int = 0,
            unconfirmed_anlas: float = 0.0) -> asyncio.Task:
     """写日志；成功请求额外计入每日配额。"""
     _REQUEST_LOGGED.set(True)
+    wait_ms, dur_ms, client = request_timing.snapshot()
+    timing = {"wait_ms": wait_ms, "dur_ms": dur_ms, "client": client}
     async def _go():
         if status == "ok":
             await STATE.db.record_success(
                 key["id"], key["name"], kind, model, STATE.day(),
                 images=images, anlas=anlas, tokens=tokens, v5=v5,
                 legacy_free_images=legacy_free_images, detail=detail,
-                unconfirmed_anlas=unconfirmed_anlas,
+                unconfirmed_anlas=unconfirmed_anlas, **timing,
             )
         else:
             await STATE.db.add_log(key["id"], key["name"], kind, model, status,
                                    images=images, anlas=anlas, tokens=tokens, detail=detail,
-                                   unconfirmed_anlas=unconfirmed_anlas)
+                                   unconfirmed_anlas=unconfirmed_anlas, **timing)
     task = asyncio.create_task(_go())
     task.add_done_callback(_log_task_failure)
     return task
@@ -1469,6 +1473,17 @@ LANDING_HEADERS = {
 async def index():
     """成员落地页：自包含的静态页面，数据来自 /public/status 与 /v1/me。"""
     return FileResponse(Path(__file__).parent / "static" / "landing.html", headers=LANDING_HEADERS)
+
+
+_FAVICON = (Path(__file__).parent / "static" / "favicon.svg").read_bytes()
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+@app.get("/favicon.svg", include_in_schema=False)
+async def favicon():
+    """🦉 站点图标；/favicon.ico 也返回 SVG，现代浏览器都能识别，避免日志里出现 404。"""
+    return Response(_FAVICON, media_type="image/svg+xml",
+                    headers={"Cache-Control": "public, max-age=86400", "X-Content-Type-Options": "nosniff"})
 
 
 @app.get("/announcement")

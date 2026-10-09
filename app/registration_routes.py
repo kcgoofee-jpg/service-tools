@@ -59,7 +59,7 @@ def _checked(service, body: Who) -> str:
 
 @router.post("/info")
 async def info(request: Request, body: Who):
-    """机器人 /help 与 /status 使用：注册是否开放、新成员默认功能、记录声明、上游状态。"""
+    """机器人 /help 与 /quota 使用：注册是否开放、新成员默认功能、记录声明、上游状态。"""
     service = _service(request)
     _checked(service, body)
     gate = request.app.state.gate
