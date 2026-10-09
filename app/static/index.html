@@ -439,6 +439,7 @@ details.neg div{margin-top:6px;white-space:pre-wrap;overflow-wrap:anywhere;max-h
       <button data-tab="ops"><span data-ic="toggle"></span>功能与开放</button>
       <div class="nav-label">系统</div>
       <button data-tab="logs"><span data-ic="list"></span>用量日志</button>
+      <button data-tab="actions"><span data-ic="list"></span>操作日志</button>
       <button data-tab="set"><span data-ic="sliders"></span>设置</button>
     </nav>
     <div class="side-foot">
@@ -555,6 +556,17 @@ NAI_TOKEN_V5_DAILY_LIMITS=0,150</pre><button class="btn mini" type="button" data
                 <tbody></tbody>
               </table>
             </div>
+          </div>
+        </section>
+
+        <!-- 操作日志 -->
+        <section id="tab-actions" hidden>
+          <div class="page-head"><div class="ttl"><h1>操作日志</h1><p>后台、机器人管理命令与系统自动操作的记录，保留 180 天</p></div>
+            <div class="tools"><button class="btn" data-act="refresh-actions"><span data-ic="refresh"></span>刷新</button></div></div>
+          <div class="card panel" style="padding:16px">
+            <div class="table-wrap"><table class="rt logs"><thead><tr><th>时间</th><th>操作者</th><th>操作</th><th>对象</th><th>详情</th><th>结果</th></tr></thead>
+              <tbody id="actionBody"></tbody></table></div>
+            <div class="pager" id="actionPager"></div>
           </div>
         </section>
 
@@ -993,7 +1005,7 @@ async function boot(){
 }
 
 /* ---------- tabs ---------- */
-const TABS = ['ov','members','audit','keys','ops','logs','set'];
+const TABS = ['ov','members','audit','keys','ops','logs','actions','set'];
 function tab(name){
   document.body.classList.remove('nav-open');
   $$('.nav button').forEach(b=>b.classList.toggle('active', b.dataset.tab===name));
@@ -1005,6 +1017,7 @@ function tab(name){
   if(name==='keys') loadKeys();
   if(name==='ops') loadOps();
   if(name==='logs') loadLogs();
+  if(name==='actions') loadActions();
   if(name==='set') loadSettings();
 }
 
@@ -1746,6 +1759,23 @@ async function loadLogs(){
     pager($('#logPager'), d, 'log');
   }catch(e){ toastErr(e); }
 }
+let actionPage = 1;
+async function loadActions(){
+  try{
+    const d = await api('/admin/api/actions?page=' + actionPage);
+    actionPage = d.page;
+    $('#actionBody').innerHTML = d.actions.map(a=>`
+      <tr>
+        <td class="mono" data-label="时间">${esc(new Date(a.ts*1000).toLocaleString())}</td>
+        <td data-label="操作者">${esc(a.actor)}</td>
+        <td data-label="操作">${esc(a.action)}</td>
+        <td data-label="对象">${esc(a.target)||'—'}</td>
+        <td class="muted" data-label="详情">${esc(a.detail)||'—'}</td>
+        <td data-label="结果">${a.ok?'<span class="tag on">成功</span>':'<span class="tag off">失败</span>'}</td>
+      </tr>`).join('') || '<tr><td colspan="6" class="empty-cell">暂无记录</td></tr>';
+    pager($('#actionPager'), d, 'action');
+  }catch(e){ toastErr(e); }
+}
 function changeLogPage(delta){ logPage=Math.max(1,logPage+delta); loadLogs(); }
 
 /* ---------- settings ---------- */
@@ -1858,6 +1888,7 @@ document.addEventListener('click', ev=>{
     case 'refresh-audit': loadAuditSettings(); loadAudit(); break;
     case 'refresh-keys': loadKeys(); break;
     case 'refresh-logs': loadLogs(); break;
+    case 'refresh-actions': loadActions(); break;
     case 'recon-reload': loadReconciliation(); break;
     case 'recon-run': runReconciliation(); break;
     case 'alert-test': sendTestAlert(el); break;
@@ -1871,6 +1902,7 @@ document.addEventListener('click', ev=>{
     case 'copy-prompt': { const m = auditPrompts.get(id); if(m) copyText(m.p, '提示词已复制').then(ok=>{ if(!ok) toast('复制失败，请手动选择文本', 'err'); }); break; }
     case 'audit-page': auditPage = Math.max(1, auditPage + Number(el.dataset.d)); loadAudit(); break;
     case 'log-page': changeLogPage(Number(el.dataset.d)); break;
+    case 'action-page': actionPage=Math.max(1,actionPage+Number(el.dataset.d)); loadActions(); break;
     case 'refresh-ops': loadOps(); break;
     case 'save-reg': saveReg(); break;
     case 'save-audit': saveAudit(); break;

@@ -101,6 +101,16 @@ CREATE TABLE IF NOT EXISTS upstream_token_counters (
     v5 INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (token_id, day)
 );
+CREATE TABLE IF NOT EXISTS admin_actions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts REAL NOT NULL,
+    actor TEXT NOT NULL,          -- 后台(打码 IP) / Discord:<id> / 系统
+    action TEXT NOT NULL,
+    target TEXT NOT NULL DEFAULT '',
+    detail TEXT NOT NULL DEFAULT '',
+    ok INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_admin_actions_ts ON admin_actions (ts DESC);
 CREATE TABLE IF NOT EXISTS key_sources (
     key_id INTEGER NOT NULL,
     net_hash TEXT NOT NULL,       -- 加盐哈希后的来源网段（IPv4 /24、IPv6 /48），不存完整 IP
@@ -658,6 +668,27 @@ class Database:
         for key_id, label in await cur.fetchall():
             out.setdefault(int(key_id), []).append(label)
         return out
+
+    async def add_admin_action(self, actor: str, action: str, target: str, detail: str, ok: bool) -> None:
+        await self._db.execute(
+            "INSERT INTO admin_actions (ts, actor, action, target, detail, ok) VALUES (?,?,?,?,?,?)",
+            (time.time(), actor, action, target, detail, 1 if ok else 0))
+        await self._db.commit()
+
+    async def list_admin_actions(self, limit: int = 30, offset: int = 0) -> list[dict[str, Any]]:
+        cur = await self._db.execute(
+            "SELECT * FROM admin_actions ORDER BY id DESC LIMIT ? OFFSET ?",
+            (max(1, min(int(limit), 200)), max(0, int(offset))))
+        return [dict(r) for r in await cur.fetchall()]
+
+    async def count_admin_actions(self) -> int:
+        row = await (await self._db.execute("SELECT COUNT(*) FROM admin_actions")).fetchone()
+        return int(row[0])
+
+    async def purge_admin_actions(self, older_than: float) -> int:
+        cur = await self._db.execute("DELETE FROM admin_actions WHERE ts<?", (older_than,))
+        await self._db.commit()
+        return cur.rowcount or 0
 
     async def purge_key_sources(self, older_than: float) -> int:
         cur = await self._db.execute("DELETE FROM key_sources WHERE last_seen<?", (older_than,))

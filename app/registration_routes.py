@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
+from .action_log import log_action
 from .policy import gen_key
 from .registration import RegistrationError
 
@@ -42,6 +43,12 @@ class Who(BaseModel):
     discord_id: str
     guild_id: str
     actor_id: str = ""        # 实际发出命令的 Discord 用户（由机器人填写，管理类操作据此校验）
+
+
+async def _log_bot(request: Request, who: str, action: str, target: str = "", detail: str = "") -> None:
+    db = getattr(getattr(request.app.state, "gate", None), "db", None)
+    if db is not None:
+        await log_action(db, f"Discord:{who}", action, target, detail)
 
 
 def _checked(service, body: Who) -> str:
@@ -86,6 +93,22 @@ async def admin_ops(request: Request, body: Ops):
     gate = request.app.state.gate
     from . import features as feature_defs, ops
     on = body.value.lower() in ("1", "on", "true", "开")
+    target = f"Discord:{body.target}" if body.target else ""
+    params = " ".join(x for x in (body.feature, body.value) if x)
+    try:
+        response = await _run_op(request, body, service, gate, on)
+    except HTTPException as exc:
+        db = getattr(gate, "db", None)
+        if db is not None:
+            await log_action(db, f"Discord:{body.actor_id}", f"机器人·{body.action}", target,
+                             f"失败（{exc.status_code}）：{exc.detail}"[:200], ok=False)
+        raise
+    await _log_bot(request, body.actor_id, f"机器人·{body.action}", target, params)
+    return response
+
+
+async def _run_op(request: Request, body, service, gate, on: bool):
+    from . import features as feature_defs, ops
     if body.action == "open":
         await ops.set_registration(gate.db, {"open": on}, gate, service)
         return JSONResponse({"message": "已开放注册。" if on else "已关闭注册（已领取的人不受影响）。"})
@@ -150,6 +173,7 @@ async def resetkey(request: Request, body: Who):
         raise HTTPException(404, "你还没有领取 Key，请先使用 /register。")
     token = gen_key("nai")
     await request.app.state.gate.db.rotate_key_token(key["id"], token)
+    await _log_bot(request, body.discord_id, "成员重置 Key（/resetkey）", f"Key #{key['id']} {key['name']}")
     return JSONResponse({"key": token}, headers={"Cache-Control": "no-store"})
 
 
@@ -160,6 +184,7 @@ async def revoke(request: Request, body: Who):
     _admin_actor(service, body)
     if not await service.revoke(body.discord_id):
         raise HTTPException(404, "该用户没有已领取的 Key。")
+    await _log_bot(request, body.actor_id, "机器人·revoke（撤销 Key、释放名额）", f"Discord:{body.discord_id}")
     return JSONResponse({"ok": True}, headers={"Cache-Control": "no-store"})
 
 

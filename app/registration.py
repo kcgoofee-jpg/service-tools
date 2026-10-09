@@ -176,6 +176,9 @@ class RegistrationService:
         key = await self.key_row_for(discord_id)
         if key is not None and key["enabled"] and key["expires_at"] and key["expires_at"] < time.time():
             await self.revoke(discord_id, remove_role=not defer_role)
+            from .action_log import log_action
+            await log_action(self.db, "系统", "Key 到期释放名额", f"Key #{key['id']} {key['name']}",
+                             f"Discord:{discord_id} 重新领取时自动释放")
 
     async def settings(self) -> dict:
         from .ops import registration_settings
@@ -217,6 +220,9 @@ class RegistrationService:
         for (discord_id,) in rows:
             await self.revoke(str(discord_id), remove_role=False)
         await self.sync_roles()
+        if rows:
+            from .action_log import log_action
+            await log_action(self.db, "系统", "每日清空自助注册", "", f"清空 {len(rows)} 人（REGISTER_RESET_AT）")
         return len(rows)
 
     async def begin(self, user_id: str, guild_id: str) -> str:

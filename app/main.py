@@ -52,6 +52,7 @@ from .state import GateState
 from . import features
 from .policy import REFERENCE_FIELDS
 from .key_sources import RETENTION_SECONDS as KEY_SOURCE_RETENTION
+from .action_log import RETENTION_DAYS as ADMIN_ACTION_RETENTION_DAYS
 from .audit import audit_flags, audit_notice, make_thumbnail, prompt_texts
 from .upstream_errors import upstream_error_message, text_stream_events
 from .sse import encode_sse
@@ -300,6 +301,7 @@ async def maintenance_loop() -> None:
             keep = max(7, STATE.settings.usage_log_retention_days)
             await STATE.db.purge_usage_log(time.time() - keep * 86400)
             await STATE.db.purge_key_sources(time.time() - KEY_SOURCE_RETENTION)
+            await STATE.db.purge_admin_actions(time.time() - ADMIN_ACTION_RETENTION_DAYS * 86400)
             registrar = getattr(app.state, "registrar", None)
             if registrar is not None:
                 await registrar.sync_roles()

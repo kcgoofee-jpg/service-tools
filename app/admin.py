@@ -12,7 +12,12 @@ import time
 from urllib.parse import urlsplit
 from typing import Any, Optional
 
+import json
+
 from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi.routing import APIRoute
+
+from .action_log import ADMIN_ACTIONS, log_action, summarize
 
 from . import features as feature_defs
 from . import token_store
@@ -23,7 +28,78 @@ from .allowance import SETTING, read_alert_threshold
 from .reconciliation import ReconciliationError
 from .state import RUNTIME_LIMIT_BOUNDS
 
-router = APIRouter(prefix="/admin/api")
+PREFIX = "/admin/api"
+_AUDIT_BODY_LIMIT = 64 * 1024
+
+
+class AuditedRoute(APIRoute):
+    """所有会改动数据的后台接口自动写入操作日志（谁、何时、做了什么、对象、参数摘要、结果）。
+
+    未登录的请求不记录（防止被刷），登录本身无论成败都记录。
+    """
+
+    def get_route_handler(self):
+        handler = super().get_route_handler()
+        route = self
+
+        async def audited(request: Request):
+            if request.method in ("GET", "HEAD", "OPTIONS"):
+                return await handler(request)
+            path = route.path_format[len(PREFIX):] if route.path_format.startswith(PREFIX) else route.path_format
+            label = ADMIN_ACTIONS.get((request.method, path), f"{request.method} {path}")
+            is_login = path == "/login"
+            body = None
+            declared = request.headers.get("content-length", "")
+            if declared.isdecimal() and int(declared) <= _AUDIT_BODY_LIMIT:
+                try:                                    # 缓存请求体：处理函数随后仍能读到同一份内容
+                    body = json.loads(await request.body() or b"null")
+                except ValueError:
+                    body = None
+            target = await _audit_target(request, path)
+            authed = is_login or check_session(request)
+            try:
+                response = await handler(request)
+            except HTTPException as exc:
+                if authed:
+                    await _log(request, label, target, f"失败（{exc.status_code}）：{exc.detail}"[:200], ok=False)
+                raise
+            if authed:
+                if path == "/keys" and isinstance(body, dict):
+                    target = str(body.get("name") or "")
+                if path == "/keys/{key_id}" and request.method == "DELETE" and \
+                        request.query_params.get("ban") in ("1", "true", "True"):
+                    label = "删除 Key 并永久禁止领取"
+                await _log(request, label, target, "" if is_login else summarize(body))
+            return response
+
+        return audited
+
+
+async def _log(request: Request, label: str, target: str, detail: str, ok: bool = True) -> None:
+    db = getattr(getattr(request.app.state, "gate", None), "db", None)
+    if db is not None:
+        await log_action(db, _actor(request), label, target, detail, ok=ok)
+
+
+def _actor(request: Request) -> str:
+    from .state import _mask_ip
+    return "后台 " + _mask_ip(_client_id(request))
+
+
+async def _audit_target(request: Request, path: str) -> str:
+    """操作前先记下对象名称（删除之后就查不到了）。"""
+    try:
+        if "{key_id}" in path:
+            key = await request.app.state.gate.db.get_key(int(request.path_params["key_id"]))
+            return f"Key #{request.path_params['key_id']} {key['name'] if key else '(不存在)'}"
+        if "{token_id}" in path:
+            return "上游 " + str(request.path_params.get("token_id", ""))[:24]
+    except Exception:
+        pass
+    return ""
+
+
+router = APIRouter(prefix=PREFIX, route_class=AuditedRoute)
 
 COOKIE = "nai_gate_admin"
 
@@ -488,6 +564,18 @@ async def logs(request: Request, key_id: Optional[int] = None, page: int = 1,
         "total": total,
         "pages": pages,
     }
+
+
+@router.get("/actions")
+async def admin_actions(request: Request, page: int = 1):
+    require_admin(request)
+    per_page = 30
+    db = request.app.state.gate.db
+    total = await db.count_admin_actions()
+    pages = max(1, (total + per_page - 1) // per_page)
+    page = min(max(1, min(int(page), 1_000_000)), pages)
+    rows = await db.list_admin_actions(limit=per_page, offset=(page - 1) * per_page)
+    return {"actions": rows, "page": page, "per_page": per_page, "total": total, "pages": pages}
 
 
 @router.get("/overview")

@@ -15,6 +15,7 @@ from . import alerts, token_store
 from .config import Settings
 from .database import Database
 from .key_sources import SourceTracker
+from .action_log import log_action
 from .nai import NaiClient, clamp_retry_after
 from .reconciliation import ManualReconciliation
 
@@ -330,7 +331,10 @@ class GateState:
             return 0
         key_ids = await self.db.inactive_key_ids(time.time() - days * 86400)
         for key_id in key_ids:
+            key = await self.db.get_key(key_id)
             await self.db.delete_key(key_id)
+            await log_action(self.db, "系统", "闲置回收 Key", f"Key #{key_id} {key['name'] if key else ''}",
+                             f"连续 {days} 天没有任何请求")
             # 释放对应的 Discord 领取记录，否则用户永远无法重新领取。
             for discord_id in await self.db.forget_registration_for_key(key_id):
                 release = getattr(self, "on_registration_released", None)
