@@ -119,3 +119,13 @@ async def test_stream_errors_filtered_before_delivery_and_count_only_prior_token
     assert sum(values.get("text_tokens", 0) for _, values in state.db.charges) == 1
     assert frames.closed and state.global_active == 0
     assert all("fixture-private" not in str(log) for log in state.db.logs)
+
+
+@pytest.mark.asyncio
+async def test_chat_sends_plain_text_flag_upstream(state):
+    """Upstream parses `input` as base64 tokens unless use_string is set."""
+    state.nai.frames.release.set()
+    response = await post("/v1/chat/completions", body(True))
+    assert response.status_code == 200
+    _url, upstream_body = state.nai.calls[0]
+    assert upstream_body["parameters"]["use_string"] is True
