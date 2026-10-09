@@ -525,3 +525,14 @@ async def test_inactive_cleanup_is_logged(tmp_path):
     rows = await db.list_admin_actions()
     assert rows[0]["actor"] == "系统" and "idle" in rows[0]["target"]
     await db.close()
+
+
+@pytest.mark.asyncio
+async def test_v1_prefixed_nai_paths_are_aliased(state):
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app, raise_app_exceptions=False),
+                                 base_url="http://gate") as c:
+        h = {"Authorization": "Bearer fixture-1"}
+        assert (await c.get("/v1/ai/user/subscription")).status_code == 401      # 路由存在，只是缺 Key
+        assert (await c.post("/v1/ai/generate-image", json=image_body(), headers=h)).status_code == 200
+        assert (await c.get("/v1/models")).status_code == 200                    # OpenAI 路由不受影响
+    assert state.nai.calls
