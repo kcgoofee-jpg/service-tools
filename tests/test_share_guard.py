@@ -214,6 +214,7 @@ async def test_hourly_cap_aimd_and_3h_window(guard):
     db = guard.db
     g, now = Guard(db), 2_000_000.0
     assert g.values["account_hourly_cap"] == 150
+    assert await g.adapt_daily(now - 10) is None                 # 第一次只开始计时，不加
     assert await g.on_upstream_429(now) == (150, 100)          # 上游限流：减半，不低于 100
     assert await g.on_upstream_429(now + 1) is None             # 已经在下限
     assert await g.adapt_daily(now + 3600) is None               # 24 小时内有过限流：不加
