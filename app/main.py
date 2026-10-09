@@ -122,6 +122,7 @@ async def lifespan(app: FastAPI):
     if removed_keys:
         print(f"[info] deleted {removed_keys} inactive API key(s)")
     await STATE.nai.start()
+    STATE.admin_pw_hash = await STATE.db.get_setting("admin_password_hash", None)   # 后台改过的密码（哈希）
     if SETTINGS.seed_demo_key:
         if not await STATE.db.get_key_by_token("nai-demo-key"):
             row = await STATE.db.create_key({
@@ -265,6 +266,7 @@ async def maintenance_loop() -> None:
             registrar = getattr(app.state, "registrar", None)
             if registrar is not None:
                 await registrar.sync_roles()
+                await registrar.backfill_profiles()
             usage = shutil.disk_usage(STATE.settings.data_dir)
             if usage.free / usage.total < 0.10:
                 notify_owner("disk_low", f"服务器磁盘剩余不足 10%（剩 {usage.free // 2**20} MB），请清理或扩容。", 6 * 3600)

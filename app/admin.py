@@ -63,8 +63,33 @@ def _sign(secret: str, payload: str) -> str:
 
 def _session_key(request: Request) -> str:
     # 把管理员密码摘要混入签名密钥：修改 ADMIN_PASSWORD 即令所有旧会话失效。
-    pw = request.app.state.gate.settings.admin_password or ""
+    gate = request.app.state.gate
+    pw = getattr(gate, "admin_pw_hash", None) or gate.settings.admin_password or ""
     return _secret(request) + ":" + hashlib.sha256(pw.encode()).hexdigest()
+
+
+def _pw_hash(password: str) -> str:
+    salt = os.urandom(16)
+    digest = hashlib.scrypt(password.encode(), salt=salt, n=2 ** 14, r=8, p=1, dklen=32)
+    return f"scrypt${salt.hex()}${digest.hex()}"
+
+
+def _pw_matches(password: str, stored: str) -> bool:
+    try:
+        _, salt, digest = stored.split("$")
+        probe = hashlib.scrypt(password.encode(), salt=bytes.fromhex(salt), n=2 ** 14, r=8, p=1, dklen=32)
+        return hmac.compare_digest(probe, bytes.fromhex(digest))
+    except (ValueError, TypeError):
+        return False
+
+
+def _password_ok(request: Request, password: str) -> bool:
+    """站长在后台改过密码则以保存的哈希为准，否则使用 ADMIN_PASSWORD 环境变量。"""
+    gate = request.app.state.gate
+    stored = getattr(gate, "admin_pw_hash", None)
+    if stored:
+        return _pw_matches(password, stored)
+    return hmac.compare_digest(password.encode(), gate.settings.admin_password.encode())
 
 
 def make_session_cookie(request: Request) -> str:
@@ -127,11 +152,13 @@ async def login(request: Request, response: Response):
         raise HTTPException(429, "登录尝试过于频繁，请稍后再试")
     body = await read_json_body(request)
     password = str(body.get("password", ""))
-    if not request.app.state.gate.settings.admin_password:
-        raise HTTPException(503, "尚未设置 ADMIN_PASSWORD 环境变量，管理端已锁定")
-    if request.app.state.gate.settings.admin_password == "changeme-please":
-        raise HTTPException(503, "ADMIN_PASSWORD 仍是示例值 changeme-please，请先在 .env 中改成强密码")
-    if not hmac.compare_digest(password.encode(), request.app.state.gate.settings.admin_password.encode()):
+    gate = request.app.state.gate
+    if not getattr(gate, "admin_pw_hash", None):
+        if not gate.settings.admin_password:
+            raise HTTPException(503, "尚未设置 ADMIN_PASSWORD 环境变量，管理端已锁定")
+        if gate.settings.admin_password == "changeme-please":
+            raise HTTPException(503, "ADMIN_PASSWORD 仍是示例值 changeme-please，请先在 .env 中改成强密码")
+    if not _password_ok(request, password):
         raise HTTPException(401, "密码错误")
     response.set_cookie(
         COOKIE, make_session_cookie(request),
@@ -139,6 +166,26 @@ async def login(request: Request, response: Response):
         samesite="strict", max_age=7 * 86400,
     )
     return {"ok": True}
+
+
+@router.put("/password")
+async def change_password(request: Request, response: Response):
+    """站长在后台修改密码：需要当前密码；成功后所有已登录会话（包括当前）立即失效，需用新密码重新登录。"""
+    require_admin(request)
+    gate = request.app.state.gate
+    if not await gate.hit_login(_client_id(request)):           # 同样受登录限流保护，防止被劫持会话后猜当前密码
+        raise HTTPException(429, "尝试过于频繁，请稍后再试")
+    body = await read_json_body(request)
+    current, new = str(body.get("current", "")), str(body.get("new", ""))
+    if not _password_ok(request, current):
+        raise HTTPException(401, "当前密码不正确")
+    if len(new) < 12 or new == "changeme-please" or new == current:
+        raise HTTPException(422, "新密码至少 12 个字符，且不能与当前密码或示例密码相同")
+    stored = _pw_hash(new)
+    await gate.db.set_setting("admin_password_hash", stored)
+    gate.admin_pw_hash = stored
+    response.delete_cookie(COOKIE, httponly=True, secure=gate.settings.admin_cookie_secure, samesite="strict")
+    return {"ok": True, "relogin": True}
 
 
 @router.post("/logout")
@@ -187,6 +234,19 @@ async def reconcile_anlas(request: Request, response: Response):
     except ReconciliationError as exc:
         headers = {"Retry-After": str(exc.retry_after)} if exc.retry_after else None
         raise HTTPException(exc.status, str(exc), headers=headers) from None
+
+
+def _discord_profile(row) -> Optional[dict]:
+    """成员的 Discord 资料：显示名、用户名、头像地址、个人资料链接（点开可直接私信）。"""
+    if row is None:
+        return None
+    discord_id, username, display, avatar = str(row[1]), row[2], row[3], row[4]
+    if avatar:
+        avatar_url = f"https://cdn.discordapp.com/avatars/{discord_id}/{avatar}.png?size=64"
+    else:
+        avatar_url = f"https://cdn.discordapp.com/embed/avatars/{(int(discord_id) >> 22) % 6}.png"
+    return {"id": discord_id, "username": username, "display_name": display, "avatar_url": avatar_url,
+            "profile_url": f"https://discord.com/users/{discord_id}"}
 
 
 def _key_json(row, counter, generated_images_total: int = 0) -> dict[str, Any]:
@@ -369,11 +429,18 @@ async def reset_daily_image_quota(request: Request, key_id: int):
 
 
 @router.delete("/keys/{key_id}")
-async def delete_key(request: Request, key_id: int):
+async def delete_key(request: Request, key_id: int, ban: bool = False):
+    """删除成员 / Key。Discord 自助领取的成员会同时清掉领取记录并摘除身份组；ban=true 则永久禁止该账号再次领取。"""
     require_admin(request)
-    if not await request.app.state.gate.db.get_key(key_id):
+    gate = request.app.state.gate
+    if not await gate.db.get_key(key_id):
         raise HTTPException(404, "key 不存在")
-    await request.app.state.gate.db.delete_key(key_id)
+    registrar = getattr(request.app.state, "registrar", None)
+    discord_id = await registrar.registration_for_key(key_id) if registrar is not None else None
+    if discord_id is not None:
+        await (registrar.ban if ban else registrar.revoke)(discord_id)
+        return {"ok": True, "discord_id": discord_id, "banned": bool(ban)}
+    await gate.db.delete_key(key_id)
     return {"ok": True}
 
 
@@ -526,15 +593,16 @@ async def members(request: Request):
     today = st.day()
     week = await st.db.member_usage(st.week_days(7)[0])
     totals = await st.db.generated_image_totals()
-    reg = {int(r[0]): str(r[1]) for r in await st.db._db.execute_fetchall(
-        "SELECT key_id, discord_id FROM discord_registrations")}
+    reg = {int(r[0]): r for r in await st.db._db.execute_fetchall(
+        "SELECT key_id, discord_id, username, display_name, avatar FROM discord_registrations")}
     out = []
     for row in await st.db.list_keys():
         counter = await st.db.get_counter(row["id"], today)
         w = week.get(row["id"], {})
         out.append({
             "id": row["id"], "name": row["name"], "enabled": bool(row["enabled"]),
-            "is_admin": bool(row["is_admin"]), "discord_id": reg.get(row["id"]),
+            "is_admin": bool(row["is_admin"]), "discord_id": str(reg[row["id"]][1]) if row["id"] in reg else None,
+            "discord": _discord_profile(reg.get(row["id"])),
             "created_at": row["created_at"], "last_used_at": row["last_used_at"],
             "expires_at": row["expires_at"],
             "daily_images": row["daily_images"], "daily_v5": row["daily_v5"],

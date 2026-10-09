@@ -183,6 +183,9 @@ class Database:
             "ALTER TABLE api_keys ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE api_keys ADD COLUMN features TEXT",
             "ALTER TABLE discord_registrations ADD COLUMN role_granted INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE discord_registrations ADD COLUMN username TEXT",
+            "ALTER TABLE discord_registrations ADD COLUMN display_name TEXT",
+            "ALTER TABLE discord_registrations ADD COLUMN avatar TEXT",
             "ALTER TABLE upstream_token_counters ADD COLUMN images INTEGER NOT NULL DEFAULT 0",
         ):
             try:
