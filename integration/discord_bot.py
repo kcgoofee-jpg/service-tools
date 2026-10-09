@@ -20,6 +20,41 @@ BACKEND = os.getenv("REGISTRATION_BACKEND_URL", "http://127.0.0.1:3003").rstrip(
 SITE = os.getenv("SITE_URL", "").rstrip("/")
 
 
+# 后台「Discord」页的配置；每分钟从网关读一次（读不到时沿用上一次 / 默认值）
+CONFIG = {"gallery_forum": os.getenv("GALLERY_FORUM_NAME", "跑图分享"), "gallery_like": 1, "gallery_ai": 1,
+          "gallery_ai_daily": gallery_praise.DAILY_LIMIT, "gallery_ai_model": gallery_praise.MODEL}
+
+
+async def bridge(method: str, path: str, payload: dict | None = None):
+    """调网关的机器人桥接接口（/self-register/bot/*）；失败返回 None，不影响机器人其他功能。"""
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            r = await client.request(method, BACKEND + "/self-register/bot" + path, json=payload,
+                                     headers={"Authorization": "Bearer " + os.environ["REGISTRATION_BRIDGE_SECRET"]})
+        return r.json() if r.status_code == 200 else None
+    except (httpx.HTTPError, ValueError):
+        return None
+
+
+async def report_event(kind: str, thread: discord.Thread, author: str = "", detail: str = "") -> None:
+    await bridge("POST", "/report", {"event": {"kind": kind, "title": thread.name, "author": author, "detail": detail,
+                                               "url": thread.jump_url}})
+
+
+async def sync_loop(client: discord.Client) -> None:
+    """每分钟：拉配置、报心跳（后台据此显示在线状态）。"""
+    ready_at = time.time()
+    while not client.is_closed():
+        cfg = await bridge("GET", "/config")
+        if isinstance(cfg, dict):
+            CONFIG.update({k: v for k, v in cfg.items() if k in CONFIG})
+        guild = client.guilds[0].name if client.guilds else ""
+        await bridge("POST", "/report", {"status": {
+            "user": str(client.user), "guild": guild, "latency_ms": round(client.latency * 1000),
+            "ready_at": ready_at, "ai_ready": gallery_praise.enabled(), "ai_today": gallery_praise.used_today()}})
+        await asyncio.sleep(60)
+
+
 STATUS_TEXT = {"ok": "🟢 正常", "idle": "🟢 正常（近期无请求）", "degraded": "🟠 不稳定（近期失败较多）"}
 
 
@@ -155,36 +190,51 @@ def build_client() -> tuple[discord.Client, app_commands.CommandTree, discord.Ob
         await interaction.followup.send(f"已撤销 {member.mention} 的 Key。" if status == 200 else str(data),
                                         ephemeral=True)
 
-    gallery_name = os.getenv("GALLERY_FORUM_NAME", "跑图分享")
-
     @client.event
     async def on_thread_create(thread: discord.Thread):
-        """「跑图分享」论坛有新帖：奶妹自动点赞，并在日志里记一笔（运维监控据此去写评论）。"""
+        """「跑图分享」论坛有新帖：奶妹自动点赞，再看图写一段评论（开关和频道名在后台「Discord」页）。"""
         parent = thread.parent
-        if parent is None or gallery_name not in (parent.name or ""):
+        if parent is None or CONFIG["gallery_forum"] not in (parent.name or ""):
             return
         print(f"[gallery] new post thread={thread.id} owner={thread.owner_id} title={thread.name[:40]}", flush=True)
         starter = None
         for attempt in range(3):            # 论坛帖的首条消息可能比建帖事件晚一点到
             try:
                 starter = thread.starter_message or await thread.fetch_message(thread.id)
-                await starter.add_reaction("❤️")
                 break
             except discord.NotFound:
                 await asyncio.sleep(2)
             except discord.HTTPException as exc:
-                print(f"[bug] gallery reaction failed: {exc}", flush=True)
+                print(f"[bug] gallery fetch failed: {exc}", flush=True)
+                await report_event("error", thread, detail=f"读取帖子失败：{exc}")
                 return
         if starter is None:
             return
-        # 配置了 PRAISE_API_KEY 时，奶妹看图写一段夸奖（gallery_praise.py）
-        images = [a.url for a in starter.attachments if (a.content_type or "").split(";")[0] in gallery_praise.IMAGE_TYPES]
-        text = await gallery_praise.write_praise(thread.name, starter.content, images)
-        if text:
+        author = starter.author.display_name if starter.author else ""
+        if CONFIG["gallery_like"]:
             try:
-                await thread.send(text, allowed_mentions=discord.AllowedMentions.none())
+                await starter.add_reaction("❤️")
+                await report_event("like", thread, author)
             except discord.HTTPException as exc:
-                print(f"[bug] gallery comment send failed: {exc}", flush=True)
+                print(f"[bug] gallery reaction failed: {exc}", flush=True)
+                await report_event("error", thread, author, f"点赞失败：{exc}")
+        if not CONFIG["gallery_ai"]:
+            return
+        images = [a.url for a in starter.attachments if (a.content_type or "").split(";")[0] in gallery_praise.IMAGE_TYPES]
+        if not images:
+            await report_event("skip", thread, author, "帖子里没有图片")
+            return
+        text = await gallery_praise.write_praise(thread.name, starter.content, images,
+                                                 model=CONFIG["gallery_ai_model"], daily=CONFIG["gallery_ai_daily"])
+        if not text:
+            await report_event("skip", thread, author, gallery_praise.last_reason or "没有生成评论")
+            return
+        try:
+            await thread.send(text, allowed_mentions=discord.AllowedMentions.none())
+            await report_event("shy" if text == gallery_praise.SHY else "comment", thread, author, text[:100])
+        except discord.HTTPException as exc:
+            print(f"[bug] gallery comment send failed: {exc}", flush=True)
+            await report_event("error", thread, author, f"发评论失败：{exc}")
 
     @tree.error
     async def on_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
@@ -206,6 +256,9 @@ def build_client() -> tuple[discord.Client, app_commands.CommandTree, discord.Ob
     async def on_ready():
         await tree.sync(guild=guild)
         print(f"[bot] ready as {client.user}, commands synced", flush=True)
+        if not getattr(client, "_sync_started", False):     # 断线重连也会触发 on_ready，只启动一次
+            client._sync_started = True
+            asyncio.create_task(sync_loop(client))
 
     return client, tree, guild
 

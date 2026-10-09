@@ -243,3 +243,25 @@ async def callback(request: Request, code: str = "", state: str = "", error: str
         await _log_bot(request, who, "领取 Key 失败（授权回调）", "", str(exc)[:200])
         return HTMLResponse(str(exc), status_code=403, headers=headers)
     return HTMLResponse("领取成功。Key 和网址已发送到你的 Discord 私信，请勿分享 Key。", headers=headers)
+
+
+class BotReport(BaseModel):
+    status: dict | None = None
+    event: dict | None = None
+
+
+@router.get("/bot/config")
+async def bot_config_get(request: Request):
+    """机器人每分钟来读一次配置（后台「Discord」页可改，不用重启机器人）。"""
+    _service(request)
+    from . import bot_config
+    return JSONResponse(await bot_config.load(request.app.state.gate.db), headers={"Cache-Control": "no-store"})
+
+
+@router.post("/bot/report")
+async def bot_report(request: Request, body: BotReport):
+    """机器人上报心跳和动作（点赞 / 评论），后台显示在线状态和最近记录。"""
+    _service(request)
+    from . import bot_config
+    await bot_config.report(request.app.state.gate.db, body.status, body.event)
+    return {"ok": True}

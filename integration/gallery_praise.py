@@ -42,10 +42,15 @@ SYSTEM = """你是「猫头鹰公益站」Discord 社区的看板娘「奶妹」
 SHY = "🙈💨 呜哇——奶妹捂住眼睛跑开啦！\n这张对奶妹来说太刺激了，不敢看不敢看～ (〃▽〃)ﾉ 老师继续加油哦！\n\n——🦉 奶妹"
 
 _used: dict[str, int] = {}
+last_reason = ""          # 最近一次没出评论的原因（机器人上报给后台）
 
 
 def _today() -> str:
     return time.strftime("%Y-%m-%d")
+
+
+def used_today() -> int:
+    return _used.get(_today(), 0)
 
 
 def enabled() -> bool:
@@ -80,34 +85,45 @@ async def _images(client: httpx.AsyncClient, urls: list[str]) -> list[dict]:
     return out
 
 
-async def write_praise(title: str, text: str, image_urls: list[str]) -> Optional[str]:
-    """返回评论正文；没有可用图片、超出每日上限或出错时返回 None。"""
-    if not enabled() or not image_urls:
+def _skip(reason: str, bug: bool = False) -> None:
+    global last_reason
+    last_reason = reason
+    print(f"[{'bug' if bug else 'gallery'}] gallery: {reason}", flush=True)     # [bug] 会被监控抓到
+
+
+async def write_praise(title: str, text: str, image_urls: list[str], *, model: Optional[str] = None,
+                       daily: Optional[int] = None) -> Optional[str]:
+    """返回评论正文；没有可用图片、超出每日上限或出错时返回 None（原因见 last_reason）。"""
+    if not enabled():
+        _skip("没有配置 PRAISE_API_KEY")
         return None
-    day = _today()
-    if _used.get(day, 0) >= DAILY_LIMIT:
-        print(f"[gallery] daily AI comment limit {DAILY_LIMIT} reached", flush=True)
+    if not image_urls:
+        _skip("帖子里没有图片")
+        return None
+    day, limit = _today(), DAILY_LIMIT if daily is None else daily
+    if _used.get(day, 0) >= limit:
+        _skip(f"今天的 AI 评论已达上限 {limit} 条")
         return None
     headers = {"Authorization": "Bearer " + os.environ["PRAISE_API_KEY"], "anthropic-version": "2023-06-01"}
     async with httpx.AsyncClient() as client:
         content = await _images(client, image_urls)
         if not content:
-            print("[gallery] no readable image; skip comment", flush=True)
+            _skip("图片下载失败或格式不支持")
             return None
         content.append({"type": "text", "text": f"帖子标题：{title or '（无）'}\n作者的话：{text or '（无）'}\n\n请为这个帖子写评论。"})
         try:
             r = await client.post(f"{BASE_URL}/v1/messages", headers=headers, timeout=120, json={
-                "model": MODEL, "max_tokens": 4000, "system": SYSTEM,
+                "model": model or MODEL, "max_tokens": 4000, "system": SYSTEM,
                 "messages": [{"role": "user", "content": content}],
             })
         except httpx.HTTPError as exc:
-            print(f"[bug] gallery AI comment: network error {type(exc).__name__}", flush=True)
+            _skip(f"AI 评论网络错误 {type(exc).__name__}", bug=True)
             return None
     if r.status_code == 429:
-        print("[gallery] AI comment rate limited", flush=True)
+        _skip("AI 评论接口限流")
         return None
     if r.status_code != 200:
-        print(f"[bug] gallery AI comment failed: {r.status_code} {r.text[:200]}", flush=True)
+        _skip(f"AI 评论失败：{r.status_code} {r.text[:200]}", bug=True)
         return None
     data = r.json()
     if data.get("stop_reason") == "refusal":
@@ -116,6 +132,7 @@ async def write_praise(title: str, text: str, image_urls: list[str]) -> Optional
     # 模型会先输出 thinking 块，只取正文
     body = "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text").strip()
     if not body:
+        _skip("模型没有返回正文")
         return None
     if body.startswith("[NSFW]"):
         print("[gallery] explicit image; shy reply", flush=True)
