@@ -5,8 +5,10 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import math
 import os
 import time
+from urllib.parse import urlsplit
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -40,7 +42,9 @@ def _secret(request: Request) -> str:
         s.secret_key = f.read_text().strip()
     else:
         s.secret_key = os.urandom(32).hex()
-        f.write_text(s.secret_key)
+        fd = os.open(f, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as fh:
+            fh.write(s.secret_key)
     return s.secret_key
 
 
@@ -48,19 +52,28 @@ def _sign(secret: str, payload: str) -> str:
     return hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
 
 
+def _session_key(request: Request) -> str:
+    # 把管理员密码摘要混入签名密钥：修改 ADMIN_PASSWORD 即令所有旧会话失效。
+    pw = request.app.state.gate.settings.admin_password or ""
+    return _secret(request) + ":" + hashlib.sha256(pw.encode()).hexdigest()
+
+
 def make_session_cookie(request: Request) -> str:
-    secret = _secret(request)
+    secret = _session_key(request)
     payload = str(int(time.time()) + 7 * 86400)
     return payload + "." + _sign(secret, payload)
 
 
 def check_session(request: Request) -> bool:
-    secret = _secret(request)
+    secret = _session_key(request)
     raw = request.cookies.get(COOKIE, "")
     if "." not in raw:
         return False
     payload, sig = raw.split(".", 1)
-    if not hmac.compare_digest(sig, _sign(secret, payload)):
+    try:
+        if not hmac.compare_digest(sig.encode(), _sign(secret, payload).encode()):
+            return False
+    except (TypeError, ValueError):
         return False
     try:
         return int(payload) > time.time()
@@ -68,7 +81,29 @@ def check_session(request: Request) -> bool:
         return False
 
 
+def _host_only(netloc: str) -> str:
+    return (urlsplit("//" + netloc).hostname or "").lower()
+
+
+def _origin_ok(request: Request) -> bool:
+    """浏览器对跨源写请求一定会带 Origin；其主机名必须与本站 Host 一致（忽略端口，
+    以兼容反向代理）。同级子域名、其他站点都会被拒。X-Forwarded-* 不被信任。
+    无 Origin（curl 等非浏览器客户端）放行，它们拿不到浏览器里的 Cookie。"""
+    origin = request.headers.get("origin")
+    if origin is None:
+        return True
+    host = _host_only(urlsplit(origin).netloc)
+    if not host:
+        return False
+    allowed = {_host_only(request.headers.get("host", ""))}
+    allowed.update(_host_only(urlsplit(o).netloc) for o in request.app.state.gate.settings.admin_allowed_origins)
+    allowed.discard("")
+    return host in allowed
+
+
 def require_admin(request: Request) -> None:
+    if request.method not in ("GET", "HEAD", "OPTIONS") and not _origin_ok(request):
+        raise HTTPException(403, "来源校验失败")
     if not check_session(request):
         raise HTTPException(401, "未登录或会话已过期")
 
@@ -77,12 +112,16 @@ def require_admin(request: Request) -> None:
 
 @router.post("/login")
 async def login(request: Request, response: Response):
+    if not _origin_ok(request):
+        raise HTTPException(403, "来源校验失败")
     if not await request.app.state.gate.hit_login(_client_id(request)):
         raise HTTPException(429, "登录尝试过于频繁，请稍后再试")
     body = await read_json_body(request)
     password = str(body.get("password", ""))
     if not request.app.state.gate.settings.admin_password:
         raise HTTPException(503, "尚未设置 ADMIN_PASSWORD 环境变量，管理端已锁定")
+    if request.app.state.gate.settings.admin_password == "changeme-please":
+        raise HTTPException(503, "ADMIN_PASSWORD 仍是示例值 changeme-please，请先在 .env 中改成强密码")
     if not hmac.compare_digest(password, request.app.state.gate.settings.admin_password):
         raise HTTPException(401, "密码错误")
     response.set_cookie(
@@ -118,7 +157,7 @@ async def reconciliation_status(request: Request, response: Response):
 
 def _reconciliation_csrf(request: Request) -> str:
     # Use a purpose-specific HMAC of the authenticated session for CSRF checks.
-    return _sign(_secret(request), "reconciliation:" + request.cookies[COOKIE])
+    return _sign(_session_key(request), "reconciliation:" + request.cookies[COOKIE])
 
 
 @router.post("/reconciliation")
@@ -187,6 +226,17 @@ async def list_keys(request: Request):
     return {"keys": out}
 
 
+def _num(value: Any, kind: type, lo, hi, name: str):
+    """把后台输入解析为有限数值并钳制范围；非法输入返回 422 而不是 500。"""
+    try:
+        v = kind(value if value not in (None, "") else 0)
+        if kind is float and not math.isfinite(v):
+            raise ValueError
+    except (TypeError, ValueError, OverflowError):
+        raise HTTPException(422, f"{name} 必须是有效数字") from None
+    return max(lo, min(hi, v))
+
+
 @router.post("/keys")
 async def create_key(request: Request):
     require_admin(request)
@@ -201,10 +251,8 @@ async def create_key(request: Request):
         return max(lo, min(hi, v))
 
     daily_images = _int_field("daily_images", st.settings.default_daily_images, 0, 1000000)
-    monthly_anlas = float(body.get("monthly_anlas", st.settings.default_monthly_anlas) or 0)
-    monthly_anlas = max(0.0, min(monthly_anlas, 100000.0))
-    daily_anlas = float(body.get("daily_anlas", st.settings.default_daily_anlas) or 0)
-    daily_anlas = max(0.0, min(daily_anlas, 100000.0))
+    monthly_anlas = _num(body.get("monthly_anlas", st.settings.default_monthly_anlas), float, 0.0, 100000.0, "monthly_anlas")
+    daily_anlas = _num(body.get("daily_anlas", st.settings.default_daily_anlas), float, 0.0, 100000.0, "daily_anlas")
     daily_v5 = _int_field("daily_v5", st.settings.default_daily_v5, 0, 100000)
     daily_text = _int_field("daily_text_tokens", st.settings.default_daily_text_tokens, 0, 100_000_000)
     rpm = _int_field("rpm", st.settings.default_rpm, 1, 600)
@@ -254,17 +302,17 @@ async def patch_key(request: Request, key_id: int):
     if "enabled" in body:
         fields["enabled"] = bool(body["enabled"])
     if "daily_images" in body:
-        fields["daily_images"] = max(0, min(int(body["daily_images"]), 1000000))
+        fields["daily_images"] = _num(body["daily_images"], int, 0, 1000000, "daily_images")
     if "daily_anlas" in body:
-        fields["daily_anlas"] = max(0.0, min(float(body["daily_anlas"] or 0), 100000.0))
+        fields["daily_anlas"] = _num(body["daily_anlas"], float, 0.0, 100000.0, "daily_anlas")
     if "daily_v5" in body:
-        fields["daily_v5"] = max(0, min(int(body["daily_v5"]), 100000))
+        fields["daily_v5"] = _num(body["daily_v5"], int, 0, 100000, "daily_v5")
     if "monthly_anlas" in body:
-        fields["monthly_anlas"] = max(0.0, min(float(body["monthly_anlas"] or 0), 100000.0))
+        fields["monthly_anlas"] = _num(body["monthly_anlas"], float, 0.0, 100000.0, "monthly_anlas")
     if "daily_text_tokens" in body:
-        fields["daily_text_tokens"] = max(0, min(int(body["daily_text_tokens"]), 100_000_000))
+        fields["daily_text_tokens"] = _num(body["daily_text_tokens"], int, 0, 100_000_000, "daily_text_tokens")
     if "rpm" in body:
-        fields["rpm"] = max(1, min(int(body["rpm"]), 600))
+        fields["rpm"] = _num(body["rpm"], int, 1, 600, "rpm")
     if "allow_anlas" in body:
         fields["allow_anlas"] = bool(body["allow_anlas"])
     if "allow_img2img" in body:
@@ -274,7 +322,7 @@ async def patch_key(request: Request, key_id: int):
     if "image_model_scope" in body:
         fields["image_model_scope"] = "all" if body["image_model_scope"] == "all" else "legacy"
     if "expires_days" in body:
-        d = max(0, int(body["expires_days"]))
+        d = _num(body["expires_days"], int, 0, 3650, "expires_days")
         fields["expires_at"] = (time.time() + d * 86400) if d > 0 else None
     await st.db.update_key(key_id, fields)
     row = await st.db.get_key(key_id)
@@ -300,6 +348,8 @@ async def reset_daily_image_quota(request: Request, key_id: int):
 @router.delete("/keys/{key_id}")
 async def delete_key(request: Request, key_id: int):
     require_admin(request)
+    if not await request.app.state.gate.db.get_key(key_id):
+        raise HTTPException(404, "key 不存在")
     await request.app.state.gate.db.delete_key(key_id)
     return {"ok": True}
 
@@ -417,11 +467,9 @@ async def put_settings(request: Request):
     threshold = body.get(SETTING, await read_alert_threshold(st.db))
     if type(threshold) is not int or not 1 <= threshold <= 100:
         raise HTTPException(422, "V5 告警阈值必须为 1～100 的整数百分比")
-    v = float(body.get("global_monthly_anlas", 0) or 0)
-    v = max(0.0, min(v, 1000000.0))
+    v = _num(body.get("global_monthly_anlas", 0), float, 0.0, 1000000.0, "global_monthly_anlas")
     await st.db.set_setting("global_monthly_anlas", v)
-    g5 = int(body.get("global_daily_v5", 0) or 0)
-    g5 = max(0, min(g5, 100000))
+    g5 = _num(body.get("global_daily_v5", 0), int, 0, 100000, "global_daily_v5")
     await st.db.set_setting("global_daily_v5", g5)
     await st.db.set_setting(SETTING, threshold)
     return {"ok": True, "global_monthly_anlas": v, "global_daily_v5": g5, SETTING: threshold}

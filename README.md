@@ -85,3 +85,10 @@ curl 'https://你的域名/ai/generate-image' \
 用量日志记录 Key、模型、状态和消耗，不保存生成的图片或提示词。历史版本遗留的文件不会因升级自动删除。
 
 本地测试：安装 `requirements.txt`、`pytest` 和 `pytest-asyncio`，然后执行 `python -m pytest -q`。测试使用假上游，不消耗真实 NovelAI 额度。
+
+## 安全加固说明（fork）
+
+- 后台所有写操作会校验 `Origin` 主机名必须与请求的 `Host` 一致，用来防止同级子域名/其他站点的跨站写入。使用 Nginx 反代时必须加 `proxy_set_header Host $host;`（Caddy 默认已保留）。如需额外放行来源，设置 `ADMIN_ALLOWED_ORIGINS=https://a.example,https://b.example`。
+- 首页公告以 `Content-Security-Policy: sandbox` 返回，其中的脚本不会执行。
+- 修改 `ADMIN_PASSWORD` 后，所有已登录的后台会话立即失效。`ADMIN_PASSWORD` 仍是示例值 `changeme-please` 时拒绝登录。
+- 反向代理场景下登录限流按代理 IP 计数；需要按真实 IP 限流时，请为 uvicorn 配置 `FORWARDED_ALLOW_IPS`（仅限可信代理）。
