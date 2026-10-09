@@ -63,7 +63,8 @@ DEFAULTS = {
 }
 STATE_KEY = "quota_algo_last"
 HISTORY_KEY = "quota_algo_history"
-DAY_KEY = "quota_algo_day"        # 最近一次做「每日微调」的日期，保证一天只调一次
+DAY_KEY = "quota_algo_day"
+NOTICE_KEY = "algo_notice"        # 首页一行提醒        # 最近一次做「每日微调」的日期，保证一天只调一次
 
 
 def v5_factor(percent: Optional[float]) -> float:
@@ -161,8 +162,19 @@ async def _allowance(state) -> tuple[Optional[float], Optional[float]]:
     allowance = getattr(nai, "allowance", None)
     if allowance is None:
         return None, None
-    snap = await allowance.snapshot(getattr(nai, "pool", []))
+    pool = getattr(nai, "pool", [])
+    snap = await allowance.snapshot(pool)
     rows = [a for a in snap["accounts"] if a.get("percent") is not None]
+    if not rows and getattr(nai, "_client", None) is not None:
+        # 刚重启时还没人用过 V5，缓存里没有剩余比例：主动查一次（只是读订阅信息，不生成图片）
+        for t in pool:
+            if getattr(t, "usable", False):
+                try:
+                    await allowance.resolve(nai._client, nai.image_host, t.token_id, t.token)
+                except Exception:
+                    pass
+        snap = await allowance.snapshot(pool)
+        rows = [a for a in snap["accounts"] if a.get("percent") is not None]
     if not rows:
         return None, None
     pct = sum(a["percent"] for a in rows) / len(rows)
@@ -218,6 +230,11 @@ async def run(state, now: Optional[float] = None) -> dict[str, Any]:
     if guard is not None and guard.values.get("base_daily_images") != b:
         await guard.save({"base_daily_images": b})
     await db.set_settings_bulk(settings)
+    # 首页提醒（站长要求：算法调整只在网站首页提示，不发 Discord）
+    note = f"今日额度（算法自动分配）：V4.5 每人 {a} 张、保底 {b} 张 · V5 每人 {v5['each']} 张"
+    if review and review["from"] != review["to"]:
+        note = f"{today[5:].replace('-', '月')}日 算法调整：" + "；".join(review["reasons"]) + "。" + note
+    await db.set_setting(NOTICE_KEY, note)
     result = {"enabled": True, "ceiling": a, "base": b, "v5": v5, "members": len(members), "cap": cap,
               "updated_at": now, "changed_keys": changed, "review": review}
     await db.set_setting(STATE_KEY, json.dumps(result, ensure_ascii=False))

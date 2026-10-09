@@ -194,6 +194,7 @@ section{margin-top:40px;scroll-margin-top:72px}
 .algo-foot i{width:10px;height:10px;border-radius:50%;background:var(--accent);flex:none;animation:algoPulse 2s ease-in-out infinite}
 @keyframes algoPulse{50%{box-shadow:0 0 0 7px color-mix(in srgb,var(--accent) 20%,transparent)}}
 @media (prefers-reduced-motion: reduce){.algo *{animation:none!important}.algo .flow-line span{opacity:1}}
+.algo-note{margin:0 0 10px;font-size:12.5px;color:var(--muted)}
 /* steps */
 .steps{display:grid;gap:16px;grid-template-columns:1fr}
 .step{position:relative;display:flex;flex-direction:column;gap:8px}
@@ -310,6 +311,7 @@ footer{max-width:960px;margin:0 auto;padding:24px 16px 40px;text-align:center;co
     <div class="card">
       <div class="live-head"><div class="t" id="liveTitle"><span class="live-dot" id="liveDot"></span>实时运行</div>
         <div class="pills" id="pills" aria-live="polite"><span class="skel"></span><span class="skel"></span></div></div>
+      <p class="algo-note" id="algoNote" hidden></p>
       <p class="cooldown" id="cooldown" hidden><span data-ic="clock"></span><span id="cooldownTxt"></span></p>
       <form id="chkForm" autocomplete="off" novalidate>
         <label class="sr" for="keyIn">你的 Key</label>
@@ -566,6 +568,8 @@ function renderStatus(d){
     var li0 = el('li'); li0.appendChild(el('span', 't muted', '新成员默认功能由站长配置。')); fl.appendChild(li0);
     $('featNote').hidden = false;
   }
+  var al = (d.algo_notice || '').trim();
+  $('algoNote').hidden = !al; $('algoNote').textContent = al;
   var an = (d.audit_notice || '').trim();
   $('audit').hidden = !an; $('auditTxt').textContent = an;
 }
