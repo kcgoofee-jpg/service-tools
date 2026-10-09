@@ -308,7 +308,11 @@ def scheduling(state) -> Module:
         hard_note="关闭后完全按 FIFO；observe 模式只统计不改顺序（冻结期保持 observe）",
         params=[Param("配额粒度 quantum", lambda: P("scheduling.quantum", sch.DEFAULT_QUANTUM), "A", "",
                       "1 = 严格轮流最公平；越大越偏吞吐。待用影子数据自动调", key="scheduling.quantum"),
-                Param("模式", lambda: "observe（影子，不改顺序）", "A", "", "冻结期保持；审核后切 enforce")])
+                Param("自动生效门槛（≥N 人同时排队）", lambda: P("scheduling.engage_min_waiters", 2), "A", "",
+                      "少于此数等于 FIFO；达到才按公平挑人", key="scheduling.engage_min_waiters"),
+                Param("防饥饿（秒）", lambda: P("scheduling.starvation_seconds", 60), "A", "",
+                      "一张图等满这么久强制插最前", key="scheduling.starvation_seconds"),
+                Param("模式", lambda: "observe（影子，不改顺序）", "A", "", "闲时=FIFO、挤时=公平，自动切换；冻结后切 enforce")])
 
 
 def build(state, bug) -> Kernel:

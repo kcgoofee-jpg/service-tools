@@ -11,7 +11,9 @@
 
 ━━ 先观察后执行 ━━
 observe：只记录「此刻 FIFO 服务的人，是不是 DRR 本该挑的人」，算出不公平比例和出图差距，不改真实顺序。
-enforce：空槽时真的按 DRR 挑人。冻结期保持 observe，避免污染测量数据。
+enforce：空槽时真的按 DRR 挑人——但只在「≥ engage_min_waiters 个不同 Key 同时在等」时才重排，否则天然等于 FIFO；
+         任何一张图等满 starvation_seconds 秒强制插到最前（防饥饿）。所以它闲时零影响、挤时才公平，自动切换，无需手动。
+         冻结期保持 observe，避免污染测量数据。
 """
 from __future__ import annotations
 
@@ -26,7 +28,8 @@ WINDOW = 600.0                              # 公平性统计窗口：最近 10 
 DEFAULT_QUANTUM = 1
 
 
-def drr_pick(waiters: list[int], served: dict[int, int], quantum: int = 1) -> Optional[int]:
+def drr_pick(waiters: list[int], served: dict[int, int], quantum: int = 1,
+             ages: Optional[dict[int, float]] = None, starvation: float = 60.0) -> Optional[int]:
     """从等待的 Key（waiters，按到达先后，可重复出现表示排了多张）里，挑 DRR 下一个该服务的 key_id。
 
     served：最近窗口里每把 Key 已服务的张数。挑「已服务 // quantum 最小」的 Key；并列时按到达顺序（waiters 里更靠前）。
@@ -34,6 +37,11 @@ def drr_pick(waiters: list[int], served: dict[int, int], quantum: int = 1) -> Op
     """
     if not waiters:
         return None
+    # 防饥饿：任何一张图等太久（≥ starvation 秒）就强制优先，不管公平份额，绝不让人被无限期压后
+    if ages:
+        starving = [(ages.get(k, 0), i, k) for i, k in enumerate(waiters) if ages.get(k, 0) >= starvation]
+        if starving:
+            return max(starving)[2]
     q = max(1, quantum)
     best = None
     best_rank = None
@@ -72,7 +80,7 @@ class FairScheduler:
         记录 DRR 会不会挑别人（= 这次 FIFO 不公平）。不改真实顺序。"""
         now = time.time() if now is None else now
         distinct = list(dict.fromkeys(waiting_keys))
-        if len(distinct) < 2:
+        if len(distinct) < P("scheduling.engage_min_waiters", 2):   # 少于这么多人同时在等，等于 FIFO，不算决策
             return
         self._shadow_total += 1
         served = self._served_counts(now, set(distinct))

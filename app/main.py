@@ -55,7 +55,7 @@ from . import features
 from .policy import REFERENCE_FIELDS
 from .key_sources import RETENTION_SECONDS as KEY_SOURCE_RETENTION
 from .action_log import RETENTION_DAYS as ADMIN_ACTION_RETENTION_DAYS
-from .audit import audit_flags, audit_notice, make_thumbnail, prompt_texts
+from .audit import audit_flags, audit_notice, make_thumbnail, prompt_texts, capture_prompts, full_image
 from .upstream_errors import upstream_error_message, text_stream_events
 from .sse import encode_sse
 
@@ -185,7 +185,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "2.5.0"
+__version__ = "2.6.0"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -455,11 +455,13 @@ async def audit_generation(key, kind: str, model: str, status: str, body: dict, 
     if not (want_prompts or want_thumbs):
         return
     try:
-        prompt, negative = prompt_texts(body) if want_prompts else ("", "")
-        thumb = None
+        prompt, negative, extra = capture_prompts(body) if want_prompts else ("", "", "")
+        thumb, image, image_type = None, None, ""
         if want_thumbs and content and status == "ok":
             thumb = await anyio.to_thread.run_sync(make_thumbnail, content)
-        await STATE.db.add_audit(key["id"], key["name"], kind, model, status, prompt, negative, thumb)
+            image, image_type = await anyio.to_thread.run_sync(full_image, content)
+        await STATE.db.add_audit(key["id"], key["name"], kind, model, status, prompt, negative, thumb,
+                                 extra=extra, image=image, image_type=image_type)
     except Exception as exc:
         bug("audit", exc)
 

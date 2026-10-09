@@ -355,6 +355,7 @@ details.help ol{margin:8px 0 8px;padding-left:20px}
 .thumb .zoom{position:absolute;right:8px;bottom:8px;background:rgba(10,12,20,.6);color:#fff;border-radius:8px;padding:4px;opacity:0;transition:opacity .15s;display:grid}
 .thumb:hover .zoom{opacity:1}
 .thumb.none .zoom{display:none}
+.shot-params{font-size:11.5px;color:var(--muted);margin-top:4px;word-break:break-all}
 .gallery.large{grid-template-columns:repeat(auto-fill,minmax(360px,1fr))}
 .gallery.list{display:flex;flex-direction:column;gap:8px}
 .gallery.list .shot{flex-direction:row;align-items:stretch}
@@ -707,6 +708,7 @@ td.note{min-width:220px}
               <select id="auditFilter" aria-label="按成员筛选" style="width:180px"><option value="">全部成员</option></select>
               <select id="auditView" aria-label="视图" style="width:110px"><option value="grid">画廊</option><option value="large">大图</option><option value="list">列表</option></select>
               <select id="auditPer" aria-label="每页数量" style="width:110px"><option value="24">每页 24</option><option value="48">每页 48</option><option value="96">每页 96</option></select>
+              <button class="btn" id="auditExport" data-act="audit-export" disabled title="先在左边选一个成员">导出该成员全部</button>
               <button class="btn rf" data-act="refresh-audit" aria-label="刷新" title="刷新"><span data-ic="refresh"></span><span class="lbl">刷新</span></button>
             </div></div>
           <div class="card panel" id="auditSettings"><div class="skel" style="height:56px"></div></div>
@@ -1896,17 +1898,26 @@ async function loadAudit(){
       return;
     }
     grid.innerHTML = d.items.map(it=>{
-      auditPrompts.set(it.id, {p: it.prompt||'', n: it.negative||'', who: it.key_name});
+      let ex = {}; try{ ex = it.extra ? JSON.parse(it.extra) : {}; }catch(_){}
+      const chars = ex.char_prompts || [], nchars = ex.char_negatives || [], pr = ex.params || {};
+      auditPrompts.set(it.id, {p: it.prompt||'', n: it.negative||'', who: it.key_name, chars, nchars});
       const id = Number(it.id);
+      const sz = (pr.width&&pr.height) ? `${pr.width}×${pr.height}` : '';
+      const parts = [pr.seed!=null?`种子 ${esc(pr.seed)}`:'', pr.sampler?esc(pr.sampler):'', pr.steps?esc(pr.steps)+'步':'', pr.scale!=null?'CFG '+esc(pr.scale):'', sz].filter(Boolean);
       return `<article class="card shot">
-        ${it.has_thumb ? `<button class="thumb" data-act="zoom" data-id="${id}" aria-label="放大查看"><img loading="lazy" decoding="async" alt="" src="/admin/api/audit/${id}/thumb"><span class="zoom">${ic('zoom')}</span></button>`
+        ${(it.has_image||it.has_thumb) ? `<button class="thumb" data-act="zoom" data-id="${id}" aria-label="放大查看原图"><img loading="lazy" decoding="async" alt="" src="/admin/api/audit/${id}/thumb"><span class="zoom">${ic('zoom')}</span></button>`
           : `<div class="thumb none">${ic('image')}</div>`}
         <div class="shot-body">
           <div class="shot-top"><span class="who" title="${esc(it.key_name)}">${esc(it.key_name)}</span>${statusTag(it.status)}</div>
           <div class="shot-meta"><span class="mono">${esc(it.model||'—')}</span><span>·</span><span>${esc(it.kind||'')}</span><span>·</span><span title="${esc(new Date(it.ts*1000).toLocaleString('zh-CN'))}">${esc(rel(it.ts))}</span></div>
           ${it.prompt ? `<div class="prompt" data-act="expand" title="点击展开 / 收起">${esc(it.prompt)}</div>` : '<div class="prompt empty">未记录提示词</div>'}
-          ${it.negative ? `<details class="neg"><summary>负面提示词</summary><div>${esc(it.negative)}</div></details>` : ''}
-          <div class="shot-actions">${it.prompt?`<button class="btn mini" data-act="copy-prompt" data-id="${id}">${ic('copy')}复制提示词</button>`:''}</div>
+          ${chars.length ? `<details class="neg"><summary>角色提示词 ×${chars.length}</summary><div>${chars.map((c,i)=>`<b>角色${i+1}</b> ${esc(c)}`).join('<br>')}</div></details>` : ''}
+          ${it.negative ? `<details class="neg"><summary>负面提示词</summary><div>${esc(it.negative)}${nchars.length?'<br>'+nchars.map((c,i)=>`<b>角色${i+1}负面</b> ${esc(c)}`).join('<br>'):''}</div></details>` : ''}
+          ${parts.length ? `<div class="shot-params mono">${esc(parts.join(' · '))}</div>` : ''}
+          <div class="shot-actions">
+            ${it.prompt?`<button class="btn mini" data-act="copy-pos" data-id="${id}">${ic('copy')}复制正面</button>`:''}
+            ${it.negative?`<button class="btn mini" data-act="copy-neg" data-id="${id}">${ic('copy')}复制负面</button>`:''}
+            ${chars.length?`<button class="btn mini" data-act="copy-chars" data-id="${id}">${ic('copy')}复制角色</button>`:''}</div>
         </div></article>`;
     }).join('');
     pager($('#auditPager'), d, 'audit');
@@ -1914,7 +1925,7 @@ async function loadAudit(){
 }
 function openLightbox(id){
   const m = auditPrompts.get(id) || {};
-  $('#lbImg').src = `/admin/api/audit/${Number(id)}/thumb`;
+  $('#lbImg').src = `/admin/api/audit/${Number(id)}/image`;
   $('#lbCap').textContent = (m.who ? m.who + ' · ' : '') + (m.p || '');
   openOverlay('#lightbox');
 }
@@ -2519,7 +2530,10 @@ document.addEventListener('click', ev=>{
     case 'zoom': openLightbox(id); break;
     case 'close-lightbox': closeOverlay('#lightbox'); $('#lbImg').removeAttribute('src'); break;
     case 'expand': el.classList.toggle('open'); break;
-    case 'copy-prompt': { const m = auditPrompts.get(id); if(m) copyText(m.p, '提示词已复制').then(ok=>{ if(!ok) toast('复制失败，请手动选择文本', 'err'); }); break; }
+        case 'copy-pos': { const m = auditPrompts.get(Number(el.dataset.id)); if(m) copyText(m.p, '已复制正面提示词'); break; }
+    case 'copy-neg': { const m = auditPrompts.get(Number(el.dataset.id)); if(m) copyText(m.n, '已复制负面提示词'); break; }
+    case 'copy-chars': { const m = auditPrompts.get(Number(el.dataset.id)); if(m) copyText((m.chars||[]).map((c,i)=>`角色${i+1}: ${c}`).join('\n'), '已复制角色提示词'); break; }
+    case 'audit-export': { const kf = $('#auditFilter').value; if(kf) window.open('/admin/api/audit/export?key_id=' + encodeURIComponent(kf), '_blank'); break; }
     case 'audit-page': auditPage = Math.max(1, auditPage + Number(el.dataset.d)); loadAudit(); break;
     case 'audit-goto': auditPage = Math.max(1, Number(el.dataset.p)); loadAudit(); break;
     case 'log-page': changeLogPage(Number(el.dataset.d)); break;
@@ -2581,7 +2595,7 @@ $('#logFilter').addEventListener('change', ()=>{ logPage=1; loadLogs(); });
 $('#logFeature').addEventListener('change', ()=>{ logPage=1; loadLogs(); });
 $('#logHideTest').addEventListener('change', ()=>{ logPage=1; loadLogs(); });
 $('#shadowRange').addEventListener('change', loadShadow);
-$('#auditFilter').addEventListener('change', ()=>{ auditPage=1; loadAudit(); });
+$('#auditFilter').addEventListener('change', ()=>{ auditPage=1; const b=$('#auditExport'); if(b) b.disabled=!$('#auditFilter').value; loadAudit(); });
 $('#auditView').addEventListener('change', e=>{ auditView=e.target.value; loadAudit(); });
 $('#auditPer').addEventListener('change', e=>{ auditPer=Number(e.target.value); auditPage=1; loadAudit(); });
 document.addEventListener('change', e=>{ const a=e.target.dataset&&e.target.dataset.act; if(a&&a.endsWith('-jump')){ const kind=a.slice(0,-5); const v=Math.max(1,Number(e.target.value)||1); if(kind==='audit'){auditPage=v;loadAudit();}else if(kind==='log'){logPage=v;loadLogs();}else if(kind==='action'){actionPage=v;loadActions();} } });
