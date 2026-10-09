@@ -76,4 +76,4 @@ async def test_real_modules_build_tick_and_check(state):
     assert await state.share.mode() == "off"
     # 观测：计数和日志对得上；内存每小时计数 ↔ 日志
     checks = {c["name"]: c for m in (await k.snapshot()) for c in m["last"].get("checks", [])}
-    assert checks["今日计数 ↔ 用量日志"]["ok"]
+    assert checks["生成记录 ↔ 用量日志"]["ok"]

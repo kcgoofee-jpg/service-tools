@@ -120,6 +120,12 @@ CREATE TABLE IF NOT EXISTS share_state (       -- 防分享风险分（share_gua
     warned_ts REAL NOT NULL DEFAULT 0,
     paused_ts REAL NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS upstream_snapshots (   -- 每小时记一次上游真实状态，和我们自己的计数做独立核对
+    ts REAL NOT NULL,
+    v5_percent REAL,              -- 账号 V5 剩余 %（订阅接口）
+    v5_rate REAL,                 -- 实测恢复 %/天（拿不到时为空）
+    anlas REAL                    -- 账号 Anlas 余额
+);
 CREATE TABLE IF NOT EXISTS req_features (      -- 出图请求的特征（只存哈希），给防分享回测用；长期保留
     ts REAL NOT NULL,
     key_id INTEGER NOT NULL,
@@ -707,7 +713,7 @@ class Database:
                 await db.execute(_INSERT_LOG, (
                     now, key_id, key_name, kind, model, "ok", images, anlas,
                     tokens, detail[:500], unconfirmed_anlas, max(0, int(wait_ms)),
-                    max(0, int(dur_ms)), client[:60], int(up_status), rid[:16], src[:40], RULE_VERSION,
+                    max(0, int(dur_ms)), client[:256], int(up_status), rid[:16], src[:40], RULE_VERSION,
                 ))
                 await db.execute(_UPSERT_COUNTERS, (
                     key_id, day, images, anlas, tokens, 1, v5, legacy_free_images,
@@ -839,7 +845,7 @@ class Database:
             _INSERT_LOG,
             (time.time(), key_id, key_name[:80], kind, model[:80], status,
              images, anlas, tokens, detail[:500], unconfirmed_anlas,
-             max(0, int(wait_ms)), max(0, int(dur_ms)), client[:60], int(up_status), rid[:16], src[:40], RULE_VERSION),
+             max(0, int(wait_ms)), max(0, int(dur_ms)), client[:256], int(up_status), rid[:16], src[:40], RULE_VERSION),
         )
         await self._db.commit()
 

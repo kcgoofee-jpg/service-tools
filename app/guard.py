@@ -168,8 +168,12 @@ class Guard:
             return None
         # 只有上限真的「顶到过」才有信息：需求没碰到上限时，没有 429 不能说明上限可以更高（TCP 只在窗口用满时加窗）
         hit = await self.db._db.execute_fetchall(
-            "SELECT 1 FROM usage_log WHERE ts>? AND detail LIKE '%本小时出图量已达上限%' LIMIT 1", (now - 86400,))
-        if not hit:
+            "SELECT 1 FROM usage_log u LEFT JOIN api_keys k ON k.id=u.key_id WHERE u.ts>? "
+            "AND COALESCE(k.is_test,0)=0 AND COALESCE(k.is_admin,0)=0 "
+            "AND u.detail LIKE '%本小时出图量已达上限%' LIMIT 1", (now - 86400,))
+        first = (await self.db._db.execute_fetchall("SELECT MIN(ts) FROM usage_log"))[0][0]
+        covered = (now - max(now - 86400, float(first or now))) / 3600
+        if not hit or covered < 20:          # 没顶到过上限（没信息），或过去 24 小时数据不完整：不加
             await self.db.set_setting("guard_hourly_adapted_at", now)
             return None
         old = self.values["account_hourly_cap"]

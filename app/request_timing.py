@@ -13,7 +13,7 @@ from typing import Optional
 
 _TIMING: ContextVar[Optional[dict]] = ContextVar("gate_request_timing", default=None)
 _UNSAFE = re.compile(r"[\x00-\x1f\x7f]+")
-CLIENT_MAX = 60
+CLIENT_MAX = 256       # 完整 User-Agent：前 60 个字符里 12 把 Windows Key 一模一样，区分不了客户端（统计审查）
 
 
 def client_name(user_agent: str) -> str:
@@ -79,6 +79,18 @@ def snapshot() -> dict:
         wait, dur = sent - holder["t0"], now - sent
     return {"wait_ms": int(wait * 1000), "dur_ms": int(dur * 1000), "client": holder["client"],
             "up_status": holder["status"], "rid": holder.get("rid", ""), "src": holder.get("src", "")}
+
+
+def set_model(model: str) -> None:
+    """记下本请求的模型，让被拒的请求也能按模型统计（原来被拒行 model 为空）。"""
+    holder = _TIMING.get()
+    if holder is not None:
+        holder["model"] = (model or "")[:80]
+
+
+def model() -> str:
+    holder = _TIMING.get()
+    return holder.get("model", "") if holder is not None else ""
 
 
 def set_source(label: str) -> None:

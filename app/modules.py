@@ -30,6 +30,14 @@ def capacity(state) -> Module:
     g = state.guard
 
     async def tick(k: Kernel):
+        now = time.time()
+        last = await _q1(state.db, "SELECT MAX(ts) FROM upstream_snapshots")
+        if not last or now - float(last) >= 3600:          # 每小时记一次上游真实状态
+            pct, rate = await quota_algo._allowance(state)
+            anl = (await _setting_json(state.db, "anlas_pool_last")).get("anlas")
+            await state.db._db.execute("INSERT INTO upstream_snapshots(ts, v5_percent, v5_rate, anlas) VALUES (?,?,?,?)",
+                                       (now, pct, rate, anl))
+            await state.db._db.commit()
         changed = await g.adapt_daily()
         if changed:
             from .action_log import log_action
@@ -45,7 +53,23 @@ def capacity(state) -> Module:
             return [Check("有可用的上游账号", False, "没有可用的上游账号，无法核对每小时计数")]
         mem = max(g.hour_count(t, now) for t in tokens)
         cap = g.hourly_cap(now) * len(tokens)
+        # 独立来源：上游报告的 V5 剩余变化 ↔ 我们日志里数到的 V5 张数（同时校准「每 1% ≈ 14.2 张」）
+        snaps = await state.db._db.execute_fetchall(
+            "SELECT ts, v5_percent, v5_rate FROM upstream_snapshots WHERE ts>? AND v5_percent IS NOT NULL ORDER BY ts",
+            now - 86400)
+        v5_check = Check("上游 V5 消耗 ↔ 日志 V5 张数", True, "数据不足（需要 ≥ 6 小时、账号剩余 < 95%）")
+        if len(snaps) >= 2 and snaps[-1][0] - snaps[0][0] >= 6 * 3600 and snaps[-1][1] < 95:
+            hours = (snaps[-1][0] - snaps[0][0]) / 3600
+            rate = snaps[-1][2] or quota_algo.V5_FALLBACK_RATE
+            used_pct = snaps[0][1] - snaps[-1][1] + rate * hours / 24
+            counted = int(await _q1(state.db, "SELECT COALESCE(SUM(images),0) FROM usage_log WHERE ts>? AND ts<=? "
+                                              "AND status='ok' AND model LIKE '%diffusion-5%'", snaps[0][0], snaps[-1][0]) or 0)
+            if used_pct > 0.5:
+                per = counted / used_pct
+                v5_check = Check("上游 V5 消耗 ↔ 日志 V5 张数", 7 <= per <= 28,
+                                 f"{hours:.0f} 小时内上游用掉 {used_pct:.1f}%，日志 {counted} 张 → 每 1% ≈ {per:.1f} 张（参数 14.2）")
         return [
+            v5_check,
             Check("内存每小时计数 ↔ 用量日志", mem >= logged - 2,
                   f"内存 {mem} 张，日志 {logged} 张" + ("" if mem >= logged - 2 else "：内存计数偏少，上限可能被绕过（重启清零？）")),
             Check("实际每小时出图 ≤ 上限", logged <= cap * 1.05 + 2, f"最近 60 分钟 {logged} 张，上限 {cap}"),
@@ -90,10 +114,8 @@ def allocation(state) -> Module:
         drift = int(await _q1(db, "SELECT COUNT(*) FROM api_keys WHERE quota_auto=1 AND is_admin=0 AND is_test=0 "
                                   "AND enabled=1 AND (daily_images<>? OR daily_v5<>?)", a, each) or 0)
         base_now = state.guard.values.get("base_daily_images", 0)
+        # 「人均 × 人数 ≤ 全站」「领 Key 默认 = 算法值」是同一个函数写出来的恒等式（统计审查），不算交叉校验，已移到单元测试
         return [
-            Check("人均 V5 × 人数 ≤ 全站 V5", each * people <= glob, f"{each} × {people} = {each * people}，全站 {glob}"),
-            Check("领 Key 默认额度 = 算法当前值", reg_img == a and reg_v5 == each,
-                  f"领 Key 默认 V4.5 {reg_img} / V5 {reg_v5}，算法 {a} / {each}"),
             Check("算法管理的 Key 都已同步", drift == 0, f"{drift} 把 Key 的额度和算法结果不一致"),
             Check("保底 ≤ 上限", base_now <= (a or 0), f"保底 {base_now}，上限 {a}"),
             Check("保底 = 算法当前值", base_now == b, f"实际保底 {base_now}，算法 {b}"),
@@ -236,12 +258,17 @@ def registration(state) -> Module:
 # ---------------- ⑥ 观测 ----------------
 def observation(state) -> Module:
     async def checks(k: Kernel):
+        # 生成记录（audit.py）和用量日志是两条独立的写入路径；「每日计数 ↔ 日志」在同一个事务里写，是恒等式
         db = state.db
         day = state.day()
-        counted = int(await _q1(db, "SELECT COALESCE(SUM(images),0) FROM counters WHERE day=?", day) or 0)
         start = time.mktime(time.strptime(day, "%Y-%m-%d"))
-        logged = int(await _q1(db, "SELECT COALESCE(SUM(images),0) FROM usage_log WHERE ts>=? AND status='ok'", start) or 0)
-        return [Check("今日计数 ↔ 用量日志", abs(counted - logged) <= 2, f"计数 {counted} 张，日志 {logged} 张")]
+        logged = int(await _q1(db, "SELECT COALESCE(SUM(images),0) FROM usage_log WHERE ts>=? AND status='ok' "
+                                   "AND kind LIKE 'image%'", start) or 0)
+        audited = int(await _q1(db, "SELECT COUNT(*) FROM generation_audit WHERE ts>=? AND status='ok'", start) or 0)
+        if not audited:
+            return [Check("生成记录 ↔ 用量日志", True, "生成记录未开启或今天还没有记录")]
+        tol = max(2, logged * 0.005)
+        return [Check("生成记录 ↔ 用量日志", abs(audited - logged) <= tol, f"生成记录 {audited} 条，日志 {logged} 张")]
 
     return Module(
         name="observation", title="⑥ 观测", question="实际发生了什么？各处的数字对得上吗？",
