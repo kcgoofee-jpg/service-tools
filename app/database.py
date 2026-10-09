@@ -655,15 +655,17 @@ class Database:
         return row is None or row[0] < window_start
 
     async def key_source_labels(self, key_id: int, since: float) -> list[str]:
+        # 按打码标签（IPv4 /16、IPv6 /32）去重：WARP、手机运营商等同一网络内频繁换 /24 的不算多个来源
         cur = await self._db.execute(
-            "SELECT label FROM key_sources WHERE key_id=? AND last_seen>=? ORDER BY last_seen DESC",
-            (key_id, since))
+            """SELECT label FROM key_sources WHERE key_id=? AND last_seen>=?
+               GROUP BY label ORDER BY MAX(last_seen) DESC""", (key_id, since))
         return [r[0] for r in await cur.fetchall()]
 
     async def key_source_summary(self, since: float) -> dict[int, list[str]]:
         """每把 Key 在 since 之后出现过的来源网段标签（最近的在前）。"""
         cur = await self._db.execute(
-            "SELECT key_id, label FROM key_sources WHERE last_seen>=? ORDER BY last_seen DESC", (since,))
+            """SELECT key_id, label FROM key_sources WHERE last_seen>=?
+               GROUP BY key_id, label ORDER BY MAX(last_seen) DESC""", (since,))
         out: dict[int, list[str]] = {}
         for key_id, label in await cur.fetchall():
             out.setdefault(int(key_id), []).append(label)

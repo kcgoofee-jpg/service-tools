@@ -595,3 +595,20 @@ async def test_402_403_alert_but_do_not_disable_token(status):
     r = await c.request("POST", "https://offline.invalid/text")
     assert r.status_code == status and events == [f"upstream_{status}"]
     assert c.pool[0].usable and not c.pool[0].disabled
+
+
+@pytest.mark.asyncio
+async def test_rotating_24s_inside_one_16_count_as_one_source():
+    from app.key_sources import SourceTracker
+    with tempfile.TemporaryDirectory() as tmp:
+        db = Database(str(Path(tmp) / "g.sqlite"))
+        await db.connect()
+        key = await db.create_key({"name": "warp", "token": "nai-w", "daily_images": 10, "monthly_anlas": 0,
+                                   "daily_text_tokens": 0, "rpm": 5})
+        alerts = _Alerts()
+        tracker = SourceTracker(db, alerts, threshold=3)
+        for i, ip in enumerate(("104.28.1.5", "104.28.77.9", "104.28.200.3", "104.28.9.1")):
+            await tracker.observe(key, ip, 1_800_000_000.0 + i)
+        assert await db.key_source_labels(key["id"], 0) == ["104.28.*.*"] and not alerts.sent
+        assert (await db.key_source_summary(0))[key["id"]] == ["104.28.*.*"]
+        await db.close()
