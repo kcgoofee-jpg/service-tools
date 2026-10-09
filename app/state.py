@@ -64,6 +64,8 @@ class GateState:
         self.sources = SourceTracker(self.db, self.alerter, threshold=settings.key_share_alert_nets)
         from .share_guard import ShareGuard
         self.share = ShareGuard(self.db)
+        from .scheduling import FairScheduler
+        self.sched = FairScheduler()
         from .errors import Tracker
         self.bugs = Tracker(self.db, notify=lambda kind, msg, cooldown: self.alerter.notify(kind, msg, cooldown=cooldown))
         self.announcer = alerts.announcer_from_settings(settings)

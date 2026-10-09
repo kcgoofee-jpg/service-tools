@@ -237,6 +237,10 @@ class Guard:
                 e["running"] = True
                 return
 
+    def waiting_keys(self) -> list[int]:
+        """当前排队中（未开始生成）的 key_id，按到达先后；公平调度影子对比用。"""
+        return [e["key"] for e in sorted((e for e in self.entries if not e["running"]), key=lambda e: e["since"])]
+
     def release_image(self, key_id: int) -> None:
         n = self.image_inflight.get(key_id, 0) - 1
         if n > 0:

@@ -185,7 +185,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "2.2.0"
+__version__ = "2.3.0"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -677,7 +677,17 @@ async def image_admission(key):
     reason = guard.admit_image(key["id"], accounts)
     if reason:
         raise err(429, reason)
-    request_timing.on_sent(lambda: guard.mark_running(key["id"]))
+    def _on_sent():
+        waiting = guard.waiting_keys()           # 本张开始发往上游时，还在排队的其他 Key
+        guard.mark_running(key["id"])
+        sched = getattr(STATE, "sched", None)
+        if sched is not None:
+            try:
+                sched.observe_pick(key["id"], waiting)
+                sched.on_serve(key["id"])
+            except Exception as exc:
+                bug("scheduling", exc)
+    request_timing.on_sent(_on_sent)
     try:
         yield
     finally:
