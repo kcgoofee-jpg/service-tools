@@ -93,10 +93,12 @@ def daily_adjust(a: int, b: int, *, used: int, cap: int, hourly_blocks: int, cei
     """前一天的结果 → 新的 A、B 和调整理由（纯函数，方便测试和审核）。"""
     util = used / cap if cap else 0.0
     reasons: list[str] = []
-    if util >= 0.85 or hourly_blocks >= 10:
+    # 拥挤看两样：全天用量 ≥ 85%，或有 ≥ 3 个不同的小时出现过「每小时上限」拦截。
+    # 只按小时数算：一次几分钟的扎堆（2026-10-09 23:04 一次 10 连拦）不算拥挤，那是每小时上限本身在起作用。
+    if util >= 0.85 or hourly_blocks >= 3:
         a2 = max(b, a - cfg["quota_step"])
         b2 = max(cfg["quota_base_min"], b - cfg["quota_base_step"])
-        reasons.append(f"拥挤（用量 {util:.0%}，每小时上限拦截 {hourly_blocks} 次）：上限 {a}→{a2}，保底 {b}→{b2}")
+        reasons.append(f"拥挤（用量 {util:.0%}，{hourly_blocks} 个小时出现每小时上限拦截）：上限 {a}→{a2}，保底 {b}→{b2}")
         return a2, min(b2, a2), reasons
     a2, b2 = a, b
     if util < 0.6 and ceiling_hits > 0:
@@ -132,13 +134,24 @@ async def _yesterday(db, day: str, members: list[int]) -> dict[str, int]:
     used = sum(r[1] for r in rows)
     hits = sum(1 for r in rows if r[2] and r[1] >= r[2])
 
+    # 只统计成员（不含测试号、站长号）被拦的记录
+    member_rejects = ("FROM usage_log u JOIN api_keys k ON k.id=u.key_id WHERE u.ts>=? AND u.ts<? "
+                      "AND u.status='rejected' AND k.is_test=0 AND k.is_admin=0 AND u.detail LIKE ?")
+
     async def count(pattern: str) -> int:
-        r = await db._db.execute_fetchall(
-            "SELECT COUNT(*) FROM usage_log WHERE ts>=? AND ts<? AND status='rejected' AND detail LIKE ?",
-            (start, end, pattern))
+        r = await db._db.execute_fetchall("SELECT COUNT(*) " + member_rejects, (start, end, pattern))
         return int(r[0][0])
+
+    async def hours(*patterns: str) -> int:
+        """出现过拦截的不同小时数。"""
+        seen: set[int] = set()
+        for p in patterns:
+            for (h,) in await db._db.execute_fetchall("SELECT DISTINCT CAST(u.ts/3600 AS INT) " + member_rejects,
+                                                     (start, end, p)):
+                seen.add(int(h))
+        return len(seen)
     return {"used": used, "ceiling_hits": hits,
-            "hourly_blocks": await count("%本小时出图量已达上限%") + await count("%出图总量已达上限%"),
+            "hourly_blocks": await hours("%本小时出图量已达上限%", "%出图总量已达上限%"),
             "base_blocks": await count("%保底%")}
 
 

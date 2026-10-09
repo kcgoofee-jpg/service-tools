@@ -26,8 +26,11 @@ def test_daily_adjust_rules():
     # 拥挤：上限和保底都下调，保底不高于上限
     a, b, why = quota_algo.daily_adjust(150, 100, used=900, cap=1000, hourly_blocks=0, ceiling_hits=0, base_blocks=0, cfg=CFG)
     assert (a, b) == (125, 90) and "拥挤" in why[0]
-    a, b, _ = quota_algo.daily_adjust(150, 100, used=100, cap=1000, hourly_blocks=12, ceiling_hits=3, base_blocks=0, cfg=CFG)
+    # 3 个不同小时被每小时上限拦过才算拥挤；只在 1～2 个小时扎堆（几分钟内的连拦）不下调
+    a, b, _ = quota_algo.daily_adjust(150, 100, used=100, cap=1000, hourly_blocks=3, ceiling_hits=3, base_blocks=0, cfg=CFG)
     assert (a, b) == (125, 90)
+    a, b, why = quota_algo.daily_adjust(150, 100, used=200, cap=1000, hourly_blocks=1, ceiling_hits=0, base_blocks=0, cfg=CFG)
+    assert (a, b) == (150, 100) and "无需调整" in why[0]
     # 有余量且有人顶格：放宽上限；有人被保底拦：抬保底
     a, b, _ = quota_algo.daily_adjust(150, 100, used=300, cap=1000, hourly_blocks=0, ceiling_hits=2, base_blocks=5, cfg=CFG)
     assert (a, b) == (175, 110)
