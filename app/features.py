@@ -18,6 +18,8 @@ FEATURES: dict[str, str] = {
     "voice": "语音合成",
 }
 GLOBAL_KEY = "features_global"
+# 需要消耗 Anlas 的功能：本站只提供免费出图，拒绝时说明原因，免得成员以为是 Key 坏了。
+ANLAS_FEATURES = {"vibe": "每次编码参考图约 2 Anlas"}
 
 # 用量日志 usage_log.kind → 功能。后台按功能统计与筛选日志时使用。
 KIND_FEATURE: dict[str, str] = {
@@ -82,5 +84,8 @@ async def check(db, key, name: str) -> Optional[str]:
         return f"站长暂未开放此功能：{FEATURES[name]}"
     allowed = key_features(key)
     if allowed is not None and name not in allowed:
+        if name in ANLAS_FEATURES:
+            return (f"{FEATURES[name]}会消耗 Anlas（{ANLAS_FEATURES[name]}），本站只提供免费出图，暂不开放。"
+                    "请在客户端里关闭这个功能后再生成")
         return f"你的 Key 暂无权使用：{FEATURES[name]}（可向站长申请）"
     return None

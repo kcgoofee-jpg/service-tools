@@ -44,6 +44,8 @@ def welcome_dm(key: str, site: str, quota: str, expires_days: int, idle_days: in
         rules.append(f"• 有效期 {expires_days} 天，到期后可重新 /register")
     if idle_days:
         rules.append(f"• 连续 {idle_days} 天没有使用会被自动回收（回收前 1 天私信提醒）")
+    rules.append("• 只提供免费出图：总像素 ≤1024×1024（尺寸可自定义，超出自动等比缩小）、≤28 步、每次 1 张；"
+                 "图生图、Vibe 等会消耗 Anlas 的功能不开放")
     rules.append("• 一人一把，请勿分享（本站记录打码后的来源网段防分享，不存完整 IP，7 天后删除）")
     text = (f"🦉 **欢迎来到猫头鹰公益站！** 这是你的 API Key（只发这一次，请先保存）：\n`{key}`\n\n"
             f"**三步开始出图（以柏宝绘为例）**\n"

@@ -909,3 +909,106 @@ async def test_image_perf_rows_reads_usage_log(tmp_path):
         assert len(rows) == 1 and rows[0][1:] == ("nai-diffusion-5", "error", 0, 10, 20, 429, "")
     finally:
         await db.close()
+
+
+# ---------------------------------------------------------------- v1.5：测试 Key、影子模式、Anlas 说明
+
+@pytest.mark.asyncio
+async def test_test_keys_are_excluded_from_member_stats_and_never_reclaimed(tmp_path):
+    db = Database(str(tmp_path / "t.db"))
+    await db.connect()
+    try:
+        base = dict(daily_images=10, monthly_anlas=0, daily_text_tokens=0, rpm=5)
+        member = await db.create_key({"name": "member", "token": "nai-m", **base})
+        tester = await db.create_key({"name": "tester", "token": "nai-t", "is_test": True, **base})
+        assert tester["is_test"] == 1 and member["is_test"] == 0
+        for key in (member, tester):
+            await db.add_log(key["id"], key["name"], "image", "nai-diffusion-4-5-full", "ok", images=1, dur_ms=5)
+            await db.add_log(key["id"], key["name"], "image", "nai-diffusion-4-5-full", "error", dur_ms=5)
+        assert await db.image_stability(0) == {"ok": 1, "error": 1}
+        assert len(await db.image_perf_rows(0)) == 2 and len(await db.shadow_rows(0)) == 2
+        assert sum(r["n"] for r in await db.usage_by_kind(0)) == 2
+        assert await db.count_logs(hide_test=True) == 2 and await db.count_logs() == 4
+        await db.set_setting("key_inactivity_grace_started_at", 0)
+        ids = await db.inactive_key_ids(time.time() + 10 * 86400)
+        assert member["id"] in ids and tester["id"] not in ids
+        await db.update_key(member["id"], {"is_test": True})
+        assert (await db.get_key(member["id"]))["is_test"] == 1
+    finally:
+        await db.close()
+
+
+def _shadow_row(ts, key, wait=0.0, dur=7.0, status="ok"):
+    return (ts, key, f"k{key}", status, 1 if status == "ok" else 0, int(wait * 1000), int(dur * 1000))
+
+
+def test_shadow_drr_lets_light_users_skip_a_burst():
+    from app import shadow
+    t0 = 10_000.0
+    rows = []
+    # A 在 t0 同时到达 4 张（真实系统里按先到先出依次出图），B/C/D 稍后各 1 张
+    for i in range(4):
+        start = t0 + 15 * i
+        rows.append(_shadow_row(start + 7, 1, wait=start - t0))
+    for j, key in enumerate((2, 3, 4)):
+        arrival = t0 + 1 + j
+        start = t0 + 60 + 15 * j
+        rows.append(_shadow_row(start + 7, key, wait=start - arrival))
+    r = shadow.analyze(rows, slots=1, interval=15, key_interval=15)
+    assert r["samples"] == 7
+    assert r["fifo"]["worst_member_mean"] == 87 and round(r["drr"]["worst_member_mean"]) == 56   # D 不再等完 A 的 4 张
+    assert r["contention"]["peak_waiting_members"] == 3 and r["contention"]["contended_share"] > 0
+    assert r["fifo"]["p50"] is not None and abs(r["actual"]["p90"] - r["fifo"]["p90"]) < 2   # 回放与实际一致
+
+
+def test_shadow_quiet_day_has_no_contention_and_no_borrowing():
+    from app import shadow
+    rows = [_shadow_row(1000 + 300 * i, 1 + i % 3) for i in range(12)]
+    r = shadow.analyze(rows)
+    assert r["contention"]["contended_share"] == 0
+    assert r["drr"]["p90"] == r["fifo"]["p90"] == 0
+    assert r["quota"]["borrowers"] == 0 and r["load"]["busy_minutes"] == 0
+
+
+def test_shadow_borrowing_and_busy_hysteresis():
+    from app import shadow
+    rows = [_shadow_row(5000 + 15 * i, 7) for i in range(120)]           # 30 分钟满负荷，同一个人
+    rows += [_shadow_row(5000 + 15 * i + 1, 8) for i in range(3)]
+    r = shadow.analyze(rows)
+    q = r["quota"]
+    assert q["members"][0]["images"] == 120 and q["members"][0]["borrowed"] == 120 - shadow.BASE_QUOTA
+    assert q["borrowers"] == 1 and q["total"] == 123
+    assert r["load"]["peak_util"] >= 0.9 and r["load"]["busy_minutes"] >= 15
+
+
+def test_untimed_rows_count_for_quota_but_not_replay():
+    from app import shadow
+    rows = [(100.0, 1, "old", "ok", 1, 0, 0), _shadow_row(200, 1)]
+    r = shadow.analyze(rows)
+    assert r["samples"] == 1 and r["quota"]["total"] == 2
+
+
+@pytest.mark.asyncio
+async def test_anlas_feature_rejection_explains_why():
+    from app import features
+    key = {"is_admin": 0, "features": "image"}
+
+    class DB:
+        async def get_setting(self, *_):
+            return None
+    msg = await features.check(DB(), key, "vibe")
+    assert "Anlas" in msg and "关闭" in msg
+    assert "可向站长申请" in await features.check(DB(), key, "tags")
+
+
+@pytest.mark.asyncio
+async def test_img2img_rejection_tells_member_to_remove_reference(state):
+    state.db.keys["fixture-1"].update(allow_img2img=False)
+    r = await post("/ai/generate-image", image_body(image="aGVsbG8="))
+    assert r.status_code == 400 and "移除参考图" in r.json()["error"]["message"]
+
+
+def test_welcome_dm_states_free_generation_rules():
+    from app.registration import welcome_dm
+    text = welcome_dm("nai-x", "https://g/", "q", 30, 3)
+    assert "1024×1024" in text and "28 步" in text and "Anlas" in text

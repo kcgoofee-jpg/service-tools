@@ -166,7 +166,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "1.4.0"
+__version__ = "1.5.0"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -895,7 +895,7 @@ async def _generate_image(request: Request, *, streaming: bool):
     if (p0.get("image") or p0.get("mask")) and not key["is_admin"]:
         if not (key["allow_img2img"] and STATE.settings.allow_img2img):
             record(key, "image", model, "rejected", detail="img2img 未开放")
-            raise err(400, "本站未开放 img2img / 局部重绘")
+            raise err(400, "本站不支持图生图（img2img）/ 局部重绘（会消耗 Anlas）。请在客户端里移除参考图（原图）后再生成")
         if not key["allow_anlas"]:
             record(key, "image", model, "rejected", detail="img2img 未开通 Anlas 权限")
             raise err(402, "该 Key 未开通 Anlas 权限，无法使用图生图 / 局部重绘")
