@@ -23,7 +23,7 @@ class Intent(BaseModel):
 def _service(request: Request):
     service = getattr(request.app.state, "registrar", None)
     if service is None:
-        raise HTTPException(503, "自助注册尚未配置")
+        raise HTTPException(503, "自助领 Key 尚未配置")
     given = request.headers.get("Authorization", "")
     if not hmac.compare_digest(given.encode(), ("Bearer " + service.bridge_secret).encode()):
         gate = getattr(request.app.state, "gate", None)
@@ -112,7 +112,7 @@ async def _run_op(request: Request, body, service, gate, on: bool):
     from . import features as feature_defs, ops
     if body.action == "open":
         await ops.set_registration(gate.db, {"open": on}, gate, service)
-        return JSONResponse({"message": "已开放注册。" if on else "已关闭注册（已领取的人不受影响）。"})
+        return JSONResponse({"message": "已开放领 Key。" if on else "已关闭领 Key（已领取的人不受影响）。"})
     if body.action == "limit":
         if not body.value.isdecimal():
             raise HTTPException(422, "请输入数字")
@@ -215,7 +215,7 @@ async def slots(request: Request, body: Who):
 async def intent(request: Request, body: Intent):
     service = getattr(request.app.state, "registrar", None)
     if service is None:
-        raise HTTPException(503, "自助注册尚未配置")
+        raise HTTPException(503, "自助领 Key 尚未配置")
     given = request.headers.get("Authorization", "")
     if not hmac.compare_digest(given, "Bearer " + service.bridge_secret):
         raise HTTPException(401, "未授权")
@@ -231,7 +231,7 @@ async def intent(request: Request, body: Intent):
 async def callback(request: Request, code: str = "", state: str = "", error: str = ""):
     service = getattr(request.app.state, "registrar", None)
     if service is None:
-        raise HTTPException(503, "自助注册尚未配置")
+        raise HTTPException(503, "自助领 Key 尚未配置")
     headers = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer",
                "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'"}
     if error:
@@ -242,4 +242,4 @@ async def callback(request: Request, code: str = "", state: str = "", error: str
     except RegistrationError as exc:
         await _log_bot(request, who, "领取 Key 失败（授权回调）", "", str(exc)[:200])
         return HTMLResponse(str(exc), status_code=403, headers=headers)
-    return HTMLResponse("注册成功。API Key 和网址已发送到你的 Discord 私信，请勿分享 Key。", headers=headers)
+    return HTMLResponse("领取成功。Key 和网址已发送到你的 Discord 私信，请勿分享 Key。", headers=headers)

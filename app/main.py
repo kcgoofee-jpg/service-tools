@@ -414,7 +414,7 @@ async def check_upstream_perf() -> None:
         return
     for flag in report["flags"]:
         notify_owner(f"perf_{flag['family']}_{flag['code']}",
-                     "📉 上游表现变化 · " + flag["text"] + " 详情见后台「总览 → 上游表现」。", 3 * 3600)
+                     "📉 上游表现变化 · " + flag["text"] + " 详情见后台「上游」页。", 3 * 3600)
 
 
 async def maintenance_loop() -> None:

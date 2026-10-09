@@ -97,7 +97,7 @@ def build_client() -> tuple[discord.Client, app_commands.CommandTree, discord.Ob
                  f"客户端接口地址填 `{SITE}`（不加 /v1），Key 填 `nai-` 开头的整串。详细说明：{SITE}"]
         if status == 200:
             if not data["open"]:
-                lines.append("⚠ 目前暂未开放注册。")
+                lines.append("⚠ 目前暂未开放领 Key。")
             if data["notice"]:
                 lines.append("📢 " + data["notice"])
         await interaction.followup.send("\n".join(lines), ephemeral=True)
@@ -107,7 +107,7 @@ def build_client() -> tuple[discord.Client, app_commands.CommandTree, discord.Ob
         code, data = await backend("/self-register/ops", interaction, extra={"action": action, **extra})
         await interaction.followup.send(data["message"] if code == 200 else str(data), ephemeral=True)
 
-    @tree.command(name="open", description="（管理员）开放或关闭自助注册", guild=guild)
+    @tree.command(name="open", description="（管理员）开放或关闭领 Key", guild=guild)
     @app_commands.default_permissions(manage_guild=True)
     @app_commands.choices(state=[app_commands.Choice(name="开放", value="on"), app_commands.Choice(name="关闭", value="off")])
     async def open_(interaction: discord.Interaction, state: app_commands.Choice[str]):
@@ -140,7 +140,7 @@ def build_client() -> tuple[discord.Client, app_commands.CommandTree, discord.Ob
         reset = f"，每天 {data['reset_at']} 自动清空" if data["reset_at"] else ""
         state = "开放中" if data.get("open", True) else "已关闭"
         wait = f"；候补 {data.get('waitlist', 0)} 人（已邀请 {data.get('invited', 0)} 人）" if data.get("waitlist") else ""
-        await interaction.followup.send(f"已领取 {data['active']} / {cap}{reset}；注册{state}{wait}", ephemeral=True)
+        await interaction.followup.send(f"已领取 {data['active']} / {cap}{reset}；领 Key {state}{wait}", ephemeral=True)
 
     @tree.command(name="revoke", description="（管理员）撤销某位成员的 Key，释放名额", guild=guild)
     @app_commands.default_permissions(manage_guild=True)
