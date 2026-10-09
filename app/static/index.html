@@ -650,6 +650,12 @@ NAI_TOKEN_V5_DAILY_LIMITS=0,150</pre><button class="btn mini" type="button" data
             <button class="btn primary" data-act="save-runtime">保存运行限制</button>
           </div>
           <div class="card panel">
+            <div class="panel-head"><h2>账号保护与排队</h2><div class="desc">保护上游账号：每日 / 每小时总量、安静时段、间隔抖动；每把 Key 的排队数与 V4.5 保底借用。0 = 关闭该项，保存后立即生效</div></div>
+            <div id="guardLive" class="hint" style="margin-bottom:12px">正在读取…</div>
+            <div class="form-grid" id="guardFields"></div>
+            <button class="btn primary" data-act="save-guard">保存账号保护设置</button>
+          </div>
+          <div class="card panel">
             <div class="panel-head"><h2>站点公告</h2><div class="desc">用户访问首页看到的内容，支持 HTML</div></div>
             <textarea id="announce" rows="10" placeholder="&lt;h2&gt;欢迎&lt;/h2&gt;&lt;p&gt;申请 Key 请联系……&lt;/p&gt;" aria-label="站点公告"></textarea>
             <div style="margin-top:16px"><button class="btn primary" data-act="save-announce">保存公告</button></div>
@@ -1643,6 +1649,7 @@ function renderOpsReg(){
       <div class="body"><div class="t">${r.open?'注册已开放':'注册已关闭'}</div><div class="hint" style="margin:0">${r.open?'成员可通过 Discord /register 自助领取 Key':'新成员暂时无法领取 Key'}${r.reset_at?` · 重置时间 ${esc(r.reset_at)}`:''}</div></div>
       <div style="min-width:200px;flex:1;max-width:280px"><div class="quota"><div class="row"><span>名额</span><span class="num"><b>${esc(r.active)}</b> / ${r.max_users>0?esc(r.max_users):'不限'}</span></div>
       <div class="bar ${cls}"><i style="width:${pct}%"></i></div></div></div></div>
+    ${(r.waitlist||[]).length ? `<div class="notice-box">候补 ${r.waitlist.length} 人（名额满时 /register 自动排队；有空位后按顺序私信邀请，保留 24 小时）：${r.waitlist.map((w,i)=>`${i+1}. ${esc(w.name||('Discord '+w.discord_id))}${w.invited_at?'（已邀请，'+esc(new Date(w.invited_at*1000).toLocaleString())+'）':''}`).join('；')}</div>` : ''}
     <div class="cols-3">
       <div class="field"><label for="reg_max">名额上限</label><input id="reg_max" type="number" min="0" value="${esc(r.max_users)}"><div class="hint">0 = 不限</div></div>
       <div class="field"><label for="reg_exp">有效期（天）</label><input id="reg_exp" type="number" min="0" value="${esc(r.expires_days)}"><div class="hint">0 = 永久</div></div>
@@ -1920,6 +1927,7 @@ function changeLogPage(delta){ logPage=Math.max(1,logPage+delta); loadLogs(); }
 
 /* ---------- settings ---------- */
 async function loadSettings(){
+  loadGuard();
   try{
     const [a, s, o, r] = await Promise.all([
       api('/admin/api/announcement'), api('/admin/api/settings'),
@@ -1986,6 +1994,28 @@ async function saveBudget(){
     toast('已保存：月预算 ' + d.global_monthly_anlas + 'A / V5 日限 ' + d.global_daily_v5, 'ok');
     showV5Cap(d.v5_capacity);
     loadAllowance();
+  }catch(e){ toastErr(e); }
+}
+let guardData = null;
+async function loadGuard(){
+  try{
+    guardData = await api('/admin/api/guard');
+    const v = guardData.values, f = guardData.fields;
+    $('#guardFields').innerHTML = Object.keys(f).map(k => `<div class="field"><label for="g_${k}">${esc(f[k].label)}</label>
+      <input id="g_${k}" type="number" min="${f[k].min}" max="${f[k].max}" step="1" value="${esc(v[k])}"><div class="hint">默认 ${f[k].default}，范围 ${f[k].min}～${f[k].max}</div></div>`).join('');
+    const acc = guardData.accounts.map(a => `账号 ${a.position}：今天 ${a.today}${v.account_daily_cap?' / '+v.account_daily_cap:''} 张，本小时 ${a.this_hour}${guardData.hourly_cap_now?' / '+guardData.hourly_cap_now:''} 张`).join('；');
+    $('#guardLive').textContent = `${guardData.quiet_now ? '🌙 现在是安静时段' : '☀️ 正常时段'} · ${acc || '没有可用账号'} · 正在生成或排队 ${guardData.queued_images} 张`;
+  }catch(e){ $('#guardLive').textContent = '读取失败'; }
+}
+async function saveGuard(){
+  try{
+    const body = {};
+    for(const k of Object.keys(guardData.fields)){
+      const f = guardData.fields[k];
+      body[k] = readNum('g_' + k, f.label, {min:f.min, max:f.max});
+    }
+    await api('/admin/api/guard', {method:'PUT', body: JSON.stringify(body)});
+    toast('账号保护设置已保存，立即生效', 'ok'); loadGuard();
   }catch(e){ toastErr(e); }
 }
 async function saveRuntimeLimits(){
@@ -2080,6 +2110,7 @@ document.addEventListener('click', ev=>{
     case 'close-keymodal': closeOverlay('#keyModal'); $('#keyModalVal').value=''; break;
     case 'save-budget': saveBudget(); break;
     case 'save-runtime': saveRuntimeLimits(); break;
+    case 'save-guard': saveGuard(); break;
     case 'save-announce': saveAnnounce(); break;
   }
 });

@@ -123,6 +123,7 @@ async def lifespan(app: FastAPI):
     await STATE.load_runtime_limits()
     await STATE.db.migrate_upstream_token_ids([token.token_id for token in STATE.nai.pool])
     await STATE.nai.load_saved_limits()
+    await STATE.guard.load()
     await STATE.load_image_cooldown()
     removed_keys = await STATE.delete_inactive_keys()
     if removed_keys:
@@ -166,7 +167,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "1.5.0"
+__version__ = "1.6.0"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -389,6 +390,7 @@ async def maintenance_loop() -> None:
             if registrar is not None:
                 await registrar.sync_roles()
                 await registrar.backfill_profiles()
+                await registrar.invite_waitlist()
             await check_upstream_perf()
             usage = shutil.disk_usage(STATE.settings.data_dir)
             if usage.free / usage.total < 0.10:
@@ -496,9 +498,57 @@ async def read_image_payload(request: Request, limit_mb: float = 25) -> dict:
         raise err(exc.status_code, exc.detail) from None
 
 
+def daily_base(key) -> int:
+    """这把 Key 的每日保底张数；0 表示没有保底 / 借用之分（整天都按每日上限）。"""
+    guard = getattr(STATE, "guard", None)
+    base = guard.values["base_daily_images"] if guard is not None else 0
+    if key["is_admin"] or not base or not key["daily_images"] or base >= key["daily_images"]:
+        return 0
+    return base
+
+
+async def guard_precheck() -> None:
+    """出图前先看账号保护：所有可用账号都到了每日 / 每小时上限或安静时段上限时，直接 429 并说明原因。"""
+    guard = getattr(STATE, "guard", None)
+    pool = [t for t in getattr(STATE.nai, "pool", []) if t.usable]
+    if guard is None or not pool:
+        return
+    reasons = [await guard.token_block_reason(STATE.db, t.token_id, STATE.day()) for t in pool]
+    if all(reasons):
+        raise err(429, reasons[0])
+
+
+@asynccontextmanager
+async def image_admission(key):
+    """P1：每把 Key 同时生成 1 张、最多再排 N 张；全站排队总数有上限。超出直接 429，不进入排队。"""
+    guard = getattr(STATE, "guard", None)
+    if guard is None or key["is_admin"]:
+        yield
+        return
+    await guard_precheck()
+    accounts = sum(1 for t in getattr(STATE.nai, "pool", []) if t.usable)
+    reason = guard.admit_image(key["id"], accounts)
+    if reason:
+        raise err(429, reason)
+    try:
+        yield
+    finally:
+        guard.release_image(key["id"])
+
+
 @asynccontextmanager
 async def acquire_concurrency(key, *, image: bool = False):
     """Per-user admission; text also uses the legacy global request limit."""
+    if image:
+        async with image_admission(key), _acquire_slots(key, image=True):
+            yield
+    else:
+        async with _acquire_slots(key, image=False):
+            yield
+
+
+@asynccontextmanager
+async def _acquire_slots(key, *, image: bool):
     t = STATE.settings.queue_timeout
     ksem = None if key["is_admin"] else STATE.key_sem(key["id"], STATE.settings.key_concurrency)
     async with AsyncExitStack() as resources:
@@ -533,8 +583,17 @@ async def quota_image_check(key, est: dict, *, legacy_free_images: int = 0,
     own_day = own_month = own
     global_day = global_month = pending
     if legacy_free_images and key["daily_images"] > 0:
-        if c["legacy_free_images"] + sum(r.legacy for r in own_day) + legacy_free_images > key["daily_images"]:
+        used_legacy = c["legacy_free_images"] + sum(r.legacy for r in own_day)
+        if used_legacy + legacy_free_images > key["daily_images"]:
             raise err(429, f"今日 V4.5 及以下免费图额度已用完（{key['daily_images']} 张/天），明日恢复")
+        # 保底与借用：超过每日保底后，只在全站空闲（没人排队、本小时用量不高）时放行，直到 Key 的每日上限。
+        guard = getattr(STATE, "guard", None)
+        base = guard.values["base_daily_images"] if guard is not None else 0
+        if base and base < key["daily_images"] and used_legacy + legacy_free_images > base:
+            tokens = [t.token_id for t in getattr(STATE.nai, "pool", []) if t.usable]
+            if not guard.site_idle(key["id"], tokens):
+                raise err(429, f"今天的保底 {base} 张已用完。全站空闲时可以继续用到 {key['daily_images']} 张，"
+                               "现在有其他人在排队或用量较高，请过几分钟再试")
     if est["v5"] > 0:
         # V5 周额度是账户级共享资源，用全站日计数镜像（恢复量 ~190 张/天）
         if key["daily_v5"] > 0 and c["v5"] + sum(r.v5 for r in own_day) + est["v5"] > key["daily_v5"]:
@@ -1322,6 +1381,7 @@ async def v1_me(request: Request):
         "generated_images_total": generated_images.get(key["id"], 0),
         "today": {
             "images": c["images"], "daily_images": key["daily_images"],
+            "daily_images_base": daily_base(key),
             "legacy_free_images_today": c["legacy_free_images"],
             "anlas_today": round(float(c["anlas"]), 2),
             "daily_anlas": key["daily_anlas"],
@@ -1523,6 +1583,17 @@ async def public_status(request: Request):
     return JSONResponse(body, headers={"Cache-Control": "no-store"})
 
 
+def _public_limits() -> dict:
+    """首页「使用须知」里的排队与保底规则；数值来自后台「账号保护与排队」。"""
+    guard = getattr(STATE, "guard", None)
+    if guard is None:
+        return {}
+    v = guard.values
+    return {"key_image_queue": v["key_image_queue"], "base_daily_images": v["base_daily_images"],
+            "quiet_start": v["quiet_start"], "quiet_end": v["quiet_end"],
+            "quiet": v["quiet_start"] != v["quiet_end"]}
+
+
 async def _image_stability() -> dict:
     getter = getattr(STATE.db, "image_stability", None)
     if getter is None:
@@ -1557,6 +1628,7 @@ async def _public_status_body(request: Request) -> dict:
         "audit_notice": audit_notice(*(await audit_flags(STATE.db, SETTINGS))),
         "discord_invite": SETTINGS.discord_invite_url,
         "key_inactivity_delete_days": SETTINGS.key_inactivity_delete_days,
+        "limits": _public_limits(),
         # 正在处理的出图任务数（含正在生成的那一个）；全站串行出图，成员据此估计等待时间
         "image_jobs": len(getattr(STATE, "image_reservations", {}) or {}),
         "stability": await _image_stability(),

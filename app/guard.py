@@ -1,0 +1,161 @@
+"""账号保护与排队（P0 / P1）：每个上游账号的每日 / 每小时出图上限、安静时段、请求间隔抖动、
+每把 Key 的排队数、全站排队上限、V4.5 保底与空闲借用。
+
+依据：fccc 的号在日均约 1370、峰值约 2500 张/天、全天不停时被 NovelAI 限制；NovelAI 条款禁止给服务造成
+「excessive strain」。所以总量和节奏比单人限额更重要：让上游看到的是一个用得多、但有作息、不并发的正常用户。
+
+所有数值存 site_settings（键名 guard_*），后台「设置 → 账号保护与排队」可改，立即生效；0 表示关闭该项。
+"""
+from __future__ import annotations
+
+import math
+import random
+import time
+from collections import deque
+from datetime import datetime
+from typing import Any, Optional
+from zoneinfo import ZoneInfo
+
+HOUR = 3600
+# 名称: (默认值, 最小, 最大, 说明)
+FIELDS: dict[str, tuple[int, int, int, str]] = {
+    "account_daily_cap": (1000, 0, 20000, "每个上游账号每天最多出图张数"),
+    "account_hourly_cap": (80, 0, 240, "每个上游账号每小时最多出图张数"),
+    "quiet_start": (2, 0, 23, "安静时段开始（北京时间，整点）"),
+    "quiet_end": (8, 0, 23, "安静时段结束（北京时间，整点；与开始相同表示不设安静时段）"),
+    "quiet_hourly_cap": (20, 0, 240, "安静时段每个账号每小时最多出图张数"),
+    "interval_jitter": (5, 0, 30, "两次出图间隔额外随机增加 0～N 秒"),
+    "key_image_queue": (1, 0, 3, "每把 Key 在生成中的那张之外，最多再排几张"),
+    "queue_per_account": (10, 0, 100, "每个上游账号全站最多同时排几张图"),
+    "base_daily_images": (100, 0, 100000, "V4.5 每人每天保底张数；超过后只在全站空闲时放行，直到 Key 的每日上限"),
+}
+IDLE_SHARE = 0.6           # 本小时用量低于上限的 60% 且没人排队，算「空闲」，允许借用
+
+
+def _key(name: str) -> str:
+    return "guard_" + name
+
+
+class Guard:
+    def __init__(self, db=None, tz: str = "Asia/Shanghai"):
+        self.db = db
+        self.tz = ZoneInfo(tz)
+        self.values: dict[str, int] = {name: spec[0] for name, spec in FIELDS.items()}
+        self._starts: dict[str, deque] = {}
+        self.image_inflight: dict[int, int] = {}
+
+    # ---------- 设置 ----------
+    async def load(self) -> None:
+        if self.db is None:
+            return
+        for name, (default, low, high, _) in FIELDS.items():
+            try:
+                raw = await self.db.get_setting(_key(name), None)
+                if raw is not None:
+                    self.values[name] = max(low, min(high, int(float(raw))))
+            except (TypeError, ValueError):
+                self.values[name] = default
+
+    async def save(self, body: dict) -> dict[str, int]:
+        updates: dict[str, int] = {}
+        for name, value in body.items():
+            if name not in FIELDS:
+                continue
+            _, low, high, label = FIELDS[name]
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or value != int(value):
+                raise ValueError(f"{label} 必须是整数")
+            if not low <= int(value) <= high:
+                raise ValueError(f"{label} 必须在 {low}～{high} 之间")
+            updates[name] = int(value)
+        if updates and self.db is not None:
+            await self.db.set_settings_bulk({_key(k): v for k, v in updates.items()})
+        self.values.update(updates)
+        return dict(self.values)
+
+    def describe(self) -> dict[str, Any]:
+        return {"values": dict(self.values),
+                "fields": {k: {"default": v[0], "min": v[1], "max": v[2], "label": v[3]} for k, v in FIELDS.items()},
+                "quiet_now": self.in_quiet(), "hourly_cap_now": self.hourly_cap()}
+
+    # ---------- 安静时段与每小时上限 ----------
+    def in_quiet(self, now: Optional[float] = None) -> bool:
+        start, end = self.values["quiet_start"], self.values["quiet_end"]
+        if start == end:
+            return False
+        hour = datetime.fromtimestamp(time.time() if now is None else now, self.tz).hour
+        return start <= hour < end if start < end else (hour >= start or hour < end)
+
+    def hourly_cap(self, now: Optional[float] = None) -> int:
+        return self.values["quiet_hourly_cap"] if self.in_quiet(now) else self.values["account_hourly_cap"]
+
+    def record_start(self, token_id: str, now: Optional[float] = None) -> None:
+        q = self._starts.setdefault(token_id, deque())
+        q.append(time.time() if now is None else now)
+
+    def hour_count(self, token_id: str, now: Optional[float] = None) -> int:
+        now = time.time() if now is None else now
+        q = self._starts.get(token_id)
+        if not q:
+            return 0
+        while q and q[0] <= now - HOUR:
+            q.popleft()
+        return len(q)
+
+    def minutes_until_free(self, token_id: str, now: Optional[float] = None) -> int:
+        now = time.time() if now is None else now
+        q = self._starts.get(token_id)
+        if not q:
+            return 1
+        return max(1, math.ceil((q[0] + HOUR - now) / 60))
+
+    def jitter(self) -> float:
+        span = self.values["interval_jitter"]
+        return random.uniform(0, span) if span else 0.0
+
+    async def token_block_reason(self, db, token_id: str, day: str, now: Optional[float] = None) -> Optional[str]:
+        """这个上游账号现在不能再接新的出图任务时，返回给成员看的原因。"""
+        daily = self.values["account_daily_cap"]
+        if daily:
+            used = (await db.get_upstream_counter(token_id, day))["images"]
+            if used >= daily:
+                return f"本站今天的出图总量已达上限（每个账号 {daily} 张/天，用来保护上游账号），明天 0 点恢复"
+        cap = self.hourly_cap(now)
+        if cap and self.hour_count(token_id, now) >= cap:
+            wait = self.minutes_until_free(token_id, now)
+            if self.in_quiet(now):
+                return (f"现在是安静时段（{self.values['quiet_start']}:00–{self.values['quiet_end']}:00），"
+                        f"出图放慢到每小时 {cap} 张，约 {wait} 分钟后有空位")
+            return f"本小时出图量已达上限（每小时 {cap} 张，用来保护上游账号），约 {wait} 分钟后有空位"
+        return None
+
+    # ---------- 排队（P1） ----------
+    def admit_image(self, key_id: int, accounts: int) -> Optional[str]:
+        """每把 Key 同时生成 1 张、最多再排 key_image_queue 张；全站排队总数有上限。返回拒绝原因或 None。"""
+        mine = self.image_inflight.get(key_id, 0)
+        extra = self.values["key_image_queue"]
+        if mine >= 1 + extra:
+            more = f"、最多再排 {extra} 张" if extra else ""
+            return f"你的上一张图还没出完：每把 Key 同时只生成 1 张{more}，请等前面的完成后再发"
+        per = self.values["queue_per_account"]
+        if per and sum(self.image_inflight.values()) >= per * max(1, accounts):
+            return f"当前排队的人太多（全站最多同时排 {per * max(1, accounts)} 张），请稍后再试"
+        self.image_inflight[key_id] = mine + 1
+        return None
+
+    def release_image(self, key_id: int) -> None:
+        n = self.image_inflight.get(key_id, 0) - 1
+        if n > 0:
+            self.image_inflight[key_id] = n
+        else:
+            self.image_inflight.pop(key_id, None)
+
+    # ---------- 保底与借用 ----------
+    def site_idle(self, key_id: int, token_ids: list[str], now: Optional[float] = None) -> bool:
+        """没有其他成员在排队，且本小时用量低于上限的 60%：允许超出保底继续用。"""
+        if any(n > 0 for k, n in self.image_inflight.items() if k != key_id):
+            return False
+        cap = self.hourly_cap(now)
+        if not cap or not token_ids:
+            return True
+        used = sum(self.hour_count(t, now) for t in token_ids)
+        return used < IDLE_SHARE * cap * len(token_ids)

@@ -35,6 +35,7 @@ ADMIN_ACTIONS = {
     ("PUT", "/ops/registration"): "修改开放注册设置",
     ("PUT", "/ops/features"): "修改全局功能开关",
     ("PUT", "/ops/audit"): "修改生成记录设置",
+    ("PUT", "/guard"): "修改账号保护与排队设置",
 }
 
 

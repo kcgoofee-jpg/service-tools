@@ -578,6 +578,35 @@ async def upstream_perf(request: Request):
     return await perf.collect(request.app.state.gate, time.time())
 
 
+@router.get("/guard")
+async def guard_get(request: Request):
+    """账号保护与排队（P0 / P1）的当前设置和实时用量。"""
+    require_admin(request)
+    st = request.app.state.gate
+    data = st.guard.describe()
+    accounts = []
+    for t in st.nai.pool:
+        used = (await st.db.get_upstream_counter(t.token_id, st.day()))["images"]
+        accounts.append({"position": t.position, "usable": t.usable, "today": used,
+                         "this_hour": st.guard.hour_count(t.token_id)})
+    data["accounts"] = accounts
+    data["queued_images"] = sum(st.guard.image_inflight.values())
+    return data
+
+
+@router.put("/guard")
+async def guard_put(request: Request):
+    require_admin(request)
+    body = await read_json_body(request)
+    if not isinstance(body, dict):
+        raise HTTPException(422, "参数必须是对象")
+    try:
+        await request.app.state.gate.guard.save(body)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+    return await guard_get(request)
+
+
 @router.get("/shadow")
 async def scheduler_shadow(request: Request, hours: int = 24):
     """调度影子模式：用真实请求回放新规则，只计算不执行。hours=24 或 168。"""
@@ -914,6 +943,7 @@ async def _ops_snapshot(request: Request) -> dict:
     reg["active"] = await service.count_active() if service else 0
     reg["reset_at"] = service.reset_at if service else ""
     reg["v5_capacity"] = await ops.v5_capacity(st.db, st.settings, service)
+    reg["waitlist"] = await service.waitlist() if service else []
     prompts, thumbs, days = await ops.audit_flags(st.db, st.settings)
     return {
         "registration": reg,

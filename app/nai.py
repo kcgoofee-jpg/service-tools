@@ -133,6 +133,7 @@ class NaiClient:
         self._client: Optional[httpx.AsyncClient] = None
         self._lock = asyncio.Lock()
         self.allowance = AllowanceCache(db)
+        self.guard = None          # app.guard.Guard：账号每日 / 每小时上限、安静时段、间隔抖动
 
     async def start(self) -> None:
         self._client = httpx.AsyncClient(
@@ -273,13 +274,25 @@ class NaiClient:
             return True
 
     async def pick_token(self, *, requires_anlas: bool = False,
-                         v5_free: bool = False) -> Optional[TokenState]:
-        """选取符合该图片费用策略的令牌；V5 限额在这里原子预留。"""
+                         v5_free: bool = False, image_job: bool = False) -> Optional[TokenState]:
+        """选取符合该图片费用策略的令牌；V5 限额在这里原子预留。
+
+        image_job：出图类任务还要经过账号保护（每日 / 每小时上限、安静时段）；全部账号都被挡住时返回 429 和原因。
+        """
         async with self._lock:
             usable = [t for t in self.pool if t.usable and
                       (not requires_anlas or t.allow_anlas)]
             if not usable:
                 return None
+            if image_job and self.guard is not None:
+                reasons = []
+                open_tokens = []
+                for t in usable:
+                    reason = await self.guard.token_block_reason(self._db, t.token_id, self._day_fn())
+                    (reasons.append(reason) if reason else open_tokens.append(t))
+                if not open_tokens:
+                    raise UpstreamError(429, reasons[0])
+                usable = open_tokens
 
             # 保持轮询，同时跳过当日 V5 已用完的特定上游 Token。
             start = (self._rr + 1) % len(usable)
@@ -332,7 +345,8 @@ class NaiClient:
                 now = time.monotonic()
                 wait = max(0.0, ts.image_next_at - now)
                 if not wait:
-                    ts.image_next_at = now + self._image_min_interval
+                    jitter = self.guard.jitter() if self.guard is not None else 0.0
+                    ts.image_next_at = now + self._image_min_interval + jitter
                     return
             await asyncio.sleep(wait)
 
@@ -437,7 +451,8 @@ class NaiClient:
         attempts = 0
         while attempts < 2:
             attempts += 1
-            ts = await self.pick_token(requires_anlas=requires_anlas, v5_free=v5_free)
+            ts = await self.pick_token(requires_anlas=requires_anlas, v5_free=v5_free,
+                                       image_job=image_lane and wait_for_image_slot)
             if ts is None:
                 raise self._unavailable(requires_anlas, v5_free)
             succeeded = False
@@ -469,6 +484,8 @@ class NaiClient:
                         before_dispatch()
                     send_started = True
                     request_timing.mark_sent()
+                    if image_lane and wait_for_image_slot and self.guard is not None:
+                        self.guard.record_start(ts.token_id)
                     if max_response_bytes is None:
                         resp = await self._client.request(
                             method, url, json=json_body, headers=self._headers(ts, accept))
@@ -571,7 +588,7 @@ class NaiClient:
         """图片流不重试；调用方只在确认完整最终图片后增加 completed_images。"""
         if self._client is None:
             raise RuntimeError("client not started")
-        ts = await self.pick_token(requires_anlas=requires_anlas, v5_free=v5_free)
+        ts = await self.pick_token(requires_anlas=requires_anlas, v5_free=v5_free, image_job=True)
         if ts is None:
             raise self._unavailable(requires_anlas, v5_free)
         resp: Optional[httpx.Response] = None
@@ -624,6 +641,8 @@ class NaiClient:
                     on_dispatch()
                 send_started = True
                 request_timing.mark_sent()
+                if self.guard is not None:
+                    self.guard.record_start(ts.token_id)
                 resp = await self._client.send(req, stream=True)
                 request_timing.mark_status(resp.status_code)
             if resp.status_code == 429:

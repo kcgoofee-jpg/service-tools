@@ -106,6 +106,12 @@ CREATE TABLE IF NOT EXISTS upstream_token_counters (
     v5 INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (token_id, day)
 );
+CREATE TABLE IF NOT EXISTS waitlist (
+    discord_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL DEFAULT '',
+    joined_at REAL NOT NULL,
+    invited_at REAL                -- 有名额时发出邀请的时间；24 小时内未领取则让给下一位
+);
 CREATE TABLE IF NOT EXISTS key_idle_reminders (
     key_id INTEGER PRIMARY KEY,
     activity REAL NOT NULL,       -- 提醒时 Key 的最后活动时间；之后再有活动会重新计时并允许再次提醒

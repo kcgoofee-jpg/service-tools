@@ -295,6 +295,7 @@ footer{max-width:960px;margin:0 auto;padding:24px 16px 40px;text-align:center;co
     <ul class="rules card">
       <li><span class="ri" data-ic="refresh"></span><span><b>额度每日重置。</b>用完当天额度后，次日自动恢复。</span></li>
       <li><span class="ri" data-ic="image"></span><span><b>只提供免费出图，不消耗 Anlas。</b>尺寸可以自定义，总像素不超过 1024×1024 即可（如 832×1216、1216×832、1024×1024），超出会自动等比缩小；最多 28 步，每次 1 张；V5 使用官方预设尺寸。图生图、局部重绘、Vibe、ControlNet、角色精确参考会消耗 Anlas，暂不开放，客户端里请关闭。</span></li>
+      <li id="ruleGuard" hidden><span class="ri" data-ic="clock"></span><span><b>排队与保底。</b><span id="guardTxt"></span></span></li>
       <li id="ruleIdle" hidden><span class="ri" data-ic="info"></span><span><b>长期不用会被回收。</b>领取后连续 <b id="idleDays"></b> 天没有任何请求的 Key 会被自动删除，名额让给其他人；之后可以重新领取。</span></li>
       <li><span class="ri" data-ic="key"></span><span><b>一人一把，请勿分享 Key。</b>为防止分享，本站会记录你使用 Key 时的来源网段（只保留打码后的前两段，不保存完整 IP，7 天后自动删除）；同一把 Key 短时间内出现在多个网段时，站长可能会来确认。如果泄露，请在 Discord 使用 <code>/resetkey</code> 重置。</span></li>
       <li><span class="ri" data-ic="pulse"></span><span><b>生成变慢时，</b>先看页面上方的服务状态，上游限流时稍等片刻再试。</span></li>
@@ -428,13 +429,21 @@ function renderStatus(d){
   if(jobs > 1) pills.appendChild(pill('info', '出图排队中 ' + jobs + ' 个任务 · 约 15 秒一张', false));
   if(reg.open){
     var t = '注册开放中';
-    if(reg.slots_left != null) t += ' · 剩余名额 ' + reg.slots_left;
+    if(reg.slots_left != null) t += reg.slots_left === 0 ? ' · 名额已满，/register 可排候补' : ' · 剩余名额 ' + reg.slots_left;
     pills.appendChild(pill(reg.slots_left === 0 ? 'warn' : 'info', t, false));
   } else pills.appendChild(pill('', '注册暂未开放', false));
   var cd = Number(up.image_cooldown_seconds) || 0;
   $('cooldown').hidden = !(cd > 0);
   if(cd > 0) $('cooldownTxt').textContent = '上游限流冷却中，约 ' + cd + ' 秒';
   var idle = Number(d.key_inactivity_delete_days) || 0;
+  var L = d.limits || {};
+  if(L.key_image_queue != null){
+    var parts = ['每把 Key 同时生成 1 张' + (L.key_image_queue ? '、最多再排 ' + L.key_image_queue + ' 张，' : '，') + '多发的会被退回，等前一张出完再发即可'];
+    if(L.base_daily_images) parts.push('每人每天保底 ' + L.base_daily_images + ' 张，超过后在全站空闲（没人排队）时可以继续用到你的每日上限');
+    if(L.quiet) parts.push('为保护上游账号，全站每天、每小时出图有总量上限，' + L.quiet_start + ':00–' + L.quiet_end + ':00 出图会放慢');
+    $('guardTxt').textContent = parts.join('；') + '。';
+    $('ruleGuard').hidden = false;
+  }
   $('ruleIdle').hidden = !(idle > 0);
   if(idle > 0) $('idleDays').textContent = String(idle);
   renderDiscord(d.discord_invite);
@@ -525,6 +534,7 @@ function renderResult(m){
 
   var qs = el('div'); qs.style.cssText = 'display:flex;flex-direction:column;gap:16px';
   qs.appendChild(quota('今日图片', t.images, t.daily_images));
+  if(t.daily_images_base){ var bn = el('div', '', '保底 ' + t.daily_images_base + ' 张；超过后在全站空闲（没人排队）时可以继续用到 ' + t.daily_images + ' 张'); bn.style.cssText = 'color:var(--muted);font-size:13px;margin-top:-8px'; qs.appendChild(bn); }
   var all = t.image_model_scope === 'all';
   if(all) qs.appendChild(quota('今日 V5', t.v5_today, t.daily_v5));
   box.appendChild(qs);

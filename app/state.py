@@ -53,6 +53,9 @@ class GateState:
             image_min_interval=settings.image_min_interval,
         )
         self.nai.managed_path = self.token_store_path
+        from .guard import Guard
+        self.guard = Guard(self.db, settings.tz)
+        self.nai.guard = self.guard
         self.upstream_managed = bool(managed)
         self.alerter = alerts.from_settings(settings)
         self.sources = SourceTracker(self.db, self.alerter, threshold=settings.key_share_alert_nets)
