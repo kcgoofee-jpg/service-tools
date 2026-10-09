@@ -30,8 +30,10 @@ class RegistrationService:
                  key_daily_images: int = 100, key_daily_v5: int = 50,
                  key_image_scope: str = "all", key_expires_days: int = 0, key_rpm: int = 5,
                  max_users: int = 0, reset_at: str = "", key_features: str | None = None,
-                 min_account_days: int = 0, member_role_id: str = ""):
+                 min_account_days: int = 0, member_role_id: str = "",
+                 admin_ids: tuple = ()):
         self.member_role_id = member_role_id
+        self.admin_ids = tuple(admin_ids)
         self.max_users, self.reset_at, self.key_features = max_users, reset_at, key_features
         self.min_account_days = min_account_days
         self.command_guild, self.membership_guild = command_guild, membership_guild
@@ -66,32 +68,65 @@ class RegistrationService:
         except httpx.HTTPError:
             return False
 
+    async def _queue_role_removal(self, discord_id: str) -> None:
+        await self.db._db.execute(
+            "INSERT OR REPLACE INTO pending_role_removals(discord_id, created_at) VALUES (?,?)",
+            (discord_id, time.time()))
+        await self.db._db.commit()
+
     async def release_role(self, discord_id: str) -> None:
-        await self._set_role(discord_id, False)
+        """摘身份组：先登记待办，成功后再划掉；失败（限流、网络）会由后台同步重试，不会永久残留。"""
+        if not self.member_role_id:
+            return
+        await self._queue_role_removal(discord_id)
+        if await self._set_role(discord_id, False):
+            await self.db._db.execute("DELETE FROM pending_role_removals WHERE discord_id=?", (discord_id,))
+            await self.db._db.commit()
 
     async def sync_roles(self) -> int:
-        """Key 已过期、被停用或被删除的成员：摘掉身份组（每 5 分钟由后台任务调用）。"""
+        """后台同步：Key 已过期 / 被停用 / 被删除的成员摘掉身份组，并重试之前失败的摘除。"""
         if not self.member_role_id:
             return 0
+        done = 0
         rows = await self.db._db.execute_fetchall(
             """SELECT r.discord_id FROM discord_registrations r LEFT JOIN api_keys k ON k.id=r.key_id
                WHERE r.role_granted=1 AND (k.id IS NULL OR k.enabled=0
                      OR (k.expires_at IS NOT NULL AND k.expires_at < ?))""", (time.time(),))
-        done = 0
         for (discord_id,) in rows:
+            await self._queue_role_removal(str(discord_id))
+            await self.db._db.execute("UPDATE discord_registrations SET role_granted=0 WHERE discord_id=?",
+                                      (str(discord_id),))
+        await self.db._db.commit()
+        pending = await self.db._db.execute_fetchall("SELECT discord_id FROM pending_role_removals")
+        for (discord_id,) in pending:
             if await self._set_role(str(discord_id), False):
-                await self.db._db.execute("UPDATE discord_registrations SET role_granted=0 WHERE discord_id=?",
-                                          (str(discord_id),))
+                await self.db._db.execute("DELETE FROM pending_role_removals WHERE discord_id=?", (str(discord_id),))
                 done += 1
-        if done:
-            await self.db._db.commit()
+        await self.db._db.commit()
         return done
 
-    async def _release_if_expired(self, discord_id: str) -> None:
-        """成员的 Key 已过期：自动清掉旧 Key 和记录，让他可以在有名额时重新领取（每个周期自然轮换）。"""
+    async def is_banned(self, discord_id: str) -> bool:
+        rows = await self.db._db.execute_fetchall("SELECT 1 FROM discord_bans WHERE discord_id=?", (discord_id,))
+        return bool(rows)
+
+    async def ban(self, discord_id: str) -> None:
+        """永久禁止该 Discord 账号领取：写入封禁表，并撤销其现有 Key 与身份组。"""
+        await self.db._db.execute("INSERT OR IGNORE INTO discord_bans(discord_id, created_at) VALUES (?,?)",
+                                  (discord_id, time.time()))
+        await self.db._db.commit()
+        await self.revoke(discord_id)
+
+    async def unban(self, discord_id: str) -> bool:
+        cur = await self.db._db.execute("DELETE FROM discord_bans WHERE discord_id=?", (discord_id,))
+        await self.db._db.commit()
+        return cur.rowcount == 1
+
+    async def _release_if_expired(self, discord_id: str, *, defer_role: bool = False) -> None:
+        """成员的 Key 已过期：自动清掉旧 Key 和记录，让他可以在有名额时重新领取（每个周期自然轮换）。
+        被站长停用（enabled=0）的 Key 不会被自动释放：停用等于暂停该成员，不能靠过期绕过。"""
         key = await self.key_row_for(discord_id)
-        if key is not None and key["expires_at"] and key["expires_at"] < time.time():
-            await self.revoke(discord_id)
+        if key is not None and key["enabled"] and key["expires_at"] and key["expires_at"] < time.time():
+            await self.revoke(discord_id, remove_role=not defer_role)
 
     async def settings(self) -> dict:
         from .ops import registration_settings
@@ -110,7 +145,7 @@ class RegistrationService:
             "SELECT key_id FROM discord_registrations WHERE discord_id=?", (discord_id,))
         return await self.db.get_key(rows[0][0]) if rows else None
 
-    async def revoke(self, discord_id: str) -> bool:
+    async def revoke(self, discord_id: str, *, remove_role: bool = True) -> bool:
         """删除该用户的 Key 和领取记录，名额释放，用户可重新领取。"""
         rows = await self.db._db.execute_fetchall(
             "SELECT key_id FROM discord_registrations WHERE discord_id=?", (discord_id,))
@@ -119,14 +154,20 @@ class RegistrationService:
         await self.db.delete_key(rows[0][0])
         await self.db._db.execute("DELETE FROM discord_registrations WHERE discord_id=?", (discord_id,))
         await self.db._db.commit()
-        await self.release_role(discord_id)
+        if remove_role:
+            await self.release_role(discord_id)
+        elif self.member_role_id:
+            await self._queue_role_removal(discord_id)          # 由后台同步稍后执行，避免在锁内等 Discord
         return True
 
     async def reset_all(self) -> int:
         """清空所有自助注册用户（删 Key 和记录，保留用量账本），用户需重新 /register。"""
-        rows = await self.db._db.execute_fetchall("SELECT discord_id FROM discord_registrations")
+        rows = await self.db._db.execute_fetchall(
+            """SELECT r.discord_id FROM discord_registrations r LEFT JOIN api_keys k ON k.id=r.key_id
+               WHERE k.id IS NULL OR k.enabled=1""")           # 被停用的成员不在清空范围内
         for (discord_id,) in rows:
-            await self.revoke(str(discord_id))
+            await self.revoke(str(discord_id), remove_role=False)
+        await self.sync_roles()
         return len(rows)
 
     async def begin(self, user_id: str, guild_id: str) -> str:
@@ -136,6 +177,8 @@ class RegistrationService:
             age_days = (time.time() * 1000 - ((int(user_id) >> 22) + 1420070400000)) / 86_400_000
             if age_days < self.min_account_days:
                 raise RegistrationError(f"Discord 账号注册满 {self.min_account_days} 天后才能领取，请稍后再来。")
+        if await self.is_banned(user_id):
+            raise RegistrationError("这个 Discord 账号已被站长停用，无法领取 Key。")
         await self._release_if_expired(user_id)
         if (await self.db._db.execute_fetchall(
             "SELECT 1 FROM discord_registrations WHERE discord_id=?", (user_id,)
@@ -166,7 +209,9 @@ class RegistrationService:
         expected_id = pending[0]
         # The state is one-use; no OAuth token is persisted.
         async with self.lock:
-            await self._release_if_expired(expected_id)
+            if await self.is_banned(expected_id):
+                raise RegistrationError("这个 Discord 账号已被站长停用，无法领取 Key。")
+            await self._release_if_expired(expected_id, defer_role=True)
             if (await self.db._db.execute_fetchall(
                 "SELECT 1 FROM discord_registrations WHERE discord_id=?", (expected_id,)
             )):
@@ -222,10 +267,12 @@ class RegistrationService:
                     await self.db._db.execute("DELETE FROM discord_registrations WHERE discord_id=?", (expected_id,))
                     await self.db.delete_key(row["id"])
                     raise
-                if await self._set_role(expected_id, True):
+                if self.member_role_id:
+                    # 先记标志再调用 Discord：即使中途崩溃，到期同步也会尝试摘除，不会残留
                     await self.db._db.execute("UPDATE discord_registrations SET role_granted=1 WHERE discord_id=?",
                                               (expected_id,))
                     await self.db._db.commit()
+                    await self._set_role(expected_id, True)
                 return "sent"
             except (httpx.HTTPError, KeyError, ValueError) as exc:
                 raise RegistrationError("Discord 服务暂时不可用，请稍后重试。") from exc
@@ -237,6 +284,9 @@ def configured_service(db, http: httpx.AsyncClient) -> RegistrationService | Non
     names = ("DISCORD_CLIENT_ID", "DISCORD_CLIENT_SECRET", "DISCORD_BOT_TOKEN",
              "REGISTRATION_BRIDGE_SECRET", "DISCORD_GUILD_ID", "SITE_URL")
     if not all(os.getenv(name) for name in names):
+        return None
+    if len(os.environ["REGISTRATION_BRIDGE_SECRET"]) < 32:
+        print("[warn] REGISTRATION_BRIDGE_SECRET 少于 32 个字符，自助注册保持关闭。")
         return None
     site = os.environ["SITE_URL"].rstrip("/") + "/"
     guild = os.environ["DISCORD_GUILD_ID"].strip()
@@ -255,7 +305,8 @@ def configured_service(db, http: httpx.AsyncClient) -> RegistrationService | Non
         key_daily_v5=number("REGISTER_DAILY_V5", 0),
         key_image_scope="all" if os.getenv("REGISTER_IMAGE_SCOPE") == "all" else "legacy",
         key_expires_days=number("REGISTER_EXPIRES_DAYS", 30), key_rpm=max(1, number("REGISTER_RPM", 5)),
-        max_users=number("REGISTER_MAX_USERS", 0), reset_at=os.getenv("REGISTER_RESET_AT", "").strip(),
+        max_users=number("REGISTER_MAX_USERS", 10), reset_at=os.getenv("REGISTER_RESET_AT", "").strip(),
         key_features=os.getenv("REGISTER_FEATURES", "image").strip(),
         min_account_days=number("REGISTER_MIN_ACCOUNT_DAYS", 7),
-        member_role_id=os.getenv("DISCORD_MEMBER_ROLE_ID", "").strip())
+        member_role_id=os.getenv("DISCORD_MEMBER_ROLE_ID", "").strip(),
+        admin_ids=tuple(x.strip() for x in os.getenv("ADMIN_DISCORD_IDS", "").split(",") if x.strip().isdecimal()))

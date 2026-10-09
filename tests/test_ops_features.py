@@ -173,7 +173,9 @@ async def test_registration_runtime_settings_override_env_defaults(db):
     service = RegistrationService(db, None, client_id="c", client_secret="s", bot_token="b", bridge_secret="x",
                                   redirect_uri="https://x/cb", key_daily_images=30, key_daily_v5=0, max_users=10)
     cfg = await ops.registration_settings(db, service)
-    assert (cfg["open"], cfg["max_users"], cfg["daily_images"]) == (True, 10, 30)
+    assert (cfg["open"], cfg["max_users"], cfg["daily_images"]) == (False, 10, 30)    # closed until the owner opens it
+    await ops.set_registration(db, {"open": True})
+    assert (await ops.registration_settings(db, service))["open"] is True
     await ops.set_registration(db, {"open": False, "max_users": 3, "features": ["image", "text"], "daily_v5": 15})
     cfg = await ops.registration_settings(db, service)
     assert (cfg["open"], cfg["max_users"], cfg["daily_v5"], cfg["features"]) == (False, 3, 15, ["image", "text"])
@@ -195,11 +197,12 @@ async def test_registration_changes_are_announced_to_members(db):
             self.sent.append(text)
 
     state = SimpleNamespace(announcer=Announcer())
+    await ops.set_registration(db, {"open": True}, state)
     await ops.set_registration(db, {"open": False}, state)
     await ops.set_registration(db, {"max_users": 10, "open": True}, state)
     await ops.set_registration(db, {"daily_images": 50}, state)             # not a headcount/open change -> silent
     await ops.set_registration(db, {"max_users": 12, "notify": False}, state)   # explicitly silent
     await ops.set_registration(db, {"max_users": 15}, state)
     texts = state.announcer.sent
-    assert len(texts) == 3 and "已暂停" in texts[0] and "已开放" in texts[1] and "10" in texts[1]
-    assert "已调整" in texts[2] and "15" in texts[2]
+    assert len(texts) == 4 and "已开放" in texts[0] and "已暂停" in texts[1] and "已开放" in texts[2] and "10" in texts[2]
+    assert "已调整" in texts[3] and "15" in texts[3]

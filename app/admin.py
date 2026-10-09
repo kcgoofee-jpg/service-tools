@@ -41,13 +41,19 @@ def _secret(request: Request) -> str:
         return s.secret_key
     # 未配置则自动生成并持久化
     f = s.data_dir / "secret_key"
-    if f.exists():
-        s.secret_key = f.read_text().strip()
+    existing = f.read_text().strip() if f.exists() else ""
+    if len(existing) >= 32:
+        s.secret_key = existing
     else:
+        # 不存在或损坏（空文件等）：生成新的，并先写临时文件再原子替换，崩溃也不会留下空密钥
         s.secret_key = os.urandom(32).hex()
-        fd = os.open(f, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        tmp = f.with_name(f.name + ".tmp")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w") as fh:
             fh.write(s.secret_key)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, f)
     return s.secret_key
 
 
@@ -125,7 +131,7 @@ async def login(request: Request, response: Response):
         raise HTTPException(503, "尚未设置 ADMIN_PASSWORD 环境变量，管理端已锁定")
     if request.app.state.gate.settings.admin_password == "changeme-please":
         raise HTTPException(503, "ADMIN_PASSWORD 仍是示例值 changeme-please，请先在 .env 中改成强密码")
-    if not hmac.compare_digest(password, request.app.state.gate.settings.admin_password):
+    if not hmac.compare_digest(password.encode(), request.app.state.gate.settings.admin_password.encode()):
         raise HTTPException(401, "密码错误")
     response.set_cookie(
         COOKIE, make_session_cookie(request),

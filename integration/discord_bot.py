@@ -26,7 +26,7 @@ async def backend(path: str, interaction: discord.Interaction, extra_id: str | N
                   extra: dict | None = None):
     """POST to the gateway bridge. Returns (status, json-or-detail-text)."""
     payload = {"discord_id": extra_id or str(interaction.user.id), "guild_id": str(interaction.guild_id),
-               **(extra or {})}
+               "actor_id": str(interaction.user.id), **(extra or {})}
     try:
         async with httpx.AsyncClient(timeout=8) as client:
             response = await client.post(BACKEND + path, json=payload,
@@ -133,6 +133,16 @@ def build_client() -> tuple[discord.Client, app_commands.CommandTree, discord.Ob
     async def grant(interaction: discord.Interaction, member: discord.Member,
                     feature: app_commands.Choice[str], state: app_commands.Choice[str]):
         await run_ops(interaction, "grant", target=str(member.id), feature=feature.value, value=state.value)
+
+    @tree.command(name="ban", description="（管理员）永久禁止某位成员领取 Key，并撤销其现有 Key", guild=guild)
+    @app_commands.default_permissions(manage_guild=True)
+    async def ban(interaction: discord.Interaction, member: discord.Member):
+        await run_ops(interaction, "ban", target=str(member.id))
+
+    @tree.command(name="unban", description="（管理员）解除某位成员的领取禁令", guild=guild)
+    @app_commands.default_permissions(manage_guild=True)
+    async def unban(interaction: discord.Interaction, member: discord.Member):
+        await run_ops(interaction, "unban", target=str(member.id))
 
     @tree.command(name="audit", description="（管理员）开关生成记录（提示词与缩略图）并通知成员", guild=guild)
     @app_commands.default_permissions(manage_guild=True)
