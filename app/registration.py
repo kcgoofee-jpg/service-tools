@@ -392,10 +392,18 @@ class RegistrationService:
                 user = await self._discord("GET", "/users/@me", bearer="Bearer " + token)
                 if str(user.get("id")) != expected_id:
                     raise RegistrationError("授权的 Discord 账号与命令发起者不一致。")
-                member = await self._discord("GET", f"/users/@me/guilds/{self.membership_guild}/member",
-                                             bearer="Bearer " + token)
-                if self.membership_role and self.membership_role not in member.get("roles", []):
-                    raise RegistrationError("未检测到指定身份组，无法领取 Key。")
+                # 限定身份组（后台「领 Key」可设，可以是别的社区的服务器）优先于启动配置
+                guild_id = cfg.get("role_guild") or self.membership_guild
+                role_id = cfg.get("role_id") if cfg.get("role_guild") else self.membership_role
+                note = cfg.get("role_note") or "指定身份组"
+                response = await self.http.get(f"https://discord.com/api/users/@me/guilds/{guild_id}/member",
+                                               headers={"Authorization": "Bearer " + token}, timeout=12)
+                if response.status_code == 404:
+                    raise RegistrationError(f"目前只开放给「{note}」：请先加入对应的社区服务器后再用 /register。")
+                if response.status_code >= 400:
+                    raise RegistrationError("Discord 身份核验失败，请重新使用 /register 并同意授权。")
+                if role_id and role_id not in response.json().get("roles", []):
+                    raise RegistrationError(f"目前只开放给「{note}」，没有检测到这个身份组，暂时不能领取 Key。")
                 channel = await self._discord("POST", "/users/@me/channels",
                     bearer="Bot " + self.bot_token, json={"recipient_id": expected_id})
                 if await self.is_banned(expected_id):      # 网络等待期间可能刚被封禁

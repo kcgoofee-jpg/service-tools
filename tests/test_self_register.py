@@ -22,6 +22,7 @@ class RegistrationTests(unittest.IsolatedAsyncioTestCase):
         self.calls = []
         self.dm_fails = False
         self.roles = ["1335363403870502912"]
+        self.other_roles = None
 
         def discord(request):
             self.calls.append((request.method, request.url.path))
@@ -31,6 +32,9 @@ class RegistrationTests(unittest.IsolatedAsyncioTestCase):
                 return httpx.Response(200, json={"id": "777"})
             if request.url.path == "/api/users/@me/guilds/1134557553011998840/member":
                 return httpx.Response(200, json={"roles": self.roles})
+            if request.url.path == "/api/users/@me/guilds/222222222222222222/member":      # 别的社区
+                return httpx.Response(200, json={"roles": self.other_roles}) if self.other_roles is not None \
+                    else httpx.Response(404, json={})
             if request.url.path == "/api/users/@me/channels":
                 return httpx.Response(200, json={"id": "dm-1"})
             if request.url.path == "/api/channels/dm-1/messages":
@@ -75,6 +79,21 @@ class RegistrationTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(RegistrationError):
             await self.service.finish("auth-code", await self.begin())
         self.assertEqual((await self.db._db.execute_fetchall("SELECT count(*) FROM api_keys"))[0][0], 0)
+
+    async def test_admin_role_gate_in_other_community(self):
+        from app import ops
+        await ops.set_registration(self.db, {"role_guild": "222222222222222222", "role_id": "1461731450058575986",
+                                             "role_note": "创作者"})
+        with self.assertRaisesRegex(RegistrationError, "先加入"):           # 不在那个服务器
+            await self.service.finish("auth-code", await self.begin())
+        self.other_roles = ["1"]
+        with self.assertRaisesRegex(RegistrationError, "创作者"):           # 在服务器但没有身份组
+            await self.service.finish("auth-code", await self.begin())
+        self.assertEqual((await self.db._db.execute_fetchall("SELECT count(*) FROM api_keys"))[0][0], 0)
+        self.other_roles = ["1461731450058575986"]
+        self.assertEqual(await self.service.finish("auth-code", await self.begin()), "sent")
+        with self.assertRaises(ValueError):
+            await ops.set_registration(self.db, {"role_id": "abc"})
 
     async def test_dm_failure_rolls_back_key_and_allows_retry(self):
         self.dm_fails = True

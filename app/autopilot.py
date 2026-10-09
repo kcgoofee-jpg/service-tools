@@ -8,9 +8,9 @@
 ━━ 规则 ━━
 1. idle_days 闲置回收天数（原来固定 3 天）
    名额满了或有人在候补 → 2 天（让名额流转起来）；空位超过 30% → 5 天（没人等，不必急着回收）；其余 3 天。
-2. slots 名额上限（原来手动改）
-   有人在候补、且最近 3 天最忙的一小时也没超过账号每小时上限的 50% → +5（最多 100）。
-   前一天每小时上限拦截 ≥ 10 次 → 不再加（只停止增长，不会踢人）。
+2. slots 名额上限（原来手动改；2026-10-10 起执行）
+   名额快满（空位 ≤ 2）或有人在候补，且昨天日用量 < 60%、被每小时上限拦的小时 < 3 → +5（最多 100），
+   两次之间至少隔 6 小时。只加不减（人多了由动态额度调小每人份额，不踢人）。
 3. reset_hour 每日额度重置时间（原来固定北京时间 0 点）
    取最近 7 天出图最少的那个整点作为建议重置时间，避免大家在 0 点一起抢 V5。
    改日期边界会影响当天计数，所以这条只给建议，执行要在运维审核后单独做迁移。
@@ -54,12 +54,22 @@ def idle_days_rule(active: int, cap: int, waitlist: int) -> tuple[int, str]:
     return 3, f"名额 {active}/{cap}：保持 3 天"
 
 
-def slots_rule(cap: int, waitlist: int, peak_util: float, hourly_blocks: int) -> tuple[int, str]:
-    if hourly_blocks >= 10:
-        return cap, f"昨天每小时上限拦截 {hourly_blocks} 次：名额不再增加"
-    if waitlist > 0 and peak_util < 0.5 and cap < 100:
-        return min(100, cap + 5), f"候补 {waitlist} 人、最忙时只用了每小时上限的 {peak_util:.0%}：名额 +5"
-    return cap, f"候补 {waitlist} 人、最忙时 {peak_util:.0%}：名额不变"
+SLOTS_MAX = 100
+SLOTS_STEP = 5
+SLOTS_COOLDOWN = 6 * 3600     # 两次自动加名额至少隔 6 小时，先看加进来的人用得怎么样
+
+
+def slots_rule(cap: int, active: int, waitlist: int, day_util: float, blocked_hours: int) -> tuple[int, str]:
+    """名额快满（空位 ≤ 2）或有人在候补，且账号昨天还有余量（日用量 < 60%、被每小时上限拦的小时 < 3）→ +5。
+    只加不减：人多了由动态额度把每人份额调小，不踢人。"""
+    if blocked_hours >= 3:
+        return cap, f"昨天 {blocked_hours} 个小时被每小时上限拦过：名额不再增加"
+    if day_util >= 0.6:
+        return cap, f"昨天用量 {day_util:.0%}：名额不再增加"
+    if cap and cap < SLOTS_MAX and (waitlist > 0 or cap - active <= 2):
+        return min(SLOTS_MAX, cap + SLOTS_STEP), (f"名额 {active}/{cap}、候补 {waitlist} 人，"
+                                                  f"昨天用量 {day_util:.0%}：名额 +{SLOTS_STEP}")
+    return cap, f"名额 {active}/{cap}、候补 {waitlist} 人、昨天用量 {day_util:.0%}：名额不变"
 
 
 def breaker_rule(fails: int, total: int) -> tuple[bool, str]:
@@ -87,19 +97,29 @@ async def run(state, registrar=None, now: Optional[float] = None) -> dict[str, A
     # 1/2 名额与回收
     cfg = await registrar.settings() if registrar is not None else {"max_users": 0}
     active = await registrar.count_active() if registrar is not None else 0
-    waitlist = len(await registrar.waitlist()) if registrar is not None else 0
+    # 候补只算还没被邀请的人（已邀请的有 24 小时保留名额，不算在等）
+    waitlist = sum(1 for w in await registrar.waitlist() if not w.get("invited_at")) if registrar is not None else 0
     days, why = idle_days_rule(active, cfg.get("max_users") or 0, waitlist)
     out["rules"]["idle_days"] = {"mode": await _mode(db, "idle_days"), "value": days, "why": why}
 
-    guard = getattr(state, "guard", None)
-    hourly_cap = (guard.values["account_hourly_cap"] if guard else 80) or 80
-    hours = await _q(db, "SELECT CAST(ts/3600 AS INT) h, COUNT(*) FROM usage_log WHERE ts>=? AND status='ok' "
-                         "AND kind LIKE 'image%' GROUP BY h", now - 3 * 86400)
-    peak = max((r[1] for r in hours), default=0) / hourly_cap
-    yday = now - 86400
-    blocks = (await _q(db, "SELECT COUNT(*) FROM usage_log WHERE ts>=? AND detail LIKE '%本小时出图量已达上限%'", yday))[0][0]
-    slots, why = slots_rule(cfg.get("max_users") or 0, waitlist, peak, blocks)
-    out["rules"]["slots"] = {"mode": await _mode(db, "slots"), "value": slots, "why": why}
+    # 用动态额度每天 0 点的复盘（昨天的用量 / 被拦小时数，已排除测试号和站长号）
+    from . import quota_algo
+    hist = json.loads(await db.get_setting(quota_algo.HISTORY_KEY, "[]") or "[]")
+    last = hist[-1] if hist else {}
+    day_util = (last.get("used", 0) / last["cap"]) if last.get("cap") else 0.0
+    cap_now = cfg.get("max_users") or 0
+    slots, why = slots_rule(cap_now, active, waitlist, day_util, int(last.get("hourly_blocks", 0)))
+    mode = await _mode(db, "slots")
+    out["rules"]["slots"] = {"mode": mode, "value": slots, "why": why}
+    if mode == "enforce" and slots > cap_now and registrar is not None:
+        last_at = float(await db.get_setting("autopilot_slots_at", 0) or 0)
+        if now - last_at >= SLOTS_COOLDOWN:
+            from . import ops
+            # 算法调整只在首页提示，不发 Discord（notify=False）
+            await ops.set_registration(db, {"max_users": slots, "notify": False}, state, registrar)
+            await db.set_setting("autopilot_slots_at", now)
+            await log_action(db, "系统", "自动驾驶：名额", "", f"{cap_now} → {slots}：{why}")
+            out["rules"]["slots"]["applied"] = True
 
     # 3 重置时间：最近 7 天每个北京时间整点的出图量，取最少的
     by_hour = {h: 0 for h in range(24)}

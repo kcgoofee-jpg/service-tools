@@ -46,6 +46,11 @@ async def registration_settings(db, service) -> dict[str, Any]:
         "daily_v5": to_int(await read("register_daily_v5"), defaults.key_daily_v5 if defaults else 0),
         "image_scope": (await read("register_image_scope")) or (defaults.key_image_scope if defaults else "legacy"),
         "expires_days": to_int(await read("register_expires_days"), defaults.key_expires_days if defaults else 30),
+        # 限定身份组：只有在这个 Discord 服务器里拥有这个身份组的人能领 Key（可以是别的社区的服务器）。
+        # 都为空时沿用启动配置（DISCORD_ROLE_ID，本服务器）。
+        "role_guild": (await read("register_role_guild")) or "",
+        "role_id": (await read("register_role_id")) or "",
+        "role_note": (await read("register_role_note")) or "",
     }
 
 
@@ -84,6 +89,14 @@ async def set_registration(db, body: dict, state=None, service=None) -> None:
             values["register_" + name] = number
     if "image_scope" in body:
         values["register_image_scope"] = "all" if body["image_scope"] == "all" else "legacy"
+    for name in ("role_guild", "role_id"):
+        if name in body:
+            v = str(body[name] or "").strip()
+            if v and not (v.isdecimal() and 15 <= len(v) <= 21):
+                raise ValueError(f"{name} 需要是 Discord 的数字 ID")
+            values["register_" + name] = v
+    if "role_note" in body:
+        values["register_role_note"] = str(body["role_note"] or "").strip()[:60]
     if "features" in body:
         # None = 全部已开放功能，用 "*" 显式保存；空字符串表示“一个功能都不开”。
         values["register_features"] = "*" if body["features"] is None else features.dump(body["features"])
