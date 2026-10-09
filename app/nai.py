@@ -415,6 +415,14 @@ class NaiClient:
         }
 
     def _unavailable(self, requires_anlas: bool, v5_free: bool) -> UpstreamError:
+        # 先区分「账号暂时不可用（冷却 / 停用）」和「额度真的用完」，避免把冷却误报成 V5 额度已用完。
+        usable = [t for t in self.pool if t.usable]
+        if not usable:
+            cooling = [t for t in self.pool if t.admin_enabled and not t.disabled and time.time() < t.blocked_until]
+            if cooling:
+                wait = max(1, int(min(t.blocked_until for t in cooling) - time.time()))
+                return UpstreamError(503, f"上游账号暂时限流冷却中，约 {wait} 秒后恢复（不是额度用完），请稍后再试")
+            return UpstreamError(503, "上游账号暂时不可用（不是额度用完），请稍后再试")
         if requires_anlas:
             return UpstreamError(503, "没有允许使用 Anlas 的上游令牌，无法生成此图片")
         if v5_free:

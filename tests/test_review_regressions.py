@@ -1152,3 +1152,13 @@ async def test_nai_pick_token_refuses_when_every_account_is_capped():
     assert await client.pick_token() is not None                # 文本 / 标签补全不受出图上限影响
     client.guard.values["account_daily_cap"] = 6
     assert await client.pick_token(image_job=True) is not None
+
+
+def test_cooling_account_is_not_reported_as_v5_quota_used_up():
+    client = NaiClient(["pst-a"], "https://image.invalid", "https://text.invalid", "https://text.invalid",
+                       db=NaiDB(), day_fn=lambda: "2026-10-09", v5_daily_limits=[10], allow_anlas=[False])
+    client.pool[0].blocked_until = time.time() + 40
+    e = client._unavailable(False, v5_free=True)
+    assert e.status == 503 and "冷却" in e.message and "不是额度用完" in e.message
+    client.pool[0].blocked_until = 0
+    assert "V5 免费图片额度已用完" in client._unavailable(False, v5_free=True).message   # 真用完时仍照实说
