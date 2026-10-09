@@ -705,6 +705,27 @@ async def quota_algo_put(request: Request):
     return {"ok": True, "last": result}
 
 
+@router.get("/discord-bot")
+async def discord_bot_get(request: Request):
+    """Discord 机器人：配置、在线状态（心跳）、最近 50 条点赞 / 评论记录。"""
+    require_admin(request)
+    from . import bot_config
+    return await bot_config.snapshot(request.app.state.gate.db)
+
+
+@router.put("/discord-bot")
+async def discord_bot_put(request: Request):
+    """修改机器人配置；机器人一分钟内生效。"""
+    require_admin(request)
+    from . import bot_config
+    try:
+        values = bot_config.validate(await read_json_body(request))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    await bot_config.save(request.app.state.gate.db, values)
+    return {"ok": True, "config": await bot_config.load(request.app.state.gate.db)}
+
+
 @router.get("/errors")
 async def errors_list(request: Request, all: bool = False):
     """Bug 追踪：按特征归并的错误（未处理的在前）。detail 含堆栈，只在后台显示。"""

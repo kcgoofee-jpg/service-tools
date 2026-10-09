@@ -506,6 +506,7 @@ details.neg div{margin-top:6px;white-space:pre-wrap;overflow-wrap:anywhere;max-h
       <button data-tab="actions"><span data-ic="list"></span>操作日志</button>
       <div class="nav-label">设置</div>
       <button data-tab="limits"><span data-ic="sliders"></span>额度与保护</button>
+      <button data-tab="discord"><span data-ic="chat"></span>Discord<span class="nav-badge" id="navBot" hidden>!</span></button>
       <button data-tab="set"><span data-ic="sliders"></span>系统</button>
     </nav>
     <div class="side-foot">
@@ -605,6 +606,16 @@ NAI_TOKEN_V5_DAILY_LIMITS=0,150</pre><button class="btn mini" type="button" data
               <label class="check" style="white-space:nowrap"><input type="checkbox" id="bugAll"><span>含已处理</span></label></div>
             <div class="table-wrap"><table class="rt"><thead><tr><th>级别</th><th>来源</th><th>内容</th><th>次数</th><th>首次 / 最近</th><th>最近错误编号</th><th></th></tr></thead><tbody id="bugBody"></tbody></table></div>
           </div>
+        </section>
+
+        <!-- Discord 机器人 -->
+        <section id="tab-discord" hidden>
+          <div class="page-head"><div class="ttl"><h1>Discord</h1><p>奶妹机器人的状态与跑图分享设置，保存后一分钟内生效</p></div><div class="tools"><button class="btn" data-act="refresh-bot"><span data-ic="refresh"></span>刷新</button></div></div>
+          <div class="card panel"><div class="panel-head"><h2>机器人</h2></div><div id="botStatus"><div class="skel" style="height:60px"></div></div></div>
+          <div class="card panel"><div class="panel-head"><h2>跑图分享</h2><div class="desc">新帖自动点赞、看图写评论；露骨图片只发「捂眼睛跑开」</div></div>
+            <div id="botCfg"><div class="skel" style="height:200px"></div></div></div>
+          <div class="card panel"><div class="panel-head"><h2>最近动作</h2></div><div id="botEvents"><div class="skel" style="height:120px"></div></div></div>
+          <p class="hint" style="margin:-8px 0 24px">领 Key 的开关和名额在「<a href="#" data-act="goto-ops">领 Key 与功能</a>」页；机器人 Token 和 AI 评论的 API Key 只放在服务器 .env 里</p>
         </section>
 
         <!-- 成员 -->
@@ -901,6 +912,7 @@ const ICONS = {
   sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
   logout:'<path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/>',
   menu:'<path d="M4 6h16M4 12h16M4 18h16"/>',
+  chat:'<path d="M4 5h16a1 1 0 011 1v10a1 1 0 01-1 1H9l-5 4V6a1 1 0 011-1z"/><path d="M8 10h8M8 13h5"/>',
   shield:'<path d="M12 3l8 3v6c0 4.5-3.2 8-8 9-4.8-1-8-4.5-8-9V6l8-3z"/><path d="M9 12l2 2 4-4"/>',
   refresh:'<path d="M20 11a8 8 0 00-14.5-4M4 4v4h4"/><path d="M4 13a8 8 0 0014.5 4M20 20v-4h-4"/>',
   plus:'<path d="M12 5v14M5 12h14"/>',
@@ -1142,7 +1154,7 @@ async function boot(){
 }
 
 /* ---------- tabs ---------- */
-const TABS = ['ov','members','keys','ops','audit','up','bugs','logs','actions','limits','set'];
+const TABS = ['ov','members','keys','ops','audit','up','bugs','logs','actions','limits','discord','set'];
 function tab(name){
   document.body.classList.remove('nav-open');
   $$('.nav button').forEach(b=>b.classList.toggle('active', b.dataset.tab===name));
@@ -1159,6 +1171,7 @@ function tab(name){
   if(name==='limits'){ loadQuotaAlgo(); loadAutopilot(); }
   if(name==='up'){ loadOverview(); loadReconciliation(); loadPerf(); loadShadow(); }
   if(name==='bugs') loadBugs();
+  if(name==='discord') loadBot();
 }
 
 /* ---------- overview ---------- */
@@ -2208,6 +2221,40 @@ async function loadAutopilot(){
     }</tbody></table></div><div class="muted sm" style="margin-top:8px">更新于 ${esc(new Date(d.last.at*1000).toLocaleString())}</div>` : '<div class="muted">还没有运行记录（每 10 分钟一次）</div>';
   }catch(e){ $('#apBody').innerHTML = '<div class="muted">读取失败</div>'; }
 }
+/* Discord 机器人：状态（心跳）、跑图分享设置、最近动作（/admin/api/discord-bot，机器人侧见 integration/discord_bot.py） */
+const BOT_TAG = {like:'', comment:'on', shy:'warn', skip:'', error:'off'};
+async function loadBot(){
+  try{
+    const d = await api('/admin/api/discord-bot'), st = d.status || {}, c = d.config;
+    $('#navBot').hidden = !!st.online;
+    $('#botStatus').innerHTML = `<div class="cols-3">
+      <div><div class="muted sm">状态</div><div style="font-size:18px;font-weight:700">${st.online ? '<span class="tag on">在线</span>' : '<span class="tag off">离线</span>'} <span class="muted" style="font-size:13px">${st.latency_ms!=null ? esc(st.latency_ms)+' ms' : ''}</span></div></div>
+      <div><div class="muted sm">账号 · 服务器</div><div style="font-weight:600">${esc(st.user || '—')}<div class="muted sm">${esc(st.guild || '')}</div></div></div>
+      <div><div class="muted sm">AI 评论</div><div style="font-weight:600">${st.ai_ready ? '已配置 API Key' : '<span class="tag off">没有配置 API Key</span>'}<div class="muted sm">今天 ${esc(st.ai_today ?? 0)} / ${esc(c.gallery_ai_daily)} 条</div></div></div>
+    </div><div class="muted sm" style="margin-top:8px">${st.seen_at ? '最近心跳 ' + esc(new Date(st.seen_at*1000).toLocaleString()) + (st.ready_at ? ' · 启动于 ' + esc(new Date(st.ready_at*1000).toLocaleString()) : '') : '还没有收到心跳（机器人更新后每分钟上报一次）'}</div>`;
+    const sw = (id, on, label) => `<div class="feat-row"><div class="body"><div class="t">${label}</div></div><label class="switch"><input type="checkbox" id="${id}" ${on?'checked':''} aria-label="${label}"><span></span></label></div>`;
+    $('#botCfg').innerHTML = sw('bot_like', c.gallery_like, '新帖自动点赞 ❤️') + sw('bot_ai', c.gallery_ai, '看图写评论') + `
+      <div class="cols-3" style="margin-top:12px">
+        <div class="field"><label for="bot_forum">论坛频道名包含</label><input id="bot_forum" maxlength="50" value="${esc(c.gallery_forum)}"></div>
+        <div class="field"><label for="bot_daily">AI 评论每天最多</label><input id="bot_daily" type="number" min="0" max="500" step="1" value="${esc(c.gallery_ai_daily)}"></div>
+        <div class="field"><label for="bot_model">模型</label><input id="bot_model" maxlength="80" value="${esc(c.gallery_ai_model)}"></div>
+      </div><div style="margin-top:12px"><button class="btn primary" data-act="save-bot"><span data-ic="check"></span>保存</button></div>`;
+    hydrateIcons($('#botCfg'));
+    const ev = d.events || [];
+    $('#botEvents').innerHTML = ev.length ? `<div class="table-wrap"><table class="rt"><thead><tr><th>时间</th><th>动作</th><th>帖子</th><th>作者</th><th>内容</th></tr></thead><tbody>${
+      ev.map(e => `<tr><td class="mono" data-label="时间">${esc(new Date(e.at*1000).toLocaleString())}</td><td data-label="动作"><span class="tag ${BOT_TAG[e.kind]||''}">${esc(d.kinds[e.kind]||e.kind)}</span></td><td data-label="帖子">${e.url?`<a href="${esc(e.url)}" target="_blank" rel="noopener">${esc(e.title||'帖子')}</a>`:esc(e.title)}</td><td data-label="作者">${esc(e.author)}</td><td class="muted" data-label="内容">${esc(e.detail)}</td></tr>`).join('')
+    }</tbody></table></div>` : '<div class="muted">还没有记录（跑图分享有新帖时出现）</div>';
+  }catch(e){ $('#botStatus').innerHTML = '<div class="muted">读取失败</div>'; }
+}
+async function saveBot(){
+  try{
+    const body = {gallery_like: $('#bot_like').checked ? 1 : 0, gallery_ai: $('#bot_ai').checked ? 1 : 0,
+      gallery_forum: $('#bot_forum').value.trim(),
+      gallery_ai_daily: readNum('bot_daily', 'AI 评论每天最多', {min:0, max:500}), gallery_ai_model: $('#bot_model').value.trim()};
+    await api('/admin/api/discord-bot', {method:'PUT', body: JSON.stringify(body)});
+    toast('已保存，机器人一分钟内生效', 'ok'); loadBot();
+  }catch(e){ toastErr(e); }
+}
 async function loadQuotaAlgo(){
   try{
     const d = await api('/admin/api/quota-algo'), l = d.last || {}, v = l.v5 || {};
@@ -2300,6 +2347,9 @@ document.addEventListener('click', ev=>{
     case 'refresh-logs': loadLogs(); break;
     case 'refresh-up': loadOverview(); loadReconciliation(); loadPerf(); loadShadow(); break;
     case 'refresh-bugs': loadBugs(); break;
+    case 'refresh-bot': loadBot(); break;
+    case 'save-bot': saveBot(); break;
+    case 'goto-ops': tab('ops'); break;
     case 'refresh-actions': loadActions(); break;
     case 'recon-reload': loadReconciliation(); break;
     case 'recon-run': runReconciliation(); break;
