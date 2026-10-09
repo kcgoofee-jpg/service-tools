@@ -733,6 +733,10 @@ NAI_TOKEN_V5_DAILY_LIMITS=0,150</pre><button class="btn mini" type="button" data
             <div class="form-grid" id="guardFields"></div>
             <button class="btn primary" data-act="save-guard">保存账号保护设置</button>
           </div>
+          <div class="card panel" id="autopilot">
+            <div class="panel-head"><h2>自动驾驶</h2><div class="desc">闲置回收、名额、重置时间、全站熔断、单个 Key 暂停 / 重置交给算法。目前全部是「观察」：只记录会怎么做，不执行；审核没问题后逐条切换为执行</div></div>
+            <div id="apBody"><div class="skel" style="height:80px"></div></div>
+          </div>
           <div class="card panel" id="quotaAlgo">
             <div class="panel-head"><h2>动态额度</h2><div class="desc">所有「交给算法」的成员同一套额度，每 10 分钟重算；每天按前一天的拥挤程度微调上限和保底。成员页里手动改过的 Key 不受影响</div></div>
             <div id="qaBody"><div class="skel" style="height:80px"></div></div>
@@ -1152,7 +1156,7 @@ function tab(name){
   if(name==='logs') loadLogs();
   if(name==='actions') loadActions();
   if(name==='set' || name==='limits') loadSettings();
-  if(name==='limits') loadQuotaAlgo();
+  if(name==='limits'){ loadQuotaAlgo(); loadAutopilot(); }
   if(name==='up'){ loadOverview(); loadReconciliation(); loadPerf(); loadShadow(); }
   if(name==='bugs') loadBugs();
 }
@@ -2192,6 +2196,18 @@ async function loadGuard(){
 const ANLAS_LABELS = {anlas_auto_enabled:['开启自动分配（1 开 / 0 关）',0,1], anlas_reserve:['保留不分的 Anlas',0,10000],
   anlas_member_daily_cap:['每人每天最多',0,1000], anlas_min_images_7d:['近 7 天至少出图张数',0,10000], anlas_min_key_age_days:['领取满几天',0,365]};
 /* 动态额度：结果 + 每日微调历史（数据来自 /admin/api/quota-algo，算法说明见 app/quota_algo.py） */
+const AP_NAME = {idle_days:'闲置回收天数', slots:'名额上限', reset_hour:'额度重置时间', breaker:'全站熔断', key_guard:'单个 Key 守护'};
+const AP_MODE = {observe:'<span class="tag warn">观察</span>', enforce:'<span class="tag on">执行</span>', off:'<span class="tag off">关闭</span>'};
+async function loadAutopilot(){
+  try{
+    const d = await api('/admin/api/autopilot'), r = (d.last || {}).rules || {};
+    const val = (k, v) => k === 'key_guard' ? (v.length ? v.map(x => `${esc(x.name)}：${x.action==='reset'?'重置':'暂停'}`).join('；') : '—')
+      : k === 'breaker' ? (v ? '暂停 5 分钟' : '正常') : k === 'reset_hour' ? v + ':00' : k === 'idle_days' ? v + ' 天' : esc(v);
+    $('#apBody').innerHTML = Object.keys(r).length ? `<div class="table-wrap"><table class="rt"><thead><tr><th>规则</th><th>模式</th><th>判断</th><th>理由</th></tr></thead><tbody>${
+      Object.entries(r).map(([k, v]) => `<tr><td data-label="规则">${esc(AP_NAME[k]||k)}</td><td data-label="模式">${AP_MODE[v.mode]||esc(v.mode)}</td><td data-label="判断">${val(k, v.value)}</td><td class="muted" data-label="理由">${esc(v.why)}</td></tr>`).join('')
+    }</tbody></table></div><div class="muted sm" style="margin-top:8px">更新于 ${esc(new Date(d.last.at*1000).toLocaleString())}</div>` : '<div class="muted">还没有运行记录（每 10 分钟一次）</div>';
+  }catch(e){ $('#apBody').innerHTML = '<div class="muted">读取失败</div>'; }
+}
 async function loadQuotaAlgo(){
   try{
     const d = await api('/admin/api/quota-algo'), l = d.last || {}, v = l.v5 || {};

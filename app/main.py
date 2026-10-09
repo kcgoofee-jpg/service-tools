@@ -481,6 +481,11 @@ async def anlas_rebalance_loop() -> None:
         except Exception as exc:
             bug("quota_algo", exc)
         try:
+            from . import autopilot
+            await autopilot.run(STATE, getattr(app.state, "registrar", None))
+        except Exception as exc:
+            bug("autopilot", exc)
+        try:
             reg = getattr(app.state, "registrar", None)
 
             async def _dm(key_id, text, reg=reg):

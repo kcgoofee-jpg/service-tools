@@ -670,6 +670,16 @@ async def quota_algo_get(request: Request):
             "params": params}
 
 
+@router.get("/autopilot")
+async def autopilot_get(request: Request):
+    """自动驾驶：每条规则的最新判断（观察模式下只记录不执行）和最近 7 天的每小时快照。"""
+    require_admin(request)
+    from . import autopilot
+    db = request.app.state.gate.db
+    return {"last": json.loads(await db.get_setting(autopilot.STATE_KEY, "{}") or "{}"),
+            "history": json.loads(await db.get_setting(autopilot.HISTORY_KEY, "[]") or "[]")}
+
+
 @router.put("/quota-algo")
 async def quota_algo_put(request: Request):
     """修改初始值 / 步长 / 范围；保存后立即重算。"""
