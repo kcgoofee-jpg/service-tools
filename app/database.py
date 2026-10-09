@@ -101,6 +101,16 @@ CREATE TABLE IF NOT EXISTS upstream_token_counters (
     v5 INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (token_id, day)
 );
+CREATE TABLE IF NOT EXISTS key_sources (
+    key_id INTEGER NOT NULL,
+    net_hash TEXT NOT NULL,       -- 加盐哈希后的来源网段（IPv4 /24、IPv6 /48），不存完整 IP
+    label TEXT NOT NULL DEFAULT '',
+    first_seen REAL NOT NULL,
+    last_seen REAL NOT NULL,
+    hits INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (key_id, net_hash)
+);
+CREATE INDEX IF NOT EXISTS idx_key_sources_seen ON key_sources (last_seen);
 CREATE TABLE IF NOT EXISTS upstream_token_settings (
     token_id TEXT PRIMARY KEY,
     v5_daily_limit INTEGER NOT NULL
@@ -435,6 +445,7 @@ class Database:
     async def delete_key(self, key_id: int) -> None:
         # The trigger archives the V5 flag and removes offsets atomically.
         # Counters/logs also accept late settlement from already admitted work.
+        await self._db.execute("DELETE FROM key_sources WHERE key_id=?", (key_id,))
         await self._db.execute("DELETE FROM api_keys WHERE id=?", (key_id,))
         await self._db.commit()
 
@@ -617,6 +628,41 @@ class Database:
     async def audit_thumb(self, audit_id: int) -> Optional[bytes]:
         row = await (await self._db.execute("SELECT thumb FROM generation_audit WHERE id=?", (audit_id,))).fetchone()
         return bytes(row["thumb"]) if row and row["thumb"] is not None else None
+
+    async def touch_key_source(self, key_id: int, net_hash: str, label: str,
+                               now: float, window_start: float) -> bool:
+        """记录来源网段；返回该网段在窗口内是否为新出现（用于决定是否检查分享告警）。"""
+        cur = await self._db.execute(
+            "SELECT last_seen FROM key_sources WHERE key_id=? AND net_hash=?", (key_id, net_hash))
+        row = await cur.fetchone()
+        await self._db.execute(
+            """INSERT INTO key_sources (key_id, net_hash, label, first_seen, last_seen, hits)
+               VALUES (?,?,?,?,?,1)
+               ON CONFLICT(key_id, net_hash) DO UPDATE SET last_seen=excluded.last_seen,
+                   label=excluded.label, hits=hits+1""",
+            (key_id, net_hash, label, now, now))
+        await self._db.commit()
+        return row is None or row[0] < window_start
+
+    async def key_source_labels(self, key_id: int, since: float) -> list[str]:
+        cur = await self._db.execute(
+            "SELECT label FROM key_sources WHERE key_id=? AND last_seen>=? ORDER BY last_seen DESC",
+            (key_id, since))
+        return [r[0] for r in await cur.fetchall()]
+
+    async def key_source_summary(self, since: float) -> dict[int, list[str]]:
+        """每把 Key 在 since 之后出现过的来源网段标签（最近的在前）。"""
+        cur = await self._db.execute(
+            "SELECT key_id, label FROM key_sources WHERE last_seen>=? ORDER BY last_seen DESC", (since,))
+        out: dict[int, list[str]] = {}
+        for key_id, label in await cur.fetchall():
+            out.setdefault(int(key_id), []).append(label)
+        return out
+
+    async def purge_key_sources(self, older_than: float) -> int:
+        cur = await self._db.execute("DELETE FROM key_sources WHERE last_seen<?", (older_than,))
+        await self._db.commit()
+        return cur.rowcount or 0
 
     async def purge_usage_log(self, older_than: float) -> int:
         """只清理明细日志；每日计数器和账本不受影响。"""

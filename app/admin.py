@@ -290,11 +290,14 @@ async def list_keys(request: Request):
     rows = await st.db.list_keys()
     today = st.day()
     totals = await st.db.generated_image_totals()
+    sources = await st.db.key_source_summary(time.time() - 24 * 3600)
     out = []
     for r in rows:
         c = await st.db.get_counter(r["id"], today)
-        out.append(_key_json(r, c, totals.get(r["id"], 0)))
-    return {"keys": out}
+        item = _key_json(r, c, totals.get(r["id"], 0))
+        item["sources_24h"] = sources.get(r["id"], [])
+        out.append(item)
+    return {"keys": out, "share_alert_nets": st.settings.key_share_alert_nets}
 
 
 def _features_field(body: dict):

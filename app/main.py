@@ -51,6 +51,7 @@ from .policy import (
 from .state import GateState
 from . import features
 from .policy import REFERENCE_FIELDS
+from .key_sources import RETENTION_SECONDS as KEY_SOURCE_RETENTION
 from .audit import audit_flags, audit_notice, make_thumbnail, prompt_texts
 from .upstream_errors import upstream_error_message, text_stream_events
 from .sse import encode_sse
@@ -234,6 +235,12 @@ async def authenticate(request: Request):
         raise err(403, "该 Key 已过期，请联系站长续期")
     # 只要 Key 实际通过鉴权即视为使用，避免 Launcher 登录/上游暂时失败时被误删。
     await STATE.db.touch_key(row["id"])
+    sources = getattr(STATE, "sources", None)
+    if sources is not None:
+        try:                            # 来源网段统计（防 Key 分享）；失败不能影响请求
+            await sources.observe(row, client_id)
+        except Exception:
+            print("[warn] key source tracking failed")
     return row
 
 
@@ -292,6 +299,7 @@ async def maintenance_loop() -> None:
             await STATE.db.purge_audit(time.time() - days * 86400)
             keep = max(7, STATE.settings.usage_log_retention_days)
             await STATE.db.purge_usage_log(time.time() - keep * 86400)
+            await STATE.db.purge_key_sources(time.time() - KEY_SOURCE_RETENTION)
             registrar = getattr(app.state, "registrar", None)
             if registrar is not None:
                 await registrar.sync_roles()
