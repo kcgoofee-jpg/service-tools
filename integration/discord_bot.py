@@ -48,7 +48,8 @@ async def sync_loop(client: discord.Client) -> None:
         cfg = await bridge("GET", "/config")
         if isinstance(cfg, dict):
             CONFIG.update({k: v for k, v in cfg.items() if k in CONFIG})
-        guild = client.guilds[0].name if client.guilds else ""
+        g = client.get_guild(int(os.environ["DISCORD_GUILD_ID"]))
+        guild = g.name if g else ""
         await bridge("POST", "/report", {"status": {
             "user": str(client.user), "guild": guild, "latency_ms": round(client.latency * 1000),
             "ready_at": ready_at, "ai_ready": gallery_praise.enabled(), "ai_today": gallery_praise.used_today()}})
