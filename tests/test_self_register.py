@@ -221,3 +221,55 @@ class OpenRegistrationTests(RegistrationTests):
             await self.service.begin(young, "1480185480048808009")
         old = str(((int(time.time() * 1000) - 30 * 86_400_000) - 1420070400000) << 22)
         self.assertIn("state=", await self.service.begin(old, "1480185480048808009"))
+
+
+class MemberRoleTests(RegistrationTests):
+    """Registering grants the 'has key' role; expiry/revoke/delete remove it; Discord errors never block registration."""
+
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        self.role_calls = []
+        self.role_status = 204
+        inner = self.http._transport
+
+        def with_roles(request):
+            if "/roles/" in request.url.path:
+                self.role_calls.append((request.method, request.url.path.rsplit("/", 3)[-3:]))
+                return httpx.Response(self.role_status)
+            return inner.handler(request)
+        self.http = httpx.AsyncClient(transport=httpx.MockTransport(with_roles), base_url="https://discord.com")
+        self.service.http = self.http
+        self.service.member_role_id = "555"
+
+    async def mint(self, user="777"):
+        link = await self.service.begin(user, "1480185480048808009")
+        return await self.service.finish("auth-code", parse_qs(urlparse(link).query)["state"][0])
+
+    async def test_role_granted_on_success_and_removed_on_revoke(self):
+        self.assertEqual(await self.mint(), "sent")
+        self.assertEqual(self.role_calls[0][0], "PUT")
+        flag = (await self.db._db.execute_fetchall("SELECT role_granted FROM discord_registrations"))[0][0]
+        self.assertEqual(flag, 1)
+        await self.service.revoke("777")
+        self.assertEqual(self.role_calls[-1][0], "DELETE")
+
+    async def test_discord_role_failure_does_not_break_registration(self):
+        self.role_status = 403
+        self.assertEqual(await self.mint(), "sent")
+        flag = (await self.db._db.execute_fetchall("SELECT role_granted FROM discord_registrations"))[0][0]
+        self.assertEqual(flag, 0)                                       # not marked, will not try to remove
+
+    async def test_sync_removes_role_when_key_expires_or_is_deleted(self):
+        await self.mint()
+        self.assertEqual(await self.service.sync_roles(), 0)             # still valid
+        await self.db._db.execute("UPDATE api_keys SET expires_at=?", (time.time() - 5,))
+        await self.db._db.commit()
+        self.assertEqual(await self.service.sync_roles(), 1)
+        self.assertEqual(self.role_calls[-1][0], "DELETE")
+        self.assertEqual(await self.service.sync_roles(), 0)             # flag cleared, idempotent
+
+    async def test_inactivity_cleanup_hook_removes_role(self):
+        await self.mint()
+        key_id = (await self.db._db.execute_fetchall("SELECT key_id FROM discord_registrations"))[0][0]
+        ids = await self.db.forget_registration_for_key(key_id)
+        self.assertEqual(ids, ["777"])
