@@ -765,6 +765,29 @@ async def share_guard_put(request: Request):
     return {"ok": True, "mode": body["mode"]}
 
 
+@router.get("/modules")
+async def modules_get(request: Request):
+    """模块：每个模块回答的问题、依据、数学原理、开关、最近一次运行、交叉校验、关键参数（依据等级）。"""
+    require_admin(request)
+    kernel = getattr(request.app.state.gate, "kernel", None)
+    return {"modules": await kernel.snapshot() if kernel else []}
+
+
+@router.put("/modules/{name}")
+async def modules_put(request: Request, name: str):
+    """启用 / 关闭一个模块；关闭只停止自动调整，保护类的硬限制不受影响。"""
+    require_admin(request)
+    kernel = getattr(request.app.state.gate, "kernel", None)
+    if kernel is None or name not in kernel.modules:
+        raise HTTPException(404, "没有这个模块")
+    body = await read_json_body(request)
+    if not isinstance(body.get("enabled"), bool):
+        raise HTTPException(422, "enabled 必须是 true / false")
+    await kernel.set_enabled(name, body["enabled"])
+    await kernel.tick_all()
+    return {"ok": True, "modules": await kernel.snapshot()}
+
+
 @router.get("/errors")
 async def errors_list(request: Request, all: bool = False):
     """Bug 追踪：按特征归并的错误（未处理的在前）。detail 含堆栈，只在后台显示。"""
