@@ -71,6 +71,10 @@ def build_client() -> tuple[discord.Client, app_commands.CommandTree, discord.Ob
                 f"2. 在柏宝绘等支持自定义 NovelAI 地址的客户端里，接口地址填 `{SITE}`，Key 填你领到的 `nai-…`。\n"
                 "3. `/quota` 查看今日额度，`/resetkey` 重置 Key。\n"
                 "4. 请勿分享 Key；额度用完次日重置。")
+        if os.getenv("AUDIT_PROMPTS", "").lower() in ("1", "true", "yes", "on") or \
+                os.getenv("AUDIT_THUMBS", "").lower() in ("1", "true", "yes", "on"):
+            text += (f"\n5. 为防止滥用，本站会保留图片提示词和小缩略图 {os.getenv('AUDIT_RETENTION_DAYS', '7')} 天后自动删除，"
+                     "仅站长可见。")
         await interaction.response.send_message(text, ephemeral=True)
 
     @tree.command(name="slots", description="（管理员）查看名额占用", guild=guild)

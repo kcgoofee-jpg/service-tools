@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import shutil
 from datetime import datetime, timedelta
 import json
 import logging
@@ -46,6 +47,7 @@ from .policy import (
     text_model_host,
 )
 from .state import GateState
+from .audit import audit_notice, make_thumbnail, prompt_texts
 from .upstream_errors import upstream_error_message, text_stream_events
 from .sse import encode_sse
 
@@ -137,10 +139,12 @@ async def lifespan(app: FastAPI):
     app.state.registrar = configured_service(STATE.db, registration_http)
     cleanup_task = asyncio.create_task(inactive_key_cleanup_loop())
     reset_task = asyncio.create_task(registration_reset_loop())
+    maintenance_task = asyncio.create_task(maintenance_loop())
+    notify_owner("startup", "服务已启动（重启或更新部署后会收到这条）。", 60)
     try:
         yield
     finally:
-        for task in (cleanup_task, reset_task):
+        for task in (cleanup_task, reset_task, maintenance_task):
             task.cancel()
             try:
                 await task
@@ -175,12 +179,17 @@ async def fallback_handler(request: Request, exc: Exception):
 
 async def authenticate(request: Request):
     """校验虚拟 Key。"""
+    client_id = request.client.host if request.client else "unknown"
+    wait = getattr(STATE, "auth_blocked", lambda _ip: 0)(client_id)
+    if wait:
+        raise GateError(429, f"无效请求过多，请 {wait // 60 + 1} 分钟后再试")
     auth = request.headers.get("authorization", "")
     token = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
     if not token:
         raise err(401, "缺少 API Key")
     row = await STATE.db.get_key_by_token(token)
     if not row:
+        getattr(STATE, "record_auth_failure", lambda _ip: None)(client_id)
         raise err(401, "无效的 API Key")
     if not row["enabled"]:
         raise err(403, "该 Key 已被禁用")
@@ -189,6 +198,41 @@ async def authenticate(request: Request):
     # 只要 Key 实际通过鉴权即视为使用，避免 Launcher 登录/上游暂时失败时被误删。
     await STATE.db.touch_key(row["id"])
     return row
+
+
+def notify_owner(kind: str, message: str, cooldown: float = 900) -> None:
+    alerter = getattr(STATE, "alerter", None)
+    if alerter is not None:
+        alerter.notify(kind, message, cooldown=cooldown)
+
+
+async def audit_generation(key, kind: str, model: str, status: str, body: dict, content: bytes | None = None) -> None:
+    """按配置记录提示词和缩略图；任何失败都不得影响生图结果。"""
+    cfg = STATE.settings
+    if not (getattr(cfg, "audit_prompts", False) or getattr(cfg, "audit_thumbs", False)):
+        return
+    try:
+        prompt, negative = prompt_texts(body) if cfg.audit_prompts else ("", "")
+        thumb = None
+        if cfg.audit_thumbs and content and status == "ok":
+            thumb = await anyio.to_thread.run_sync(make_thumbnail, content)
+        await STATE.db.add_audit(key["id"], key["name"], kind, model, status, prompt, negative, thumb)
+    except Exception:
+        print("[warn] audit write failed")
+
+
+async def maintenance_loop() -> None:
+    """每 5 分钟：清理过期生成记录；磁盘与告警自检。"""
+    while True:
+        try:
+            days = max(1, STATE.settings.audit_retention_days)
+            await STATE.db.purge_audit(time.time() - days * 86400)
+            usage = shutil.disk_usage(STATE.settings.data_dir)
+            if usage.free / usage.total < 0.10:
+                notify_owner("disk_low", f"服务器磁盘剩余不足 10%（剩 {usage.free // 2**20} MB），请清理或扩容。", 6 * 3600)
+        except Exception as exc:
+            print(f"[warn] maintenance failed: {type(exc).__name__}")
+        await asyncio.sleep(300)
 
 
 async def inactive_key_cleanup_loop() -> None:
@@ -719,14 +763,19 @@ async def _generate_image(request: Request, *, streaming: bool):
         except GateError as exc:
             await record(key, "image", model, "error", detail=exc.message,
                          unconfirmed_anlas=est["anlas"] if exc.billing_uncertain else 0)
+            await audit_generation(key, "image", model, "error", body)
             raise
         if resp.status_code not in (200, 201):
             await record(key, "image", model, "error", detail=f"upstream {resp.status_code}",
                          unconfirmed_anlas=est["anlas"] if resp.status_code >= 500 else 0)
+            await audit_generation(key, "image", model, "error", body)
+            if resp.status_code >= 500:
+                notify_owner("upstream_5xx", f"NovelAI 图片接口返回 {resp.status_code}，上游可能故障。", 1800)
             raise err(resp.status_code, upstream_error_message(resp.status_code))
         await settle_record(key, "image", model, "ok", images=image_count, anlas=est["anlas"],
                             v5=est["v5"], legacy_free_images=legacy_free_images,
                             detail=detail)
+        await audit_generation(key, "image", model, "ok", body, resp.content)
         return Response(resp.content, status_code=200,
                         media_type=resp.headers.get("content-type", "application/octet-stream"))
 
@@ -810,6 +859,7 @@ async def _generate_image(request: Request, *, streaming: bool):
                         legacy_free_images=legacy_free_images,
                         detail=detail + (f"; 完成 {completed}/{image_count}" if completed < image_count else ""),
                     )
+                await audit_generation(key, "image_stream", model, "ok" if completed and not failure else "error", body)
                 if failure or not completed:
                     # 未结算部分单独记为待核对费用。
                     await record(key, "image_stream", model, "error",
@@ -1191,9 +1241,12 @@ _ANNOUNCEMENT_HEADERS = {"Content-Security-Policy": "sandbox allow-popups allow-
 @app.get("/")
 async def index():
     p = SETTINGS.announcement_path
-    if p.exists() and p.read_text(encoding="utf-8").strip():
-        return Response(p.read_text(encoding="utf-8"), media_type="text/html", headers=_ANNOUNCEMENT_HEADERS)
-    return Response(DEFAULT_ANNOUNCEMENT, media_type="text/html", headers=_ANNOUNCEMENT_HEADERS)
+    html = p.read_text(encoding="utf-8") if p.exists() and p.read_text(encoding="utf-8").strip() else DEFAULT_ANNOUNCEMENT
+    notice = audit_notice(SETTINGS.audit_prompts, SETTINGS.audit_thumbs, SETTINGS.audit_retention_days)
+    if notice:  # 记录功能开启时，首页始终披露，站长无法在公告里漏掉
+        footer = f'<p style="margin:24px auto;max-width:760px;padding:0 20px;font:13px system-ui;opacity:.7">{notice}</p>'
+        html = html.replace("</body>", footer + "</body>", 1) if "</body>" in html else html + footer
+    return Response(html, media_type="text/html", headers=_ANNOUNCEMENT_HEADERS)
 
 
 @app.get("/admin")

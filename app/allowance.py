@@ -78,6 +78,10 @@ class AllowanceCache:
                 if negative or percent < threshold:
                     log.warning("V5 low allowance: account %s; remaining=%s%%; exhausted=%s",
                                 token_id, percent, negative)
+                    callback = getattr(self, "on_low", None)
+                    if callback:
+                        callback("v5_low", "V5 官方免费额度" + ("已用尽" if negative else f"仅剩 {percent}%（阈值 {threshold}%）")
+                                 + "，之后的 V5 请求会按 Anlas 计费或被拒。", 6 * 3600)
                 return negative
             except (httpx.HTTPError, ValueError, TypeError, TimeoutError):
                 self._rows[token_id] = {**row, "error": "额度查询失败，当前状态未确认",

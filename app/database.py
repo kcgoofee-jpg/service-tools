@@ -56,6 +56,20 @@ CREATE TABLE IF NOT EXISTS counters (
     v5 INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (key_id, day)
 );
+CREATE TABLE IF NOT EXISTS generation_audit (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts REAL NOT NULL,
+    key_id INTEGER,
+    key_name TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL DEFAULT 'image',
+    model TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT '',
+    prompt TEXT NOT NULL DEFAULT '',
+    negative TEXT NOT NULL DEFAULT '',
+    thumb BLOB
+);
+CREATE INDEX IF NOT EXISTS idx_audit_ts ON generation_audit(ts);
+CREATE INDEX IF NOT EXISTS idx_audit_key ON generation_audit(key_id, ts);
 CREATE TABLE IF NOT EXISTS usage_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ts REAL NOT NULL,
@@ -550,6 +564,42 @@ class Database:
     async def forget_registration_for_key(self, key_id: int) -> None:
         await self._db.execute("DELETE FROM discord_registrations WHERE key_id=?", (key_id,))
         await self._db.commit()
+
+    async def add_audit(self, key_id, key_name: str, kind: str, model: str, status: str,
+                        prompt: str, negative: str, thumb: Optional[bytes]) -> None:
+        await self._db.execute(
+            """INSERT INTO generation_audit (ts,key_id,key_name,kind,model,status,prompt,negative,thumb)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
+            (time.time(), key_id, key_name[:80], kind, model[:80], status, prompt, negative, thumb))
+        await self._db.commit()
+
+    async def list_audit(self, limit: int, offset: int, key_id: Optional[int] = None) -> tuple[list, int]:
+        where, args = ("WHERE key_id=?", (key_id,)) if key_id is not None else ("", ())
+        total = (await (await self._db.execute(f"SELECT COUNT(*) FROM generation_audit {where}", args)).fetchone())[0]
+        rows = await (await self._db.execute(
+            f"""SELECT id,ts,key_id,key_name,kind,model,status,prompt,negative,
+                       (thumb IS NOT NULL) AS has_thumb
+                FROM generation_audit {where} ORDER BY id DESC LIMIT ? OFFSET ?""",
+            (*args, limit, offset))).fetchall()
+        return rows, int(total)
+
+    async def audit_thumb(self, audit_id: int) -> Optional[bytes]:
+        row = await (await self._db.execute("SELECT thumb FROM generation_audit WHERE id=?", (audit_id,))).fetchone()
+        return bytes(row["thumb"]) if row and row["thumb"] is not None else None
+
+    async def purge_audit(self, older_than: float) -> int:
+        cur = await self._db.execute("DELETE FROM generation_audit WHERE ts<?", (older_than,))
+        await self._db.commit()
+        return cur.rowcount
+
+    async def member_usage(self, since_day: str) -> dict[int, dict]:
+        """每个 Key 近一段时间的用量汇总（来自每日计数器）。"""
+        rows = await (await self._db.execute(
+            """SELECT key_id, COALESCE(SUM(images),0) AS images, COALESCE(SUM(v5),0) AS v5,
+                      COALESCE(SUM(anlas),0) AS anlas, COALESCE(SUM(text_tokens),0) AS text_tokens,
+                      COALESCE(SUM(requests),0) AS requests
+               FROM counters WHERE day>=? GROUP BY key_id""", (since_day,))).fetchall()
+        return {int(r["key_id"]): dict(r) for r in rows}
 
     async def add_log(
         self, key_id: Optional[int], key_name: str, kind: str, model: str,

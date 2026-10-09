@@ -9,6 +9,9 @@ services:
     environment:
       - DATA_DIR=/app/data
       - TZ=Asia/Shanghai
+      # 端口只绑定在本机(127.0.0.1)，只有本机的反向代理能连上，可信任其 X-Forwarded-For，
+      # 这样登录/无效 Key 限流按真实访客 IP 计，而不是把所有人算成同一个。
+      - FORWARDED_ALLOW_IPS=*
     volumes:
       - ./data:/app/data
 
@@ -28,3 +31,6 @@ services:
       - REGISTRATION_BRIDGE_SECRET=${REGISTRATION_BRIDGE_SECRET}
       - REGISTRATION_BACKEND_URL=http://nai-gate:8000
       - SITE_URL=${SITE_URL}
+      - AUDIT_PROMPTS=${AUDIT_PROMPTS:-0}
+      - AUDIT_THUMBS=${AUDIT_THUMBS:-0}
+      - AUDIT_RETENTION_DAYS=${AUDIT_RETENTION_DAYS:-7}

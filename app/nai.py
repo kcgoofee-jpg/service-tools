@@ -81,6 +81,11 @@ async def _wait_cleanup(task: asyncio.Task) -> Any:
 class NaiClient:
     """持有共享 httpx.AsyncClient 与上游令牌池。"""
 
+    def _event(self, kind: str, message: str, cooldown: float = 900) -> None:
+        callback = getattr(self, "on_event", None)
+        if callback:
+            callback(kind, message, cooldown)
+
     def __init__(self, tokens: list[str], image_host: str, text_host: str,
                  legacy_text_host: str, *, db: Any, day_fn: Callable[[], str],
                  v5_daily_limits: list[int], allow_anlas: list[bool],
@@ -392,6 +397,7 @@ class NaiClient:
                     continue
                 if resp.status_code == 401:
                     self.mark_unauthorized(ts)
+                    self._event("upstream_401", "NovelAI 返回 401：上游 Token 已失效，生图和文本全部不可用，请尽快更换 Token。", 1800)
                     raise UpstreamError(502, "上游令牌已失效（401），请站长更换 NovelAI Token")
                 if succeeded:
                     self.mark_ok(ts)
@@ -517,6 +523,7 @@ class NaiClient:
                 raise UpstreamError(429, "上游限流(429)，全站图片生成已进入冷却")
             if resp.status_code == 401:
                 self.mark_unauthorized(ts)
+                self._event("upstream_401", "NovelAI 返回 401：上游 Token 已失效，生图和文本全部不可用，请尽快更换 Token。", 1800)
                 raise UpstreamError(502, "上游令牌已失效（401），请站长更换 NovelAI Token")
             if resp.status_code not in (200, 201):
                 status = resp.status_code if 400 <= resp.status_code <= 599 else 502
@@ -567,6 +574,7 @@ class NaiClient:
             except Exception:
                 raise UpstreamError(502, "上游文本错误响应连接关闭失败") from None
             if resp.status_code == 401:
+                self._event("upstream_401", "NovelAI 返回 401：上游 Token 已失效，生图和文本全部不可用，请尽快更换 Token。", 1800)
                 raise UpstreamError(502, "上游令牌已失效（401），请站长更换 NovelAI Token")
             if resp.status_code == 429:
                 raise UpstreamError(429, "上游限流(429)，请降低频率后重试")

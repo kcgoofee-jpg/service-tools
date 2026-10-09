@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Optional
 from zoneinfo import ZoneInfo
 
+from . import alerts
 from .config import Settings
 from .database import Database
 from .nai import NaiClient
@@ -21,6 +22,11 @@ RUNTIME_LIMIT_BOUNDS = {
     "image_min_interval": (15, 120),
     "image_429_cooldown_seconds": (60, 3600),
 }
+
+
+def _mask_ip(value: str) -> str:
+    parts = value.split(".")
+    return ".".join(["*"] * (len(parts) - 2) + parts[-2:]) if len(parts) == 4 else "…" + value[-6:]
 
 
 class GateState:
@@ -39,6 +45,11 @@ class GateState:
             allow_anlas=settings.nai_token_allow_anlas,
             image_min_interval=settings.image_min_interval,
         )
+        self.alerter = alerts.from_settings(settings)
+        self.nai.on_event = lambda kind, msg, cooldown=900: self.alerter.notify(kind, msg, cooldown=cooldown)
+        self.nai.allowance.on_low = self.nai.on_event
+        self._auth_fails: dict[str, deque[float]] = {}
+        self._auth_blocked_until: dict[str, float] = {}
         self._global_sem = asyncio.Semaphore(max(1, settings.global_concurrency))
         self._key_sems: dict[int, asyncio.Semaphore] = {}
         self._key_image_next_at: dict[int, float] = {}
@@ -223,6 +234,32 @@ class GateState:
                         self._rpm.pop(k, None)
             return True
 
+    def auth_blocked(self, client_id: str) -> int:
+        """该 IP 因多次无效 Key 被临时拦截时，返回剩余秒数；否则 0。"""
+        until = self._auth_blocked_until.get(client_id, 0.0)
+        return max(0, int(until - time.time()))
+
+    def record_auth_failure(self, client_id: str) -> None:
+        """记录一次无效 Key；超过阈值则临时拦截该 IP，并告警。"""
+        now = time.time()
+        window = max(1, self.settings.auth_fail_window)
+        win = self._auth_fails.setdefault(client_id, deque())
+        win.append(now)
+        while win and now - win[0] > window:
+            win.popleft()
+        if len(win) >= max(1, self.settings.auth_fail_max):
+            self._auth_blocked_until[client_id] = now + max(1, self.settings.auth_block_seconds)
+            win.clear()
+            self.alerter.notify(
+                "auth_flood", f"有 IP 在 {window} 秒内用无效 Key 反复请求 {self.settings.auth_fail_max} 次，"
+                f"已临时拦截 {self.settings.auth_block_seconds // 60} 分钟（IP 后两段：{_mask_ip(client_id)}）。",
+                cooldown=1800)
+        if len(self._auth_fails) > 2048:
+            for k in [k for k, w in self._auth_fails.items() if not w or now - w[-1] > window]:
+                self._auth_fails.pop(k, None)
+            for k in [k for k, t in self._auth_blocked_until.items() if t < now]:
+                self._auth_blocked_until.pop(k, None)
+
     async def hit_login(self, client_id: str) -> bool:
         """限制后台口令猜测；True = 放行。"""
         async with self._lock:
@@ -262,7 +299,10 @@ class GateState:
             self._image_blocked_until, time.time() + max(5.0, retry_after)
         )
         await self.db.set_setting("image_cooldown_until", self._image_blocked_until)
-        return max(1, int(self._image_blocked_until - time.time()))
+        remaining = max(1, int(self._image_blocked_until - time.time()))
+        self.alerter.notify("upstream_429", f"NovelAI 对图片请求返回 429（限流），全站生图已暂停 {remaining} 秒。"
+                            "如果频繁出现，请降低成员人数或调大图片间隔。", cooldown=1800)
+        return remaining
 
     def image_cooldown_remaining(self) -> int:
         return max(0, int(self._image_blocked_until - time.time()))
