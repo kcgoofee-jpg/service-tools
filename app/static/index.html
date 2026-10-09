@@ -227,7 +227,34 @@ td .tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
 .member-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px}
 .member{padding:20px;display:flex;flex-direction:column;gap:16px;transition:border-color .15s,box-shadow .15s}
 .member:hover{border-color:var(--border-strong);box-shadow:var(--shadow)}
-.member.dim{opacity:.75}
+.member.dim>:not(.member-foot){opacity:.5}
+.member.dim{background:var(--surface-2)}
+.avatar{position:relative;overflow:hidden}
+.avatar.dc{border-radius:50%}
+.avatar img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+.member-top .nm2{font-size:12.5px;color:var(--muted);overflow-wrap:anywhere;line-height:1.4}
+.dc-row{display:flex;gap:8px;flex-wrap:wrap}
+.dc-row .btn{text-decoration:none}
+.m-actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+details.menu{position:relative}
+details.menu>summary{list-style:none;cursor:pointer}
+details.menu>summary::-webkit-details-marker{display:none}
+.menu-pop{position:absolute;right:0;bottom:calc(100% + 6px);z-index:10;min-width:210px;background:var(--surface);border:1px solid var(--border-strong);
+  border-radius:var(--radius-sm);box-shadow:var(--shadow-lg);padding:4px;display:flex;flex-direction:column}
+.menu-pop button{border:0;background:none;text-align:left;padding:8px 10px;border-radius:6px;cursor:pointer;color:var(--text);font-weight:500;white-space:nowrap}
+.menu-pop button:hover{background:var(--surface-3)}
+.menu-pop button.danger{color:var(--bad)}
+.menu-pop button.danger:hover{background:var(--bad-soft)}
+.codeblk{display:flex;gap:8px;align-items:flex-start;background:var(--surface-3);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;margin:8px 0 12px}
+.codeblk pre{margin:0;flex:1;min-width:0;font-family:var(--mono);font-size:12.5px;line-height:1.7;white-space:pre-wrap;overflow-wrap:anywhere}
+details.help{margin-top:16px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface-2)}
+details.help>summary{cursor:pointer;font-weight:600;padding:12px 16px}
+details.help .help-body{padding:0 16px 8px;font-size:13px;color:var(--text-2);line-height:1.75}
+details.help ol{margin:8px 0 8px;padding-left:20px}
+.pwbox{display:flex;gap:8px}
+.ok-msg{color:var(--ok);background:var(--ok-soft);border-radius:var(--radius-sm);padding:10px 14px;margin-bottom:12px;font-size:13px}
+.sumline{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.sumline .body{flex:1;min-width:200px}
 .member-top{display:flex;gap:12px;align-items:flex-start}
 .avatar{width:40px;height:40px;border-radius:12px;background:var(--accent-soft);color:var(--accent-text);display:grid;place-items:center;font-weight:700;font-size:16px;flex:none}
 .member-top .nm{font-weight:600;font-size:15px;overflow-wrap:anywhere;line-height:1.35}
@@ -442,6 +469,21 @@ details.neg div{margin-top:6px;white-space:pre-wrap;overflow-wrap:anywhere;max-h
             <div class="panel-head"><h2>上游 NovelAI 令牌池</h2></div>
             <div id="pool"></div>
             <div id="allowanceDetails" class="hint" style="white-space:pre-line;margin-top:16px">V5 余量：正在读取本地状态…</div>
+            <details class="help" id="tokenHelp"><summary>添加更多上游 Token</summary>
+              <div class="help-body">
+                <p>上游 Token 是在服务器的 <code>.env</code> 文件里配置的，不能在这个页面直接添加。</p>
+                <ol>
+                  <li>编辑 <code>.env</code>，用英文逗号分隔多个 Token，<b>顺序有意义</b>：
+                    <div class="codeblk"><pre>NAI_TOKENS=pst-aaa,pst-bbb</pre><button class="btn mini" type="button" data-act="copy-code">复制</button></div></li>
+                  <li>可选：在同一文件里按相同顺序设置每把 Token 是否允许消耗 Anlas，以及免费 V5 每日上限（0 = 不限）：
+                    <div class="codeblk"><pre>NAI_TOKEN_ALLOW_ANLAS=1,0
+NAI_TOKEN_V5_DAILY_LIMITS=0,150</pre><button class="btn mini" type="button" data-act="copy-code">复制</button></div></li>
+                  <li>重启网关使配置生效：
+                    <div class="codeblk"><pre>docker compose up -d</pre><button class="btn mini" type="button" data-act="copy-code">复制</button></div></li>
+                </ol>
+                <p>重启后，每把 Token 会出现在上面的列表中，可以单独启用 / 停用，并设置各自的 V5 日限和图片并发。</p>
+                <p style="margin-bottom:8px"><b>不要随意调整 Token 的顺序：</b>每把 Token 的后台设置跟随 Token 本身保存，但 <code>.env</code> 里的 <code>NAI_TOKEN_ALLOW_ANLAS</code> 和 <code>NAI_TOKEN_V5_DAILY_LIMITS</code> 是按位置对应的，改了顺序就会错位。</p>
+              </div></details>
           </div>
           <div class="card panel">
             <div class="panel-head"><h2>Anlas 消耗核对</h2>
@@ -478,17 +520,18 @@ details.neg div{margin-top:6px;white-space:pre-wrap;overflow-wrap:anywhere;max-h
               <select id="auditFilter" aria-label="按成员筛选" style="width:200px"><option value="">全部成员</option></select>
               <button class="btn" data-act="refresh-audit"><span data-ic="refresh"></span>刷新</button>
             </div></div>
+          <div class="card panel" id="auditSettings"><div class="skel" style="height:56px"></div></div>
           <div class="gallery" id="auditGrid"></div>
           <div class="pager" id="auditPager"></div>
         </section>
 
         <!-- 功能与开放 -->
         <section id="tab-ops" hidden>
-          <div class="page-head"><div class="ttl"><h1>功能与开放</h1><p>全局功能开关、Discord 自助领取与生成记录公告</p></div>
+          <div class="page-head"><div class="ttl"><h1>功能与开放</h1><p>全局功能开关与 Discord 自助领取</p></div>
             <div class="tools"><button class="btn" data-act="refresh-ops"><span data-ic="refresh"></span>刷新</button></div></div>
           <div class="card panel"><div class="panel-head"><h2>功能开关</h2><div class="desc">切换后立即保存。关闭后管理员 Key 仍可使用。</div></div><div id="opsFeatures"><div class="skel" style="height:200px"></div></div></div>
           <div class="card panel"><div class="panel-head"><h2>开放注册（Discord 自助领取）</h2></div><div id="opsReg"><div class="skel" style="height:260px"></div></div></div>
-          <div class="card panel"><div class="panel-head"><h2>生成记录与公告</h2></div><div id="opsAudit"><div class="skel" style="height:220px"></div></div></div>
+          <p class="hint" style="margin:-8px 0 24px">生成记录设置已移到「<a href="#" data-act="goto-audit">生成记录</a>」页</p>
         </section>
 
         <!-- 密钥 -->
@@ -565,6 +608,18 @@ details.neg div{margin-top:6px;white-space:pre-wrap;overflow-wrap:anywhere;max-h
             <div class="panel-head"><h2>站点公告</h2><div class="desc">用户访问首页看到的内容，支持 HTML</div></div>
             <textarea id="announce" rows="10" placeholder="&lt;h2&gt;欢迎&lt;/h2&gt;&lt;p&gt;申请 Key 请联系……&lt;/p&gt;" aria-label="站点公告"></textarea>
             <div style="margin-top:16px"><button class="btn primary" data-act="save-announce">保存公告</button></div>
+          </div>
+          <div class="card panel">
+            <div class="panel-head"><h2>后台密码</h2><div class="desc">修改后所有已登录的会话（包括当前）都会失效，需要用新密码重新登录</div></div>
+            <form id="pwForm" autocomplete="off" onsubmit="return false" style="max-width:420px">
+              <div class="field"><label for="pw_cur">当前密码</label><div class="pwbox"><input id="pw_cur" type="password" autocomplete="current-password"><button class="btn" type="button" data-act="toggle-pw" data-for="pw_cur">显示</button></div></div>
+              <div class="field"><label for="pw_new">新密码</label><div class="pwbox"><input id="pw_new" type="password" autocomplete="new-password"><button class="btn" type="button" data-act="toggle-pw" data-for="pw_new">显示</button></div><div class="hint">至少 12 个字符，且不能与当前密码相同</div></div>
+              <div class="field"><label for="pw_new2">确认新密码</label><div class="pwbox"><input id="pw_new2" type="password" autocomplete="new-password"><button class="btn" type="button" data-act="toggle-pw" data-for="pw_new2">显示</button></div></div>
+              <div class="err" id="pwErr" role="alert"></div>
+              <div class="ok-msg" id="pwOk" role="status" hidden></div>
+              <button class="btn primary" type="button" id="pwSave" data-act="save-pw">修改密码</button>
+            </form>
+            <p class="hint" style="margin-top:16px">忘记密码时，可在服务器 <code>.env</code> 中设置 <code>ADMIN_PASSWORD</code>，并删除数据库里的 <code>admin_password_hash</code> 设置来重置。</p>
           </div>
           <div class="card panel">
             <div class="panel-head"><h2>服务端配置</h2><div class="desc">只读，修改请编辑 .env 后重启</div></div>
@@ -902,7 +957,7 @@ function tab(name){
   window.scrollTo(0,0);
   if(name==='ov') loadOverview();
   if(name==='members') loadMembers();
-  if(name==='audit') loadAudit();
+  if(name==='audit'){ loadAuditSettings(); loadAudit(); }
   if(name==='keys') loadKeys();
   if(name==='ops') loadOps();
   if(name==='logs') loadLogs();
@@ -1076,6 +1131,44 @@ async function loadMembers(){
     renderMembers();
   }catch(e){ toastErr(e); $('#memberGrid').innerHTML = ''; }
 }
+const DC_CDN = 'https://cdn.discordapp.com/', DC_SITE = 'https://discord.com/';
+function safeUrl(u, prefix){ return typeof u === 'string' && u.startsWith(prefix) && !/[\s"'<>]/.test(u) ? u : ''; }
+function memberLabel(m){ const d = m.discord; return (d && (d.display_name || d.username)) || m.name; }
+async function refreshAfterMemberChange(){
+  membersCache = null; keysCache = [];
+  await Promise.allSettled([loadMembers(), loadKeys(), loadOverview()]);
+}
+async function memberToggle(id, enabled){
+  const m = (membersCache||[]).find(x=>x.id===id); if(!m) return;
+  const name = memberLabel(m);
+  if(!enabled && !await askConfirm(`确定停用成员「${name}」？\n停用后其 Key 立即不能使用，但成员记录和用量保留，之后可以重新启用。`, '停用')) return;
+  try{
+    await api('/admin/api/keys/'+id, {method:'PATCH', body:JSON.stringify({enabled})});
+    toast(`已${enabled?'启用':'停用'}「${name}」`, 'ok');
+    await refreshAfterMemberChange();
+  }catch(e){ toastErr(e); }
+}
+async function memberDelete(id, ban){
+  const m = (membersCache||[]).find(x=>x.id===id); if(!m || m.is_admin) return;
+  const name = memberLabel(m), isDc = !!(m.discord || m.discord_id);
+  let msg, okText;
+  if(ban){
+    msg = `确定删除成员「${name}」并永久禁止其领取？\n其 Key 将被删除，Discord 领取记录会被清除并摘除身份组。\n该 Discord 账号以后无法再次自助领取，此操作不可恢复。`;
+    okText = '删除并永久禁止';
+  }else if(isDc){
+    msg = `确定删除成员「${name}」？\n其 Key 将被删除，Discord 领取记录会被清除并摘除身份组。\n删除后该成员可以重新自助领取新的 Key，历史用量不再保留。`;
+    okText = '删除';
+  }else{
+    msg = `确定删除成员「${name}」？\n其 Key 将被删除且不可恢复。`;
+    okText = '删除';
+  }
+  if(!await askConfirm(msg, okText)) return;
+  try{
+    await api('/admin/api/keys/'+id+(ban?'?ban=true':''), {method:'DELETE'});
+    toast(ban ? `已删除「${name}」并永久禁止领取` : `已删除「${name}」`, 'ok');
+    await refreshAfterMemberChange();
+  }catch(e){ toastErr(e); }
+}
 function memberLimitRatio(m){ return m.daily_images>0 ? m.today.images/m.daily_images : 0; }
 function renderMembers(){
   const all = membersCache || [];
@@ -1087,7 +1180,8 @@ function renderMembers(){
     statCard('从未使用', all.filter(m=>!m.last_used_at).length, '人', '拿到 Key 但没有用过', 'accent') +
     statCard('已绑定 Discord', all.filter(m=>m.discord_id).length, '人');
   const q = memberQuery.trim().toLowerCase();
-  let list = all.filter(m=>!q || m.name.toLowerCase().includes(q) || String(m.discord_id||'').includes(q));
+  let list = all.filter(m=>!q || m.name.toLowerCase().includes(q) || String(m.discord_id||'').includes(q)
+    || (m.discord && [m.discord.username, m.discord.display_name].some(v=>String(v||'').toLowerCase().includes(q))));
   const keyf = {today:m=>m.today.images, week:m=>m.week.images, total:m=>m.total_images, recent:m=>m.last_used_at||0}[memberSort];
   list = list.slice().sort((a,b)=>keyf(b)-keyf(a) || a.name.localeCompare(b.name));
   if(!list.length){
@@ -1100,13 +1194,20 @@ function renderMembers(){
     const exp = m.expires_at ? (m.expires_at < now ? '<span class="tag off">已过期</span>'
       : m.expires_at-now < 3*86400 ? `<span class="tag warn">${new Date(m.expires_at*1000).toLocaleDateString('zh-CN')} 到期</span>`
       : `到期 ${new Date(m.expires_at*1000).toLocaleDateString('zh-CN')}`) : '永久有效';
+    const dc = m.discord || null;
+    const title = (dc && (dc.display_name || dc.username)) || m.name;
+    const handle = dc && dc.username && dc.username !== title ? '@' + dc.username : '';
+    const av = dc ? safeUrl(dc.avatar_url, DC_CDN) : '';
+    const prof = dc ? safeUrl(dc.profile_url, DC_SITE) : '';
+    const dcId = dc ? String(dc.id) : (m.discord_id ? String(m.discord_id) : '');
     return `<article class="card member ${m.enabled?'':'dim'}">
       <div class="member-top">
-        <div class="avatar">${esc([...String(m.name||'?')][0]||'?')}</div>
+        <div class="avatar ${dc?'dc':''}">${esc([...String(title||'?')][0]||'?')}${av?`<img class="av" src="${esc(av)}" alt="" width="40" height="40" referrerpolicy="no-referrer" loading="lazy">`:''}</div>
         <div style="min-width:0;flex:1">
-          <div class="nm">${esc(m.name)}</div>
+          <div class="nm">${esc(title)}</div>
+          ${handle?`<div class="nm2">${esc(handle)}</div>`:''}
           <div class="tags">
-            <span class="tag ${m.enabled?'on':'off'}">${m.enabled?'启用':'禁用'}</span>
+            ${m.enabled?'<span class="tag on">启用</span>':'<span class="tag off">已停用</span>'}
             ${m.is_admin?'<span class="tag info">站长</span>':''}
             ${m.discord_id?`<span class="tag info" title="Discord ID ${esc(m.discord_id)}">Discord 已绑定</span>`:'<span class="tag dim">未绑定 Discord</span>'}
             ${!m.last_used_at?'<span class="tag warn">从未使用</span>':''}
@@ -1116,6 +1217,7 @@ function renderMembers(){
         </div>
       </div>
       ${m.features!==undefined?`<div class="chips">${featChips(m.features)}</div>`:''}
+      ${dcId?`<div class="dc-row">${prof?`<a class="btn mini" href="${esc(prof)}" target="_blank" rel="noopener noreferrer">在 Discord 打开</a>`:''}<button class="btn mini" type="button" data-act="copy-dc" data-dcid="${esc(dcId)}">${ic('copy')}复制 Discord ID</button></div>`:''}
       <div class="quota">
         <div class="row"><span>今日图片</span><span class="num"><b>${m.today.images}</b> / ${limited?m.daily_images:'不限'}${m.today.v5?` · V5 ${m.today.v5}${m.daily_v5>0?'/'+m.daily_v5:''}`:''}</span></div>
         ${limited?`<div class="bar ${cls}" role="progressbar" aria-valuenow="${Math.round(Math.min(1,ratio)*100)}" aria-valuemin="0" aria-valuemax="100"><i style="width:${Math.min(100,Math.round(ratio*100))}%"></i></div>`:'<div class="bar"><i style="width:0"></i></div>'}
@@ -1127,13 +1229,46 @@ function renderMembers(){
       </div>
       <div class="member-foot">
         <div class="meta"><span>最近使用：${esc(rel(m.last_used_at))}</span><span>${exp}</span></div>
-        <button class="btn mini" data-act="view-audit" data-id="${m.id}">${ic('image')}生成记录</button>
+        <div class="m-actions">
+          <button class="btn mini" data-act="view-audit" data-id="${m.id}">${ic('image')}生成记录</button>
+          <details class="menu"><summary class="btn mini" aria-label="更多操作：${esc(title)}">更多 ▾</summary>
+            <div class="menu-pop">
+              <button type="button" data-act="member-toggle" data-id="${m.id}" data-on="${m.enabled?0:1}">${m.enabled?'停用':'启用'}</button>
+              ${m.is_admin?'':`<button type="button" class="danger" data-act="member-del" data-id="${m.id}">${dcId?'删除（可重新领取）':'删除'}</button>`}
+              ${m.is_admin||!dcId?'':`<button type="button" class="danger" data-act="member-ban" data-id="${m.id}">删除并永久禁止领取</button>`}
+            </div></details>
+        </div>
       </div>
     </article>`;
   }).join('');
 }
 
 /* ---------- audit ---------- */
+let auditSetOpen = null;
+async function loadAuditSettings(){
+  try{ opsData = await api('/admin/api/ops'); auditSetOpen = null; renderAuditSettings(); }
+  catch(e){ $('#auditSettings').innerHTML = '<div class="muted">记录设置暂时无法读取。</div>'; }
+}
+function renderAuditSettings(){
+  const a = opsData && opsData.audit, box = $('#auditSettings');
+  if(!a) return;
+  const on = a.prompts || a.thumbs;
+  if(auditSetOpen === null) auditSetOpen = !on;
+  const parts = [a.prompts?'提示词':'', a.thumbs?'缩略图':''].filter(Boolean).join(' + ');
+  const summary = on ? `记录中：${parts} · 保留 ${a.retention_days} 天` : '记录已关闭：不会保存提示词和缩略图';
+  const head = `<div class="sumline"><div class="body"><h2 style="font-size:15px;font-weight:600">记录设置</h2>
+      <div class="${on?'':'muted'}" style="margin-top:2px">${esc(summary)}</div></div>
+      ${on?`<button class="btn" type="button" data-act="toggle-audit-set" aria-expanded="${auditSetOpen}">${auditSetOpen?'收起':'修改'}</button>`:''}</div>`;
+  if(!auditSetOpen){ box.innerHTML = head; return; }
+  box.innerHTML = head + `<div style="margin-top:16px">
+    <div class="notice-box">目前处于测试期：站长会记录成员提交的提示词与缩略图，用于防范违规内容（例如政治类内容）。成员会通过首页、/help、/register 私信和频道公告获知这一点。记录将在 <b>${esc(a.retention_days)}</b> 天后自动删除，且仅站长可见。
+      ${a.announce_configured?'':'<br>成员公告频道尚未配置，不会发布频道公告；首页与私信中的告知仍然有效。'}</div>
+    <div class="feat-row"><div class="body"><div class="t">记录提示词</div></div><label class="switch"><input type="checkbox" id="aud_prompts" ${a.prompts?'checked':''} aria-label="记录提示词"><span></span></label></div>
+    <div class="feat-row"><div class="body"><div class="t">记录缩略图</div></div><label class="switch"><input type="checkbox" id="aud_thumbs" ${a.thumbs?'checked':''} aria-label="记录缩略图"><span></span></label></div>
+    <div class="field" style="margin-top:16px;max-width:260px"><label for="aud_days">保留天数</label><input id="aud_days" type="number" min="1" max="90" value="${esc(a.retention_days)}"><div class="hint">1～90 天</div></div>
+    <label class="check"><input type="checkbox" id="aud_notify" checked><span>切换时在成员频道发布测试期公告${a.announce_configured?'':'（公告频道未配置，将不会发布）'}</span></label>
+    <div style="margin-top:16px"><button class="btn primary" data-act="save-audit">保存</button></div></div>`;
+}
 function fillMemberFilter(){
   const sel = $('#auditFilter'), cur = sel.value;
   sel.innerHTML = '<option value="">全部成员</option>' + (membersCache||[]).map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join('');
@@ -1228,7 +1363,7 @@ function syncFeatMode(modeName, listSel){
 /* ---------- ops page ---------- */
 let opsData = null;
 async function loadOps(){
-  try{ opsData = await api('/admin/api/ops'); renderOpsFeatures(); renderOpsReg(); renderOpsAudit(); }
+  try{ opsData = await api('/admin/api/ops'); renderOpsFeatures(); renderOpsReg(); }
   catch(e){ toastErr(e); }
 }
 function renderOpsFeatures(){
@@ -1287,24 +1422,13 @@ async function saveReg(){
   try{ await putReg({...vals, image_scope:$('#reg_scope').value, features:readFeatMode('reg_feat_mode','#reg_feat_list')}, '开放设置已保存'); }
   catch(e){ toastErr(e); }
 }
-function renderOpsAudit(){
-  const a = opsData.audit;
-  $('#opsAudit').innerHTML = `
-    <div class="notice-box">目前处于测试期：站长会记录成员提交的提示词与缩略图，用于防范违规内容（例如政治类内容）。成员会通过首页、/help、/register 私信和频道公告获知这一点。记录将在 <b>${esc(a.retention_days)}</b> 天后自动删除，且仅站长可见。
-      ${a.announce_configured?'':'<br>成员公告频道尚未配置，不会发布频道公告；首页与私信中的告知仍然有效。'}</div>
-    <div class="feat-row"><div class="body"><div class="t">记录提示词</div></div><label class="switch"><input type="checkbox" id="aud_prompts" ${a.prompts?'checked':''} aria-label="记录提示词"><span></span></label></div>
-    <div class="feat-row"><div class="body"><div class="t">记录缩略图</div></div><label class="switch"><input type="checkbox" id="aud_thumbs" ${a.thumbs?'checked':''} aria-label="记录缩略图"><span></span></label></div>
-    <div class="field" style="margin-top:16px;max-width:260px"><label for="aud_days">保留天数</label><input id="aud_days" type="number" min="1" max="90" value="${esc(a.retention_days)}"><div class="hint">1～90 天</div></div>
-    <label class="check"><input type="checkbox" id="aud_notify" checked><span>切换时在成员频道发布测试期公告${a.announce_configured?'':'（公告频道未配置，将不会发布）'}</span></label>
-    <div style="margin-top:16px"><button class="btn primary" data-act="save-audit">保存</button></div>`;
-}
 async function saveAudit(){
   const days = Number($('#aud_days').value);
   if(!Number.isInteger(days) || days<1 || days>90){ toast('保留天数须为 1～90 的整数', 'err'); return; }
   try{
     opsData = await api('/admin/api/ops/audit', {method:'PUT', body:JSON.stringify({prompts:$('#aud_prompts').checked, thumbs:$('#aud_thumbs').checked, retention_days:days, notify:$('#aud_notify').checked})});
     statusCache = null;
-    toast('生成记录设置已保存', 'ok'); renderOpsAudit();
+    toast('生成记录设置已保存', 'ok'); auditSetOpen = null; renderAuditSettings(); loadAudit();
   }catch(e){ toastErr(e); }
 }
 
@@ -1513,6 +1637,38 @@ async function loadSettings(){
       `敏感配置仍在 .env；更多说明见项目 README`;
   }catch(e){ toastErr(e); }
 }
+async function changePassword(){
+  const cur = $('#pw_cur').value, nw = $('#pw_new').value, nw2 = $('#pw_new2').value;
+  const err = $('#pwErr'), ok = $('#pwOk'), btn = $('#pwSave');
+  err.textContent = ''; ok.hidden = true;
+  if(!cur){ err.textContent = '请输入当前密码'; return; }
+  if(nw.length < 12){ err.textContent = '新密码至少需要 12 个字符'; return; }
+  if(nw !== nw2){ err.textContent = '两次输入的新密码不一致'; return; }
+  if(nw === cur){ err.textContent = '新密码不能与当前密码相同'; return; }
+  btn.disabled = true;
+  try{
+    const r = await fetch('/admin/api/password', {method:'PUT', credentials:'same-origin',
+      headers:{'Content-Type':'application/json'}, body:JSON.stringify({current:cur, new:nw})});
+    const data = await r.json().catch(()=>({}));
+    const detail = data.error?.message || data.detail;
+    if(r.status === 401){
+      if(typeof detail === 'string' && detail.includes('当前密码')){ toast('当前密码不正确', 'err'); err.textContent = '当前密码不正确'; btn.disabled = false; }
+      else showLogin();
+      return;
+    }
+    if(!r.ok){
+      const msg = typeof detail === 'string' ? detail : (r.status === 422 ? '新密码不符合要求' : 'HTTP ' + r.status);
+      err.textContent = msg; toast(msg, 'err'); btn.disabled = false; return;
+    }
+    ok.textContent = '密码已修改，请用新密码重新登录。正在返回登录页…'; ok.hidden = false;
+    toast('密码已修改', 'ok');
+    ['pw_cur','pw_new','pw_new2'].forEach(i=>{ $('#'+i).value = ''; });
+    setTimeout(()=>{
+      showLogin(); btn.disabled = false; ok.hidden = true; $('#pwd').value = '';
+      $('#loginErr').textContent = '密码已修改，请用新密码重新登录';
+    }, 1500);
+  }catch(e){ err.textContent = '网络错误，请稍后再试'; btn.disabled = false; }
+}
 async function saveBudget(){
   try{
     const d = await api('/admin/api/settings', {method:'PUT', body: JSON.stringify({
@@ -1548,7 +1704,11 @@ async function saveAnnounce(){
 }
 
 /* ---------- events ---------- */
+document.addEventListener('error', ev=>{
+  const t = ev.target; if(t && t.tagName === 'IMG' && t.classList.contains('av')) t.remove();
+}, true);
 document.addEventListener('click', ev=>{
+  $$('details.menu[open]').forEach(d=>{ if(!d.contains(ev.target)) d.removeAttribute('open'); });
   const nav = ev.target.closest('.nav button[data-tab]');
   if(nav){ tab(nav.dataset.tab); return; }
   const el = ev.target.closest('[data-act]');
@@ -1562,7 +1722,7 @@ document.addEventListener('click', ev=>{
   switch(el.dataset.act){
     case 'refresh-ov': loadOverview(); loadAllowance(); break;
     case 'refresh-members': membersCache=null; loadMembers(); break;
-    case 'refresh-audit': loadAudit(); break;
+    case 'refresh-audit': loadAuditSettings(); loadAudit(); break;
     case 'refresh-keys': loadKeys(); break;
     case 'refresh-logs': loadLogs(); break;
     case 'recon-reload': loadReconciliation(); break;
@@ -1581,6 +1741,15 @@ document.addEventListener('click', ev=>{
     case 'refresh-ops': loadOps(); break;
     case 'save-reg': saveReg(); break;
     case 'save-audit': saveAudit(); break;
+    case 'toggle-audit-set': auditSetOpen = !auditSetOpen; renderAuditSettings(); break;
+    case 'goto-audit': ev.preventDefault(); tab('audit'); break;
+    case 'save-pw': changePassword(); break;
+    case 'toggle-pw': { const i = document.getElementById(el.dataset.for); const show = i.type === 'password'; i.type = show ? 'text' : 'password'; el.textContent = show ? '隐藏' : '显示'; break; }
+    case 'copy-code': { const t = el.parentElement.querySelector('pre').textContent; copyText(t, '已复制').then(ok=>{ if(!ok) toast('复制失败，请手动选择文本', 'err'); }); break; }
+    case 'copy-dc': copyText(el.dataset.dcid, 'Discord ID 已复制').then(ok=>{ if(!ok) toast('复制失败，请手动选择文本', 'err'); }); break;
+    case 'member-toggle': el.closest('details')?.removeAttribute('open'); memberToggle(id, el.dataset.on==='1'); break;
+    case 'member-del': el.closest('details')?.removeAttribute('open'); memberDelete(id, false); break;
+    case 'member-ban': el.closest('details')?.removeAttribute('open'); memberDelete(id, true); break;
     case 'new-key': openCreate(); break;
     case 'edit-key': openEdit(id); break;
     case 'close-modal': closeModal(); break;
