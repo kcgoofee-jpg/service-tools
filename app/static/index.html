@@ -261,6 +261,7 @@ td .tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
 .mf.info{background:var(--surface-3);color:var(--muted)}
 .mf.warn{background:var(--warn-soft);color:var(--warn)}
 .mf.bad{background:var(--bad-soft);color:var(--bad)}
+.mf.ok{background:var(--ok-soft);color:var(--ok)}
 .mq{display:flex;flex-direction:column;align-items:flex-start;gap:4px;white-space:nowrap;font-size:12.5px}
 .mbar{width:120px;height:6px;border-radius:3px;background:var(--surface-3);display:flex;overflow:hidden;flex:none}
 .mbar i{display:block;height:100%;background:var(--accent)}
@@ -278,6 +279,8 @@ tr.mx>td{background:var(--surface-2);padding:16px 18px 18px;cursor:default}
 tr.mr.open>td{background:var(--surface-2);border-bottom-color:transparent}
 .mx-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr) minmax(0,1fr);gap:16px 28px}
 .mx-g h4{font-size:12px;font-weight:600;color:var(--muted);margin:0 0 10px;letter-spacing:.02em}
+.mod.off{opacity:.65}.mod-checks{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}.bad-text{color:var(--bad)}
+.mod .kv{margin-bottom:6px}
 .mx-wide{grid-column:1/-1;order:9}.mx-wide:empty{display:none}
 .share-ev h5{font-size:12px;font-weight:600;color:var(--muted);margin:4px 0 8px}.share-ev .table-wrap{max-height:280px;overflow:auto;margin-bottom:12px}
 .kv{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 14px;font-size:12.5px;margin:0}
@@ -571,6 +574,7 @@ td.note{min-width:220px}
       <button data-tab="logs"><span data-ic="list"></span>用量日志</button>
       <button data-tab="actions"><span data-ic="list"></span>操作日志</button>
       <div class="nav-label">设置</div>
+      <button data-tab="modules"><span data-ic="toggle"></span>模块<span class="nav-badge" id="navMods" hidden></span></button>
       <button data-tab="limits"><span data-ic="sliders"></span>额度与保护</button>
       <button data-tab="discord"><span data-ic="chat"></span>Discord<span class="nav-badge" id="navBot" hidden>!</span></button>
       <button data-tab="set"><span data-ic="sliders"></span>系统</button>
@@ -656,6 +660,12 @@ td.note{min-width:220px}
           <div class="card panel" id="bugPanel" style="padding:16px">
             <div class="table-wrap"><table class="rt"><thead><tr><th class="st">级别</th><th class="nw">来源</th><th>内容</th><th class="num">次数</th><th class="t">首次 / 最近</th><th class="nw">最近错误编号</th><th class="act">操作</th></tr></thead><tbody id="bugBody"></tbody></table></div>
           </div>
+        </section>
+
+        <!-- 模块 -->
+        <section id="tab-modules" hidden>
+          <div class="page-head"><div class="ttl"><h1>模块</h1></div><div class="tools"><button class="btn" data-act="refresh-mods" aria-label="刷新"><span data-ic="refresh"></span>刷新</button></div></div>
+          <div id="modList"><div class="skel" style="height:300px"></div></div>
         </section>
 
         <!-- Discord 机器人 -->
@@ -1189,7 +1199,7 @@ async function boot(){
 }
 
 /* ---------- tabs ---------- */
-const TABS = ['ov','members','ops','audit','up','bugs','logs','actions','limits','discord','set'];
+const TABS = ['ov','members','ops','audit','up','bugs','logs','actions','modules','limits','discord','set'];
 function tab(name){
   document.body.classList.remove('nav-open');
   $$('.nav button').forEach(b=>b.classList.toggle('active', b.dataset.tab===name));
@@ -1206,6 +1216,7 @@ function tab(name){
   if(name==='up'){ loadOverview(); loadReconciliation(); loadPerf(); loadShadow(); }
   if(name==='bugs') loadBugs();
   if(name==='discord') loadBot();
+  if(name==='modules') loadModules();
 }
 
 /* ---------- overview ---------- */
@@ -2324,6 +2335,40 @@ async function loadAutopilot(){
     }</tbody></table></div><div class="muted sm" style="margin-top:8px">更新于 ${esc(new Date(d.last.at*1000).toLocaleString())}</div>` : '<div class="muted">还没有运行记录（每 10 分钟一次）</div>';
   }catch(e){ $('#apBody').innerHTML = '<div class="muted">读取失败</div>'; }
 }
+/* 模块（app/kernel.py / modules.py）：开关、运行结果、交叉校验、参数依据等级 */
+const BASIS_CLS = {A:'off', B:'', C:'on', D:'warn'};
+async function loadModules(){
+  try{
+    const d = await api('/admin/api/modules');
+    let bad = 0;
+    $('#modList').innerHTML = d.modules.map(m => {
+      const L = m.last || {}, checks = L.checks || [];
+      bad += checks.filter(c => !c.ok).length;
+      const run = !m.periodic ? '' : L.at ? `${L.ok ? '✓' : '✗'} ${esc(new Date(L.at*1000).toLocaleTimeString())} · ${esc(L.ok ? (L.summary||'完成') : L.error)}` : '等待下一轮（每 10 分钟）';
+      return `<div class="card panel mod${m.enabled?'':' off'}">
+        <div class="panel-head"><h2>${esc(m.title)} <span class="muted" style="font-weight:400;font-size:14px">${esc(m.question)}</span></h2>
+          <label class="switch"><input type="checkbox" data-mod="${esc(m.name)}" ${m.enabled?'checked':''} aria-label="启用 ${esc(m.title)}"><span></span></label></div>
+        <dl class="kv"><dt>现实依据</dt><dd>${esc(m.reality)}</dd><dt>数学原理</dt><dd>${esc(m.principle)}</dd>
+          ${run ? `<dt>最近运行</dt><dd class="${L.ok===false?'bad-text':''}">${run}</dd>` : ''}
+          ${m.hard_note ? `<dt>关闭后</dt><dd class="muted">${esc(m.hard_note)}</dd>` : ''}</dl>
+        ${checks.length ? `<div class="mod-checks">${checks.map(c => `<span class="mf ${c.ok?'ok':'bad'}" title="${esc(c.detail)}">${c.ok?'✓':'✗'} ${esc(c.name)}</span>`).join('')}</div>
+          ${checks.filter(c=>!c.ok).map(c => `<div class="bad-text sm">✗ ${esc(c.name)}：${esc(c.detail)}</div>`).join('')}` : ''}
+        ${m.params.length ? `<div class="table-wrap"><table class="rt"><thead><tr><th>参数</th><th class="num">当前值</th><th>依据</th><th>来源 / 说明</th></tr></thead><tbody>${
+          m.params.map(p => `<tr><td data-label="参数">${esc(p.name)}</td><td class="num" data-label="当前值">${esc(p.value)}</td><td data-label="依据"><span class="tag ${BASIS_CLS[p.basis]||''}">${esc(p.basis)} ${esc(p.basis_label)}</span></td><td class="muted" data-label="来源">${esc([p.source, p.note].filter(Boolean).join(' · '))}</td></tr>`).join('')
+        }</tbody></table></div>` : ''}
+      </div>`;
+    }).join('');
+    $('#navMods').hidden = !bad; $('#navMods').textContent = bad || '';
+    $$('#modList [data-mod]').forEach(el => el.addEventListener('change', () => toggleModule(el)));
+  }catch(e){ $('#modList').innerHTML = '<div class="muted">读取失败</div>'; }
+}
+async function toggleModule(el){
+  try{
+    await api('/admin/api/modules/' + encodeURIComponent(el.dataset.mod), {method:'PUT', body: JSON.stringify({enabled: el.checked})});
+    toast(el.checked ? '已启用' : '已关闭', 'ok'); loadModules();
+  }catch(e){ el.checked = !el.checked; toastErr(e); }
+}
+
 /* Discord 机器人：状态（心跳）、跑图分享设置、最近动作（/admin/api/discord-bot，机器人侧见 integration/discord_bot.py） */
 const BOT_TAG = {like:'', comment:'on', shy:'warn', skip:'', error:'off'};
 async function loadBot(){
@@ -2450,6 +2495,7 @@ document.addEventListener('click', ev=>{
     case 'refresh-up': loadOverview(); loadReconciliation(); loadPerf(); loadShadow(); break;
     case 'refresh-bugs': loadBugs(); break;
     case 'refresh-bot': loadBot(); break;
+    case 'refresh-mods': loadModules(); break;
     case 'save-bot': saveBot(); break;
     case 'refresh-actions': loadActions(); break;
     case 'recon-reload': loadReconciliation(); break;

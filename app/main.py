@@ -155,6 +155,15 @@ async def lifespan(app: FastAPI):
     app.state.registrar = configured_service(STATE.db, registration_http)
     if app.state.registrar is not None:
         STATE.on_registration_released = app.state.registrar.release_role
+    from . import modules as _modules
+    STATE.kernel = _modules.build(STATE, bug)
+    STATE.kernel.extra["registrar"] = app.state.registrar
+
+    async def _dm(key_id, text, reg=app.state.registrar):
+        did = await reg.registration_for_key(key_id) if reg is not None else None
+        if did is not None:
+            await reg.send_dm(did, "🦉 猫头鹰公益站通知：" + text)
+    STATE.kernel.extra["dm"] = _dm
     cleanup_task = asyncio.create_task(inactive_key_cleanup_loop())
     reset_task = asyncio.create_task(registration_reset_loop())
     maintenance_task = asyncio.create_task(maintenance_loop())
@@ -174,7 +183,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "1.9.7"
+__version__ = "2.0.0"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -520,36 +529,15 @@ ANLAS_REBALANCE_SECONDS = 600
 
 
 async def anlas_rebalance_loop() -> None:
-    """每 10 分钟：动态额度（V4.5 上限 / 保底 / V5，见 quota_algo.py）+ Anlas 自动分配（见 anlas_pool.py）。
-    两者只改额度数字，实际扣减都在每次请求时实时检查。"""
-    from . import anlas_pool, quota_algo
+    """每 10 分钟：按模块登记顺序运行各模块的周期任务（容量 / 分配 / Anlas / 自动驾驶……），再做交叉校验。
+    模块和开关见 modules.py / kernel.py；单个模块出错不影响其他模块。"""
     while True:
-        try:
-            await quota_algo.run(STATE)
-        except Exception as exc:
-            bug("quota_algo", exc)
-        try:
-            changed = await STATE.guard.adapt_daily()
-            if changed:
-                from .action_log import log_action
-                await log_action(STATE.db, "系统", "自动调整：每小时上限", "", f"一天没有上游限流：{changed[0]} → {changed[1]}")
-        except Exception as exc:
-            bug("guard_adapt", exc)
-        try:
-            from . import autopilot
-            await autopilot.run(STATE, getattr(app.state, "registrar", None))
-        except Exception as exc:
-            bug("autopilot", exc)
-        try:
-            reg = getattr(app.state, "registrar", None)
-
-            async def _dm(key_id, text, reg=reg):
-                did = await reg.registration_for_key(key_id) if reg is not None else None
-                if did is not None:
-                    await reg.send_dm(did, "🦉 猫头鹰公益站通知：" + text)
-            await anlas_pool.rebalance(STATE, notify=_dm)
-        except Exception as exc:
-            bug("anlas_pool", exc)
+        kernel = getattr(STATE, "kernel", None)
+        if kernel is not None:
+            try:
+                await kernel.tick_all()
+            except Exception as exc:
+                bug("kernel", exc)
         await asyncio.sleep(ANLAS_REBALANCE_SECONDS)
 
 
