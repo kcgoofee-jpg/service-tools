@@ -727,7 +727,11 @@ td.note{min-width:220px}
         <!-- 操作日志 -->
         <section id="tab-actions" hidden>
           <div class="page-head"><div class="ttl"><h1>操作日志</h1></div>
-            <div class="tools"><button class="btn rf" data-act="refresh-actions" aria-label="刷新" title="刷新"><span data-ic="refresh"></span><span class="lbl">刷新</span></button></div></div>
+            <div class="tools">
+              <select id="actionActor" aria-label="按操作者筛选" style="width:120px"><option value="">全部操作者</option>
+                <option value="admin">站长（后台）</option><option value="system">系统（自动）</option><option value="member">成员（Discord）</option></select>
+              <select id="actionKind" aria-label="按操作类型筛选" style="width:160px"><option value="">全部操作</option></select>
+              <button class="btn rf" data-act="refresh-actions" aria-label="刷新" title="刷新"><span data-ic="refresh"></span><span class="lbl">刷新</span></button></div></div>
           <div class="card panel" style="padding:16px">
             <div class="table-wrap"><table class="rt logs"><thead><tr><th class="t">时间</th><th class="nw">操作者</th><th class="nw">操作</th><th>对象</th><th>详情</th><th class="st">结果</th></tr></thead>
               <tbody id="actionBody"></tbody></table></div>
@@ -2243,11 +2247,19 @@ async function loadLogs(){
     pager($('#logPager'), d, 'log');
   }catch(e){ toastErr(e); }
 }
-let actionPage = 1;
+let actionPage = 1, actionKindsLoaded = false;
 async function loadActions(){
   try{
-    const d = await api('/admin/api/actions?page=' + actionPage);
+    const actor = ($('#actionActor')||{}).value || '';
+    const kind = ($('#actionKind')||{}).value || '';
+    const d = await api('/admin/api/actions?page=' + actionPage
+      + (actor ? '&actor=' + encodeURIComponent(actor) : '')
+      + (kind ? '&action=' + encodeURIComponent(kind) : ''));
     actionPage = d.page;
+    if(!actionKindsLoaded && Array.isArray(d.action_kinds)){
+      const sel = $('#actionKind');
+      if(sel){ sel.insertAdjacentHTML('beforeend', d.action_kinds.map(k=>`<option value="${esc(k)}">${esc(k)}</option>`).join('')); actionKindsLoaded = true; }
+    }
     $('#actionBody').innerHTML = d.actions.map(a=>`
       <tr>
         <td class="t" data-label="时间" title="${esc(fullTime(a.ts))}">${esc(shortTime(a.ts))}</td>
@@ -2600,7 +2612,7 @@ $('#shadowRange').addEventListener('change', loadShadow);
 $('#auditFilter').addEventListener('change', ()=>{ auditPage=1; const b=$('#auditExport'); if(b) b.disabled=!$('#auditFilter').value; loadAudit(); });
 $('#auditView').addEventListener('change', e=>{ auditView=e.target.value; loadAudit(); });
 $('#auditPer').addEventListener('change', e=>{ auditPer=Number(e.target.value); auditPage=1; loadAudit(); });
-document.addEventListener('change', e=>{ const a=e.target.dataset&&e.target.dataset.act; if(a&&a.endsWith('-jump')){ const kind=a.slice(0,-5); const v=Math.max(1,Number(e.target.value)||1); if(kind==='audit'){auditPage=v;loadAudit();}else if(kind==='log'){logPage=v;loadLogs();}else if(kind==='action'){actionPage=v;loadActions();} } });
+document.addEventListener('change', e=>{ if(e.target.id==='actionActor'||e.target.id==='actionKind'){ actionPage=1; loadActions(); return; } const a=e.target.dataset&&e.target.dataset.act; if(a&&a.endsWith('-jump')){ const kind=a.slice(0,-5); const v=Math.max(1,Number(e.target.value)||1); if(kind==='audit'){auditPage=v;loadAudit();}else if(kind==='log'){logPage=v;loadLogs();}else if(kind==='action'){actionPage=v;loadActions();} } });
 $('#memberSearch').addEventListener('input', e=>{ memberQuery = e.target.value; renderMembers(); });
 $('#memberFilter').addEventListener('click', e=>{
   const b = e.target.closest('[data-mfilter]'); if(!b || b.disabled) return;
