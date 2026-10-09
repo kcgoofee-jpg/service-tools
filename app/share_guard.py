@@ -62,6 +62,13 @@ MODE_SETTING = "share_guard_mode"          # enforce（默认）/ observe / off
 
 Notify = Callable[[int, str], Awaitable[None]]
 
+# 运行时一律经 P() 读取：服务器 data/private_params.json 里的私密值优先，上面的常量只是公开起点（见 params.py）
+from .params import P
+
+
+def _pts(kind: str) -> float:
+    return P(f"share.points.{kind}", POINTS[kind])
+
 
 def os_family(user_agent: str) -> str:
     ua = (user_agent or "").lower()
@@ -86,7 +93,7 @@ def _flag(key, name: str) -> bool:
 
 
 def decayed(score: float, since: float, now: float) -> float:
-    return score * math.pow(0.5, max(0.0, now - since) / HALF_LIFE)
+    return score * math.pow(0.5, max(0.0, now - since) / P("share.half_life", HALF_LIFE))
 
 
 # ---------- 出图习惯指纹（只在内存里保留哈希，不存提示词原文）----------
@@ -186,15 +193,15 @@ class ShareGuard:
         for h in [h for h in hours if h < int(now // 3600) - 23]:
             hours.discard(h)
         out: list[tuple[str, str]] = []
-        if busy and prev and now - prev[0] <= OVERLAP_WINDOW and prev[1] != label and prev[4] and fp and prev[4] != fp:
+        if busy and prev and now - prev[0] <= P("share.overlap_window", OVERLAP_WINDOW) and prev[1] != label and prev[4] and fp and prev[4] != fp:
             out.append(("overlap", f"上一张还没完成，{label}（{osf or '未知系统'}）又发来请求，"
                                    f"上一张来自 {prev[1]}（{prev[3] or '未知系统'}）"))
         same = [(t, lb, f) for t, lb, fam, _, f in trail if fam == family and lb]
-        recent = [x for x in same if x[0] >= now - CONCURRENT_WINDOW]
+        recent = [x for x in same if x[0] >= now - P("share.concurrent_window", CONCURRENT_WINDOW)]
         nets = {lb for _, lb, _ in recent}
         fps = {f for _, _, f in recent if f}
-        fast = [1 for (ta, a, _), (tb, b, _) in zip(recent, recent[1:]) if a != b and tb - ta <= FAST_SWITCH]
-        if len(nets) >= 3 and len(fast) >= 2 and len(fps) >= 2:
+        fast = [1 for (ta, a, _), (tb, b, _) in zip(recent, recent[1:]) if a != b and tb - ta <= P("share.fast_switch", FAST_SWITCH)]
+        if len(nets) >= P("share.concurrent_nets", 3) and len(fast) >= P("share.concurrent_fast", 2) and len(fps) >= 2:
             out.append(("concurrent", f"30 分钟内 {len(nets)} 个网络、{len(fps)} 种客户端交替在用"
                                       f"（{'、'.join(sorted(nets)[:5])}）"))
         win = [(lb, f) for t, lb, f in same if t >= now - 600]
@@ -204,15 +211,15 @@ class ShareGuard:
             out.append(("alternate", f"10 分钟内来回切换 {flips} 次（{'→'.join(seq[-5:])}），客户端也不同"))
         oses = {o for _, _, _, o, _ in trail if o}
         allfp = {f for _, _, _, _, f in trail if f}
-        if len(oses) >= 3:
+        if len(oses) >= P("share.multi_device_os", 3):
             out.append(("multi_device", f"24 小时内 {len(oses)} 种系统（{'、'.join(sorted(oses))}）"))
-        if len(allfp) >= 4 and len(oses) >= 2:
+        if len(allfp) >= P("share.many_clients", 4) and len(oses) >= 2:
             out.append(("many_clients", f"24 小时内 {len(allfp)} 种客户端、{len(oses)} 种系统"))
-        if len(hours) >= 20:
+        if len(hours) >= P("share.allday_hours", 20):
             out.append(("allday", f"近 24 小时有 {len(hours)} 个小时在用"))
         fresh = []
         for kind, text in out:
-            if now - self._last.get((key_id, kind), 0) >= DEDUPE[kind]:
+            if now - self._last.get((key_id, kind), 0) >= P(f"share.dedupe.{kind}", DEDUPE[kind]):
                 self._last[(key_id, kind)] = now
                 fresh.append((kind, text))
         return fresh
@@ -266,15 +273,15 @@ class ShareGuard:
             return None
         kid = int(key["id"])
         s = await self._state(kid)
-        if s["strikes"] >= STRIKES_BAN:          # 已停用，不再重复处罚
+        if s["strikes"] >= P("share.strikes_ban", STRIKES_BAN):          # 已停用，不再重复处罚
             return None
         score = decayed(s["score"], s["score_ts"], now)
         strong_recent = any(k in STRONG for k, _ in found) or bool(await self.db._db.execute_fetchall(
             f"SELECT 1 FROM share_evidence WHERE key_id=? AND ts>=? AND kind IN ({','.join('?' * len(STRONG))}) LIMIT 1",
-            (kid, now - CONFIRM_WINDOW, *STRONG)))
+            (kid, now - P("share.confirm_window", CONFIRM_WINDOW), *STRONG)))
         counted = []
         for kind, text in found:
-            pts = POINTS[kind] if (kind in STRONG or strong_recent) else 0
+            pts = _pts(kind) if (kind in STRONG or strong_recent) else 0
             score += pts
             if pts:
                 counted.append((kind, text))
@@ -288,10 +295,10 @@ class ShareGuard:
         why = "；".join(t for _, t in found)
         action = None
         if mode == "enforce":
-            if score >= RESET:
+            if score >= P("share.reset", RESET):
                 s["strikes"] += 1
                 s["score"] = 0.0
-                if s["strikes"] >= STRIKES_BAN and ban is not None:
+                if s["strikes"] >= P("share.strikes_ban", STRIKES_BAN) and ban is not None:
                     action = "ban"
                     await self._evidence(kid, "action", 0, f"第 {s['strikes']} 次违规：停用并禁止再领取", now)
                     await self._save(kid, s)
@@ -312,9 +319,9 @@ class ShareGuard:
                 if admin:
                     admin(f"🔁 防分享：「{name}」风险分达到 {RESET}，已重置 Key（第 {s['strikes']} 次）。证据：{why}")
                 return action
-            if score >= PAUSE and now - s["paused_ts"] >= PAUSE_COOLDOWN:
+            if score >= P("share.pause", PAUSE) and now - s["paused_ts"] >= P("share.pause_cooldown", PAUSE_COOLDOWN):
                 action = "pause"
-                s["paused_until"], s["paused_ts"] = now + PAUSE_SECONDS, now
+                s["paused_until"], s["paused_ts"] = now + P("share.pause_seconds", PAUSE_SECONDS), now
                 self.paused[kid] = s["paused_until"]
                 await self._evidence(kid, "action", 0, "暂停 24 小时", now)
                 if member:
@@ -323,7 +330,7 @@ class ShareGuard:
                                       "Key 仅限本人使用；再出现会重置 Key。如果是误判，请联系站长。")
                 if admin:
                     admin(f"⏸ 防分享：「{name}」风险分 {score:.0f}，已暂停 24 小时。证据：{why}")
-            elif score >= WARN and now - s["warned_ts"] >= WARN_COOLDOWN:
+            elif score >= P("share.warn", WARN) and now - s["warned_ts"] >= P("share.warn_cooldown", WARN_COOLDOWN):
                 action = "warn"
                 s["warned_ts"] = now
                 await self._evidence(kid, "action", 0, "私信提醒", now)
@@ -332,7 +339,7 @@ class ShareGuard:
                                       "请不要分享给别人；继续出现会暂停或重置 Key。如果只是换了网络，可以忽略这条。")
                 if admin:
                     admin(f"⚠ 防分享：「{name}」风险分 {score:.0f}，已私信提醒。证据：{why}")
-        elif admin and score >= WARN:
+        elif admin and score >= P("share.warn", WARN):
             admin(f"👀 防分享（观察）：「{name}」风险分 {score:.0f}。证据：{why}")
         await self._save(kid, s)
         await self.db._db.commit()
@@ -342,7 +349,7 @@ class ShareGuard:
         """返回 (kind, 说明, 是否有网络/客户端差异) 或 None。"""
         hist = self._habits.setdefault(key_id, deque(maxlen=120))
         hist.append((now, sig, toks, label or "", (ua or "")[:80]))
-        while hist and hist[0][0] < now - HABIT_WINDOW:
+        while hist and hist[0][0] < now - P("share.habit_window", HABIT_WINDOW):
             hist.popleft()
         if len(hist) < 6:
             return None
@@ -350,7 +357,7 @@ class ShareGuard:
         seq, where = [], {}
         for _, sg, tk, lb, fp in hist:              # 在线聚类：参数签名相同或和固定部分足够像就归为同一套习惯
             for i, h in enumerate(habits):
-                if h.sig == sg or _jaccard(set(tk), h.core()) >= 0.3:
+                if h.sig == sg or _jaccard(set(tk), h.core()) >= P("share.habit_same", 0.3):
                     h.add(tk)
                     break
             else:
@@ -362,11 +369,11 @@ class ShareGuard:
         if len(big) < 2:
             return None
         a, b = big[0], big[1]
-        if habits[a].sig == habits[b].sig or _jaccard(habits[a].core(), habits[b].core()) >= 0.15:
+        if habits[a].sig == habits[b].sig or _jaccard(habits[a].core(), habits[b].core()) >= P("share.habit_distinct", 0.15):
             return None
         ab = [x for x in seq if x in (a, b)]
         switches = sum(1 for x, y in zip(ab, ab[1:]) if x != y)
-        if switches < 3:                             # 先 A 后 B 是换了画师串；A、B、A、B 才是两个人
+        if switches < P("share.habit_switches", 3):                             # 先 A 后 B 是换了画师串；A、B、A、B 才是两个人
             return None
         la, lb_ = {x[0] for x in where[a]}, {x[0] for x in where[b]}
         fa, fb = {x[1] for x in where[a]}, {x[1] for x in where[b]}
@@ -382,8 +389,16 @@ class ShareGuard:
         now = time.time() if now is None else now
         kid = int(key["id"])
         sig, toks = habit_fingerprint(body)
+        try:                                  # 回测用的特征（只存哈希）；写失败不影响判断
+            await self.db._db.execute(
+                "INSERT INTO req_features(ts, key_id, src, fp, os, sig, toks, busy) VALUES (?,?,?,?,?,?,?,?)",
+                (now, kid, label or "", hashlib.sha1((user_agent or "").encode()).hexdigest()[:10],
+                 os_family(user_agent), sig, " ".join(sorted(toks)[:80]), int(bool(callbacks.pop("busy", False)))))
+            await self.db._db.commit()
+        except Exception:
+            pass
         found = self.habit_signal(kid, sig, toks, label or "", user_agent, now)
-        if not found or now - self._last.get((kid, "habits"), 0) < DEDUPE["habits"]:
+        if not found or now - self._last.get((kid, "habits"), 0) < P("share.dedupe.habits", DEDUPE["habits"]):
             return None
         self._last[(kid, "habits")] = now
         kind, text, differs = found

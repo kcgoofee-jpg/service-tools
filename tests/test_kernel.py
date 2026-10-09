@@ -57,7 +57,7 @@ async def test_toggle_isolation_and_checks(state):
     await k.tick_all()
     assert ran == ["a"] and not (await k.enabled("a"))         # 这次跑的是 c（同一个函数）
     snap = await k.snapshot()
-    assert snap[0]["params"][0] == {"name": "p", "value": 3, "basis": "C", "basis_label": "实测", "source": "实测", "note": ""}
+    assert snap[0]["params"][0] == {"name": "p", "value": 3, "basis": "C", "basis_label": "实测", "source": "实测", "note": "", "private": False}
 
 
 @pytest.mark.asyncio

@@ -183,7 +183,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "2.0.0"
+__version__ = "2.0.1"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -1093,8 +1093,9 @@ async def _generate_image(request: Request, *, streaming: bool):
     share = getattr(STATE, "share", None)
     if share is not None:
         try:                            # 防分享：出图习惯指纹（只在内存里保留哈希，见 share_guard.py）
+            busy = bool(STATE.guard.image_inflight.get(key["id"], 0) > 0)
             await share.observe_habit(key, body, request_timing.snapshot().get("src", ""),
-                                      request.headers.get("user-agent", ""), **_share_callbacks(request))
+                                      request.headers.get("user-agent", ""), busy=busy, **_share_callbacks(request))
         except Exception as exc:
             bug("share_guard", exc)
     if model_tier == "v5" and not key["is_admin"] and key["image_model_scope"] != "all":

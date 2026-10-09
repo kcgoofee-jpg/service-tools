@@ -119,6 +119,17 @@ CREATE TABLE IF NOT EXISTS share_state (       -- 防分享风险分（share_gua
     warned_ts REAL NOT NULL DEFAULT 0,
     paused_ts REAL NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS req_features (      -- 出图请求的特征（只存哈希），给防分享回测用；30 天后删除
+    ts REAL NOT NULL,
+    key_id INTEGER NOT NULL,
+    src TEXT NOT NULL DEFAULT '',          -- 来源网络打码标签
+    fp TEXT NOT NULL DEFAULT '',           -- 客户端指纹（User-Agent）的哈希
+    os TEXT NOT NULL DEFAULT '',
+    sig TEXT NOT NULL DEFAULT '',          -- 参数签名哈希（采样器 / 步数 / CFG / 负面词 …）
+    toks TEXT NOT NULL DEFAULT '',         -- 提示词词条哈希（空格分隔，最多 80 个），不可还原
+    busy INTEGER NOT NULL DEFAULT 0        -- 当时这把 Key 是否还有图在生成
+);
+CREATE INDEX IF NOT EXISTS idx_req_features ON req_features (key_id, ts);
 CREATE TABLE IF NOT EXISTS share_evidence (    -- 防分享证据与处罚记录，后台溯源用
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ts REAL NOT NULL,
@@ -797,6 +808,8 @@ class Database:
 
     async def purge_usage_log(self, older_than: float) -> int:
         """只清理明细日志；每日计数器和账本不受影响。"""
+        await self._db.execute("DELETE FROM req_features WHERE ts<?", (max(older_than, time.time() - 30 * 86400),))
+        await self._db.execute("DELETE FROM share_evidence WHERE ts<?", (older_than,))
         cur = await self._db.execute("DELETE FROM usage_log WHERE ts<?", (older_than,))
         await self._db.commit()
         return cur.rowcount

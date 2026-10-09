@@ -2354,7 +2354,7 @@ async function loadModules(){
         ${checks.length ? `<div class="mod-checks">${checks.map(c => `<span class="mf ${c.ok?'ok':'bad'}" title="${esc(c.detail)}">${c.ok?'✓':'✗'} ${esc(c.name)}</span>`).join('')}</div>
           ${checks.filter(c=>!c.ok).map(c => `<div class="bad-text sm">✗ ${esc(c.name)}：${esc(c.detail)}</div>`).join('')}` : ''}
         ${m.params.length ? `<div class="table-wrap"><table class="rt"><thead><tr><th>参数</th><th class="num">当前值</th><th>依据</th><th>来源 / 说明</th></tr></thead><tbody>${
-          m.params.map(p => `<tr><td data-label="参数">${esc(p.name)}</td><td class="num" data-label="当前值">${esc(p.value)}</td><td data-label="依据"><span class="tag ${BASIS_CLS[p.basis]||''}">${esc(p.basis)} ${esc(p.basis_label)}</span></td><td class="muted" data-label="来源">${esc([p.source, p.note].filter(Boolean).join(' · '))}</td></tr>`).join('')
+          m.params.map(p => `<tr><td data-label="参数">${esc(p.name)}</td><td class="num" data-label="当前值">${esc(p.value)}</td><td data-label="依据"><span class="tag ${BASIS_CLS[p.basis]||''}">${esc(p.basis)} ${esc(p.basis_label)}</span>${p.private?' <span class="tag" title="值来自服务器 data/private_params.json，不在公开代码里">私密</span>':''}</td><td class="muted" data-label="来源">${esc([p.source, p.note].filter(Boolean).join(' · '))}</td></tr>`).join('')
         }</tbody></table></div>` : ''}
       </div>`;
     }).join('');

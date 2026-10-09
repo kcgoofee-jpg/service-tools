@@ -47,6 +47,7 @@ from datetime import datetime, timedelta
 from typing import Any, Optional
 
 from .action_log import log_action
+from .params import P
 
 V5_IMAGES_PER_PERCENT = 14.2      # 官方 17.3 张/1% 按 23 步估算；成员多用 28 步，按步数折算 17.3×23/28
 V5_FALLBACK_RATE = 11.0           # 订阅第一个月的恢复速度（%/天）；拿不到实测值时使用
@@ -71,10 +72,10 @@ def v5_factor(percent: Optional[float]) -> float:
     """账号 V5 剩余越多，发得越大方；剩得越少，越保守。未知时按 0.9。"""
     if percent is None:
         return 0.9
-    for floor, k in ((90, 1.3), (70, 1.1), (40, 0.9), (20, 0.6)):
+    for floor, k in P("allocation.v5_k_table", [[90, 1.3], [70, 1.1], [40, 0.9], [20, 0.6]]):
         if percent >= floor:
-            return k
-    return 0.3
+            return float(k)
+    return P("allocation.v5_k_floor", 0.3)
 
 
 def v5_plan(percent: Optional[float], rate: Optional[float], active: int, *,
@@ -83,7 +84,7 @@ def v5_plan(percent: Optional[float], rate: Optional[float], active: int, *,
     rate = rate if rate and rate > 0 else V5_FALLBACK_RATE
     k = v5_factor(percent)
     pool = int(rate * V5_IMAGES_PER_PERCENT * k)
-    people = max(10, active)
+    people = max(P("allocation.min_people", 10), active)
     each = max(lo, min(hi, pool // people))
     return {"rate": round(rate, 1), "percent": percent, "k": k, "global": pool, "people": people, "each": each}
 
@@ -95,17 +96,17 @@ def daily_adjust(a: int, b: int, *, used: int, cap: int, hourly_blocks: int, cei
     reasons: list[str] = []
     # 拥挤看两样：全天用量 ≥ 85%，或有 ≥ 3 个不同的小时出现过「每小时上限」拦截。
     # 只按小时数算：一次几分钟的扎堆（2026-10-09 23:04 一次 10 连拦）不算拥挤，那是每小时上限本身在起作用。
-    if util >= 0.85 or hourly_blocks >= 3:
+    if util >= P("allocation.congested_util", 0.85) or hourly_blocks >= P("allocation.congested_hours", 3):
         a2 = max(b, a - cfg["quota_step"])
         b2 = max(cfg["quota_base_min"], b - cfg["quota_base_step"])
         reasons.append(f"拥挤（用量 {util:.0%}，{hourly_blocks} 个小时出现每小时上限拦截）：上限 {a}→{a2}，保底 {b}→{b2}")
         return a2, min(b2, a2), reasons
     a2, b2 = a, b
-    if util < 0.6 and ceiling_hits > 0:
+    if util < P("allocation.slack_util", 0.6) and ceiling_hits > 0:
         a2 = min(cfg["quota_ceiling_max"], a + cfg["quota_step"])
         if a2 != a:
             reasons.append(f"有余量（用量 {util:.0%}），{ceiling_hits} 人顶到上限：上限 {a}→{a2}")
-    if util < 0.6 and base_blocks > 0:
+    if util < P("allocation.slack_util", 0.6) and base_blocks > 0:
         b2 = min(a2, b + cfg["quota_base_step"])
         if b2 != b:
             reasons.append(f"有余量，{base_blocks} 次因「超过保底且全站不空闲」被拦：保底 {b}→{b2}")

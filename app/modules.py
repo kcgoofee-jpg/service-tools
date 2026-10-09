@@ -9,6 +9,7 @@ import json
 import time
 
 from .kernel import Check, Kernel, Module, Param
+from .params import P
 
 
 async def _q1(db, sql: str, *args):
@@ -108,13 +109,13 @@ def allocation(state) -> Module:
             Param("V4.5 上限初始值", lambda: cfg["quota_target_avg"], "A", "站长定：平均 150"),
             Param("保底初始值", lambda: cfg["quota_base"], "A", "站长定：100"),
             Param("每日步长 上限 / 保底", lambda: f"{cfg['quota_step']} / {cfg['quota_base_step']}", "A"),
-            Param("拥挤：用量 ≥", lambda: 0.85, "A", "", "与「拦截小时」是「或」关系 → 待改为两者都满足 + 3 天平滑"),
-            Param("拥挤：拦截小时 ≥", lambda: 3, "C", "10-09 23:04 两分钟 10 连拦误判后修正"),
-            Param("余量：用量 <", lambda: 0.6, "D", "与「有人顶格」同时满足才放宽"),
+            Param("拥挤：用量 ≥", lambda: P("allocation.congested_util", 0.85), "A", "", "与「拦截小时」是「或」关系 → 待改为两者都满足 + 3 天平滑", key="allocation.congested_util"),
+            Param("拥挤：拦截小时 ≥", lambda: P("allocation.congested_hours", 3), "C", "10-09 23:04 两分钟 10 连拦误判后修正", key="allocation.congested_hours"),
+            Param("余量：用量 <", lambda: P("allocation.slack_util", 0.6), "D", "与「有人顶格」同时满足才放宽", key="allocation.slack_util"),
             Param("V5 系数 k（按剩余）", lambda: "≥90:1.3 · ≥70:1.1 · ≥40:0.9 · ≥20:0.6 · 其余 0.3", "A",
                   "目标让剩余稳定在 60～80%", "待换连续 P 控制"),
             Param("V5 每人范围", lambda: f"{cfg['quota_v5_min']}～{cfg['quota_v5_max']}", "A"),
-            Param("至少按几人分", lambda: 10, "A", "", "给新来的人留位置"),
+            Param("至少按几人分", lambda: P("allocation.min_people", 10), "A", "", "给新来的人留位置", key="allocation.min_people"),
         ])
 
 
@@ -196,11 +197,11 @@ def integrity(state) -> Module:
         get_enabled=get_enabled, set_enabled=set_enabled, checks=checks,
         hard_note="关闭后不再收集证据和处罚；已暂停的 Key 到期自动恢复",
         params=[
-            Param("强证据加分", lambda: sg.POINTS["overlap"], "D", "网络 + 客户端 + 时间 / 习惯三者同时"),
+            Param("强证据加分", lambda: sg._pts("overlap"), "D", "网络 + 客户端 + 时间 / 习惯三者同时", key="share.points.overlap"),
             Param("辅助证据加分", lambda: f"{sg.POINTS['multi_device']} / {sg.POINTS['allday']}", "D",
                   "72 小时内有强证据才计分"),
-            Param("提醒 / 暂停 / 重置", lambda: f"{sg.WARN} / {sg.PAUSE} / {sg.RESET}", "A", "", "待回放回测"),
-            Param("半衰期（小时）", lambda: sg.HALF_LIFE // 3600, "A", "", "待回放回测"),
+            Param("提醒 / 暂停 / 重置", lambda: f"{P('share.warn', sg.WARN)} / {P('share.pause', sg.PAUSE)} / {P('share.reset', sg.RESET)}", "A", "", "待回放回测", key="share.warn"),
+            Param("半衰期（小时）", lambda: P("share.half_life", sg.HALF_LIFE) // 3600, "A", "", "待回放回测", key="share.half_life"),
             Param("停用前违规次数", lambda: sg.STRIKES_BAN, "A"),
         ])
 

@@ -32,7 +32,8 @@ FIELDS: dict[str, tuple[int, int, int, str]] = {
     "queue_per_account": (10, 0, 100, "每个上游账号全站最多同时排几张图"),
     "base_daily_images": (100, 0, 100000, "V4.5 每人每天保底张数；超过后只在全站空闲时放行，直到 Key 的每日上限"),
 }
-IDLE_SHARE = 0.6           # 本小时用量低于上限的 60% 且没人排队，算「空闲」，允许借用
+IDLE_SHARE = 0.6
+from .params import P           # 本小时用量低于上限的 60% 且没人排队，算「空闲」，允许借用
 
 
 def _key(name: str) -> str:
@@ -149,7 +150,7 @@ class Guard:
         """上游限流是我们唯一能拿到的「红线」信号：立刻把每小时上限减半（不低于 100），返回 (旧, 新)。"""
         now = time.time() if now is None else now
         old = self.values["account_hourly_cap"]
-        new = max(HOURLY_MIN, old // 2)
+        new = max(P("capacity.hourly_min", HOURLY_MIN), int(old * P("capacity.hourly_decrease", 0.5)))
         await self._set_adaptive(new, now, last_429=now)
         return (old, new) if new != old else None
 
@@ -166,7 +167,7 @@ class Guard:
         if now - last_step < 86400 or now - last_429 < 86400:
             return None
         old = self.values["account_hourly_cap"]
-        new = min(HOURLY_MAX, old + HOURLY_STEP)
+        new = min(P("capacity.hourly_max", HOURLY_MAX), old + P("capacity.hourly_step", HOURLY_STEP))
         await self._set_adaptive(new, now)
         return (old, new) if new != old else None
 
@@ -257,4 +258,4 @@ class Guard:
         if not cap or not token_ids:
             return True
         used = sum(self.hour_count(t, now) for t in token_ids)
-        return used < IDLE_SHARE * cap * len(token_ids)
+        return used < P("capacity.idle_share", IDLE_SHARE) * cap * len(token_ids)

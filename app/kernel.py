@@ -34,6 +34,7 @@ class Param:
     basis: str                        # A / B / C / D
     source: str = ""                  # 依据：文档链接、实测日期、互证的指标
     note: str = ""
+    key: str = ""                     # 私密参数键名（params.py）；有私密值时后台标「私密」
 
 
 @dataclass
@@ -138,8 +139,10 @@ class Kernel:
                     v = await v if hasattr(v, "__await__") else v
                 except Exception as exc:
                     v = f"读取失败：{exc}"
+                from . import params as _params
+                private = bool(p.key) and _params.overridden(p.key)
                 params.append({"name": p.name, "value": v, "basis": p.basis, "basis_label": BASIS.get(p.basis, p.basis),
-                               "source": p.source, "note": p.note})
+                               "source": p.source, "note": p.note, "private": private})
             out.append({"name": name, "title": m.title, "question": m.question, "reality": m.reality,
                         "principle": m.principle, "enabled": await self.enabled(name), "hard_note": m.hard_note,
                         "periodic": m.tick is not None, "last": self.last.get(name, {}), "params": params})
