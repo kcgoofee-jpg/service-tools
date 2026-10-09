@@ -1,0 +1,271 @@
+"""防分享：证据 + 风险分 + 自动处罚（2026-10-10 起默认执行）。
+
+站长原则：Key 只给本人用，「做慈善眼里容不得沙子」。但一个人也会换网络、用两台设备，
+所以每条信号都要求「一个人很难做到」的模式，单次换网络不加分。
+
+━━ 证据（每条写进 share_evidence，后台可溯源）━━
+  成员大多走 VPN / 代理，代理按请求轮换出口时，一个人也会在几分钟内出现好几个网络（10-09 回测：原神高手 2 小时 4 个境外节点、
+  kfzbrlm 用 WARP），所以「网络不同」单独不算数，必须同时出现「不同的客户端指纹」（完整 User-Agent：系统 + 浏览器 + 版本）。
+  overlap      +35  上一张还在生成 / 排队，另一个网络、另一个客户端又发来请求 —— 两台设备在两个地方同时用。
+  concurrent   +35  30 分钟内 ≥ 3 个网络在 90 秒内来回切换（≥ 2 次），并且来自 ≥ 2 种客户端指纹。
+  alternate    +15  10 分钟内 A→B→A 来回切换 ≥ 2 次，并且来自 ≥ 2 种客户端指纹。
+  multi_device +20  24 小时内 ≥ 3 种操作系统（Windows / Mac / Linux / Android / iOS）。
+  many_clients +20  24 小时内 ≥ 4 种客户端指纹、≥ 2 种系统。
+  allday       +15  近 24 小时里有 ≥ 20 个小时在用（作息不像一个人）。
+  同一类证据每把 Key 30 分钟（multi_device / many_clients / allday 为 24 小时）最多记一次。
+
+━━ 风险分 ━━
+  所有证据分数按半衰期 48 小时衰减后相加。正常换网络的人分数会自己降下来。
+
+━━ 处罚（逐级）━━
+  ≥ 30  私信提醒本人（Key 仅限本人使用，再出现会暂停），24 小时最多一次。
+  ≥ 60  暂停 24 小时（72 小时内最多一次），私信说明原因和恢复时间。
+  ≥ 100 重置 Key：旧 Key 立刻失效，新 Key 私信本人 —— Key 被别人拿走的话，本人不受影响，别人用不了了。
+        记一次「违规」，分数清零。
+  违规 ≥ 3 次：停用并禁止再领取，私信站长。
+  每一步都写操作日志并私信站长；站长可在后台清零（误判时）。测试 Key、站长 Key 不参与。
+"""
+from __future__ import annotations
+
+import math
+import time
+from collections import deque
+from typing import Any, Awaitable, Callable, Optional
+
+POINTS = {"overlap": 35, "concurrent": 35, "alternate": 15, "multi_device": 20, "many_clients": 20, "allday": 15}
+KIND_NAMES = {"overlap": "两地同时出图", "concurrent": "多地同时使用", "alternate": "网络来回切换", "multi_device": "多种设备",
+              "many_clients": "客户端过多", "allday": "全天在用", "action": "处罚"}
+HALF_LIFE = 48 * 3600
+WARN, PAUSE, RESET = 30, 60, 100
+PAUSE_SECONDS = 24 * 3600
+PAUSE_COOLDOWN = 72 * 3600
+WARN_COOLDOWN = 24 * 3600
+STRIKES_BAN = 3
+FAST_SWITCH = 90
+CONCURRENT_WINDOW = 1800
+DEDUPE = {"overlap": 1800, "concurrent": 1800, "alternate": 1800, "multi_device": 86400, "many_clients": 86400,
+          "allday": 86400}
+OVERLAP_WINDOW = 180          # 「上一张还没完」只看最近 3 分钟内的请求
+MODE_SETTING = "share_guard_mode"          # enforce（默认）/ observe / off
+
+Notify = Callable[[int, str], Awaitable[None]]
+
+
+def os_family(user_agent: str) -> str:
+    ua = (user_agent or "").lower()
+    if "android" in ua:
+        return "Android"
+    if "iphone" in ua or "ipad" in ua or "ios" in ua:
+        return "iOS"
+    if "windows" in ua:
+        return "Windows"
+    if "mac os" in ua or "macintosh" in ua:
+        return "Mac"
+    if "linux" in ua or "x11" in ua:
+        return "Linux"
+    return ""                                  # 服务器端客户端（node-fetch、python 等）不算设备
+
+
+def _flag(key, name: str) -> bool:
+    try:
+        return bool(key[name])
+    except (KeyError, IndexError, TypeError):
+        return False
+
+
+def decayed(score: float, since: float, now: float) -> float:
+    return score * math.pow(0.5, max(0.0, now - since) / HALF_LIFE)
+
+
+class ShareGuard:
+    def __init__(self, db):
+        self.db = db
+        self._trail: dict[int, deque] = {}       # key_id → (ts, 网络标签, 地址族, 系统)
+        self._hours: dict[int, set] = {}
+        self._last: dict[tuple[int, str], float] = {}
+        self.paused: dict[int, float] = {}        # key_id → 暂停到期时间（启动时从库里读）
+
+    async def load(self) -> None:
+        rows = await self.db._db.execute_fetchall(
+            "SELECT key_id, paused_until FROM share_state WHERE paused_until > ?", (time.time(),))
+        self.paused = {int(r[0]): float(r[1]) for r in rows}
+
+    def paused_until(self, key_id: int, now: Optional[float] = None) -> float:
+        until = self.paused.get(int(key_id), 0.0)
+        return until if until > (time.time() if now is None else now) else 0.0
+
+    async def mode(self) -> str:
+        v = await self.db.get_setting(MODE_SETTING, "enforce")
+        return v if v in ("enforce", "observe", "off") else "enforce"
+
+    # ---------- 信号 ----------
+    def signals(self, key_id: int, label: str, family: int, ua: str, now: float, busy: bool = False) -> list[tuple[str, str]]:
+        """busy：这把 Key 此刻还有图在生成或排队。"""
+        osf, fp = os_family(ua), (ua or "").strip()[:80]
+        trail = self._trail.setdefault(key_id, deque(maxlen=300))
+        prev = trail[-1] if trail else None
+        trail.append((now, label, family, osf, fp))
+        while trail and trail[0][0] < now - 86400:
+            trail.popleft()
+        hours = self._hours.setdefault(key_id, set())
+        hours.add(int(now // 3600))
+        for h in [h for h in hours if h < int(now // 3600) - 23]:
+            hours.discard(h)
+        out: list[tuple[str, str]] = []
+        if busy and prev and now - prev[0] <= OVERLAP_WINDOW and prev[1] != label and prev[4] and fp and prev[4] != fp:
+            out.append(("overlap", f"上一张还没完成，{label}（{osf or '未知系统'}）又发来请求，"
+                                   f"上一张来自 {prev[1]}（{prev[3] or '未知系统'}）"))
+        same = [(t, lb, f) for t, lb, fam, _, f in trail if fam == family and lb]
+        recent = [x for x in same if x[0] >= now - CONCURRENT_WINDOW]
+        nets = {lb for _, lb, _ in recent}
+        fps = {f for _, _, f in recent if f}
+        fast = [1 for (ta, a, _), (tb, b, _) in zip(recent, recent[1:]) if a != b and tb - ta <= FAST_SWITCH]
+        if len(nets) >= 3 and len(fast) >= 2 and len(fps) >= 2:
+            out.append(("concurrent", f"30 分钟内 {len(nets)} 个网络、{len(fps)} 种客户端交替在用"
+                                      f"（{'、'.join(sorted(nets)[:5])}）"))
+        win = [(lb, f) for t, lb, f in same if t >= now - 600]
+        seq = [lb for i, (lb, _) in enumerate(win) if i == 0 or lb != win[i - 1][0]]
+        flips = sum(1 for i in range(2, len(seq)) if seq[i] == seq[i - 2] != seq[i - 1])
+        if flips >= 2 and len({f for _, f in win if f}) >= 2:
+            out.append(("alternate", f"10 分钟内来回切换 {flips} 次（{'→'.join(seq[-5:])}），客户端也不同"))
+        oses = {o for _, _, _, o, _ in trail if o}
+        allfp = {f for _, _, _, _, f in trail if f}
+        if len(oses) >= 3:
+            out.append(("multi_device", f"24 小时内 {len(oses)} 种系统（{'、'.join(sorted(oses))}）"))
+        if len(allfp) >= 4 and len(oses) >= 2:
+            out.append(("many_clients", f"24 小时内 {len(allfp)} 种客户端、{len(oses)} 种系统"))
+        if len(hours) >= 20:
+            out.append(("allday", f"近 24 小时有 {len(hours)} 个小时在用"))
+        fresh = []
+        for kind, text in out:
+            if now - self._last.get((key_id, kind), 0) >= DEDUPE[kind]:
+                self._last[(key_id, kind)] = now
+                fresh.append((kind, text))
+        return fresh
+
+    # ---------- 记账与处罚 ----------
+    async def _state(self, key_id: int) -> dict[str, Any]:
+        rows = await self.db._db.execute_fetchall(
+            "SELECT score, score_ts, strikes, paused_until, warned_ts, paused_ts FROM share_state WHERE key_id=?",
+            (key_id,))
+        if not rows:
+            return {"score": 0.0, "score_ts": 0.0, "strikes": 0, "paused_until": 0.0, "warned_ts": 0.0, "paused_ts": 0.0}
+        r = rows[0]
+        return {"score": float(r[0]), "score_ts": float(r[1]), "strikes": int(r[2]), "paused_until": float(r[3]),
+                "warned_ts": float(r[4]), "paused_ts": float(r[5])}
+
+    async def _save(self, key_id: int, s: dict[str, Any]) -> None:
+        await self.db._db.execute(
+            "INSERT OR REPLACE INTO share_state(key_id, score, score_ts, strikes, paused_until, warned_ts, paused_ts) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (key_id, s["score"], s["score_ts"], s["strikes"], s["paused_until"], s["warned_ts"], s["paused_ts"]))
+
+    async def _evidence(self, key_id: int, kind: str, points: float, detail: str, now: float) -> None:
+        await self.db._db.execute("INSERT INTO share_evidence(ts, key_id, kind, points, detail) VALUES (?,?,?,?,?)",
+                                  (now, key_id, kind, points, detail[:300]))
+
+    async def observe(self, key, ip_label: Optional[str], family: int, user_agent: str, *,
+                      now: Optional[float] = None, busy: bool = False, member: Optional[Notify] = None,
+                      admin: Optional[Callable[[str], None]] = None,
+                      reset: Optional[Callable[[int], Awaitable[Optional[str]]]] = None,
+                      ban: Optional[Callable[[int], Awaitable[None]]] = None) -> Optional[str]:
+        """记录一次请求；返回执行的处罚（warn / pause / reset / ban）或 None。"""
+        if _flag(key, "is_admin") or _flag(key, "is_test") or not ip_label:
+            return None
+        mode = await self.mode()
+        if mode == "off":
+            return None
+        now = time.time() if now is None else now
+        kid = int(key["id"])
+        found = self.signals(kid, ip_label, family, user_agent, now, busy)
+        if not found:
+            return None
+        s = await self._state(kid)
+        if s["strikes"] >= STRIKES_BAN:          # 已停用，不再重复处罚
+            return None
+        score = decayed(s["score"], s["score_ts"], now)
+        for kind, text in found:
+            score += POINTS[kind]
+            await self._evidence(kid, kind, POINTS[kind], text, now)
+        s["score"], s["score_ts"] = score, now
+        name = key["name"]
+        why = "；".join(t for _, t in found)
+        action = None
+        if mode == "enforce":
+            if score >= RESET:
+                s["strikes"] += 1
+                s["score"] = 0.0
+                if s["strikes"] >= STRIKES_BAN and ban is not None:
+                    action = "ban"
+                    await self._evidence(kid, "action", 0, f"第 {s['strikes']} 次违规：停用并禁止再领取", now)
+                    await self._save(kid, s)
+                    await self.db._db.commit()
+                    await ban(kid)
+                    if admin:
+                        admin(f"🚫 防分享：「{name}」第 {s['strikes']} 次违规，已停用并禁止再领取。证据：{why}")
+                    return action
+                action = "reset"
+                await self._evidence(kid, "action", 0, f"重置 Key（第 {s['strikes']} 次违规）", now)
+                await self._save(kid, s)
+                await self.db._db.commit()
+                token = await reset(kid) if reset is not None else None
+                if member and token:
+                    await member(kid, f"检测到你的 Key 被多人同时使用（{why}）。Key 仅限本人使用，已为你重置，旧 Key 立即失效。"
+                                      f"新的 Key：`{token}`\n这是第 {s['strikes']} 次，累计 {STRIKES_BAN} 次将停用并禁止再领取。"
+                                      "如果是误判，请联系站长。")
+                if admin:
+                    admin(f"🔁 防分享：「{name}」风险分达到 {RESET}，已重置 Key（第 {s['strikes']} 次）。证据：{why}")
+                return action
+            if score >= PAUSE and now - s["paused_ts"] >= PAUSE_COOLDOWN:
+                action = "pause"
+                s["paused_until"], s["paused_ts"] = now + PAUSE_SECONDS, now
+                self.paused[kid] = s["paused_until"]
+                await self._evidence(kid, "action", 0, "暂停 24 小时", now)
+                if member:
+                    await member(kid, f"检测到你的 Key 可能被多人使用（{why}），已暂停 24 小时，"
+                                      f"{time.strftime('%m-%d %H:%M', time.localtime(s['paused_until']))} 自动恢复。"
+                                      "Key 仅限本人使用；再出现会重置 Key。如果是误判，请联系站长。")
+                if admin:
+                    admin(f"⏸ 防分享：「{name}」风险分 {score:.0f}，已暂停 24 小时。证据：{why}")
+            elif score >= WARN and now - s["warned_ts"] >= WARN_COOLDOWN:
+                action = "warn"
+                s["warned_ts"] = now
+                await self._evidence(kid, "action", 0, "私信提醒", now)
+                if member:
+                    await member(kid, f"提醒：检测到你的 Key 使用情况异常（{why}）。Key 仅限本人使用，"
+                                      "请不要分享给别人；继续出现会暂停或重置 Key。如果只是换了网络，可以忽略这条。")
+                if admin:
+                    admin(f"⚠ 防分享：「{name}」风险分 {score:.0f}，已私信提醒。证据：{why}")
+        elif admin and score >= WARN:
+            admin(f"👀 防分享（观察）：「{name}」风险分 {score:.0f}。证据：{why}")
+        await self._save(kid, s)
+        await self.db._db.commit()
+        return action
+
+    async def clear(self, key_id: int) -> None:
+        """站长判定误判：清零分数、解除暂停、违规次数归零（证据保留）。"""
+        self.paused.pop(int(key_id), None)
+        await self.db._db.execute("DELETE FROM share_state WHERE key_id=?", (key_id,))
+        await self._evidence(int(key_id), "action", 0, "站长清零（误判）", time.time())
+        await self.db._db.commit()
+
+    async def report(self, now: Optional[float] = None) -> list[dict[str, Any]]:
+        """后台：有分数或证据的 Key，按当前风险分排序。"""
+        now = time.time() if now is None else now
+        rows = await self.db._db.execute_fetchall(
+            "SELECT s.key_id, COALESCE(k.name, '#' || s.key_id), s.score, s.score_ts, s.strikes, s.paused_until "
+            "FROM share_state s LEFT JOIN api_keys k ON k.id=s.key_id")
+        out = []
+        for kid, name, score, ts, strikes, paused in rows:
+            ev = await self.db._db.execute_fetchall(
+                "SELECT ts, kind, points, detail FROM share_evidence WHERE key_id=? ORDER BY ts DESC LIMIT 20", (kid,))
+            out.append({"key_id": kid, "name": name, "score": round(decayed(score, ts, now), 1), "strikes": strikes,
+                        "paused_until": paused if paused > now else 0,
+                        "evidence": [{"ts": e[0], "kind": e[1], "label": KIND_NAMES.get(e[1], e[1]), "points": e[2],
+                                      "detail": e[3]} for e in ev]})
+        return sorted(out, key=lambda r: (-r["strikes"], -r["score"]))
+
+    async def evidence(self, key_id: int, limit: int = 30) -> list[dict[str, Any]]:
+        ev = await self.db._db.execute_fetchall(
+            "SELECT ts, kind, points, detail FROM share_evidence WHERE key_id=? ORDER BY ts DESC LIMIT ?", (key_id, limit))
+        return [{"ts": e[0], "kind": e[1], "label": KIND_NAMES.get(e[1], e[1]), "points": e[2], "detail": e[3]} for e in ev]

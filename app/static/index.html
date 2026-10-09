@@ -278,6 +278,8 @@ tr.mx>td{background:var(--surface-2);padding:16px 18px 18px;cursor:default}
 tr.mr.open>td{background:var(--surface-2);border-bottom-color:transparent}
 .mx-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr) minmax(0,1fr);gap:16px 28px}
 .mx-g h4{font-size:12px;font-weight:600;color:var(--muted);margin:0 0 10px;letter-spacing:.02em}
+.mx-wide{grid-column:1/-1;order:9}.mx-wide:empty{display:none}
+.share-ev h5{font-size:12px;font-weight:600;color:var(--muted);margin:4px 0 8px}.share-ev .table-wrap{max-height:280px;overflow:auto;margin-bottom:12px}
 .kv{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 14px;font-size:12.5px;margin:0}
 .kv dt{color:var(--muted);white-space:nowrap}
 .kv dd{margin:0;min-width:0;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
@@ -1615,7 +1617,7 @@ function memberFilters(now){
     ['never', '未出图', m => !m.first_image_at && !m.is_admin],
     ['reclaim', '快回收', m => !m.is_admin && m.enabled && now - activityAt(m) > (idleDays - 1) * D],
     ['rejected', '被拒', m => m.rejected_24h > 0],
-    ['shared', '疑似分享', m => nets > 0 && m.sources_24h >= nets],
+    ['shared', '疑似分享', m => shareHot(m)],
     ['disabled', '已停用', m => !m.enabled],
     ['manual', '手动', isManual],
     ['staff', '站长 / 测试', m => m.is_test || m.is_admin],
@@ -1659,6 +1661,23 @@ const memberOpen = new Set();          // 展开的成员：刷新、筛选、�
 const fullTime = ts => ts ? new Date(ts*1000).toLocaleString('zh-CN') : '';
 const pad2 = n => String(n).padStart(2, '0');
 function shortTime(ts){ const d = new Date(ts*1000); return `${pad2(d.getMonth()+1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; }
+/* 防分享（share_guard.py）：风险分 ≥ 30、有违规或暂停中算「疑似分享」；只看网段数会误伤 VPN 用户 */
+function shareHot(m){ const s = m.share; return !!s && (s.score >= 30 || s.strikes > 0 || s.paused_until > Date.now()/1000); }
+async function loadShare(id){
+  const box = $('#sev-' + id); if(!box) return;
+  box.innerHTML = '<div class="muted sm">读取中…</div>';
+  try{
+    const d = await api(`/admin/api/keys/${id}/share`);
+    const ev = d.evidence.map(e => `<tr><td class="t">${esc(fullTime(e.ts))}</td><td><span class="mf ${e.kind==='action'?'bad':'warn'}">${esc(e.label)}</span></td><td class="num">${e.points?'+'+e.points:''}</td><td class="muted">${esc(e.detail)}</td></tr>`).join('');
+    const tr = d.trail.map(r => `<tr><td class="t">${esc(fullTime(r.ts))}</td><td class="mono">${esc(r.src||'—')}</td><td class="muted" title="${esc(r.client)}">${esc((r.client||'').slice(0,40))}</td><td>${esc(r.kind)} · ${esc(r.status)}</td></tr>`).join('');
+    box.innerHTML = `<h5>证据与处罚</h5>${ev ? `<div class="table-wrap"><table class="rt"><tbody>${ev}</tbody></table></div>` : '<div class="muted sm">没有证据</div>'}
+      <h5>最近请求的来源</h5>${tr ? `<div class="table-wrap"><table class="rt"><thead><tr><th class="t">时间</th><th>网络</th><th>客户端</th><th>请求</th></tr></thead><tbody>${tr}</tbody></table></div>` : '<div class="muted sm">没有记录</div>'}`;
+  }catch(e){ box.innerHTML = '<div class="muted sm">读取失败</div>'; }
+}
+async function clearShare(id){
+  try{ await api(`/admin/api/keys/${id}/share-clear`, {method:'POST'}); toast('已清零并解除暂停', 'ok'); loadMembers(); }
+  catch(e){ toastErr(e); }
+}
 function memberPanel(m, now){
   const k = m.k, dc = m.discord || null;
   const prof = dc ? safeUrl(dc.profile_url, DC_SITE) : '';
@@ -1676,6 +1695,9 @@ function memberPanel(m, now){
         <button class="btn mini" type="button" data-act="regen-key" data-id="${k.id}">重新生成</button></div>
       <dl class="kv"><dt>到期</dt><dd>${esc(exp)}${expTag}</dd>
         <dt>24h 来源</dt><dd>${srcBadge(k, memberMeta.share_alert_nets)}</dd>
+        <dt>防分享</dt><dd>${m.share ? `风险 ${Math.round(m.share.score)} · 违规 ${m.share.strikes} 次${m.share.paused_until > now ? ' · <span class="mf bad">暂停中</span>' : ''}` : '无记录'}
+          <button class="btn mini" type="button" data-act="share-view" data-id="${k.id}">溯源</button>
+          ${m.share ? `<button class="btn mini" type="button" data-act="share-clear" data-id="${k.id}">清零（误判）</button>` : ''}</dd>
         <dt>${m.discord_id ? '领取' : '创建'}</dt><dd title="${esc(fullTime(m.registered_at))}">${m.registered_at ? esc(rel(m.registered_at)) : '—'}</dd>
         <dt>最近使用</dt><dd>${k.last_used_at ? esc(fullTime(k.last_used_at)) : '从未使用'}</dd></dl>`;
     const u = k.used;
@@ -1695,6 +1717,7 @@ function memberPanel(m, now){
   return `<tr class="mx" data-mx="${m.id}"><td colspan="5"><div class="mx-grid">
     <div class="mx-g"><h4>Key</h4>${keyGrp}</div>
     <div class="mx-g"><h4>额度与权限</h4>${quotaGrp}</div>
+    ${k ? `<div class="mx-g mx-wide share-ev" id="sev-${k.id}"></div>` : ''}
     <div class="mx-g ops"><h4>操作</h4><div class="mx-acts">
       ${k ? `<button class="btn mini" type="button" data-act="reset-quota" data-id="${m.id}">重置今日额度</button>` : ''}
       <button class="btn mini" type="button" data-act="member-toggle" data-id="${m.id}" data-on="${m.enabled?0:1}">${m.enabled?'停用':'启用'}</button>
@@ -1748,7 +1771,7 @@ function renderMembers(){
     const flags = [
       !m.enabled ? flag('bad', '已停用') : '',
       m.expires_at && m.expires_at < now ? flag('bad', '已过期') : '',
-      nets > 0 && m.sources_24h >= nets ? flag('bad', '疑似分享', `近 24 小时 ${m.sources_24h} 个网段`) : '',
+      m.share && m.share.paused_until > now ? flag('bad', '已暂停', '防分享暂停中') : shareHot(m) ? flag('bad', '风险 ' + Math.round(m.share.score), `防分享风险分（违规 ${m.share.strikes} 次）`) : '',
       full ? flag('bad', '已达日限') : '',
       m.expires_at && m.expires_at >= now && m.expires_at - now < 3*D ? flag('warn', '快到期') : '',
       m.rejected_24h > 0 ? flag('warn', '被拒 ' + m.rejected_24h, '近 24 小时被拒次数') : '',
@@ -2465,6 +2488,8 @@ document.addEventListener('click', ev=>{
     case 'close-modal': closeModal(); break;
     case 'save-key': saveKey(); break;
     case 'regen-key': regenerateKey(id, el); break;
+    case 'share-view': loadShare(id); break;
+    case 'share-clear': clearShare(id); break;
     case 'reset-quota': resetDailyImageQuota(id); break;
     case 'copy-key': copyKey(el); break;
     case 'copy-modal-key': { const v=$('#keyModalVal').value; copyText(v).then(ok=>{ if(!ok){ $('#keyModalVal').select(); toast('请按 Ctrl/Cmd+C 复制'); } }); break; }

@@ -124,6 +124,8 @@ async def lifespan(app: FastAPI):
     await STATE.db.migrate_upstream_token_ids([token.token_id for token in STATE.nai.pool])
     await STATE.nai.load_saved_limits()
     await STATE.guard.load()
+    if getattr(STATE, "share", None) is not None:
+        await STATE.share.load()
     await STATE.load_image_cooldown()
     removed_keys = await STATE.delete_inactive_keys()
     if removed_keys:
@@ -168,7 +170,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "1.9.0"
+__version__ = "1.9.1"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -338,6 +340,10 @@ async def authenticate(request: Request, *, passive: bool = False):
         raise err(403, "该 Key 已过期，请联系站长续期")
     if passive:          # 首页每秒查排队位置：只读，不算使用，不参与防分享统计
         return row
+    share = getattr(STATE, "share", None)
+    if share is not None and share.paused_until(row["id"]):
+        until = time.strftime("%m-%d %H:%M", time.localtime(share.paused_until(row["id"])))
+        raise err(403, f"你的 Key 因检测到多人共用已暂停，{until} 自动恢复。Key 仅限本人使用；如果是误判，请联系站长。")
     # 只要 Key 实际通过鉴权即视为使用，避免 Launcher 登录/上游暂时失败时被误删。
     await STATE.db.touch_key(row["id"])
     sources = getattr(STATE, "sources", None)
@@ -346,7 +352,42 @@ async def authenticate(request: Request, *, passive: bool = False):
             await sources.observe(row, client_id, client=request.headers.get("user-agent", ""))
         except Exception as exc:
             bug("key_sources", exc)
+    from .key_sources import network_of
+    found = network_of(client_id)
+    request_timing.set_source(found[1] if found else "")
+    if share is not None and found:
+        try:                            # 防分享：证据 + 风险分 + 自动处罚（share_guard.py）；失败不能影响请求
+            guard = getattr(STATE, "guard", None)
+            busy = bool(guard and guard.image_inflight.get(row["id"], 0) > 0)
+            await share.observe(row, found[1], 6 if ":" in found[1] else 4, request.headers.get("user-agent", ""),
+                                busy=busy, **_share_callbacks(request))
+        except Exception as exc:
+            bug("share_guard", exc)
     return row
+
+
+def _share_callbacks(request: Request) -> dict:
+    reg = getattr(request.app.state, "registrar", None)
+
+    async def member(key_id: int, text: str) -> None:
+        did = await reg.registration_for_key(key_id) if reg is not None else None
+        if did is not None:
+            await reg.send_dm(did, NOTICE_PREFIX + text)
+
+    async def reset(key_id: int):
+        token = gen_key("nai")
+        return token if await STATE.db.rotate_key_token(key_id, token) else None
+
+    async def ban(key_id: int) -> None:
+        did = await reg.registration_for_key(key_id) if reg is not None else None
+        if did is not None:
+            await reg.ban(did)
+        else:
+            await STATE.db.update_key(key_id, {"enabled": 0})
+
+    def admin(message: str) -> None:
+        notify_owner(f"share_guard_{time.time():.0f}", message, cooldown=0)
+    return {"member": member, "reset": reset, "ban": ban, "admin": admin}
 
 
 async def require_feature(key, name: str) -> None:

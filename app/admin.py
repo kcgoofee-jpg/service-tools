@@ -726,6 +726,45 @@ async def discord_bot_put(request: Request):
     return {"ok": True, "config": await bot_config.load(request.app.state.gate.db)}
 
 
+@router.get("/keys/{key_id}/share")
+async def key_share_detail(request: Request, key_id: int):
+    """防分享溯源：证据与处罚记录 + 最近 60 次请求的来源网络（打码）和客户端。"""
+    require_admin(request)
+    st = request.app.state.gate
+    trail = await st.db._db.execute_fetchall(
+        "SELECT ts, kind, status, src, client, substr(detail,1,60) FROM usage_log WHERE key_id=? ORDER BY ts DESC LIMIT 60",
+        (key_id,))
+    return {"evidence": await st.share.evidence(key_id),
+            "trail": [{"ts": r[0], "kind": r[1], "status": r[2], "src": r[3], "client": r[4], "detail": r[5]} for r in trail]}
+
+
+@router.post("/keys/{key_id}/share-clear")
+async def key_share_clear(request: Request, key_id: int):
+    """误判：清零风险分、解除暂停、违规次数归零（证据保留）。"""
+    require_admin(request)
+    await request.app.state.gate.share.clear(key_id)
+    return {"ok": True}
+
+
+@router.get("/share-guard")
+async def share_guard_get(request: Request):
+    require_admin(request)
+    st = request.app.state.gate
+    return {"mode": await st.share.mode(), "keys": await st.share.report()}
+
+
+@router.put("/share-guard")
+async def share_guard_put(request: Request):
+    """防分享模式：enforce 执行 / observe 只记录并提醒站长 / off 关闭。"""
+    require_admin(request)
+    body = await read_json_body(request)
+    if body.get("mode") not in ("enforce", "observe", "off"):
+        raise HTTPException(422, "mode 只能是 enforce / observe / off")
+    from .share_guard import MODE_SETTING
+    await request.app.state.gate.db.set_setting(MODE_SETTING, body["mode"])
+    return {"ok": True, "mode": body["mode"]}
+
+
 @router.get("/errors")
 async def errors_list(request: Request, all: bool = False):
     """Bug 追踪：按特征归并的错误（未处理的在前）。detail 含堆栈，只在后台显示。"""
@@ -1072,6 +1111,12 @@ async def members(request: Request):
     milestones = await st.db.member_milestones(since)
     sources = await st.db.key_source_summary(since)
     out = []
+    from .share_guard import decayed
+    share_map = {}
+    for kid, score, ts, strikes, paused in await st.db._db.execute_fetchall(
+            "SELECT key_id, score, score_ts, strikes, paused_until FROM share_state"):
+        share_map[kid] = {"score": round(decayed(score, ts, time.time()), 1), "strikes": strikes,
+                          "paused_until": paused if paused > time.time() else 0}
     for row in await st.db.list_keys():
         counter = await st.db.get_counter(row["id"], today)
         w = week.get(row["id"], {})
@@ -1097,6 +1142,7 @@ async def members(request: Request):
             "last_image_at": milestones.get(row["id"], {}).get("last_image_at"),
             "rejected_24h": milestones.get(row["id"], {}).get("rejected_24h", 0),
             "sources_24h": len(sources.get(row["id"], [])),
+            "share": share_map.get(row["id"]),
         })
     return {"members": out, "share_alert_nets": st.settings.key_share_alert_nets,
             "inactivity_days": st.settings.key_inactivity_delete_days}
