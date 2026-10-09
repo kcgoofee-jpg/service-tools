@@ -57,6 +57,7 @@ class SourceTracker:
         self._trail: dict[int, deque] = {}
         self._clients: dict[int, dict[str, float]] = {}
         self._hours: dict[int, set] = {}
+        self.events: deque = deque(maxlen=2000)     # (时间, key_id, 信号类型)：给自动驾驶（autopilot.py）判断用
 
     async def _get_salt(self) -> str:
         if self._salt is None:
@@ -102,6 +103,7 @@ class SourceTracker:
         found = network_of(ip)
         if self.alerter is not None and not _is_test(key):
             for kind, text in self.signals(key, found[1] if found else None, client, now):
+                self.events.append((now, int(key["id"]), kind))
                 self.alerter.notify(f"resale_{kind}_{key['id']}",
                                     f"Key「{key['name']}」{text}。可能被转卖或共享，建议先问一下本人。", cooldown=ALERT_COOLDOWN)
         if found is None:
