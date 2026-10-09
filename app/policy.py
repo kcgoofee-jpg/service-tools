@@ -203,6 +203,58 @@ def normalize_image_request(body: dict) -> None:
             raise ValueError(f"{name} 必须是非负整数")
 
 
+# 以下上游限制来自实测（参考 Steven52065/novelai_proxy 2026-09 的记录，均为上游原始报错）：
+# - 提示词上限 51200，上游按 UTF-8 字节计（中文约 1.7 万字）；
+# - 文生图宽高必须是 64 的整数倍（如 786x786 会被拒）；
+# - V4/V4.5/V5 用下列采样器上游直接 500。只拦这几个已证实的，不做白名单，避免误伤以后新增的采样器。
+MAX_PROMPT_BYTES = 51200
+DIMENSION_STEP = 64
+V4_V5_REJECTED_SAMPLERS = frozenset({
+    "plms", "ddim", "ddim_v3", "k_dpm_adaptive", "k_dpm_fast", "k_dpmpp_3m_sde", "nai_smea", "nai_smea_dyn",
+})
+
+
+def _prompt_texts(body: dict):
+    yield "input", body.get("input")
+    p = body.get("parameters")
+    if not isinstance(p, dict):
+        return
+    for key in ("prompt", "negative_prompt"):
+        yield f"parameters.{key}", p.get(key)
+    for key in ("v4_prompt", "v4_negative_prompt"):
+        caption = (p.get(key) or {}).get("caption") if isinstance(p.get(key), dict) else None
+        if not isinstance(caption, dict):
+            continue
+        yield f"{key}.base_caption", caption.get("base_caption")
+        chars = caption.get("char_captions")
+        if isinstance(chars, list):
+            for i, item in enumerate(chars):
+                if isinstance(item, dict):
+                    yield f"{key}.char_captions[{i}]", item.get("char_caption")
+
+
+def upstream_parameter_problem(body: dict) -> Optional[str]:
+    """在排队之前拦下上游一定会拒绝的请求，避免白占全站唯一的出图队列。"""
+    for path, text in _prompt_texts(body):
+        if isinstance(text, str):
+            size = len(text.encode("utf-8"))
+            if size >= MAX_PROMPT_BYTES:
+                return f"提示词过长：{path} 有 {size} 字节（中文每字 3 字节），上游上限 {MAX_PROMPT_BYTES} 字节"
+    p = body.get("parameters") if isinstance(body.get("parameters"), dict) else {}
+    if body.get("action", "generate") == "generate":
+        for key in ("width", "height"):
+            value = p.get(key)
+            if isinstance(value, int) and value > 0 and value % DIMENSION_STEP:
+                lower = max(DIMENSION_STEP, value // DIMENSION_STEP * DIMENSION_STEP)
+                return f"{key}={value} 不是 64 的倍数，上游会拒绝；可改为 {lower} 或 {lower + DIMENSION_STEP}"
+    model = str(body.get("model", ""))
+    sampler = p.get("sampler")
+    if (isinstance(sampler, str) and sampler in V4_V5_REJECTED_SAMPLERS
+            and (is_v5_model(model) or model.startswith("nai-diffusion-4"))):
+        return f"采样器 {sampler} 不支持 V4/V4.5/V5 模型，请换用 k_euler_ancestral、k_dpmpp_2m 等"
+    return None
+
+
 def is_v5_model(model: str) -> bool:
     m = (model or "").strip().lower()
     return m in ("nai-diffusion-5", "nai-v5") or m.startswith(

@@ -536,3 +536,62 @@ async def test_v1_prefixed_nai_paths_are_aliased(state):
         assert (await c.post("/v1/ai/generate-image", json=image_body(), headers=h)).status_code == 200
         assert (await c.get("/v1/models")).status_code == 200                    # OpenAI 路由不受影响
     assert state.nai.calls
+
+
+# ---------------------------------------------------------------- v1.1：上游参数预检、402/403 告警
+
+@pytest.mark.parametrize("change,needle", [
+    ({"width": 786}, "64 的倍数"),
+    ({"height": 1000}, "64 的倍数"),
+    ({"sampler": "ddim"}, "不支持 V4"),
+    ({"sampler": "k_dpmpp_3m_sde"}, "不支持 V4"),
+])
+def test_upstream_parameter_problem_rejects_known_upstream_failures(change, needle):
+    body = image_body(**change)
+    body["model"] = "nai-diffusion-4-5-full"
+    assert needle in (policy.upstream_parameter_problem(body) or "")
+
+
+def test_upstream_parameter_problem_allows_normal_and_unknown_samplers():
+    for sampler in ("k_euler_ancestral", "k_dpmpp_2m", "k_dpm_2", "some_future_sampler"):
+        body = image_body(sampler=sampler)
+        body["model"] = "nai-diffusion-4-5-full"
+        assert policy.upstream_parameter_problem(body) is None
+    v3 = image_body(sampler="ddim")
+    v3["model"] = "nai-diffusion-3"
+    assert policy.upstream_parameter_problem(v3) is None           # V3 对采样器更宽容
+    i2i = image_body(width=786)
+    i2i["action"] = "img2img"
+    i2i["model"] = "nai-diffusion-4-5-full"
+    assert policy.upstream_parameter_problem(i2i) is None          # 只约束文生图
+
+
+def test_prompt_limit_counts_utf8_bytes():
+    ok = image_body()
+    ok["input"] = "猫" * 17000                                    # 51000 字节
+    assert policy.upstream_parameter_problem(ok) is None
+    long = image_body()
+    long["parameters"]["v4_prompt"] = {"caption": {"base_caption": "x", "char_captions": [{"char_caption": "猫" * 17100}]}}
+    assert "字节" in policy.upstream_parameter_problem(long)
+
+
+@pytest.mark.asyncio
+async def test_bad_dimensions_rejected_before_queue(state):
+    r = await post("/ai/generate-image", image_body(width=786, height=786))
+    assert r.status_code == 400 and "64" in r.json()["error"]["message"]
+    assert not state.nai.calls and not state.db.charges
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [402, 403])
+async def test_402_403_alert_but_do_not_disable_token(status):
+    events = []
+
+    async def handler(req):
+        return httpx.Response(status, json={"message": "x"})
+
+    c = _nai(handler)
+    c.on_event = lambda kind, msg, cooldown=900: events.append(kind)
+    r = await c.request("POST", "https://offline.invalid/text")
+    assert r.status_code == status and events == [f"upstream_{status}"]
+    assert c.pool[0].usable and not c.pool[0].disabled
