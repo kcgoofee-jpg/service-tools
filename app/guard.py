@@ -160,6 +160,9 @@ class Guard:
         now = time.time() if now is None else now
         last_429 = float(await self.db.get_setting("guard_last_upstream_429", 0) or 0)
         last_step = float(await self.db.get_setting("guard_hourly_adapted_at", 0) or 0)
+        if not last_step:                     # 第一次运行只开始计时：上线当天不能算「平稳了一天」
+            await self.db.set_setting("guard_hourly_adapted_at", now)
+            return None
         if now - last_step < 86400 or now - last_429 < 86400:
             return None
         old = self.values["account_hourly_cap"]
