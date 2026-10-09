@@ -53,7 +53,9 @@ def audit_notice(prompts: bool, thumbs: bool, days: int) -> str:
     if not (prompts or thumbs):
         return ""
     what = "、".join(x for x, on in (("图片提示词", prompts), ("生成结果的小缩略图（视请求方式而定，部分请求只有提示词）", thumbs)) if on)
-    return f"为防止滥用，本站会保留你的{what}，{max(1, days)} 天后自动删除，仅站长可见。"
+    if days <= 0:
+        return f"本站会长期保存你的{what}，用于防止滥用和优化调度算法，仅站长可见。"
+    return f"为防止滥用，本站会保留你的{what}，{days} 天后自动删除，仅站长可见。"
 
 
 async def audit_flags(db, settings) -> tuple[bool, bool, int]:

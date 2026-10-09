@@ -81,7 +81,7 @@ class Settings:
     audit_prompts: bool = _bool("AUDIT_PROMPTS", False)        # 记录图片请求的提示词
     audit_thumbs: bool = _bool("AUDIT_THUMBS", False)          # 记录成功结果的小缩略图
     audit_retention_days: int = _int("AUDIT_RETENTION_DAYS", 7)
-    usage_log_retention_days: int = _int("USAGE_LOG_RETENTION_DAYS", 90)   # 明细日志保留天数（计数器不受影响）
+    usage_log_retention_days: int = _int("USAGE_LOG_RETENTION_DAYS", 0)    # 明细日志保留天数；0 = 长期保留（成员已知情，用于回测和优化算法）
 
     # ---- 图片安全钳制（默认强制贴合 Opus 免费档）----
     safe_clamp: bool = _bool("SAFE_CLAMP", True)

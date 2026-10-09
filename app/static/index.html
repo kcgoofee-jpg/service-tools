@@ -1450,7 +1450,7 @@ function renderStatus(s){
       <div style="margin-top:8px"><button class="btn mini" data-act="alert-test">发送测试告警</button></div></div></div>
     <div class="status-row"><div class="ico ${rec?'ok':''}">${ic('camera')}</div><div class="body">
       <div class="t">生成记录 <span class="tag ${rec?'on':'dim'}">${rec?'记录中':'已关闭'}</span></div>
-      <div class="d">提示词 ${au.prompts?'开':'关'} · 缩略图 ${au.thumbs?'开':'关'} · 保留 ${esc(au.retention_days)} 天</div></div></div>
+      <div class="d">提示词 ${au.prompts?'开':'关'} · 缩略图 ${au.thumbs?'开':'关'} · 保留 ${au.retention_days>0 ? esc(au.retention_days)+' 天' : '长期'}</div></div></div>
     <div class="status-row"><div class="ico ok">${ic('lock')}</div><div class="body">
       <div class="t">暴力破解防护 <span class="tag on">已启用</span></div>
       <div class="d">Key 鉴权失败 ${esc(p.auth_fail_max)} 次 / ${esc(p.auth_fail_window)} 秒后封禁 ${esc(p.auth_block_seconds)} 秒；后台登录最多尝试 ${esc(p.login_max_attempts)} 次</div></div></div>
@@ -1840,7 +1840,7 @@ function renderAuditSettings(){
   const on = a.prompts || a.thumbs;
   if(auditSetOpen === null) auditSetOpen = !on;
   const parts = [a.prompts?'提示词':'', a.thumbs?'缩略图':''].filter(Boolean).join(' + ');
-  const summary = on ? `记录中：${parts} · 保留 ${a.retention_days} 天` : '记录已关闭：不会保存提示词和缩略图';
+  const summary = on ? `记录中：${parts} · 保留 ${a.retention_days>0 ? a.retention_days+' 天' : '长期'}` : '记录已关闭：不会保存提示词和缩略图';
   const head = `<div class="sumline"><div class="body"><h2 style="font-size:15px;font-weight:600">记录设置</h2>
       <div class="${on?'':'muted'}" style="margin-top:2px">${esc(summary)}</div></div>
       ${on?`<button class="btn" type="button" data-act="toggle-audit-set" aria-expanded="${auditSetOpen}">${auditSetOpen?'收起':'修改'}</button>`:''}</div>`;
@@ -1848,7 +1848,7 @@ function renderAuditSettings(){
   box.innerHTML = head + `<div style="margin-top:16px">
     <div class="feat-row"><div class="body"><div class="t">记录提示词</div></div><label class="switch"><input type="checkbox" id="aud_prompts" ${a.prompts?'checked':''} aria-label="记录提示词"><span></span></label></div>
     <div class="feat-row"><div class="body"><div class="t">记录缩略图</div></div><label class="switch"><input type="checkbox" id="aud_thumbs" ${a.thumbs?'checked':''} aria-label="记录缩略图"><span></span></label></div>
-    <div class="field" style="margin-top:16px;max-width:260px"><label for="aud_days">保留天数</label><input id="aud_days" type="number" min="1" max="90" value="${esc(a.retention_days)}"><div class="hint">1～90 天</div></div>
+    <div class="field" style="margin-top:16px;max-width:260px"><label for="aud_days">保留天数</label><input id="aud_days" type="number" min="0" max="3650" value="${esc(a.retention_days)}"><div class="hint">0 = 长期保留</div></div>
     <label class="check"><input type="checkbox" id="aud_notify" checked><span>切换时在成员频道发布测试期公告${a.announce_configured?'':'（公告频道未配置，将不会发布）'}</span></label>
     <div style="margin-top:16px"><button class="btn primary" data-act="save-audit">保存</button></div></div>`;
 }
@@ -1885,7 +1885,7 @@ async function loadAudit(){
       const on = au && (au.prompts || au.thumbs);
       grid.innerHTML = `<div class="empty card" style="grid-column:1/-1"><div class="ico">${ic('image')}</div>
         <h3>${kf?'该成员暂无生成记录':'暂无生成记录'}</h3>
-        <p>${au ? (on ? `生成记录功能已开启（提示词${au.prompts?'开':'关'}、缩略图${au.thumbs?'开':'关'}），新的生成请求会出现在这里。记录会在 ${esc(au.retention_days)} 天后自动清除。`
+        <p>${au ? (on ? `生成记录功能已开启（提示词${au.prompts?'开':'关'}、缩略图${au.thumbs?'开':'关'}），新的生成请求会出现在这里。${au.retention_days>0 ? `记录会在 ${esc(au.retention_days)} 天后自动清除。` : '记录长期保存。'}`
           : '生成记录功能当前已关闭，不会保存提示词和缩略图。开启后，记录会在保留期满后自动清除。') : '记录会在保留期满后自动清除。'}</p></div>`;
       $('#auditPager').innerHTML = '';
       return;
@@ -2029,7 +2029,7 @@ async function saveReg(){
 }
 async function saveAudit(){
   const days = Number($('#aud_days').value);
-  if(!Number.isInteger(days) || days<1 || days>90){ toast('保留天数须为 1～90 的整数', 'err'); return; }
+  if(!Number.isInteger(days) || days<0 || days>3650){ toast('保留天数须为 0～3650 的整数（0 = 长期保留）', 'err'); return; }
   try{
     opsData = await api('/admin/api/ops/audit', {method:'PUT', body:JSON.stringify({prompts:$('#aud_prompts').checked, thumbs:$('#aud_thumbs').checked, retention_days:days, notify:$('#aud_notify').checked})});
     statusCache = null;
