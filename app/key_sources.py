@@ -11,6 +11,7 @@ import hashlib
 import ipaddress
 import secrets
 import time
+from collections import deque
 from typing import Optional
 
 WINDOW_SECONDS = 24 * 3600
@@ -18,6 +19,16 @@ RETENTION_SECONDS = 7 * 24 * 3600
 WRITE_INTERVAL = 300          # 同一 Key + 网段 5 分钟内只写一次库
 ALERT_COOLDOWN = 6 * 3600
 SALT_SETTING = "key_source_salt"
+ALTERNATE_WINDOW = 600     # 10 分钟内 A→B→A 式来回切换 ≥2 次
+CLIENT_ALERT = 3           # 24 小时内 ≥3 种客户端名称
+ACTIVE_HOURS_ALERT = 20    # 近 24 小时有 ≥20 个小时在用
+
+
+def _is_test(key) -> bool:
+    try:
+        return bool(key["is_test"])
+    except (KeyError, IndexError, TypeError):
+        return False
 
 
 def network_of(ip: str) -> Optional[tuple[str, str]]:
@@ -42,6 +53,10 @@ class SourceTracker:
         self.db, self.alerter, self.threshold = db, alerter, max(0, int(threshold))
         self._salt: Optional[str] = None
         self._recent: dict[tuple[int, str], float] = {}
+        # 防转卖信号（只在内存里，重启清空）：网段切换序列、客户端名称、活跃小时
+        self._trail: dict[int, deque] = {}
+        self._clients: dict[int, dict[str, float]] = {}
+        self._hours: dict[int, set] = {}
 
     async def _get_salt(self) -> str:
         if self._salt is None:
@@ -52,15 +67,46 @@ class SourceTracker:
             self._salt = str(salt)
         return self._salt
 
-    async def observe(self, key, ip: str, now: Optional[float] = None) -> None:
+    def signals(self, key, label: Optional[str], client: str, now: float) -> list[tuple[str, str]]:
+        """返回 (告警类型, 说明)：网段交替、客户端名称过多、近 24 小时几乎全天在用。都只是线索。"""
+        kid, out = int(key["id"]), []
+        if label:
+            trail = self._trail.setdefault(kid, deque(maxlen=20))
+            if not trail or trail[-1][1] != label:
+                trail.append((now, label))
+            recent = [lb for t, lb in trail if t >= now - ALTERNATE_WINDOW]
+            back_and_forth = sum(1 for i in range(2, len(recent)) if recent[i] == recent[i - 2] != recent[i - 1])
+            if back_and_forth >= 2:
+                out.append(("alternate", f"10 分钟内在 {len(set(recent))} 个网段之间来回切换（{'→'.join(recent[-5:])}），像是多人同时在用"))
+        name = (client or "").strip()[:60]
+        if name:
+            seen = self._clients.setdefault(kid, {})
+            seen[name] = now
+            for n in [n for n, t in seen.items() if t < now - WINDOW_SECONDS]:
+                seen.pop(n, None)
+            if len(seen) >= CLIENT_ALERT:
+                out.append(("clients", f"24 小时内用了 {len(seen)} 种不同的客户端"))
+        hours = self._hours.setdefault(kid, set())
+        hours.add(int(now // 3600))
+        for h in [h for h in hours if h < int(now // 3600) - 23]:
+            hours.discard(h)
+        if len(hours) >= ACTIVE_HOURS_ALERT:
+            out.append(("allday", f"近 24 小时里有 {len(hours)} 个小时都在用，作息不像一个人"))
+        return out
+
+    async def observe(self, key, ip: str, now: Optional[float] = None, client: str = "") -> None:
         """记录一次成功鉴权的来源网段。管理员 Key 不记录。"""
         if key["is_admin"]:
             return
+        now = time.time() if now is None else now
         found = network_of(ip)
+        if self.alerter is not None and not _is_test(key):
+            for kind, text in self.signals(key, found[1] if found else None, client, now):
+                self.alerter.notify(f"resale_{kind}_{key['id']}",
+                                    f"Key「{key['name']}」{text}。可能被转卖或共享，建议先问一下本人。", cooldown=ALERT_COOLDOWN)
         if found is None:
             return
         net, label = found
-        now = time.time() if now is None else now
         digest = hashlib.sha256(((await self._get_salt()) + net).encode()).hexdigest()[:16]
         slot = (int(key["id"]), digest)
         if now - self._recent.get(slot, 0) < WRITE_INTERVAL:

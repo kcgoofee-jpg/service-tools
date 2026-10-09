@@ -25,7 +25,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-from . import admin, registration_routes, request_timing
+from . import admin, live, registration_routes, request_timing
 from .registration import configured_service
 from .body import read_bounded_body, read_json_body
 from .config import load_settings
@@ -167,7 +167,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "1.6.1"
+__version__ = "1.7.0"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -282,7 +282,7 @@ async def fallback_handler(request: Request, exc: Exception):
 
 # ================================================================ helpers ====
 
-async def authenticate(request: Request):
+async def authenticate(request: Request, *, passive: bool = False):
     """校验虚拟 Key。"""
     client_id = request.client.host if request.client else "unknown"
     wait = getattr(STATE, "auth_blocked", lambda _ip: 0)(client_id)
@@ -305,12 +305,14 @@ async def authenticate(request: Request):
         raise err(403, "该 Key 已被禁用")
     if row["expires_at"] and row["expires_at"] < time.time():
         raise err(403, "该 Key 已过期，请联系站长续期")
+    if passive:          # 首页每秒查排队位置：只读，不算使用，不参与防分享统计
+        return row
     # 只要 Key 实际通过鉴权即视为使用，避免 Launcher 登录/上游暂时失败时被误删。
     await STATE.db.touch_key(row["id"])
     sources = getattr(STATE, "sources", None)
     if sources is not None:
         try:                            # 来源网段统计（防 Key 分享）；失败不能影响请求
-            await sources.observe(row, client_id)
+            await sources.observe(row, client_id, client=request.headers.get("user-agent", ""))
         except Exception:
             print("[warn] key source tracking failed")
     return row
@@ -404,6 +406,17 @@ async def inactive_key_cleanup_loop() -> None:
     """常驻服务每小时回收一次长期闲置 Key。"""
     while True:
         try:
+            try:
+                from . import anlas_pool
+                reg = getattr(app.state, "registrar", None)
+
+                async def _dm(key_id, text, reg=reg):
+                    did = await reg.registration_for_key(key_id) if reg is not None else None
+                    if did is not None:
+                        await reg.send_dm(did, "🦉 猫头鹰公益站通知：" + text)
+                await anlas_pool.rebalance(STATE, notify=_dm)          # 每小时重算一次 Anlas 自动分配
+            except Exception as exc:
+                print(f"[warn] anlas rebalance failed: {type(exc).__name__}")
             registrar = getattr(app.state, "registrar", None)
             if registrar is not None:
                 await STATE.remind_idle_keys(registrar.send_dm, SETTINGS.site_url.rstrip("/"))
@@ -498,6 +511,14 @@ async def read_image_payload(request: Request, limit_mb: float = 25) -> dict:
         raise err(exc.status_code, exc.detail) from None
 
 
+def _flag(key, name: str) -> bool:
+    """读 Key 上可能不存在的新列（老测试数据 / 假对象）。"""
+    try:
+        return bool(key[name])
+    except (KeyError, IndexError, TypeError):
+        return False
+
+
 def daily_base(key) -> int:
     """这把 Key 的每日保底张数；0 表示没有保底 / 借用之分（整天都按每日上限）。"""
     guard = getattr(STATE, "guard", None)
@@ -530,6 +551,7 @@ async def image_admission(key):
     reason = guard.admit_image(key["id"], accounts)
     if reason:
         raise err(429, reason)
+    request_timing.on_sent(lambda: guard.mark_running(key["id"]))
     try:
         yield
     finally:
@@ -673,6 +695,7 @@ def record(key, kind: str, model: str, status: str, *, images: int = 0,
            unconfirmed_anlas: float = 0.0) -> asyncio.Task:
     """写日志；成功请求额外计入每日配额。"""
     _REQUEST_LOGGED.set(True)
+    live.note(status)
     timing = request_timing.snapshot()
     async def _go():
         if status == "ok":
@@ -959,8 +982,8 @@ async def _generate_image(request: Request, *, streaming: bool):
             record(key, "image", model, "rejected", detail="img2img 未开通 Anlas 权限")
             raise err(402, "该 Key 未开通 Anlas 权限，无法使用图生图 / 局部重绘")
 
-    # 免费档钳制：只对未开通 Anlas 的 Key 生效；开通 Anlas 的 Key 靠配额约束
-    if STATE.settings.safe_clamp and not key["is_admin"] and not key["allow_anlas"]:
+    # 免费档钳制：对未开通 Anlas 的 Key 生效；自动分配 Anlas 的 Key 也保留钳制（Anlas 只用于 V5 续杯）
+    if STATE.settings.safe_clamp and not key["is_admin"] and (not key["allow_anlas"] or _flag(key, "anlas_auto")):
         try:
             body, notes, problem = clamp_image_params(
                 body,
@@ -988,6 +1011,11 @@ async def _generate_image(request: Request, *, streaming: bool):
         est = estimate_image_cost(body, is_opus=True)
     except (TypeError, ValueError, OverflowError) as exc:
         raise err(400, "图片参数无效，无法估算费用") from exc
+    # V5 续杯：自动分配了 Anlas 的成员，当天个人 V5 用完后改用 Anlas 生成同规格 V5（受每日 Anlas 限额约束）
+    if est["v5"] and _flag(key, "anlas_auto") and key["allow_anlas"] and key["daily_v5"] > 0:
+        if (await STATE.db.get_counter(key["id"], STATE.day()))["v5"] >= key["daily_v5"]:
+            est = estimate_image_cost(body, is_opus=True, v5_allowance_available=False)
+            notes = list(notes) + ["今日 V5 已用完，使用自动分配的 Anlas 续杯"]
     legacy_free_images = (
         1 if model_tier == "legacy" and legacy_normal_free_eligible(body) else 0
     )
@@ -1385,6 +1413,7 @@ async def v1_me(request: Request):
             "legacy_free_images_today": c["legacy_free_images"],
             "anlas_today": round(float(c["anlas"]), 2),
             "daily_anlas": key["daily_anlas"],
+            "anlas_auto": _flag(key, "anlas_auto") and bool(key["allow_anlas"]),
             "v5_today": c["v5"], "daily_v5": key["daily_v5"],
             "image_model_scope": key["image_model_scope"],
             "anlas_month": round(await STATE.db.month_anlas(key["id"], STATE.month()), 2),
@@ -1570,6 +1599,24 @@ async def announcement():
 
 
 _PUBLIC_STATUS_CACHE: dict = {"at": 0.0, "body": None}
+
+
+@app.get("/public/live")
+async def public_live(request: Request):
+    """首页实时架构图：每秒轮询，只含汇总数字（请求数、额度、排队数、账号保护、名额与打码的候补名单）。"""
+    body = await live.build(STATE, getattr(request.app.state, "registrar", None))
+    return JSONResponse(body, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/v1/live/me")
+async def live_me(request: Request):
+    """需要 Key：这把 Key 的图现在排第几 / 是否在生成。不写用量日志。"""
+    try:
+        key = await authenticate(request, passive=True)
+    except GateError as exc:      # 直接返回，不写拒绝日志（页面每秒都会问一次）
+        return JSONResponse({"mine": None, "error": exc.message}, status_code=exc.status,
+                            headers={"Cache-Control": "no-store"})
+    return JSONResponse(live.mine(STATE, key["id"]), headers={"Cache-Control": "no-store"})
 
 
 @app.get("/public/status")

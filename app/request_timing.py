@@ -39,6 +39,16 @@ def mark_sent() -> None:
     holder = _TIMING.get()
     if holder is not None and holder["sent"] is None:
         holder["sent"] = time.monotonic()
+        hook = holder.get("on_sent")
+        if hook is not None:
+            hook()
+
+
+def on_sent(hook) -> None:
+    """登记一个回调：本请求第一次发往上游时调用（实时架构图把这张图从「排队」移到「生成中」）。"""
+    holder = _TIMING.get()
+    if holder is not None:
+        holder["on_sent"] = hook
 
 
 def mark_status(code: int) -> None:

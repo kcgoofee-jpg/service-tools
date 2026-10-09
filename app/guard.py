@@ -43,6 +43,8 @@ class Guard:
         self.values: dict[str, int] = {name: spec[0] for name, spec in FIELDS.items()}
         self._starts: dict[str, deque] = {}
         self.image_inflight: dict[int, int] = {}
+        self.entries: list[dict] = []        # 进行中的出图：排队 / 生成，按进入时间排序
+        self._seq = 0
 
     # ---------- 设置 ----------
     async def load(self) -> None:
@@ -140,7 +142,16 @@ class Guard:
         if per and sum(self.image_inflight.values()) >= per * max(1, accounts):
             return f"当前排队的人太多（全站最多同时排 {per * max(1, accounts)} 张），请稍后再试"
         self.image_inflight[key_id] = mine + 1
+        self._seq += 1
+        self.entries.append({"id": self._seq, "key": key_id, "since": time.time(), "running": False})
         return None
+
+    def mark_running(self, key_id: int) -> None:
+        """这把 Key 最早一张排队中的图开始发往上游（实时架构图用）。"""
+        for e in self.entries:
+            if e["key"] == key_id and not e["running"]:
+                e["running"] = True
+                return
 
     def release_image(self, key_id: int) -> None:
         n = self.image_inflight.get(key_id, 0) - 1
@@ -148,6 +159,21 @@ class Guard:
             self.image_inflight[key_id] = n
         else:
             self.image_inflight.pop(key_id, None)
+        mine = [e for e in self.entries if e["key"] == key_id]
+        if mine:      # 先移除正在生成的那张，否则移除最早的
+            done = next((e for e in mine if e["running"]), mine[0])
+            self.entries.remove(done)
+
+    def queue_view(self, key_id: Optional[int] = None) -> dict:
+        """匿名的排队视图：waiting / running 数量；给定 key_id 时附上这把 Key 的图所处位置（1 起）。"""
+        waiting = sorted((e for e in self.entries if not e["running"]), key=lambda e: e["since"])
+        running = [e for e in self.entries if e["running"]]
+        out: dict[str, Any] = {"waiting": len(waiting), "running": len(running)}
+        if key_id is not None:
+            out["mine"] = ([{"state": "running"} for e in running if e["key"] == key_id]
+                           + [{"state": "waiting", "position": i + 1}
+                              for i, e in enumerate(waiting) if e["key"] == key_id])
+        return out
 
     # ---------- 保底与借用 ----------
     def site_idle(self, key_id: int, token_ids: list[str], now: Optional[float] = None) -> bool:

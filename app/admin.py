@@ -460,12 +460,51 @@ async def create_key(request: Request):
     return {"key": _key_json(row, c, 0)}
 
 
+async def _notify_member(request: Request, key_id: int, text: str) -> None:
+    """后台对 Discord 成员做了会影响使用的操作时，机器人私信本人（?notify=0 / body.notify=false 可关闭）。"""
+    registrar = getattr(request.app.state, "registrar", None)
+    if registrar is None:
+        return
+    discord_id = await registrar.registration_for_key(key_id)
+    if discord_id is None:
+        return
+    try:
+        sent = await registrar.send_dm(discord_id, "🦉 猫头鹰公益站通知：" + text)
+    except Exception:              # 私信失败绝不能让后台操作本身失败
+        sent = False
+    from .action_log import log_action
+    await log_action(request.app.state.gate.db, "系统", "私信成员", f"Key #{key_id}",
+                     text[:120] if sent else "私信失败（对方可能关闭了私信）", ok=sent)
+
+
+def _describe_changes(before, fields: dict) -> list[str]:
+    out = []
+    if "enabled" in fields and bool(before["enabled"]) != fields["enabled"]:
+        out.append("你的 Key 已被站长" + ("恢复，可以继续使用" if fields["enabled"] else "暂停，暂时无法使用（有疑问请到 🛠️｜问题反馈）"))
+    labels = {"daily_images": "每日图片", "daily_v5": "每日 V5", "daily_anlas": "每日 Anlas"}
+    for name, label in labels.items():
+        if name in fields and before[name] != fields[name]:
+            out.append(f"{label}额度：{before[name] or '不限'} → {fields[name] or '不限'}")
+    if "allow_anlas" in fields and bool(before["allow_anlas"]) != fields["allow_anlas"]:
+        out.append("已为你" + ("开通" if fields["allow_anlas"] else "关闭") + " Anlas（付费规格）")
+    if "image_model_scope" in fields and before["image_model_scope"] != fields["image_model_scope"]:
+        out.append("可用模型：" + ("含 V5" if fields["image_model_scope"] == "all" else "仅 V4.5 及以下"))
+    old_exp, new_exp = before["expires_at"], fields.get("expires_at", before["expires_at"])
+    # 编辑框每次都按「剩余天数」重算到期时间，相差不到 1 天视为没改
+    if "expires_at" in fields and (old_exp is None) != (new_exp is None) or (
+            old_exp and new_exp and abs(old_exp - new_exp) > 86400):
+        out.append("Key 有效期已调整" + (f"，约 {max(0, round((fields['expires_at'] - time.time()) / 86400))} 天后到期" if fields["expires_at"] else "为长期有效"))
+    return out
+
+
 @router.post("/keys/{key_id}/regenerate")
 async def regenerate_key(request: Request, response: Response, key_id: int):
     require_admin(request)
     token = gen_key("nai")
     if not await request.app.state.gate.db.rotate_key_token(key_id, token):
         raise HTTPException(404, "key 不存在")
+    if request.query_params.get("notify", "1") != "0":
+        await _notify_member(request, key_id, f"站长为你重置了 Key，旧 Key 已失效。新的 Key（请妥善保存）：`{token}`")
     response.headers["Cache-Control"] = "no-store"
     return {"token": token}
 
@@ -509,7 +548,14 @@ async def patch_key(request: Request, key_id: int):
     if "expires_days" in body:
         d = _num(body["expires_days"], int, 0, 3650, "expires_days")
         fields["expires_at"] = (time.time() + d * 86400) if d > 0 else None
+    before = await st.db.get_key(key_id)
     await st.db.update_key(key_id, fields)
+    if "allow_anlas" in fields or "daily_anlas" in fields:
+        await st.db._db.execute("UPDATE api_keys SET anlas_auto=0 WHERE id=?", (key_id,))   # 手动设置后不再由自动分配管理
+        await st.db._db.commit()
+    changes = _describe_changes(before, fields)
+    if changes and body.get("notify", True) is not False:
+        await _notify_member(request, key_id, "站长调整了你的 Key：\n• " + "\n• ".join(changes))
     row = await st.db.get_key(key_id)
     c = await st.db.get_counter(key_id, st.day())
     totals = await st.db.generated_image_totals(key_id)
@@ -527,6 +573,8 @@ async def reset_daily_image_quota(request: Request, key_id: int):
     await st.db.reset_daily_image_quota(key_id, st.day())
     counter = await st.db.get_counter(key_id, st.day())
     totals = await st.db.generated_image_totals(key_id)
+    if request.query_params.get("notify", "1") != "0":
+        await _notify_member(request, key_id, "站长已为你重置了今天的额度，可以继续使用。")
     return {"ok": True, "key": _key_json(row, counter, totals.get(key_id, 0))}
 
 
@@ -540,6 +588,9 @@ async def delete_key(request: Request, key_id: int, ban: bool = False):
     registrar = getattr(request.app.state, "registrar", None)
     discord_id = await registrar.registration_for_key(key_id) if registrar is not None else None
     if discord_id is not None:
+        if request.query_params.get("notify", "1") != "0":
+            await _notify_member(request, key_id, "你的 Key 已被站长" + (
+                "删除，并且这个 Discord 账号不能再领取。" if ban else "删除。如需继续使用，可以在 🔑｜领取key 重新 /register。"))
         await (registrar.ban if ban else registrar.revoke)(discord_id)
         return {"ok": True, "discord_id": discord_id, "banned": bool(ban)}
     await gate.db.delete_key(key_id)
@@ -605,6 +656,36 @@ async def guard_put(request: Request):
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from None
     return await guard_get(request)
+
+
+@router.get("/anlas-pool")
+async def anlas_pool_get(request: Request):
+    """Anlas 自动分配：上次结果与参数。"""
+    require_admin(request)
+    from . import anlas_pool
+    db = request.app.state.gate.db
+    last = await db.get_setting(anlas_pool.STATE_KEY, None)
+    return {"last": json.loads(last) if last else None,
+            "settings": {k: await anlas_pool._setting(db, k) for k in anlas_pool.DEFAULTS}}
+
+
+@router.put("/anlas-pool")
+async def anlas_pool_put(request: Request):
+    """修改参数并立即重算一次。"""
+    require_admin(request)
+    from . import anlas_pool
+    body = await read_json_body(request)
+    st = request.app.state.gate
+    bounds = {"anlas_auto_enabled": (0, 1), "anlas_reserve": (0, 10000), "anlas_member_daily_cap": (0, 1000),
+              "anlas_min_images_7d": (0, 10000), "anlas_min_key_age_days": (0, 365)}
+    values = {}
+    for name, (low, high) in bounds.items():
+        if name in body:
+            values[name] = _num(body[name], int, low, high, name)
+    if values:
+        await st.db.set_settings_bulk(values)
+    await anlas_pool.rebalance(st)
+    return await anlas_pool_get(request)
 
 
 @router.get("/shadow")
