@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import copy
 import base64
 import binascii
 import math
@@ -179,8 +178,33 @@ def estimate_tokens(text: str) -> int:
     return max(1, math.ceil(len(text) / 3.5))
 
 
+INTEGER_IMAGE_PARAMS = ("width", "height", "steps", "n_samples")
+
+
+def normalize_image_request(body: dict) -> None:
+    """路由入口统一规范化：模型名小写去空格并回写；尺寸/步数/张数必须是整数。
+
+    计价按 int() 截断而上游原样接收：放过 28.99 步或 1.99 张会让“免费”估价与实际扣费不一致。
+    """
+    model = body.get("model")
+    if not isinstance(model, str) or not model.strip():
+        raise ValueError("缺少 model")
+    body["model"] = model.strip().lower()
+    p = body.get("parameters")
+    if not isinstance(p, dict):
+        return
+    for name in INTEGER_IMAGE_PARAMS:
+        value = p.get(name)
+        if value is None:
+            continue
+        if isinstance(value, float) and value.is_integer():
+            value = p[name] = int(value)
+        if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 65536:
+            raise ValueError(f"{name} 必须是非负整数")
+
+
 def is_v5_model(model: str) -> bool:
-    m = (model or "").lower()
+    m = (model or "").strip().lower()
     return m in ("nai-diffusion-5", "nai-v5") or m.startswith(
         ("nai-diffusion-5-", "nai-v5-")
     )
@@ -291,6 +315,10 @@ def estimate_image_cost(params: dict, is_opus: bool = True, *,
         strength = inpaint.get("strength", 1.0)
         if not _unit_value(strength):
             raise ValueError("img2img.strength 必须是 0 到 1 的有限数值")
+        outer = p.get("strength", 0.0)
+        if not _unit_value(outer):
+            raise ValueError("strength 必须是 0 到 1 的有限数值")
+        strength = max(strength, outer)   # 上游可能按任一字段计价，取较大者
         # V4 按强度折算；2026-09-24 实测 V5 Full 重绘使用完整基础价。
         if str(params.get("model", "")).lower().startswith("nai-diffusion-4"):
             per *= strength
@@ -353,11 +381,10 @@ def clamp_image_params(payload: dict, *, max_pixels: int, max_steps: int,
     对 V5：钳制后可走周额度（不烧 Anlas）；对老模型：钳制后直接免费。
     """
     notes: list[str] = []
-    out = copy.deepcopy(payload)
-    p = out.get("parameters")
-    if not isinstance(p, dict):
-        p = {}
-        out["parameters"] = p
+    # 只改写 parameters 的顶层字段：浅拷贝即可，避免对大请求体做 deepcopy（内存/CPU 放大数倍）。
+    out = dict(payload)
+    p = dict(out["parameters"]) if isinstance(out.get("parameters"), dict) else {}
+    out["parameters"] = p
 
     # img2img / inpaint 审查
     is_img2img = bool(p.get("image") or p.get("mask"))
@@ -413,11 +440,9 @@ def clamp_image_params(payload: dict, *, max_pixels: int, max_steps: int,
 def clamp_text_params(payload: dict, *, max_output_tokens: int,
                       max_input_chars: int) -> Tuple[dict, list[str], Optional[str]]:
     notes: list[str] = []
-    out = copy.deepcopy(payload)
-    p = out.get("parameters")
-    if not isinstance(p, dict):
-        p = {}
-        out["parameters"] = p
+    out = dict(payload)
+    p = dict(out["parameters"]) if isinstance(out.get("parameters"), dict) else {}
+    out["parameters"] = p
 
     input_text = str(out.get("input", "") or "")
     if len(input_text) > max_input_chars:

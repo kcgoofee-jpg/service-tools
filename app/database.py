@@ -650,30 +650,42 @@ class Database:
         )
         await self._db.commit()
 
+    @staticmethod
+    def _log_filter(key_id: Optional[int], kinds: Optional[list[str]]) -> tuple[str, tuple]:
+        clauses, args = [], []
+        if key_id:
+            clauses.append("key_id=?")
+            args.append(key_id)
+        if kinds is not None:
+            clauses.append("kind IN (%s)" % ",".join("?" * len(kinds)) if kinds else "0")
+            args.extend(kinds)
+        return (" WHERE " + " AND ".join(clauses)) if clauses else "", tuple(args)
+
     async def list_logs(self, limit: int = 20, offset: int = 0,
-                        key_id: Optional[int] = None) -> list[aiosqlite.Row]:
+                        key_id: Optional[int] = None,
+                        kinds: Optional[list[str]] = None) -> list[aiosqlite.Row]:
         limit = max(1, min(int(limit), 500))
         offset = max(0, int(offset))
-        if key_id:
-            cur = await self._db.execute(
-                "SELECT * FROM usage_log WHERE key_id=? ORDER BY id DESC LIMIT ? OFFSET ?",
-                (key_id, limit, offset),
-            )
-        else:
-            cur = await self._db.execute(
-                "SELECT * FROM usage_log ORDER BY id DESC LIMIT ? OFFSET ?", (limit, offset)
-            )
+        where, args = self._log_filter(key_id, kinds)
+        cur = await self._db.execute(
+            f"SELECT * FROM usage_log{where} ORDER BY id DESC LIMIT ? OFFSET ?", args + (limit, offset))
         return list(await cur.fetchall())
 
-    async def count_logs(self, key_id: Optional[int] = None) -> int:
-        if key_id:
-            cur = await self._db.execute(
-                "SELECT COUNT(*) AS c FROM usage_log WHERE key_id=?", (key_id,)
-            )
-        else:
-            cur = await self._db.execute("SELECT COUNT(*) AS c FROM usage_log")
+    async def count_logs(self, key_id: Optional[int] = None,
+                         kinds: Optional[list[str]] = None) -> int:
+        where, args = self._log_filter(key_id, kinds)
+        cur = await self._db.execute(f"SELECT COUNT(*) AS c FROM usage_log{where}", args)
         row = await cur.fetchone()
         return int(row["c"])
+
+    async def usage_by_kind(self, since: float) -> list[dict[str, Any]]:
+        """按 kind / status 汇总 since 之后的用量日志（日志保留期内有效）。"""
+        cur = await self._db.execute(
+            """SELECT kind, status, COUNT(*) AS n, COALESCE(SUM(images),0) AS images,
+                      COALESCE(SUM(tokens),0) AS tokens, COALESCE(SUM(anlas),0) AS anlas,
+                      COUNT(DISTINCT key_id) AS users
+               FROM usage_log WHERE ts>=? GROUP BY kind, status""", (since,))
+        return [dict(r) for r in await cur.fetchall()]
 
     async def generated_image_totals(self, key_id: Optional[int] = None) -> dict[int, int]:
         """Count successful generations (including completed stream images) per Key."""

@@ -106,7 +106,7 @@ curl http://127.0.0.1:3003/healthz        # {"ok":true,"upstream":true}
 
 | 项目 | 环境变量默认值 |
 | --- | --- |
-| V4.5 及以下免费生图 | 每 Key 每天 100 张（自助领取默认 300，实际受间隔限制） |
+| V4.5 及以下免费生图 | 每 Key 每天 100 张（自助领取默认 30，可在后台“功能与开放”调整，实际受间隔限制） |
 | 免费 V5 | 每 Key 每天 50 张（自助领取默认 0，可调）；全站每天 150 张 |
 | Anlas（须单独授权） | 每 Key 每天 100、每月 2500 |
 | 请求频率 | 每 Key 每分钟 10 次 |
@@ -122,16 +122,29 @@ curl http://127.0.0.1:3003/healthz        # {"ok":true,"upstream":true}
 - 无效 Key 请求按真实访客 IP 计数，超过阈值（`AUTH_FAIL_MAX` 等）会被临时拦截并告警；被拦截的 IP 只拦“无效 Key”，持有有效 Key 的成员不受影响。
 - 语音合成按 Anlas 计费但尚未接入额度统计，目前仅管理员 Key 可用。
 - 开启生成记录会保存成员的提示词与缩略图：请确保向成员明示，并设置合理的保留天数；图片本体不保存。
-- 备份运行中的 SQLite 数据库请用 SQLite 的在线备份（`sqlite3 … ".backup"`），不要直接复制文件。
+- 备份运行中的 SQLite 数据库请用 SQLite 的在线备份（`sqlite3 … ".backup"`），不要直接复制文件。完整备份还需要同目录的 `upstream_tokens.json`（上游 Token）、`secret_key`（会话签名）、`announcement.html` 和 `.env`；只备份数据库会丢失令牌池。
+- 闲置回收：连续 `KEY_INACTIVITY_DELETE_DAYS`（默认 3）天没有任何请求的成员 Key 会被自动删除，首页和额度查询会向成员公示。
+- 后台新建 Key 默认只开通“新成员默认功能”（默认文生图）；需要更多功能时在弹窗里勾选。
+- 后台数值输入框不接受空值或负数；`0` 表示不限（文本 tokens 的 `0` 表示禁止）。
 
 ## 更新 / 轮换密钥
 
 不想把密钥发给别人或贴进聊天时，用这个脚本在服务器上隐藏输入并自动重启：
 
 ```bash
-ssh -t root@你的服务器 "cd /opt/service-tools && bash deploy/set-secret.sh NAI_TOKENS"
-# 同理可用于 DISCORD_BOT_TOKEN、DISCORD_CLIENT_SECRET、REGISTRATION_BRIDGE_SECRET 等
+ssh -t root@你的服务器 "cd /opt/service-tools && bash deploy/set-secret.sh DISCORD_BOT_TOKEN"
+# 同理可用于 DISCORD_CLIENT_SECRET、REGISTRATION_BRIDGE_SECRET 等
 ```
+
+上游 Token 一旦在后台管理过，就不要再用这个脚本改 `NAI_TOKENS`（不会生效），请在后台“替换 Token”。
+`ADMIN_PASSWORD` 只在后台从未改过密码时生效；忘记后台密码时，删除数据库里保存的密码摘要后重启即可回到 `.env` 的密码：
+
+```bash
+docker compose exec nai-gate python -c "import sqlite3; c=sqlite3.connect('/app/data/nai_gate.db'); c.execute(\"DELETE FROM site_settings WHERE key='admin_password_hash'\"); c.commit()"
+docker compose restart nai-gate
+```
+
+发布前后可用 `deploy/live_smoke.py` 对线上做一次冒烟测试（Key 从环境变量读，不会打印）。
 
 添加、替换、删除上游 Token：直接在后台“总览 → 上游令牌池”操作。粘贴新 Token 后，服务器会先向 NovelAI 验证它是否有效，通过才保存；在 NovelAI 重置了 Token 时用“替换 Token”，该槽位的 V5 日限、启停、并发和当天计数会延续。第一次在后台操作后，令牌池由后台管理：Token 保存在 `data/upstream_tokens.json`（权限 600，**不写入数据库**，数据库备份里也不会有它），`.env` 里的 `NAI_TOKENS` 只用于首次启动时初始化，之后不再读取。后台任何一次添加 / 替换 / 删除都会给站长发 Discord 告警。后台密码可在“设置 → 后台密码”里修改。
 

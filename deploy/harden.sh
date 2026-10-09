@@ -8,9 +8,10 @@ APP_DIR="${APP_DIR:-/opt/service-tools}"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -q && apt-get install -y -q ufw fail2ban unattended-upgrades sqlite3
 
-ufw --force reset >/dev/null
+# 先放行当前实际的 SSH 端口（改过端口的机器若只放行 22 会把自己锁在外面）。
+ssh_port="$(sshd -T 2>/dev/null | awk '/^port /{print $2; exit}')"; ssh_port="${ssh_port:-22}"
 ufw default deny incoming >/dev/null; ufw default allow outgoing >/dev/null
-ufw allow 22/tcp >/dev/null; ufw allow 80/tcp >/dev/null; ufw allow 443/tcp >/dev/null; ufw allow 443/udp >/dev/null
+ufw allow "${ssh_port}/tcp" >/dev/null; ufw allow 80/tcp >/dev/null; ufw allow 443/tcp >/dev/null; ufw allow 443/udp >/dev/null
 ufw --force enable >/dev/null
 
 cat > /etc/fail2ban/jail.local <<'CONF'
@@ -30,7 +31,7 @@ KbdInteractiveAuthentication no
 PermitRootLogin prohibit-password
 MaxAuthTries 3
 CONF
-  sshd -t && systemctl reload ssh
+  sshd -t && { systemctl reload ssh 2>/dev/null || systemctl reload sshd; }
 else
   echo "⚠ /root/.ssh/authorized_keys 为空：已跳过关闭 SSH 密码登录。"
 fi

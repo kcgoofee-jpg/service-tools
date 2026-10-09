@@ -297,7 +297,7 @@ footer{max-width:960px;margin:0 auto;padding:24px 16px 40px;text-align:center;co
   </section>
 
   <section id="features">
-    <div class="sec-head"><h2>可用功能</h2><p>新成员默认拥有以下功能，需要更多可以向站长申请。</p></div>
+    <div class="sec-head"><h2>可用功能</h2><p>通过 Discord 领取的新 Key 默认拥有以下功能，需要更多可以向站长申请。</p></div>
     <ul class="feat" id="featList"><li><span class="skel" style="width:100%;border-radius:8px"></span></li></ul>
     <p class="feat-note" id="featNote" hidden>需要更多功能？到 Discord 联系站长申请。</p>
   </section>
@@ -306,6 +306,7 @@ footer{max-width:960px;margin:0 auto;padding:24px 16px 40px;text-align:center;co
     <div class="sec-head"><h2>使用须知</h2></div>
     <ul class="rules card">
       <li><span class="ri" data-ic="refresh"></span><span><b>额度每日重置。</b>用完当天额度后，次日自动恢复。</span></li>
+      <li id="ruleIdle" hidden><span class="ri" data-ic="info"></span><span><b>长期不用会被回收。</b>领取后连续 <b id="idleDays"></b> 天没有任何请求的 Key 会被自动删除，名额让给其他人；之后可以重新领取。</span></li>
       <li><span class="ri" data-ic="key"></span><span><b>请勿分享 Key。</b>如果泄露，请在 Discord 使用 <code>/resetkey</code> 重置。</span></li>
       <li><span class="ri" data-ic="pulse"></span><span><b>生成变慢时，</b>先看页面上方的服务状态，上游限流时稍等片刻再试。</span></li>
       <li><span class="ri" data-ic="ban"></span><span><b>禁止违禁内容。</b>违规的 Key 会被停用。</span></li>
@@ -434,6 +435,9 @@ function renderStatus(d){
   var cd = Number(up.image_cooldown_seconds) || 0;
   $('cooldown').hidden = !(cd > 0);
   if(cd > 0) $('cooldownTxt').textContent = '上游限流冷却中，约 ' + cd + ' 秒';
+  var idle = Number(d.key_inactivity_delete_days) || 0;
+  $('ruleIdle').hidden = !(idle > 0);
+  if(idle > 0) $('idleDays').textContent = String(idle);
   renderDiscord(d.discord_invite);
   renderAnnouncement(!!d.has_announcement);
   var feats = Array.isArray(d.default_features) ? d.default_features : [];
@@ -523,7 +527,7 @@ function renderResult(m){
   var qs = el('div'); qs.style.cssText = 'display:flex;flex-direction:column;gap:16px';
   qs.appendChild(quota('今日图片', t.images, t.daily_images));
   var all = t.image_model_scope === 'all';
-  if((Number(t.daily_v5) || 0) > 0 || all) qs.appendChild(quota('今日 V5', t.v5_today, t.daily_v5));
+  if(all) qs.appendChild(quota('今日 V5', t.v5_today, t.daily_v5));
   box.appendChild(qs);
 
   var g = el('div', 'kv');
@@ -533,6 +537,8 @@ function renderResult(m){
     var left = Math.ceil((m.expires_at * 1000 - Date.now()) / 86400000);
     g.appendChild(kv('Key 到期', fmtDate(m.expires_at), left > 0 ? '还剩 ' + left + ' 天' : '已到期'));
   } else g.appendChild(kv('Key 到期', '永不过期'));
+  var idleDays = Number(m.inactivity_delete_days) || 0;
+  if(idleDays > 0) g.appendChild(kv('闲置回收', '连续 ' + idleDays + ' 天无请求将被删除', '用一次即可重新计时'));
   box.appendChild(g);
 
   var feats = Array.isArray(m.features) ? m.features : [];

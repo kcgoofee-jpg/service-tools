@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import shutil
 from datetime import datetime, timedelta
 import json
@@ -34,6 +35,7 @@ from .image_tools import prepare_tool, validate_result, MAX_RESPONSE_BYTES
 from .image_payload import read_image_body
 from .nai import NaiClient, UpstreamError, _wait_cleanup
 from .policy import (
+    normalize_image_request,
     clamp_image_params,
     clamp_text_params,
     estimate_image_cost,
@@ -160,7 +162,34 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-app = FastAPI(title="NAI Gate", docs_url=None, redoc_url=None, lifespan=lifespan)
+app = FastAPI(title="NAI Gate", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
+
+
+class AdminNoStoreMiddleware:
+    """后台 JSON 含完整成员 Key 与提示词：禁止任何缓存。
+
+    用纯 ASGI 中间件而不是 BaseHTTPMiddleware，后者会改变取消语义，影响流式与计费清理。
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or not scope.get("path", "").startswith("/admin/api/"):
+            return await self.app(scope, receive, send)
+
+        async def send_wrapper(message):
+            if message["type"] == "http.response.start":
+                headers = [(k, v) for k, v in message.get("headers", [])
+                           if k.lower() not in (b"cache-control", b"x-content-type-options")]
+                headers += [(b"cache-control", b"no-store"), (b"x-content-type-options", b"nosniff")]
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
+
+
+app.add_middleware(AdminNoStoreMiddleware)
 if SETTINGS.cors_origins:
     app.add_middleware(CORSMiddleware, allow_origins=SETTINGS.cors_origins,
                        allow_methods=["*"], allow_headers=["*"], allow_credentials=False)
@@ -323,6 +352,36 @@ def check_image_cooldown() -> None:
     remaining = STATE.image_cooldown_remaining()
     if remaining:
         raise err(429, f"上游图片服务限流保护中，所有图片生成暂停约 {remaining} 秒")
+
+
+MAX_INFLIGHT_PER_KEY = 4
+_INFLIGHT: dict[str, int] = {}
+TEXT_BODY_MB = 1          # 文本输入上限 24000 字符，1 MB 足够任何合法请求
+
+
+def limit_inflight(handler):
+    """读请求体之前按 Authorization 限制同时进行中的请求数。
+
+    25 MB 的生图请求体解析后会占用数倍内存；不限制时单个成员并发堆积即可拖垮 2 GB 机器。
+    """
+    @functools.wraps(handler)
+    async def wrapper(request: Request):
+        ident = request.headers.get("authorization", "")[:512]
+        if not ident:
+            return await handler(request)
+        count = _INFLIGHT.get(ident, 0)
+        if count >= MAX_INFLIGHT_PER_KEY:
+            raise err(429, f"同时进行中的请求过多（上限 {MAX_INFLIGHT_PER_KEY} 个），请等前面的请求完成")
+        _INFLIGHT[ident] = count + 1
+        try:
+            return await handler(request)
+        finally:
+            left = _INFLIGHT.get(ident, 1) - 1
+            if left > 0:
+                _INFLIGHT[ident] = left
+            else:
+                _INFLIGHT.pop(ident, None)
+    return wrapper
 
 
 async def read_json(request: Request, limit_mb: float = 25) -> dict:
@@ -705,9 +764,14 @@ async def _generate_image(request: Request, *, streaming: bool):
     await check_rpm(key)
     await require_feature(key, "image")
     body = await read_image_payload(request)
-    model = str(body.get("model", "?"))
     if not isinstance(body.get("parameters"), dict):
         raise err(400, "缺少 parameters 对象")
+    try:
+        normalize_image_request(body)
+    except ValueError as exc:
+        record(key, "image", str(body.get("model", "?"))[:80], "rejected", detail=str(exc))
+        raise err(400, f"图片参数无效：{exc}") from None
+    model = body["model"]
     if any(body["parameters"].get(name) for name in REFERENCE_FIELDS):
         await require_feature(key, "vibe")      # 参考图 / Vibe 经由 generate-image 传入时同样受功能开关约束
     model_tier = image_model_tier(model)
@@ -965,7 +1029,7 @@ async def _suggest_tags(request: Request, key):
             "model": request.query_params.get("model", ""),
         }
     else:
-        body = await read_json(request)
+        body = await read_json(request, limit_mb=0.0625)
 
     async def record_tag_429(retry_after: float) -> None:
         cooldown = await STATE.block_image_generation(max(
@@ -1030,7 +1094,7 @@ async def generate_stream(request: Request):
     key = await authenticate(request)
     await check_rpm(key)
     await require_feature(key, "text")
-    body = await read_json(request)
+    body = await read_json(request, limit_mb=TEXT_BODY_MB)
     model = str(body.get("model", "?"))
     _require_text_model(key, model, "text")
 
@@ -1087,7 +1151,7 @@ async def generate_text(request: Request):
     key = await authenticate(request)
     await check_rpm(key)
     await require_feature(key, "text")
-    body = await read_json(request)
+    body = await read_json(request, limit_mb=TEXT_BODY_MB)
     model = str(body.get("model", "?"))
     _require_text_model(key, model, "text")
 
@@ -1166,22 +1230,28 @@ async def v1_me(request: Request):
             "requests": c["requests"],
         },
         "expires_at": key["expires_at"],
+        # 闲置回收规则对成员可见：N 天内没有任何请求的 Key 会被自动删除（管理员 Key 除外）。
+        "inactivity_delete_days": 0 if key["is_admin"] else STATE.settings.key_inactivity_delete_days,
         "features": await _feature_view(key),
     }
 
 
 async def _feature_view(key) -> list[dict]:
     """该 Key 当前各项功能是否可用（已计入全局开关）。"""
-    return [{"id": name, "label": label,
-             "on": await features.check(STATE.db, key, name) is None}
-            for name, label in features.FEATURES.items()]
+    view = []
+    for name, label in features.FEATURES.items():
+        on = await features.check(STATE.db, key, name) is None
+        if name == "voice" and not key["is_admin"]:
+            on = False                  # 语音合成目前仅管理员 Key 可用（见 generate_voice）
+        view.append({"id": name, "label": label, "on": on})
+    return view
 
 
 async def v1_chat(request: Request):
     key = await authenticate(request)
     await check_rpm(key)
     await require_feature(key, "text")
-    body = await read_json(request)
+    body = await read_json(request, limit_mb=TEXT_BODY_MB)
     want_stream = bool(body.get("stream"))
 
     msgs = body.get("messages") or []
@@ -1345,14 +1415,15 @@ async def _public_status_body(request: Request) -> dict:
     service = getattr(request.app.state, "registrar", None)
     flags = await feature_defs.global_flags(STATE.db)
     reg = {"open": False, "slots_left": None}
-    defaults = [n for n in feature_defs.FEATURES if flags[n]]
+    # 未配置 Discord 注册时，新 Key 由后台创建，默认同样只开文生图。语音仅管理员可用，不对成员展示。
+    defaults = ["image"] if flags.get("image") else []
     if service is not None:
         cfg = await service.settings()
         reg["open"] = cfg["open"]
         if cfg["max_users"]:
             reg["slots_left"] = max(0, cfg["max_users"] - await service.count_active())
-        if cfg["features"] is not None:
-            defaults = [n for n in cfg["features"] if flags.get(n)]
+        names = feature_defs.FEATURES if cfg["features"] is None else cfg["features"]
+        defaults = [n for n in names if flags.get(n) and n != "voice"]
     p = SETTINGS.announcement_path
     return {
         "site": SETTINGS.site_url.rstrip("/"),
@@ -1361,13 +1432,23 @@ async def _public_status_body(request: Request) -> dict:
         "default_features": [{"id": n, "label": feature_defs.FEATURES[n]} for n in defaults],
         "audit_notice": audit_notice(*(await audit_flags(STATE.db, SETTINGS))),
         "discord_invite": SETTINGS.discord_invite_url,
+        "key_inactivity_delete_days": SETTINGS.key_inactivity_delete_days,
         "has_announcement": bool(p.exists() and p.read_text(encoding="utf-8").strip()),
     }
 
 
+ADMIN_HEADERS = {
+    "Content-Security-Policy": ("default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; "
+                                "img-src 'self' data: https://cdn.discordapp.com; frame-src 'self'; object-src 'none'; "
+                                "base-uri 'none'; form-action 'self'; frame-ancestors 'none'"),
+    "X-Frame-Options": "DENY", "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer", "Cache-Control": "no-store",
+}
+
+
 @app.get("/admin")
 async def admin_page():
-    return FileResponse(Path(__file__).parent / "static" / "index.html")
+    return FileResponse(Path(__file__).parent / "static" / "index.html", headers=ADMIN_HEADERS)
 
 
 @app.get("/user/subscription")
@@ -1406,26 +1487,26 @@ app.get("/ai/user/information")(user_information)
 # ================================================================ 路由注册 ====
 
 for path in ("/ai/generate-image", "/nai/ai/generate-image"):
-    app.post(path)(generate_image)
+    app.post(path)(limit_inflight(generate_image))
 for path in ("/ai/encode-vibe", "/nai/ai/encode-vibe"):
-    app.post(path)(encode_vibe)
+    app.post(path)(limit_inflight(encode_vibe))
 for path in ("/ai/upscale", "/nai/ai/upscale"):
-    app.post(path)(upscale_image)
+    app.post(path)(limit_inflight(upscale_image))
 for path in ("/ai/augment-image", "/nai/ai/augment-image"):
-    app.post(path)(augment_image)
+    app.post(path)(limit_inflight(augment_image))
 for path in ("/ai/generate-image/suggest-tags", "/nai/ai/generate-image/suggest-tags"):
     app.post(path)(suggest_tags)
     app.get(path)(suggest_tags)
 for path in ("/ai/generate-image-stream", "/nai/ai/generate-image-stream"):
-    app.post(path)(generate_image_stream)
+    app.post(path)(limit_inflight(generate_image_stream))
 for path in ("/ai/generate-stream", "/nai/ai/generate-stream"):
-    app.post(path)(generate_stream)
+    app.post(path)(limit_inflight(generate_stream))
 for path in ("/ai/generate", "/nai/ai/generate"):
-    app.post(path)(generate_text)
+    app.post(path)(limit_inflight(generate_text))
 for path in ("/ai/generate-voice", "/nai/ai/generate-voice"):
     app.post(path)(generate_voice)
 app.get("/v1/models")(v1_models)
-app.post("/v1/chat/completions")(v1_chat)
+app.post("/v1/chat/completions")(limit_inflight(v1_chat))
 app.get("/v1/me")(v1_me)
 
 

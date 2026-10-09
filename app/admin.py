@@ -308,14 +308,36 @@ def _features_field(body: dict):
 
 
 def _num(value: Any, kind: type, lo, hi, name: str):
-    """把后台输入解析为有限数值并钳制范围；非法输入返回 422 而不是 500。"""
+    """严格解析后台数值：空值、负数、越界、小数（整数字段）一律 422。
+
+    这些字段里 0 代表“不限”，绝不能把空值或非法值静默变成 0，否则一次误操作就会拆掉额度保护。
+    """
+    if value is None or isinstance(value, bool) or (isinstance(value, str) and not value.strip()):
+        raise HTTPException(422, f"{name} 不能为空")
     try:
-        v = kind(value if value not in (None, "") else 0)
-        if kind is float and not math.isfinite(v):
-            raise ValueError
+        v = float(value)
     except (TypeError, ValueError, OverflowError):
         raise HTTPException(422, f"{name} 必须是有效数字") from None
-    return max(lo, min(hi, v))
+    if not math.isfinite(v):
+        raise HTTPException(422, f"{name} 必须是有效数字")
+    if kind is int:
+        if not v.is_integer():
+            raise HTTPException(422, f"{name} 必须是整数")
+        v = int(v)
+    if not lo <= v <= hi:
+        raise HTTPException(422, f"{name} 必须在 {lo}～{hi} 之间")
+    return v
+
+
+async def _new_key_features(request: Request, body: dict):
+    """新建 Key 未指定功能时，沿用“新成员默认开通的功能”（默认只有文生图），而不是全部功能。"""
+    if "features" in body:
+        return _features_field(body)
+    db = request.app.state.gate.db
+    reg = await ops.registration_settings(db, getattr(request.app.state, "registrar", None))
+    if reg.get("features") is None and await db.get_setting("register_features", None) == "*":
+        return None                     # 站长明确把默认设为“全部已开放功能”
+    return feature_defs.dump(reg.get("features") or ["image"])
 
 
 @router.post("/keys")
@@ -325,11 +347,7 @@ async def create_key(request: Request):
     body = await read_json_body(request)
 
     def _int_field(name: str, default: int, lo: int, hi: int) -> int:
-        try:
-            v = int(body.get(name, default))
-        except (TypeError, ValueError):
-            v = default
-        return max(lo, min(hi, v))
+        return _num(body.get(name, default), int, lo, hi, name)
 
     daily_images = _int_field("daily_images", st.settings.default_daily_images, 0, 1000000)
     monthly_anlas = _num(body.get("monthly_anlas", st.settings.default_monthly_anlas), float, 0.0, 100000.0, "monthly_anlas")
@@ -354,7 +372,7 @@ async def create_key(request: Request):
         "allow_img2img": bool(body.get("allow_img2img", False)),
         "exclude_global_v5": bool(body.get("exclude_global_v5", False)),
         "image_model_scope": image_model_scope,
-        "features": _features_field(body),
+        "features": await _new_key_features(request, body),
         "expires_at": expires_at,
     })
     c = await st.db.get_counter(row["id"], st.day())
@@ -446,16 +464,20 @@ async def delete_key(request: Request, key_id: int, ban: bool = False):
 
 
 @router.get("/logs")
-async def logs(request: Request, key_id: Optional[int] = None, page: int = 1):
+async def logs(request: Request, key_id: Optional[int] = None, page: int = 1,
+               feature: Optional[str] = None):
     require_admin(request)
     per_page = 20
     page = max(1, min(int(page), 1_000_000))
     db = request.app.state.gate.db
-    total = await db.count_logs(key_id=key_id)
+    if feature and feature not in feature_defs.FEATURES:
+        raise HTTPException(422, "未知功能")
+    kinds = feature_defs.kinds_for(feature) if feature else None
+    total = await db.count_logs(key_id=key_id, kinds=kinds)
     pages = max(1, (total + per_page - 1) // per_page)
     page = min(page, pages)
     rows = await db.list_logs(limit=per_page, offset=(page - 1) * per_page,
-                              key_id=key_id)
+                              key_id=key_id, kinds=kinds)
     return {
         "logs": [dict(r) for r in rows],
         "page": page,
@@ -476,7 +498,35 @@ async def overview(request: Request):
     data["anlas_budget"] = float(budget or 0)
     v5lim = await st.db.get_setting("global_daily_v5", st.settings.global_daily_v5)
     data["v5_limit"] = int(float(v5lim or 0))
+    data["feature_usage"] = await _feature_usage(st)
     return data
+
+
+async def _feature_usage(st) -> list[dict]:
+    """每项功能今日 / 近 7 天的调用次数（成功 / 失败 / 拒绝）、图片、tokens、Anlas 与使用人数。"""
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    day_start = datetime.fromisoformat(st.day()).replace(tzinfo=ZoneInfo(st.db.tz)).timestamp()
+    week_start = day_start - 6 * 86400
+
+    def empty():
+        return {"ok": 0, "error": 0, "rejected": 0, "images": 0, "tokens": 0, "anlas": 0.0}
+
+    out = {name: {"id": name, "label": label, "today": empty(), "week": empty()}
+           for name, label in feature_defs.FEATURES.items()}
+    for period, since in (("today", day_start), ("week", week_start)):
+        for row in await st.db.usage_by_kind(since):
+            name = feature_defs.KIND_FEATURE.get(row["kind"])
+            if name is None:
+                continue
+            bucket = out[name][period]
+            status = row["status"] if row["status"] in ("ok", "rejected") else "error"
+            bucket[status] += int(row["n"])
+            if row["status"] == "ok":
+                bucket["images"] += int(row["images"])
+                bucket["tokens"] += int(row["tokens"])
+                bucket["anlas"] = round(bucket["anlas"] + float(row["anlas"]), 2)
+    return list(out.values())
 
 
 @router.get("/settings")
@@ -622,9 +672,12 @@ async def put_settings(request: Request):
     threshold = body.get(SETTING, await read_alert_threshold(st.db))
     if type(threshold) is not int or not 1 <= threshold <= 100:
         raise HTTPException(422, "V5 告警阈值必须为 1～100 的整数百分比")
-    v = _num(body.get("global_monthly_anlas", 0), float, 0.0, 1000000.0, "global_monthly_anlas")
+    # 缺省字段保持原值（以前缺省会被写成 0 = 不限）。
+    v = _num(body.get("global_monthly_anlas", await st.db.get_setting(
+        "global_monthly_anlas", st.settings.global_monthly_anlas)), float, 0.0, 1000000.0, "global_monthly_anlas")
+    g5 = _num(body.get("global_daily_v5", await st.db.get_setting(
+        "global_daily_v5", st.settings.global_daily_v5)), int, 0, 100000, "global_daily_v5")
     await st.db.set_setting("global_monthly_anlas", v)
-    g5 = _num(body.get("global_daily_v5", 0), int, 0, 100000, "global_daily_v5")
     await st.db.set_setting("global_daily_v5", g5)
     await st.db.set_setting(SETTING, threshold)
     return {"ok": True, "global_monthly_anlas": v, "global_daily_v5": g5, SETTING: threshold}
@@ -739,7 +792,9 @@ async def _ops_snapshot(request: Request) -> dict:
     prompts, thumbs, days = await ops.audit_flags(st.db, st.settings)
     return {
         "registration": reg,
-        "features": {"global": await feature_defs.global_flags(st.db), "labels": feature_defs.FEATURES},
+        "features": {"global": await feature_defs.global_flags(st.db), "labels": feature_defs.FEATURES,
+                     # 后台“新建 Key”弹窗的默认功能，与服务端缺省逻辑一致
+                     "new_key": feature_defs.parse_list(await _new_key_features(request, {}))},
         "audit": {"prompts": prompts, "thumbs": thumbs, "retention_days": days,
                   "announce_configured": st.announcer.configured},
         "upstream": st.upstream_health(),

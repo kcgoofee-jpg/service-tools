@@ -3,8 +3,18 @@
 #   docker run -d --name caddy --restart unless-stopped --network host \
 #     -v $PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro -v caddy_data:/data -v caddy_config:/config caddy:2
 gate.example.com {
-	# 机器人与网关之间的桥接接口只在容器内网使用，不对公网开放（只放行 OAuth 回调）
-	@bridge path /self-register/intent /self-register/quota /self-register/resetkey /self-register/revoke /self-register/slots /self-register/info /self-register/ops
+	# 机器人与网关之间的桥接接口只在容器内网使用，不对公网开放。
+	# 用通配 + 白名单：以后新增的桥接路由默认也不会暴露；公网只放行 OAuth 回调。
+	@bridge {
+		path /self-register /self-register/*
+		not path /self-register/callback
+	}
 	respond @bridge 404
+	respond /openapi.json 404
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		-Server
+	}
 	reverse_proxy 127.0.0.1:3003
 }

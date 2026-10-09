@@ -356,7 +356,7 @@ async def test_invalid_free_clamp_parameters_rejected_before_dispatch(state, str
     state.db.keys["fixture-1"]["allow_anlas"] = False
     response = await post("/ai/generate-image" + ("-stream" if streaming else ""), image_body(**{field: value}))
     assert response.status_code == 400
-    assert response.json()["error"]["message"] == "图片参数无效"
+    assert response.json()["error"]["message"].startswith("图片参数无效")
     assert not state.nai.calls and not state.db.charges
     assert state.global_active == 0 and not state.image_budget_lock.locked()
 
