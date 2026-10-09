@@ -484,3 +484,44 @@ async def test_source_tracker_threshold_zero_only_records():
             await tracker.observe(key, ip, 1_800_000_000.0 + i)
         assert not alerts.sent and len(await db.key_source_labels(key["id"], 0)) == 4
         await db.close()
+
+
+# ---------------------------------------------------------------- 操作日志
+
+def test_action_summary_hides_secrets():
+    from app.action_log import summarize
+    text = summarize({"token": "pst-secret-value", "password": "p", "html": "<b>x</b>", "rpm": 5,
+                      "name": "x" * 200})
+    assert "pst-secret" not in text and '"rpm":5' in text and "已隐去" in text and len(text) <= 301
+
+
+@pytest.mark.asyncio
+async def test_admin_writes_are_logged_with_target_name(tmp_path):
+    from app.admin import AuditedRoute, router
+    assert router.route_class is AuditedRoute
+    db = Database(str(tmp_path / "g.sqlite"))
+    await db.connect()
+    from app.action_log import log_action
+    await log_action(db, "后台 *.*.1.2", "删除 Key", "Key #2 davidzhao_refreshing", "")
+    await log_action(db, "系统", "闲置回收 Key", "Key #3 m", "连续 3 天没有任何请求", ok=True)
+    rows = await db.list_admin_actions()
+    assert [r["action"] for r in rows] == ["闲置回收 Key", "删除 Key"] and await db.count_admin_actions() == 2
+    assert await db.purge_admin_actions(time.time() + 1) == 2
+    await db.close()
+
+
+@pytest.mark.asyncio
+async def test_inactive_cleanup_is_logged(tmp_path):
+    from types import SimpleNamespace
+    from app.state import GateState
+    db = Database(str(tmp_path / "g.sqlite"))
+    await db.connect()
+    key = await db.create_key({"name": "idle", "token": "nai-idle", "daily_images": 1, "monthly_anlas": 0,
+                               "daily_text_tokens": 0, "rpm": 5})
+    await db._db.execute("UPDATE api_keys SET created_at=? WHERE id=?", (time.time() - 10 * 86400, key["id"]))
+    await db._db.commit()
+    fake = SimpleNamespace(db=db, settings=SimpleNamespace(key_inactivity_delete_days=3))
+    assert await GateState.delete_inactive_keys(fake) == 1
+    rows = await db.list_admin_actions()
+    assert rows[0]["actor"] == "系统" and "idle" in rows[0]["target"]
+    await db.close()
