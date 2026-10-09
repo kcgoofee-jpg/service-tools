@@ -96,7 +96,7 @@ section{margin-top:40px;scroll-margin-top:72px}
 
 .statusbar{padding:20px 0 4px}
 .pills{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
-.step-act{margin-top:14px}
+.step-act{margin-top:4px}
 .step-act .btn{min-height:44px;padding:8px 18px}
 .remember{display:flex;gap:8px;align-items:center;margin-top:12px;font-size:13.5px;color:var(--text-2);cursor:pointer}
 .remember input{width:18px;height:18px;accent-color:var(--accent)}
@@ -125,7 +125,9 @@ section{margin-top:40px;scroll-margin-top:72px}
 .steps{display:grid;gap:16px;grid-template-columns:1fr}
 .step{position:relative;display:flex;flex-direction:column;gap:8px}
 .step .n{width:28px;height:28px;border-radius:50%;background:var(--accent-soft);color:var(--accent-text);display:grid;place-items:center;font-weight:700;font-size:14px}
-.step h3{font-size:15.5px;line-height:1.45}
+.step h3{font-size:15.5px;line-height:1.45;display:flex;align-items:center;gap:10px}
+.step .n{flex:none}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .step p{color:var(--text-2);font-size:14px}
 code,.kbd{font-family:var(--mono);font-size:12.5px;background:var(--surface-3);border:1px solid var(--border);border-radius:6px;padding:1px 6px;overflow-wrap:anywhere}
 .copyline{display:flex;align-items:center;gap:8px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:4px 4px 4px 12px;margin-top:4px}
@@ -147,8 +149,6 @@ input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 .eye{position:absolute;right:4px;top:4px;width:36px;height:36px;border:0;background:none;border-radius:6px;display:grid;place-items:center;cursor:pointer;color:var(--muted)}
 .eye:hover{background:var(--surface-3);color:var(--text)}
 .chk-form .btn.primary{min-height:44px;padding:8px 24px}
-.privacy{display:flex;gap:8px;align-items:flex-start;color:var(--muted);font-size:13px;margin-top:12px}
-.privacy .ic{width:16px;height:16px;margin-top:3px}
 #result{margin-top:16px}
 .alert{display:flex;gap:12px;align-items:flex-start;padding:12px 16px;border-radius:var(--radius-sm);font-size:14px;border:1px solid transparent}
 .alert .ic{margin-top:3px}
@@ -233,20 +233,19 @@ footer{max-width:960px;margin:0 auto;padding:24px 16px 40px;text-align:center;co
   </div>
 
   <section id="quota">
-    <div class="sec-head"><h2>查看我的额度</h2><p>粘贴你的 Key，查看今日用量、到期时间和已开通功能。</p></div>
+    <div class="sec-head"><h2>查看我的额度</h2></div>
     <div class="card">
       <form id="chkForm" autocomplete="off" novalidate>
-        <label class="lb" for="keyIn">你的 Key</label>
+        <label class="sr" for="keyIn">你的 Key</label>
         <div class="chk-form">
           <div class="inwrap">
-            <input id="keyIn" class="keyin" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="粘贴你的 Key" aria-describedby="privacy">
+            <input id="keyIn" class="keyin" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="粘贴你的 Key（只在本机查询，不会上传）">
             <button class="eye" id="eyeBtn" type="button" aria-label="显示 Key" aria-pressed="false"><span data-ic="eye"></span></button>
           </div>
           <button class="btn primary" id="chkBtn" type="submit"><span data-ic="search"></span>查询</button>
         </div>
       </form>
-      <label class="remember"><input type="checkbox" id="rememberKey"><span>在本机记住 Key，下次打开自动显示额度（公共电脑请勿勾选）</span></label>
-      <p class="privacy" id="privacy"><span data-ic="lock"></span><span id="privacyTxt">Key 只在你的浏览器里用于查询，不会上传保存。</span></p>
+      <label class="remember"><input type="checkbox" id="rememberKey"><span>记住 Key，下次打开自动显示（只存在本机，公共电脑勿选）</span></label>
       <div id="result" aria-live="polite"></div>
     </div>
   </section>
@@ -258,10 +257,10 @@ footer{max-width:960px;margin:0 auto;padding:24px 16px 40px;text-align:center;co
   <section id="start">
     <div class="sec-head"><h2>三步上手</h2><p>加入社区、领取 Key，再填进客户端就能用。</p></div>
     <ol class="steps">
-      <li class="card step"><span class="n">1</span><h3>加入 Discord</h3><p>通过邀请链接加入服务器，先读一下 📖｜新人必看。无需任何审批，名额先到先得。</p>
+      <li class="card step"><h3><span class="n">1</span>加入 Discord</h3>
         <div class="step-act" id="discordSlot"></div></li>
-      <li class="card step"><span class="n">2</span><h3>领取你的 Key</h3><p>在 <code>🔑｜领取key</code> 的输入框直接打 <code>/register</code>（提示「没有权限发送消息」是正常的，不用创建子区），Key 会通过私信发给你。</p></li>
-      <li class="card step"><span class="n">3</span><h3>填入客户端</h3><p>把下面的接口地址和你的 Key 填进客户端。</p>
+      <li class="card step"><h3><span class="n">2</span>领取你的 Key</h3><p>在 <code>🔑｜领取key</code> 的输入框直接打 <code>/register</code>（提示「没有权限发送消息」是正常的，不用创建子区），Key 会通过私信发给你。</p></li>
+      <li class="card step"><h3><span class="n">3</span>填入客户端</h3><p>接口地址（不加 /v1）和你的 Key 填进客户端：</p>
         <div class="copyline"><span class="mono" id="siteTxt1">—</span><button class="btn mini" type="button" data-copy="site"><span data-ic="copy"></span>复制</button></div>
       </li>
     </ol>
@@ -561,7 +560,6 @@ function store(v){ try{ if(v) localStorage.setItem(REMEMBER, v); else localStora
 var remember = $('rememberKey');
 remember.addEventListener('change', function(){
   if(!remember.checked) store('');
-  $('privacyTxt').textContent = remember.checked ? 'Key 只保存在这台设备的浏览器里，不会上传；取消勾选即删除。' : 'Key 只在你的浏览器里用于查询，不会上传保存。';
 });
 $('chkForm').addEventListener('submit', function(e){
   e.preventDefault();
@@ -591,7 +589,6 @@ $('chkForm').addEventListener('submit', function(e){
   var saved = stored();
   if(!saved) return;
   keyIn.value = saved; remember.checked = true;
-  $('privacyTxt').textContent = 'Key 只保存在这台设备的浏览器里，不会上传；取消勾选即删除。';
   $('chkForm').requestSubmit ? $('chkForm').requestSubmit() : $('chkForm').dispatchEvent(new Event('submit', {cancelable: true}));
 })();
 })();
