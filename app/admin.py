@@ -803,7 +803,10 @@ async def members(request: Request):
     week = await st.db.member_usage(st.week_days(7)[0])
     totals = await st.db.generated_image_totals()
     reg = {int(r[0]): r for r in await st.db._db.execute_fetchall(
-        "SELECT key_id, discord_id, username, display_name, avatar FROM discord_registrations")}
+        "SELECT key_id, discord_id, username, display_name, avatar, created_at FROM discord_registrations")}
+    since = time.time() - 24 * 3600
+    milestones = await st.db.member_milestones(since)
+    sources = await st.db.key_source_summary(since)
     out = []
     for row in await st.db.list_keys():
         counter = await st.db.get_counter(row["id"], today)
@@ -820,8 +823,15 @@ async def members(request: Request):
             "week": {"images": int(w.get("images", 0)), "v5": int(w.get("v5", 0)),
                      "anlas": round(float(w.get("anlas", 0)), 2), "requests": int(w.get("requests", 0))},
             "total_images": totals.get(row["id"], 0),
+            # 筛选用：领取时间（Discord 领取优先，否则建 Key 时间）、首次 / 最近成功出图、24h 网段数与被拒次数
+            "registered_at": reg[row["id"]][5] if row["id"] in reg else row["created_at"],
+            "first_image_at": milestones.get(row["id"], {}).get("first_image_at"),
+            "last_image_at": milestones.get(row["id"], {}).get("last_image_at"),
+            "rejected_24h": milestones.get(row["id"], {}).get("rejected_24h", 0),
+            "sources_24h": len(sources.get(row["id"], [])),
         })
-    return {"members": out}
+    return {"members": out, "share_alert_nets": st.settings.key_share_alert_nets,
+            "inactivity_days": st.settings.key_inactivity_delete_days}
 
 
 @router.get("/audit")

@@ -103,6 +103,12 @@ input[type=checkbox]{width:16px;height:16px;min-height:0;padding:0;accent-color:
 .tag.on{background:var(--ok-soft);color:var(--ok)}
 .tag.off{background:var(--bad-soft);color:var(--bad)}
 .tag.warn{background:var(--warn-soft);color:var(--warn)}
+.chips-filter{display:flex;flex-wrap:wrap;gap:8px;margin:-4px 0 16px}
+.fchip{border:1px solid var(--border);background:var(--surface);color:var(--text-2);border-radius:999px;padding:5px 12px;font-size:13px;cursor:pointer;min-height:32px}
+.fchip .num{color:var(--muted);margin-left:2px}
+.fchip.active{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.fchip.active .num{color:inherit;opacity:.85}
+.fchip:disabled{opacity:.45;cursor:default}
 .num.bad{color:var(--bad);font-weight:600}.num.warn{color:var(--warn);font-weight:600}
 tr.muted td{opacity:.6}
 .tag.info{background:var(--accent-soft);color:var(--accent-text)}
@@ -520,6 +526,7 @@ NAI_TOKEN_V5_DAILY_LIMITS=0,150</pre><button class="btn mini" type="button" data
               <button data-sort="today" class="active">今日</button><button data-sort="week">近 7 天</button><button data-sort="total">累计</button><button data-sort="recent">最近使用</button>
             </div>
           </div>
+          <div class="chips-filter" id="memberFilter" role="group" aria-label="筛选成员"></div>
           <div class="member-grid" id="memberGrid"></div>
         </section>
 
@@ -746,7 +753,7 @@ NAI_TOKEN_V5_DAILY_LIMITS=0,150</pre><button class="btn mini" type="button" data
 const $ = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
 let editingId = null, keysCache = [], logPage = 1, auditPage = 1;
-let membersCache = null, statusCache = null, memberSort = 'today', memberQuery = '';
+let membersCache = null, statusCache = null, memberSort = 'today', memberQuery = '', memberFilter = 'all', memberMeta = {};
 let allowanceTimer = null, allowanceLoading = false;
 let reconBusy = false, reconReady = false, reconRemoteRunning = false, reconRetryAt = 0, reconTimer = null, reconVersion = 0;
 let reconCsrf = '';
@@ -1242,13 +1249,13 @@ async function deleteUpstreamToken(id, label){
 
 /* ---------- members ---------- */
 async function ensureMembers(){
-  if(!membersCache) membersCache = (await api('/admin/api/members')).members;
+  if(!membersCache){ const d = await api('/admin/api/members'); membersCache = d.members; memberMeta = d; }
   return membersCache;
 }
 async function loadMembers(){
   if(!membersCache){ $('#memberGrid').innerHTML = skeletons(6, 230); $('#memberStats').innerHTML = skeletons(4, 80); }
   try{
-    membersCache = (await api('/admin/api/members')).members;
+    { const d = await api('/admin/api/members'); membersCache = d.members; memberMeta = d; }
     try{ const ks = (await api('/admin/api/keys')).keys; const fm = new Map(ks.map(k=>[k.id,k.features])); membersCache.forEach(m=>{ m.features = fm.has(m.id) ? fm.get(m.id) : undefined; }); }catch(_){}
     fillMemberFilter();
     renderMembers();
@@ -1293,6 +1300,32 @@ async function memberDelete(id, ban){
   }catch(e){ toastErr(e); }
 }
 function memberLimitRatio(m){ return m.daily_images>0 ? m.today.images/m.daily_images : 0; }
+/* 成员筛选：时间都按秒；“活动”= 最近一次请求（含网站查额度），“出图”= 成功生成过图片 */
+const H = 3600, D = 86400;
+const activityAt = m => m.last_used_at || m.registered_at || m.created_at || 0;
+function memberFilters(now){
+  const idleDays = memberMeta.inactivity_days || 3, nets = memberMeta.share_alert_nets || 3;
+  return [
+    ['all', '全部', () => true],
+    ['today', '今日活跃', m => m.today.requests > 0],
+    ['quick', '领取 1 小时内出图', m => m.first_image_at && m.first_image_at - m.registered_at <= H],
+    ['stuck', '领取超 1 小时仍未出图', m => !m.first_image_at && !m.is_admin && now - m.registered_at > H],
+    ['never', '从未出图', m => !m.first_image_at && !m.is_admin],
+    ['idle1', '24 小时未使用', m => !m.is_admin && now - activityAt(m) > D],
+    ['reclaim', `即将回收（≥${idleDays - 1} 天未用）`, m => !m.is_admin && m.enabled && now - activityAt(m) > (idleDays - 1) * D],
+    ['expiring', '3 天内到期', m => m.expires_at && m.expires_at > now && m.expires_at - now < 3 * D],
+    ['rejected', '24 小时内有被拒', m => m.rejected_24h > 0],
+    ['shared', '疑似分享', m => nets > 0 && m.sources_24h >= nets],
+    ['disabled', '已停用', m => !m.enabled],
+  ];
+}
+function ago(sec){ return sec < H ? Math.max(1, Math.round(sec/60)) + ' 分钟' : sec < D ? Math.round(sec/H) + ' 小时' : Math.round(sec/D) + ' 天'; }
+function onboardLine(m, now){
+  if(m.is_admin || !m.registered_at) return '';
+  if(m.first_image_at) return `<div class="muted sm">领取后 ${ago(Math.max(0, m.first_image_at - m.registered_at))}首次出图</div>`;
+  const tried = m.last_used_at ? '，查过额度但' : '，';
+  return `<div class="sm" style="color:var(--warn)">领取 ${ago(now - m.registered_at)}${tried}还没出过图</div>`;
+}
 function renderMembers(){
   const all = membersCache || [];
   const now = Date.now()/1000;
@@ -1300,10 +1333,16 @@ function renderMembers(){
   $('#memberStats').innerHTML =
     statCard('成员总数', all.length, '', `${all.filter(m=>m.enabled).length} 个已启用`) +
     statCard('今日活跃', all.filter(m=>m.today.requests>0||m.today.images>0).length, '人', '今日有请求') +
-    statCard('从未使用', all.filter(m=>!m.last_used_at).length, '人', '拿到 Key 但没有用过', 'accent') +
+    statCard('从未出图', all.filter(m=>!m.first_image_at && !m.is_admin).length, '人', `其中 ${all.filter(m=>!m.first_image_at && !m.is_admin && m.last_used_at).length} 人查过额度`, 'accent') +
     statCard('已绑定 Discord', all.filter(m=>m.discord_id).length, '人');
+  const filters = memberFilters(now);
+  $('#memberFilter').innerHTML = filters.map(([id, label, fn]) => {
+    const n = all.filter(fn).length;
+    return `<button class="fchip${memberFilter===id?' active':''}" data-mfilter="${id}" ${n||id==='all'?'':'disabled'}>${esc(label)} <span class="num">${n}</span></button>`;
+  }).join('');
+  const activeFilter = (filters.find(f => f[0] === memberFilter) || filters[0])[2];
   const q = memberQuery.trim().toLowerCase();
-  let list = all.filter(m=>!q || m.name.toLowerCase().includes(q) || String(m.discord_id||'').includes(q)
+  let list = all.filter(activeFilter).filter(m=>!q || m.name.toLowerCase().includes(q) || String(m.discord_id||'').includes(q)
     || (m.discord && [m.discord.username, m.discord.display_name].some(v=>String(v||'').toLowerCase().includes(q))));
   const keyf = {today:m=>m.today.images, week:m=>m.week.images, total:m=>m.total_images, recent:m=>m.last_used_at||0}[memberSort];
   list = list.slice().sort((a,b)=>keyf(b)-keyf(a) || a.name.localeCompare(b.name));
@@ -1351,7 +1390,7 @@ function renderMembers(){
         <div><div class="n">${m.total_images}</div><div class="l">累计</div></div>
       </div>
       <div class="member-foot">
-        <div class="meta"><span>最近使用：${esc(rel(m.last_used_at))}</span><span>${exp}</span></div>
+        <div class="meta"><span>最近使用：${esc(rel(m.last_used_at))}</span><span>${exp}</span>${onboardLine(m, now)}</div>
         <div class="m-actions">
           <button class="btn mini" data-act="view-audit" data-id="${m.id}">${ic('image')}生成记录</button>
           <details class="menu"><summary class="btn mini" aria-label="更多操作：${esc(title)}">更多 ▾</summary>
@@ -1956,6 +1995,10 @@ $('#logFilter').addEventListener('change', ()=>{ logPage=1; loadLogs(); });
 $('#logFeature').addEventListener('change', ()=>{ logPage=1; loadLogs(); });
 $('#auditFilter').addEventListener('change', ()=>{ auditPage=1; loadAudit(); });
 $('#memberSearch').addEventListener('input', e=>{ memberQuery = e.target.value; renderMembers(); });
+$('#memberFilter').addEventListener('click', e=>{
+  const b = e.target.closest('[data-mfilter]'); if(!b || b.disabled) return;
+  memberFilter = b.dataset.mfilter; renderMembers();
+});
 $('#memberSort').addEventListener('click', e=>{
   const b = e.target.closest('button[data-sort]'); if(!b) return;
   memberSort = b.dataset.sort;

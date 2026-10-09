@@ -790,6 +790,22 @@ class Database:
         row = await cur.fetchone()
         return int(row["c"])
 
+    async def member_milestones(self, since: float) -> dict[int, dict[str, Any]]:
+        """每把 Key：首次 / 最近一次成功出图时间，以及 since 之后被拒次数（用于成员筛选）。
+        基于用量日志，超过日志保留期的早期记录不计入。"""
+        out: dict[int, dict[str, Any]] = {}
+        cur = await self._db.execute(
+            """SELECT key_id, MIN(ts), MAX(ts) FROM usage_log
+               WHERE status='ok' AND kind IN ('image','image_stream') AND key_id IS NOT NULL GROUP BY key_id""")
+        for key_id, first, last in await cur.fetchall():
+            out[int(key_id)] = {"first_image_at": first, "last_image_at": last, "rejected_24h": 0}
+        cur = await self._db.execute(
+            """SELECT key_id, COUNT(*) FROM usage_log WHERE status='rejected' AND ts>=? AND key_id IS NOT NULL
+               GROUP BY key_id""", (since,))
+        for key_id, n in await cur.fetchall():
+            out.setdefault(int(key_id), {"first_image_at": None, "last_image_at": None})["rejected_24h"] = int(n)
+        return out
+
     async def image_stability(self, since: float) -> dict[str, int]:
         """since 之后出图请求的成功 / 上游失败次数（不含参数错误等被拒请求），用于首页稳定性图标。"""
         cur = await self._db.execute(
