@@ -9,7 +9,7 @@ Opus 的固定 Anlas 每个账单周期补满到 10000、不累积，到期没�
 合格成员：通过 Discord 领取、启用中、未过期、不是测试 Key、能用 V5、近 7 天出图 ≥ N 张、领取满 M 天。
 用途只有一个：「V5 续杯」—— 当天个人 V5 用完后，用 Anlas 继续生成同规格的 V5 图。
 自动分配的 Key 仍然保留免费档钳制（尺寸、步数），不会因为客户端设置偏大而误扣 Anlas。
-站长手动开通 Anlas 的 Key（anlas_auto=0）不受影响。
+站长手动管理的 Key（anlas_auto=-1：手动关闭或手动额度）不参与自动分配，也不会被覆盖。
 """
 from __future__ import annotations
 
@@ -73,7 +73,7 @@ async def eligible_keys(db, now: float, min_images: int, min_age_days: int, day_
         f"""SELECT k.id, k.name, k.created_at, COALESCE(SUM(c.images),0) AS imgs
             FROM api_keys k JOIN discord_registrations r ON r.key_id=k.id
             LEFT JOIN counters c ON c.key_id=k.id AND c.day IN ({",".join("?" * 7)})
-            WHERE k.enabled=1 AND k.is_admin=0 AND k.is_test=0 AND k.image_model_scope='all'
+            WHERE k.enabled=1 AND k.is_admin=0 AND k.is_test=0 AND k.image_model_scope='all' AND k.anlas_auto>=0
               AND (k.expires_at IS NULL OR k.expires_at>?)
             GROUP BY k.id""", (*week, now))
     return [{"id": r[0], "name": r[1]} for r in rows

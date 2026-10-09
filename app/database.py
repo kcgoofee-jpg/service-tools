@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
     image_model_scope TEXT NOT NULL DEFAULT 'legacy',
     is_admin INTEGER NOT NULL DEFAULT 0,
     is_test INTEGER NOT NULL DEFAULT 0,   -- 测试 Key：不计入成员统计、上游表现，不会被闲置回收
-    anlas_auto INTEGER NOT NULL DEFAULT 0, -- Anlas 由自动分配管理（只用于 V5 续杯，保留免费档钳制）
+    anlas_auto INTEGER NOT NULL DEFAULT 0, -- 1 自动分配管理（只用于 V5 续杯）；0 交给算法；-1 站长手动（关闭或手动额度）
     expires_at REAL,
     created_at REAL NOT NULL,
     last_used_at REAL

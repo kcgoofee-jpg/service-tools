@@ -509,6 +509,9 @@ async def regenerate_key(request: Request, response: Response, key_id: int):
     return {"token": token}
 
 
+QUICK_V5_DAILY = 15
+
+
 @router.patch("/keys/{key_id}")
 async def patch_key(request: Request, key_id: int):
     require_admin(request)
@@ -545,14 +548,36 @@ async def patch_key(request: Request, key_id: int):
         fields["image_model_scope"] = "all" if body["image_model_scope"] == "all" else "legacy"
     if "features" in body:
         fields["features"] = _features_field(body)
+    mode = body.get("anlas_mode")
+    if mode is not None:
+        # 成员页快捷设置：off 关闭（算法也不会再开）/ auto 交给算法 / manual 手动每天 N
+        if mode == "off":
+            fields.update(allow_anlas=False, daily_anlas=0.0)
+        elif mode == "manual":
+            fields.update(allow_anlas=True, daily_anlas=_num(body.get("daily_anlas", 0), float, 1.0, 100000.0, "daily_anlas"))
+        elif mode == "auto":
+            fields.update(allow_anlas=False, daily_anlas=0.0)
+        else:
+            raise HTTPException(422, "anlas_mode 只能是 off / auto / manual")
+    if body.get("image_model_scope") == "all" and "daily_v5" not in body:
+        before_v5 = await st.db.get_key(key_id)
+        if before_v5 and not before_v5["daily_v5"]:
+            fields["daily_v5"] = QUICK_V5_DAILY     # 从「仅 V4.5」开到 V5 时给一个默认日额度，和早期成员一致
     if "expires_days" in body:
         d = _num(body["expires_days"], int, 0, 3650, "expires_days")
         fields["expires_at"] = (time.time() + d * 86400) if d > 0 else None
     before = await st.db.get_key(key_id)
     await st.db.update_key(key_id, fields)
-    if "allow_anlas" in fields or "daily_anlas" in fields:
-        await st.db._db.execute("UPDATE api_keys SET anlas_auto=0 WHERE id=?", (key_id,))   # 手动设置后不再由自动分配管理
+    if mode == "auto" or "allow_anlas" in fields or "daily_anlas" in fields:
+        # 手动设置后由站长管理（-1），自动分配不会再覆盖；选「交给算法」则回到 0，下次重算时按条件分配
+        await st.db._db.execute("UPDATE api_keys SET anlas_auto=? WHERE id=?", (0 if mode == "auto" else -1, key_id))
         await st.db._db.commit()
+        if mode == "auto":
+            try:
+                from . import anlas_pool
+                await anlas_pool.rebalance(st)
+            except Exception as exc:
+                st.bugs.capture("anlas_pool", exc) if getattr(st, "bugs", None) else None
     changes = _describe_changes(before, fields)
     if changes and body.get("notify", True) is not False:
         await _notify_member(request, key_id, "站长调整了你的 Key：\n• " + "\n• ".join(changes))
@@ -978,7 +1003,9 @@ async def members(request: Request):
             "created_at": row["created_at"], "last_used_at": row["last_used_at"],
             "expires_at": row["expires_at"],
             "daily_images": row["daily_images"], "daily_v5": row["daily_v5"],
-            "allow_anlas": bool(row["allow_anlas"]), "anlas_auto": bool(row["anlas_auto"]),
+            "allow_anlas": bool(row["allow_anlas"]), "anlas_auto": row["anlas_auto"] == 1,
+            "anlas_mode": "manual" if row["anlas_auto"] == -1 and row["allow_anlas"] else "off" if row["anlas_auto"] == -1 else "auto",
+            "daily_anlas": row["daily_anlas"], "image_model_scope": row["image_model_scope"],
             "today": {"images": counter["images"], "v5": counter["v5"], "anlas": round(float(counter["anlas"]), 2),
                       "text_tokens": counter["text_tokens"], "requests": counter["requests"]},
             "week": {"images": int(w.get("images", 0)), "v5": int(w.get("v5", 0)),

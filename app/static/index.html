@@ -241,12 +241,14 @@ td .tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
 .msum b{color:var(--text);font-variant-numeric:tabular-nums}
 .mtable td{vertical-align:middle;padding-top:10px;padding-bottom:10px}
 .mtable tr.dim{opacity:.55}
-.mtable td.muted{white-space:nowrap;font-size:12.5px}
+.mtable td.muted{white-space:nowrap;font-size:12px;line-height:1.5}
+.mtable td,.mtable th{padding-left:10px;padding-right:10px}
+.mtable .mbar{width:96px}
 #memberFilter .fchip{min-height:28px;padding:3px 10px;font-size:12.5px}
 .mrow{display:flex;gap:10px;align-items:center}
 .avatar.sm{width:28px;height:28px;font-size:12px;flex:none}
 .avatar.sm .av{width:28px;height:28px}
-.mn{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px}
+.mn{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px}
 .mn .muted{font-weight:400;font-size:12px}
 .mflags{display:flex;flex-wrap:wrap;gap:4px;margin-top:2px}
 .mf{font-size:11px;line-height:1.5;padding:0 6px;border-radius:4px;background:var(--surface-2);color:var(--text-2)}
@@ -254,13 +256,19 @@ td .tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
 .mf.info{background:var(--surface-3,var(--surface-2));color:var(--muted)}
 .mf.warn{background:var(--warn-soft);color:var(--warn)}
 .mf.bad{background:var(--bad-soft);color:var(--bad)}
-.mq{display:flex;align-items:center;gap:10px;white-space:nowrap}
+.mq{display:flex;flex-direction:column;align-items:flex-start;gap:4px;white-space:nowrap;font-size:12.5px}
 .mbar{width:90px;height:6px;border-radius:3px;background:var(--surface-2);display:flex;overflow:hidden;flex:none}
 .mbar i{display:block;height:100%;background:var(--accent)}
 .mbar i.v5{background:#14a3a3}
 .mbar.full i{background:var(--bad)}
 .mact{white-space:nowrap;text-align:right}
+.mperm{white-space:nowrap}
+.psel{font-size:12px;padding:3px 6px;min-height:28px;border-radius:6px;width:auto;margin:1px 0;display:block}
 .mact .menu{display:inline-block}
+.mwrap{overflow:visible;max-height:none}
+.mtable .menu-pop{bottom:auto;top:calc(100% + 6px)}
+.menu-pop a{display:block;padding:8px 10px;border-radius:6px;color:var(--text);font-weight:500;white-space:nowrap;text-decoration:none}
+.menu-pop a:hover{background:var(--surface-3)}
 .member{padding:20px;display:flex;flex-direction:column;gap:16px;transition:border-color .15s,box-shadow .15s}
 .member:hover{border-color:var(--border-strong);box-shadow:var(--shadow)}
 .member.dim>:not(.member-foot){opacity:.5}
@@ -1526,6 +1534,36 @@ function onboardLine(m, now){
   const tried = m.last_used_at ? '，查过额度但' : '，';
   return `<div class="sm" style="color:var(--warn)">领取 ${ago(now - m.registered_at)}${tried}还没出过图</div>`;
 }
+/* 成员页快捷权限：模型范围、Anlas 方式。改动立即生效，并由机器人私信成员 */
+const ANLAS_PRESETS = [30, 78, 150];
+function permControls(m){
+  const scope = m.image_model_scope === 'all' ? 'all' : 'legacy';
+  const mode = m.anlas_mode || 'auto', daily = Math.round(m.daily_anlas || 0);
+  const manual = ANLAS_PRESETS.includes(daily) ? ANLAS_PRESETS : [...ANLAS_PRESETS, daily].filter(Boolean).sort((a,b)=>a-b);
+  const autoLabel = m.anlas_auto ? `算法 · 今日 ${daily}` : '交给算法';
+  return `<select class="psel" data-perm="scope" data-id="${m.id}" aria-label="模型权限">
+      <option value="legacy"${scope==='legacy'?' selected':''}>仅 V4.5</option>
+      <option value="all"${scope==='all'?' selected':''}>V4.5 + V5${m.daily_v5?' ('+m.daily_v5+'/天)':''}</option></select>
+    <select class="psel" data-perm="anlas" data-id="${m.id}" aria-label="Anlas 权限">
+      <option value="off"${mode==='off'?' selected':''}>Anlas 关闭</option>
+      <option value="auto"${mode==='auto'?' selected':''}>${esc(autoLabel)}</option>
+      ${manual.map(n=>`<option value="manual:${n}"${mode==='manual'&&daily===n?' selected':''}>手动 ${n}/天</option>`).join('')}
+    </select>`;
+}
+document.addEventListener('change', async e => {
+  const sel = e.target.closest('select[data-perm]'); if(!sel) return;
+  const m = (membersCache||[]).find(x=>x.id===+sel.dataset.id); if(!m) return;
+  const v = sel.value, body = {};
+  if(sel.dataset.perm === 'scope') body.image_model_scope = v;
+  else if(v.startsWith('manual:')){ body.anlas_mode = 'manual'; body.daily_anlas = +v.slice(7); }
+  else body.anlas_mode = v;
+  sel.disabled = true;
+  try{
+    await api('/admin/api/keys/' + m.id, {method:'PATCH', body:JSON.stringify(body)});
+    toast(`已更新「${memberLabel(m)}」，机器人已私信通知`, 'ok');
+    membersCache = null; await loadMembers();
+  }catch(err){ toastErr(err); sel.disabled = false; }
+});
 function renderMembers(){
   const everyone = membersCache || [];
   const now = Date.now()/1000;
@@ -1586,14 +1624,13 @@ function renderMembers(){
         <div style="min-width:0"><div class="mn">${esc(title)} ${handle?`<span class="muted">${esc(handle)}</span>`:''}</div><div class="mflags">${flags}</div></div></div></td>
       <td data-label="今日"><div class="mq"><div class="mbar${full?' full':''}" title="V4.5 ${v45} · V5 ${v5}${cap?' / 上限 '+cap:''}"><i style="width:${pct(v45)}%"></i><i class="v5" style="width:${pct(v5)}%"></i></div>
         <span class="num"><b>${m.today.images}</b>${cap?'/'+cap:''}${v5||m.daily_v5?` <span class="muted">V5 ${v5}${m.daily_v5>0?'/'+m.daily_v5:''}</span>`:''}</span></div></td>
-      <td class="num" data-label="近 7 天">${m.week.images}</td>
-      <td class="num" data-label="累计">${m.total_images}</td>
-      <td data-label="最近使用" class="muted">${esc(rel(m.last_used_at))}</td>
-      <td data-label="领取" class="muted">${m.registered_at?esc(rel(m.registered_at)):'—'}</td>
+      <td data-label="权限" class="mperm">${m.is_admin ? '<span class="muted">站长</span>' : permControls(m)}</td>
+      <td class="num" data-label="近 7 天 / 累计">${m.week.images}<span class="muted"> / ${m.total_images}</span></td>
+      <td data-label="使用 / 领取" class="muted mtime">${esc(rel(m.last_used_at))}<br>${m.registered_at?'领取 '+esc(rel(m.registered_at)):'—'}</td>
       <td class="mact">
-        <button class="btn mini icon" data-act="view-audit" data-id="${m.id}" title="生成记录" aria-label="生成记录：${esc(title)}">${ic('image')}</button>
         <details class="menu"><summary class="btn mini icon" aria-label="更多操作：${esc(title)}">⋯</summary>
           <div class="menu-pop">
+            <button type="button" data-act="view-audit" data-id="${m.id}">生成记录</button>
             ${prof?`<a href="${esc(prof)}" target="_blank" rel="noopener noreferrer">在 Discord 打开</a>`:''}
             ${dcId?`<button type="button" data-act="copy-dc" data-dcid="${esc(dcId)}">复制 Discord ID</button>`:''}
             <button type="button" data-act="member-toggle" data-id="${m.id}" data-on="${m.enabled?0:1}">${m.enabled?'停用':'启用'}</button>
@@ -1602,8 +1639,8 @@ function renderMembers(){
           </div></details></td>
     </tr>`;
   }).join('');
-  $('#memberGrid').innerHTML = `<div class="card panel" style="padding:4px 0"><div class="table-wrap"><table class="rt mtable">
-    <thead><tr><th>成员</th><th>今日图片</th><th class="num">近 7 天</th><th class="num">累计</th><th>最近使用</th><th>领取</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+  $('#memberGrid').innerHTML = `<div class="card panel" style="padding:4px 0"><div class="table-wrap mwrap"><table class="rt mtable">
+    <thead><tr><th>成员</th><th>今日图片</th><th title="改动立即生效，并私信通知该成员">权限</th><th class="num">7 天 / 累计</th><th>最近使用</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
 
 /* ---------- audit ---------- */

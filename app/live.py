@@ -73,6 +73,27 @@ async def build(state, registrar, now: Optional[float] = None) -> dict[str, Any]
         "members": {},
         "interval": round(float(getattr(state.settings, "image_min_interval", 15) or 15) + gv.get("interval_jitter", 0) / 2, 1),
     }
+    # 调度规则（首页「点一步看规则」用）：全是站点级参数和汇总，不含任何个人信息
+    anlas = {}
+    try:
+        import json as _json
+        raw = await state.db.get_setting("anlas_pool_last", None)
+        last = _json.loads(raw) if raw else {}
+        anlas = {"per_member": int(last.get("per_member") or 0), "members": len(last.get("members") or []),
+                 "enabled": bool(last.get("enabled"))}
+    except (TypeError, ValueError):
+        pass
+    token_ids = [t.token_id for t in pool if t.usable]
+    body["rules"] = {
+        "base": gv.get("base_daily_images", 0), "key_queue": gv.get("key_image_queue", 0),
+        "queue_cap": (gv.get("queue_per_account") or 0) * usable,
+        "hourly_cap": (gv.get("account_hourly_cap") or 0) * usable, "daily_cap": (gv.get("account_daily_cap") or 0) * usable,
+        "quiet_start": gv.get("quiet_start", 0), "quiet_end": gv.get("quiet_end", 0),
+        "quiet_cap": (gv.get("quiet_hourly_cap") or 0) * usable,
+        "min_interval": float(getattr(state.settings, "image_min_interval", 15) or 15), "jitter": gv.get("interval_jitter", 0),
+        "borrow_open": bool(guard.site_idle(-1, token_ids, now)) if guard else False,
+        "anlas": anlas,
+    }
     if registrar is not None:
         cfg = await registrar.settings()
         active = await registrar.count_active()
