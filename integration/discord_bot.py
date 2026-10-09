@@ -14,6 +14,7 @@ import httpx
 from discord import app_commands
 
 from discord_registration import handle_register
+import gallery_praise
 
 BACKEND = os.getenv("REGISTRATION_BACKEND_URL", "http://127.0.0.1:3003").rstrip("/")
 SITE = os.getenv("SITE_URL", "").rstrip("/")
@@ -40,7 +41,8 @@ async def backend(path: str, interaction: discord.Interaction, extra_id: str | N
 def build_client() -> tuple[discord.Client, app_commands.CommandTree, discord.Object]:
     guild = discord.Object(id=int(os.environ["DISCORD_GUILD_ID"]))
     intents = discord.Intents.none()
-    intents.guilds = True            # 只为收到「论坛新帖」事件（给跑图分享自动点赞）；不读消息内容
+    intents.guilds = True            # 收到「论坛新帖」事件（跑图分享自动点赞 / 评论）
+    intents.message_content = True   # 读新帖的标题和文字（开发者后台已开启 Message Content Intent），用于写评论
     client = discord.Client(intents=intents)
     tree = app_commands.CommandTree(client)
 
@@ -162,16 +164,27 @@ def build_client() -> tuple[discord.Client, app_commands.CommandTree, discord.Ob
         if parent is None or gallery_name not in (parent.name or ""):
             return
         print(f"[gallery] new post thread={thread.id} owner={thread.owner_id} title={thread.name[:40]}", flush=True)
+        starter = None
         for attempt in range(3):            # 论坛帖的首条消息可能比建帖事件晚一点到
             try:
                 starter = thread.starter_message or await thread.fetch_message(thread.id)
                 await starter.add_reaction("❤️")
-                return
+                break
             except discord.NotFound:
                 await asyncio.sleep(2)
             except discord.HTTPException as exc:
                 print(f"[bug] gallery reaction failed: {exc}", flush=True)
                 return
+        if starter is None:
+            return
+        # 配置了 ANTHROPIC_API_KEY 时，奶妹看图写一段夸奖（gallery_praise.py）
+        images = [a.url for a in starter.attachments if (a.content_type or "").split(";")[0] in gallery_praise.IMAGE_TYPES]
+        text = await gallery_praise.write_praise(thread.name, starter.content, images)
+        if text:
+            try:
+                await thread.send(text, allowed_mentions=discord.AllowedMentions.none())
+            except discord.HTTPException as exc:
+                print(f"[bug] gallery comment send failed: {exc}", flush=True)
 
     @tree.error
     async def on_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
