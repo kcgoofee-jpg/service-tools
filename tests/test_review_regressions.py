@@ -1162,3 +1162,185 @@ def test_cooling_account_is_not_reported_as_v5_quota_used_up():
     assert e.status == 503 and "冷却" in e.message and "不是额度用完" in e.message
     client.pool[0].blocked_until = 0
     assert "V5 免费图片额度已用完" in client._unavailable(False, v5_free=True).message   # 真用完时仍照实说
+
+
+# ---------------------------------------------------------------- v1.7：实时架构图、Anlas 自动分配、后台通知、防转卖信号
+
+def test_guard_queue_view_tracks_waiting_and_running_positions():
+    from app.guard import Guard
+    g = Guard()
+    g.values["key_image_queue"] = 1
+    for key in (1, 2, 1, 3):
+        assert g.admit_image(key, accounts=1) is None
+    g.mark_running(2)
+    view = g.queue_view(1)
+    assert view["waiting"] == 3 and view["running"] == 1
+    assert view["mine"] == [{"state": "waiting", "position": 1}, {"state": "waiting", "position": 2}]
+    assert g.queue_view(2)["mine"] == [{"state": "running"}]
+    g.release_image(2)
+    assert g.queue_view()["running"] == 0 and len(g.entries) == 3
+    for key in (1, 1, 3):
+        g.release_image(key)
+    assert g.entries == [] and g.image_inflight == {}
+
+
+@pytest.mark.asyncio
+async def test_running_state_follows_first_upstream_dispatch(state, monkeypatch):
+    from app.guard import Guard
+    from app import request_timing
+    state.guard = Guard()
+    seen = []
+    real = state.nai.request
+
+    async def dispatch(*args, **kwargs):
+        seen.append(state.guard.queue_view(1)["mine"])
+        request_timing.mark_sent()
+        seen.append(state.guard.queue_view(1)["mine"])
+        return await real(*args, **kwargs)
+    monkeypatch.setattr(state.nai, "request", dispatch)
+    assert (await post("/ai/generate-image", image_body())).status_code == 200
+    assert seen == [[{"state": "waiting", "position": 1}], [{"state": "running"}]]
+    assert state.guard.entries == []
+
+
+@pytest.mark.asyncio
+async def test_public_live_has_only_aggregates(tmp_path):
+    from types import SimpleNamespace
+    from app import live
+    from app.guard import Guard
+    db = Database(str(tmp_path / "l.db"))
+    await db.connect()
+    try:
+        g = Guard(db)
+        g.admit_image(7, accounts=1)
+        tok = SimpleNamespace(token_id="t", usable=True, disabled=False, admin_enabled=True, blocked_until=0, image_next_at=0)
+        st = SimpleNamespace(db=db, guard=g, nai=SimpleNamespace(pool=[tok]), day=lambda: "2026-10-09",
+                             settings=SimpleNamespace(global_daily_v5=150, image_min_interval=15),
+                             image_cooldown_remaining=lambda: 0)
+
+        class Reg:
+            async def settings(self): return {"max_users": 30, "open": True}
+            async def count_active(self): return 13
+            async def waitlist(self): return [{"name": "千分之一的心", "invited_at": None, "discord_id": "123"}]
+        live._cache.update(at=0, body=None)
+        live.note("ok"); live.note("rejected")
+        body = await live.build(st, Reg())
+        text = json.dumps(body, ensure_ascii=False)
+        assert body["queue"] == {"waiting": 1, "running": 0} and body["quota"]["images_cap"] == 1000
+        assert body["members"]["waitlist"] == [{"name": "千分**", "invited": False}]
+        assert "123" not in text and "千分之一" not in text and "token" not in text.lower().replace("token_", "")
+        assert body["auth"]["rejected"] >= 1
+        me = live.mine(st, 7)
+        assert me["mine"] == [{"state": "waiting", "position": 1, "eta": 15}]
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_live_me_is_passive_and_quiet_on_bad_keys(state):
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url="http://fixture.invalid") as c:
+        ok = await c.get("/v1/live/me", headers={"Authorization": "Bearer fixture-1"})
+        bad = await c.get("/v1/live/me", headers={"Authorization": "Bearer nai-nope"})
+    assert ok.status_code == 200 and ok.json()["mine"] == []
+    assert bad.status_code == 401 and bad.json()["mine"] is None
+    assert not [a for a, kw in state.db.logs if a[4] == "rejected"]
+
+
+def test_anlas_plan_spends_down_before_refill():
+    from app.anlas_pool import plan
+    now = 1_000_000.0
+    p = plan(9949, now + 16 * 86400, now, 10, reserve=1000, cap=78, budget_left=None, month_days_left=20)
+    assert p["daily_pool"] == 559 and p["per_member"] == 55
+    late = plan(9949, now + 2 * 86400, now, 10, reserve=1000, cap=78, budget_left=None, month_days_left=20)
+    assert late["per_member"] == 78                                        # 临近续费，用不完的提高到上限
+    assert plan(9949, now + 16 * 86400, now, 10, reserve=1000, cap=78, budget_left=300, month_days_left=20)["per_member"] == 0
+    assert plan(1200, now + 16 * 86400, now, 3, reserve=1000, cap=78, budget_left=None, month_days_left=20)["per_member"] == 0
+    assert plan(9949, now + 86400, now, 0, reserve=1000, cap=78, budget_left=None, month_days_left=5)["per_member"] == 0
+
+
+@pytest.mark.asyncio
+async def test_anlas_rebalance_grants_active_v5_members_and_revokes(tmp_path):
+    from types import SimpleNamespace
+    from app import anlas_pool
+    db = Database(str(tmp_path / "a.db"))
+    await db.connect()
+    try:
+        now = time.time()
+        base = dict(daily_images=300, monthly_anlas=0, daily_text_tokens=0, rpm=5, image_model_scope="all")
+        active = await db.create_key({"name": "活跃", "token": "nai-a", **base})
+        quiet = await db.create_key({"name": "不活跃", "token": "nai-b", **base})
+        manual = await db.create_key({"name": "手动", "token": "nai-c", "allow_anlas": True, "daily_anlas": 500, **base})
+        for k, d in ((active, "111"), (quiet, "222"), (manual, "333")):
+            await db._db.execute("INSERT INTO discord_registrations(discord_id,key_id,created_at) VALUES (?,?,?)", (d, k["id"], now))
+        await db._db.execute("UPDATE api_keys SET created_at=?", (now - 5 * 86400,))
+        today = time.strftime("%Y-%m-%d", time.localtime(now))
+        await db._db.execute("INSERT INTO counters(key_id, day, images) VALUES (?,?,20)", (active["id"], today))
+        await db._db.commit()
+        st = SimpleNamespace(db=db, nai=SimpleNamespace(pool=[]), day=lambda: today, month=lambda: today[:7],
+                             settings=SimpleNamespace(global_monthly_anlas=0))
+        sent = []
+
+        async def notify(key_id, text):
+            sent.append(key_id)
+        r = await anlas_pool.rebalance(st, now=now, account={"anlas": 5000, "refill_at": now + 10 * 86400}, notify=notify)
+        assert r["per_member"] == 78 and r["members"] == ["活跃"]
+        row = await db.get_key(active["id"])
+        assert row["allow_anlas"] == 1 and row["anlas_auto"] == 1 and row["daily_anlas"] == 78 and sent == [active["id"]]
+        assert (await db.get_key(manual["id"]))["daily_anlas"] == 500            # 手动设置不受影响
+        await db._db.execute("DELETE FROM counters"); await db._db.commit()
+        await anlas_pool.rebalance(st, now=now, account={"anlas": 5000, "refill_at": now + 10 * 86400}, notify=notify)
+        row = await db.get_key(active["id"])
+        assert row["allow_anlas"] == 0 and row["anlas_auto"] == 0 and sent == [active["id"]]
+        assert json.loads(await db.get_setting(anlas_pool.STATE_KEY, "{}"))["per_member"] == 0
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_v5_top_up_uses_anlas_after_daily_v5(state):
+    key = state.db.keys["fixture-1"]
+    key.update(allow_anlas=True, anlas_auto=1, daily_v5=1, daily_anlas=100, image_model_scope="all")
+    state.db.charges.append((1, dict(anlas=0, v5=1, images=1, legacy_free_images=0)))
+    body = image_body(width=832, height=1216)
+    body["model"] = "nai-diffusion-5-full"
+    r = await post("/ai/generate-image", body)
+    assert r.status_code == 200
+    _, kwargs = state.nai.calls[-1][2], state.nai.calls[-1][3]
+    assert kwargs["requires_anlas"] and not kwargs["v5_free"]
+    big = image_body(width=2048, height=2048)
+    big["model"] = "nai-diffusion-4-5-full"
+    assert (await post("/ai/generate-image", big)).status_code == 200
+    assert state.nai.calls[-1][2]["parameters"]["width"] * state.nai.calls[-1][2]["parameters"]["height"] <= 1024 * 1024   # 仍钳制
+
+
+def test_admin_change_description_for_member_dm():
+    from app.admin import _describe_changes
+    before = {"enabled": 1, "daily_images": 300, "daily_v5": 15, "daily_anlas": 0, "allow_anlas": 0,
+              "image_model_scope": "all", "expires_at": 1_000_000.0}
+    same_ish = _describe_changes(before, {"enabled": True, "daily_images": 300, "expires_at": 1_000_000.0 + 3600})
+    assert same_ish == []
+    msgs = _describe_changes(before, {"enabled": False, "daily_images": 150, "image_model_scope": "legacy",
+                                      "expires_at": None})
+    assert any("暂停" in m for m in msgs) and any("300 → 150" in m for m in msgs)
+    assert any("仅 V4.5" in m for m in msgs) and any("长期有效" in m for m in msgs)
+
+
+def test_resale_signals_alternation_clients_and_all_day():
+    from app.key_sources import SourceTracker
+    t = SourceTracker(None)
+    key = {"id": 5, "is_admin": 0}
+    now = 1_000_000.0
+    out = []
+    for i, label in enumerate(["1.2.*.*", "3.4.*.*", "1.2.*.*", "3.4.*.*"]):
+        out = t.signals(key, label, "", now + i * 60)
+    assert any(k == "alternate" for k, _ in out)
+    t2 = SourceTracker(None)
+    assert not any(k == "alternate" for k, _ in [s for i, lb in enumerate(["1.2.*.*", "3.4.*.*", "5.6.*.*"])
+                                                    for s in t2.signals(key, lb, "", now + i * 60)])
+    for i, ua in enumerate(["A/1", "B/1", "C/1"]):
+        out = t.signals(key, None, ua, now + i)
+    assert any(k == "clients" for k, _ in out)
+    t3 = SourceTracker(None)
+    for h in range(20):
+        out = t3.signals(key, None, "", now + h * 3600)
+    assert any(k == "allday" for k, _ in out)

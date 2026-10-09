@@ -113,6 +113,8 @@ input[type=checkbox]{width:16px;height:16px;min-height:0;padding:0;accent-color:
 .num.bad{color:var(--bad);font-weight:600}.num.warn{color:var(--warn);font-weight:600}
 tr.muted td{opacity:.6}
 .tag.info{background:var(--accent-soft);color:var(--accent-text)}
+.seg-ic{display:flex;gap:4px;flex-wrap:wrap}
+.seg-ic .btn.on{background:var(--accent-soft);color:var(--accent-text);border-color:var(--accent)}
 .tag.dim{background:var(--surface-3);color:var(--muted)}
 .dot{width:7px;height:7px;border-radius:50%;background:currentColor;flex:none}
 
@@ -473,7 +475,15 @@ details.neg div{margin-top:6px;white-space:pre-wrap;overflow-wrap:anywhere;max-h
             <div class="tools"><button class="btn" data-act="refresh-ov"><span data-ic="refresh"></span>刷新</button></div></div>
           <div class="stats" id="ovCards"></div>
           <div class="two-col">
-            <div class="card panel"><div class="panel-head"><h2>近 7 天生成量（图片）</h2></div><div class="chart" id="chart"></div></div>
+            <div class="card panel"><div class="panel-head"><div><div class="hint" id="chartLabel" style="margin:0">今日生成图片</div>
+              <div class="v num" id="chartToday" style="font-size:26px;font-weight:600">—</div><div class="hint" id="chartSub" style="margin:0"></div></div>
+              <div class="seg-ic" role="group" aria-label="指标">
+                <button class="btn mini on" data-chart="images" title="图片" aria-label="图片">图片</button>
+                <button class="btn mini" data-chart="v5" title="V5" aria-label="V5">V5</button>
+                <button class="btn mini" data-chart="requests" title="请求数" aria-label="请求数">请求</button>
+                <button class="btn mini" data-chart="anlas" title="Anlas" aria-label="Anlas">Anlas</button>
+                <button class="btn mini" data-chart="text_tokens" title="文本 tokens" aria-label="文本 tokens">文本</button></div></div>
+            <div class="chart" id="chart"></div></div>
             <div class="card panel"><div class="panel-head"><h2>状态与防护</h2></div><div class="status-list" id="statusPanel"></div></div>
           </div>
           <div class="card panel">
@@ -656,6 +666,12 @@ NAI_TOKEN_V5_DAILY_LIMITS=0,150</pre><button class="btn mini" type="button" data
             <button class="btn primary" data-act="save-guard">保存账号保护设置</button>
           </div>
           <div class="card panel">
+            <div class="panel-head"><h2>Anlas 自动分配</h2><div class="desc">Anlas 每个账单周期补满、不累积。每小时按「(剩余 − 保留) ÷ 距续费天数」重算每日池，平均分给近 7 天活跃、能用 V5 的成员，只用于当天 V5 用完后的「续杯」，仍保留免费尺寸钳制。手动设置过 Anlas 的 Key 不受影响</div></div>
+            <div id="anlasLive" class="hint" style="margin-bottom:12px;white-space:pre-line">正在读取…</div>
+            <div class="form-grid" id="anlasFields"></div>
+            <button class="btn primary" data-act="save-anlas">保存并立即重算</button>
+          </div>
+          <div class="card panel">
             <div class="panel-head"><h2>站点公告</h2><div class="desc">用户访问首页看到的内容，支持 HTML</div></div>
             <textarea id="announce" rows="10" placeholder="&lt;h2&gt;欢迎&lt;/h2&gt;&lt;p&gt;申请 Key 请联系……&lt;/p&gt;" aria-label="站点公告"></textarea>
             <div style="margin-top:16px"><button class="btn primary" data-act="save-announce">保存公告</button></div>
@@ -709,6 +725,7 @@ NAI_TOKEN_V5_DAILY_LIMITS=0,150</pre><button class="btn mini" type="button" data
       <label class="check"><input id="f_allow_img2img" type="checkbox"><span>允许 img2img / 局部重绘（需同时开启上面一项）</span></label>
       <label class="check"><input id="f_exclude_global_v5" type="checkbox"><span>独立 V5 额度（此 Key 的 V5 使用不计入、也不受全站 V5 日额度限制）</span></label>
       <label class="check"><input id="f_is_test" type="checkbox"><span>测试 Key（不计入成员统计、上游表现和首页稳定性，不会被闲置回收）</span></label>
+      <label class="check"><input id="f_notify" type="checkbox" checked><span>保存后由机器人私信通知该成员（停用 / 恢复、额度、模型、Anlas、有效期的变化；仅限 Discord 领取的成员）</span></label>
       <div class="sec-title">功能权限</div>
       <div class="opt-group">
         <label class="check"><input type="radio" name="f_feat_mode" value="legacy" checked><span>全部已开放功能（含以后新开放的）</span></label>
@@ -985,7 +1002,8 @@ function renderAllowance(d){
     const value = p.percent == null ? '未查询 · 首次 V5 生图时确认'
       : `${p.is_negative ? '已耗尽' : p.percent + '%'}${p.uncertain ? '（上次记录）' : ''}`;
     const checked = p.checked_at ? ` · ${new Date(p.checked_at*1000).toLocaleTimeString()} 更新` : '';
-    return `账号 ${p.account} · V5 ${value}${checked}`;
+    const rate = p.recharge_per_day ? ` · 实测恢复约 ${p.recharge_per_day}%/天（约 ${Math.round(p.recharge_per_day / 0.0558)} 张 V5/天）` : '';
+    return `账号 ${p.account} · V5 ${value}${rate}${checked}`;
   }).join('\n') : 'V5 余量：未配置上游账号';
 }
 async function loadAllowance(){
@@ -1127,6 +1145,31 @@ async function loadShadow(){
       <div class="hint">${q.borrowers ? `有 ${q.borrowers} 人超过保底，共借用 ${q.borrowed_images} 张：新规则下这些请求只在空闲时放行。` : '没有人超过保底：新规则下所有请求都在保底内，体验不变。'} 7 天视图按 7 天合计张数显示，保底按天计算，仅供参考。</div>`;
   }catch(e){ box.innerHTML = '<div class="hint">回放失败</div>'; }
 }
+/* 总览图表：今日数值 + 近 7 天，用按钮切换指标（原来的几张今日卡片合并到这里） */
+let ovData = null, chartMetric = 'images';
+function drawChart(){
+  const d = ovData; if(!d) return;
+  const t = d.today, k = chartMetric;
+  const M = {
+    images: ['今日生成图片', t.images, '张', (t.member_images != null && t.member_images !== t.images ? `其中成员 ${t.member_images} 张，其余来自测试 / 已删除的 Key · ` : '') + '账号保护每日上限见「设置」'],
+    v5: ['今日 V5', t.v5 || 0, '/ ' + (d.v5_limit > 0 ? d.v5_limit : '∞'), '全站日限；每人另有个人 V5 上限'],
+    requests: ['今日请求数', t.requests, '次', '含查额度以外的所有调用'],
+    anlas: ['今日消耗 Anlas（估算）', t.anlas, 'Anlas', `本月 ${d.month.anlas} / 预算 ${d.anlas_budget > 0 ? d.anlas_budget : '∞'}`],
+    text_tokens: ['今日文本 tokens', fmt(t.text_tokens), '', '文本 / 聊天功能'],
+  }[k];
+  $('#chartLabel').textContent = M[0];
+  $('#chartToday').innerHTML = `${esc(M[1])} <small class="muted" style="font-size:14px;font-weight:400">${esc(M[2])}</small>`;
+  $('#chartSub').textContent = M[3];
+  const vals = d.week.map(w => Number(w[k]) || 0), max = Math.max(1, ...vals);
+  $('#chart').innerHTML = d.week.map((w, i) => `
+      <div class="col" title="${esc(w.day)}：${vals[i]}">
+        <div class="val">${k === 'anlas' ? Math.round(vals[i]) : vals[i]}</div>
+        <div class="track"><div class="fill" style="height:${Math.max(2, Math.round(vals[i]/max*100))}%"></div></div>
+        <div class="lb">${esc(w.day.slice(5))}</div>
+      </div>`).join('');
+  document.querySelectorAll('[data-chart]').forEach(b => b.classList.toggle('on', b.dataset.chart === k));
+}
+document.addEventListener('click', e => { const b = e.target.closest('[data-chart]'); if(b){ chartMetric = b.dataset.chart; drawChart(); } });
 async function loadOverview(){
   loadReconciliation();
   loadPerf();
@@ -1137,12 +1180,7 @@ async function loadOverview(){
     const d = await api('/admin/api/overview');
     const t = d.today;
     $('#ovCards').innerHTML =
-      statCard('今日生成图片', t.images, '张', t.member_images != null && t.member_images !== t.images ? `其中成员 ${t.member_images} 张，其余来自测试 / 已删除的 Key` : '', 'accent') +
-      statCard('今日消耗 Anlas（估算）', t.anlas) +
-      statCard('今日 V5 张数 / 全站日限', t.v5||0, '/ ' + (d.v5_limit>0?d.v5_limit:'∞')) +
       statCard('本月 Anlas / 全站预算', d.month.anlas, '/ ' + (d.anlas_budget>0?d.anlas_budget:'∞')) +
-      statCard('今日文本 tokens', fmt(t.text_tokens)) +
-      statCard('今日请求数', t.requests) +
       statCard('Key 总数 / 有效', d.keys_total, '/ ' + d.keys_active) +
       `<div class="card stat" title="按今日、本月累计；查询官方余额不会清空这些记录"><div class="k">失败请求可能产生的费用</div>
         <div class="v">${t.unconfirmed_anlas||0} <small>Anlas</small></div>
@@ -1156,13 +1194,7 @@ async function loadOverview(){
         <td data-label="今日">${cnt(f.today)}</td><td data-label="今日产出">${esc(out(f.today))}</td>
         <td data-label="近 7 天">${cnt(f.week)}</td><td data-label="近 7 天产出">${esc(out(f.week))}</td></tr>`;
     }).join('');
-    const max = Math.max(1, ...d.week.map(w=>w.images));
-    $('#chart').innerHTML = d.week.map(w=>`
-      <div class="col" title="${esc(w.day)}：${w.images} 张 / ${w.anlas}A / ${esc(fmt(w.text_tokens))}tk">
-        <div class="val">${w.images}</div>
-        <div class="track"><div class="fill" style="height:${Math.max(2, Math.round(w.images/max*100))}%"></div></div>
-        <div class="lb">${esc(w.day.slice(5))}</div>
-      </div>`).join('');
+    ovData = d; drawChart();
     const pool = d.pool.length ? d.pool : [];
     $('#pool').innerHTML = (!d.pool_configured)
       ? `<span class="tag warn">未配置上游 Token —— 请点右侧「添加 Token」</span>`
@@ -1812,6 +1844,7 @@ async function saveKey(){
       allow_img2img: $('#f_allow_img2img').checked,
       exclude_global_v5: $('#f_exclude_global_v5').checked,
       is_test: $('#f_is_test').checked,
+      notify: $('#f_notify').checked,
     };
     if(!editingId || $('#f_expires').value.trim() !== '') body.expires_days = readNum('f_expires', '有效天数', {max:3650});
   }catch(e){ $('#modalErr').textContent = e.message; return; }
@@ -1927,7 +1960,7 @@ function changeLogPage(delta){ logPage=Math.max(1,logPage+delta); loadLogs(); }
 
 /* ---------- settings ---------- */
 async function loadSettings(){
-  loadGuard();
+  loadGuard(); loadAnlasPool();
   try{
     const [a, s, o, r] = await Promise.all([
       api('/admin/api/announcement'), api('/admin/api/settings'),
@@ -2006,6 +2039,26 @@ async function loadGuard(){
     const acc = guardData.accounts.map(a => `账号 ${a.position}：今天 ${a.today}${v.account_daily_cap?' / '+v.account_daily_cap:''} 张，本小时 ${a.this_hour}${guardData.hourly_cap_now?' / '+guardData.hourly_cap_now:''} 张`).join('；');
     $('#guardLive').textContent = `${guardData.quiet_now ? '🌙 现在是安静时段' : '☀️ 正常时段'} · ${acc || '没有可用账号'} · 正在生成或排队 ${guardData.queued_images} 张`;
   }catch(e){ $('#guardLive').textContent = '读取失败'; }
+}
+const ANLAS_LABELS = {anlas_auto_enabled:['开启自动分配（1 开 / 0 关）',0,1], anlas_reserve:['保留不分的 Anlas',0,10000],
+  anlas_member_daily_cap:['每人每天最多',0,1000], anlas_min_images_7d:['近 7 天至少出图张数',0,10000], anlas_min_key_age_days:['领取满几天',0,365]};
+async function loadAnlasPool(){
+  try{
+    const d = await api('/admin/api/anlas-pool'), v = d.settings, L = d.last;
+    $('#anlasFields').innerHTML = Object.keys(ANLAS_LABELS).map(k => `<div class="field"><label for="a_${k}">${ANLAS_LABELS[k][0]}</label><input id="a_${k}" type="number" min="${ANLAS_LABELS[k][1]}" max="${ANLAS_LABELS[k][2]}" step="1" value="${esc(v[k])}"></div>`).join('');
+    $('#anlasLive').textContent = !L ? '还没有运行过（每小时自动运行一次，保存后立即运行）。'
+      : L.error ? '上次运行：' + L.error
+      : !L.enabled ? '自动分配已关闭。'
+      : `账号剩余 ${L.anlas} Anlas · 约 ${L.days_to_refill} 天后补满 · 今日池 ${L.daily_pool}\n合格成员 ${L.members.length} 人${L.members.length ? '（' + L.members.slice(0, 8).join('、') + (L.members.length > 8 ? '…' : '') + '）' : ''} · 每人每天 ${L.per_member}${L.per_member ? '（约 ' + Math.floor(L.per_member / 26) + ' 张续杯 V5）' : '（不足一张付费 V5，本轮不分）'}\n更新于 ${new Date(L.updated_at * 1000).toLocaleString()}`;
+  }catch(e){ $('#anlasLive').textContent = '读取失败'; }
+}
+async function saveAnlasPool(){
+  try{
+    const body = {};
+    for(const k of Object.keys(ANLAS_LABELS)) body[k] = readNum('a_' + k, ANLAS_LABELS[k][0], {min:ANLAS_LABELS[k][1], max:ANLAS_LABELS[k][2]});
+    await api('/admin/api/anlas-pool', {method:'PUT', body: JSON.stringify(body)});
+    toast('已保存并重算 Anlas 分配', 'ok'); loadAnlasPool();
+  }catch(e){ toastErr(e); }
 }
 async function saveGuard(){
   try{
@@ -2111,6 +2164,7 @@ document.addEventListener('click', ev=>{
     case 'save-budget': saveBudget(); break;
     case 'save-runtime': saveRuntimeLimits(); break;
     case 'save-guard': saveGuard(); break;
+    case 'save-anlas': saveAnlasPool(); break;
     case 'save-announce': saveAnnounce(); break;
   }
 });

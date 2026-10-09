@@ -73,8 +73,11 @@ class AllowanceCache:
                 percent, negative = usage.get("percent"), usage.get("isNegative")
                 if type(percent) is not int or percent < 0 or type(negative) is not bool:
                     raise ValueError("invalid allowance")
+                next_pct = usage.get("timeUntilNextPercent")
                 self._rows[token_id] = dict(percent=percent, is_negative=negative,
-                    checked_at=time.time(), at=time.monotonic(), error=None, retry_at=0)
+                    checked_at=time.time(), at=time.monotonic(), error=None, retry_at=0,
+                    # 官方返回「再恢复 1% 还要多少秒」，据此算出实测恢复速度（%/天）
+                    next_percent_seconds=next_pct if type(next_pct) is int and 0 < next_pct < 10 ** 7 else None)
                 if negative or percent < threshold:
                     log.warning("V5 low allowance: account %s; remaining=%s%%; exhausted=%s",
                                 token_id, percent, negative)
@@ -101,7 +104,9 @@ class AllowanceCache:
             percent = row.get("percent")
             stale = time.monotonic() - row.get("at", -1e9) >= 300
             low = row.get("is_negative") is True or (percent is not None and percent < threshold)
+            nps = row.get("next_percent_seconds")
             accounts.append(dict(account=index + 1, percent=percent,
+                recharge_per_day=round(86400 / nps, 1) if nps else None,
                 is_negative=row.get("is_negative"), checked_at=row.get("checked_at"),
                 low=low, uncertain=stale or bool(row.get("error")),
                 error=row.get("error"), stale=stale))

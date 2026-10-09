@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
     image_model_scope TEXT NOT NULL DEFAULT 'legacy',
     is_admin INTEGER NOT NULL DEFAULT 0,
     is_test INTEGER NOT NULL DEFAULT 0,   -- 测试 Key：不计入成员统计、上游表现，不会被闲置回收
+    anlas_auto INTEGER NOT NULL DEFAULT 0, -- Anlas 由自动分配管理（只用于 V5 续杯，保留免费档钳制）
     expires_at REAL,
     created_at REAL NOT NULL,
     last_used_at REAL
@@ -232,6 +233,7 @@ class Database:
             "ALTER TABLE usage_log ADD COLUMN client TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE usage_log ADD COLUMN up_status INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE api_keys ADD COLUMN is_test INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE api_keys ADD COLUMN anlas_auto INTEGER NOT NULL DEFAULT 0",
         ):
             try:
                 await self._db.execute(ddl)
@@ -939,7 +941,7 @@ class Database:
         cur = await self._db.execute(
             f"""SELECT day,
                        SUM(images) AS images, SUM(anlas) AS anlas,
-                       SUM(text_tokens) AS text_tokens, SUM(requests) AS requests
+                       SUM(text_tokens) AS text_tokens, SUM(requests) AS requests, SUM(v5) AS v5
                 FROM counters WHERE day IN ({ph}) GROUP BY day""",
             tuple(week_days),
         )
@@ -953,6 +955,7 @@ class Database:
                 "anlas": float(r.get("anlas") or 0),
                 "text_tokens": int(r.get("text_tokens") or 0),
                 "requests": int(r.get("requests") or 0),
+                "v5": int(r.get("v5") or 0),
             })
         return {
             "today": {

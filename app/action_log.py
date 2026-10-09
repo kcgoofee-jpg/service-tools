@@ -36,6 +36,7 @@ ADMIN_ACTIONS = {
     ("PUT", "/ops/features"): "修改全局功能开关",
     ("PUT", "/ops/audit"): "修改生成记录设置",
     ("PUT", "/guard"): "修改账号保护与排队设置",
+    ("PUT", "/anlas-pool"): "修改 Anlas 自动分配",
 }
 
 
