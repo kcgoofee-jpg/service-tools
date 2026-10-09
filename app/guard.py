@@ -118,11 +118,14 @@ class Guard:
         return len(q)
 
     def minutes_until_free(self, token_id: str, now: Optional[float] = None) -> int:
+        """到计数降回上限以下要等多久：超了 n 张就要等第 n+1 早的那张滑出 60 分钟窗口（不是最早那一张）。"""
         now = time.time() if now is None else now
         q = self._starts.get(token_id)
         if not q:
             return 1
-        return max(1, math.ceil((q[0] + HOUR - now) / 60))
+        cap = self.hourly_cap(now)
+        idx = max(0, min(len(q) - 1, len(q) - cap)) if cap else 0
+        return max(1, math.ceil((q[idx] + HOUR - now) / 60))
 
     def jitter(self) -> float:
         span = self.values["interval_jitter"]

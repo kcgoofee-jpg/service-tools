@@ -196,3 +196,11 @@ async def test_guard_hour_count_survives_restart(guard):
     g = Guard(db)
     assert await g.seed_hour(db, ["tok"], now=now + 1) == 30
     assert g.hour_count("tok", now + 2) == 30
+
+
+def test_minutes_until_free_waits_for_enough_slots():
+    from app.guard import Guard
+    g, now = Guard(), 1_000_000.0
+    for i in range(106):                       # 超了 26 张：要等第 27 张滑出窗口
+        g.record_start("tok", now - 3600 + 30 + i * 30)
+    assert g.minutes_until_free("tok", now) == 14
