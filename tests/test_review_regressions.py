@@ -1310,31 +1310,39 @@ async def test_anlas_rebalance_grants_active_v5_members_and_revokes(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_v5_top_up_uses_anlas_after_daily_v5(state):
+async def test_v5_top_up_only_when_account_v5_is_empty(state):
+    """账号 V5 还有剩余时，NovelAI 扣的是 V5 额度不是 Anlas：续杯只在账号 V5 用完（≤ 1%）时才走 Anlas。"""
+    import json as _json
     key = state.db.keys["fixture-1"]
     key.update(allow_anlas=True, anlas_auto=1, daily_v5=1, daily_anlas=100, image_model_scope="all")
     state.db.charges.append((1, dict(anlas=0, v5=1, images=1, legacy_free_images=0)))
     body = image_body(width=832, height=1216)
     body["model"] = "nai-diffusion-5-full"
+    await state.db.set_setting("quota_algo_last", _json.dumps({"v5": {"percent": 97}}))
+    assert (await post("/ai/generate-image", body)).status_code == 402        # 个人 V5 用完，账号还有额度：不续杯
+    await state.db.set_setting("quota_algo_last", _json.dumps({"v5": {"percent": 0.5}}))
     r = await post("/ai/generate-image", body)
     assert r.status_code == 200
     _, kwargs = state.nai.calls[-1][2], state.nai.calls[-1][3]
     assert kwargs["requires_anlas"] and not kwargs["v5_free"]
-    big = image_body(width=2048, height=2048)
+    key.update(daily_anlas=1000)                                           # 超规格图按像素扣，给够当天 Anlas
+    big = image_body(width=1536, height=1536)
     big["model"] = "nai-diffusion-4-5-full"
     assert (await post("/ai/generate-image", big)).status_code == 200
-    assert state.nai.calls[-1][2]["parameters"]["width"] * state.nai.calls[-1][2]["parameters"]["height"] <= 1024 * 1024   # 仍钳制
+    params = state.nai.calls[-1][2]["parameters"]
+    assert params["width"] * params["height"] > 1024 * 1024               # 有 Anlas：不钳制，按 Anlas 扣
 
 
 @pytest.mark.asyncio
-async def test_auto_anlas_only_pays_for_v5_top_up(state):
+async def test_auto_anlas_pays_for_paid_only_operations(state):
+    """放开 Anlas（10-10）：自动分配的 Anlas 可用于超规格 / 放大 / 导演工具等付费操作，仍受每日上限约束。"""
     from app.main import GateError
     key = state.db.keys["fixture-1"]
     key.update(allow_anlas=True, anlas_auto=1, daily_v5=1, daily_anlas=100, image_model_scope="all")
-    with pytest.raises(GateError) as caught:          # 放大 / 导演工具 / 超规格等其他付费请求
-        await main.quota_image_check(key, {"anlas": 20, "v5": 0, "images": 1})
-    assert caught.value.status == 402 and "V5" in caught.value.message
-    await main.quota_image_check(key, {"anlas": 20, "v5": 0, "images": 1, "topup": True})
+    await main.quota_image_check(key, {"anlas": 20, "v5": 0, "images": 1})
+    with pytest.raises(GateError) as caught:
+        await main.quota_image_check(key, {"anlas": 200, "v5": 0, "images": 1})
+    assert caught.value.status == 402 and "Anlas" in caught.value.message
 
 
 def test_admin_change_description_for_member_dm():

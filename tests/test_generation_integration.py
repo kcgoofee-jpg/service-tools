@@ -64,8 +64,13 @@ class FakeDB:
         return {name: sum(row.get(name, 0) for row in values)
                 for name in ("anlas", "v5", "images", "legacy_free_images")}
 
-    async def get_setting(self, _name, default):
-        return default
+    async def get_setting(self, name, default):
+        return getattr(self, "kv", {}).get(name, default)
+
+    async def set_setting(self, name, value):
+        if not hasattr(self, "kv"):
+            self.kv = {}
+        self.kv[name] = value
 
     async def month_anlas(self, key_id, *_):
         return sum(row["anlas"] for owner, row in self.charges if owner == key_id)

@@ -121,8 +121,9 @@ async def rebalance(state, now: Optional[float] = None, account: Optional[dict] 
     if notify is not None:
         for key_id in chosen - set(current):          # 新获得续杯资格的成员，私信说明一次
             try:
-                await notify(key_id, f"你近 7 天比较活跃，获得了 Anlas 自动续杯：今天的 V5 用完后，可以继续用 Anlas 生成同规格的 V5 图，"
-                                     f"每天约 {per} Anlas（约 {per // V5_PAID_PRICE} 张）。额度按全站剩余 Anlas 每天自动重算，不用做任何设置。")
+                await notify(key_id, f"你近 7 天比较活跃，获得了每天约 {per} Anlas 的自动额度：可以用 Vibe / 角色参照、放大、导演工具，"
+                                     "或者超过免费规格的尺寸 / 步数（这些本来就要花 Anlas，不占大家的 V5 免费额度）。"
+                                     "额度按全站剩余 Anlas 每天自动重算，不用做任何设置。")
             except Exception:
                 pass
     for key_id in set(current) - chosen:
