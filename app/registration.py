@@ -29,8 +29,10 @@ class RegistrationService:
                  membership_role: str = MEMBERSHIP_ROLE, site_url: str = SITE_URL,
                  key_daily_images: int = 100, key_daily_v5: int = 50,
                  key_image_scope: str = "all", key_expires_days: int = 0, key_rpm: int = 5,
-                 max_users: int = 0, reset_at: str = "", key_features: str | None = None):
+                 max_users: int = 0, reset_at: str = "", key_features: str | None = None,
+                 min_account_days: int = 0):
         self.max_users, self.reset_at, self.key_features = max_users, reset_at, key_features
+        self.min_account_days = min_account_days
         self.command_guild, self.membership_guild = command_guild, membership_guild
         self.membership_role, self.site_url = membership_role, site_url
         self.key_daily_images, self.key_daily_v5 = key_daily_images, key_daily_v5
@@ -43,10 +45,17 @@ class RegistrationService:
         self.lock = asyncio.Lock()
 
     async def count_active(self) -> int:
-        """仍持有有效 Key 的已注册用户数（Key 被删则名额释放）。"""
+        """占用名额的人数：持有有效（启用且未过期）Key 的已注册用户。Key 过期或被删则名额释放。"""
         rows = await self.db._db.execute_fetchall(
-            "SELECT COUNT(*) FROM discord_registrations r JOIN api_keys k ON k.id=r.key_id")
+            """SELECT COUNT(*) FROM discord_registrations r JOIN api_keys k ON k.id=r.key_id
+               WHERE k.enabled=1 AND (k.expires_at IS NULL OR k.expires_at > ?)""", (time.time(),))
         return int(rows[0][0])
+
+    async def _release_if_expired(self, discord_id: str) -> None:
+        """成员的 Key 已过期：自动清掉旧 Key 和记录，让他可以在有名额时重新领取（每个周期自然轮换）。"""
+        key = await self.key_row_for(discord_id)
+        if key is not None and key["expires_at"] and key["expires_at"] < time.time():
+            await self.revoke(discord_id)
 
     async def settings(self) -> dict:
         from .ops import registration_settings
@@ -86,10 +95,15 @@ class RegistrationService:
     async def begin(self, user_id: str, guild_id: str) -> str:
         if guild_id != self.command_guild or not user_id.isdecimal():
             raise RegistrationError("请在指定服务器使用 /register。")
+        if self.min_account_days:
+            age_days = (time.time() * 1000 - ((int(user_id) >> 22) + 1420070400000)) / 86_400_000
+            if age_days < self.min_account_days:
+                raise RegistrationError(f"Discord 账号注册满 {self.min_account_days} 天后才能领取，请稍后再来。")
+        await self._release_if_expired(user_id)
         if (await self.db._db.execute_fetchall(
             "SELECT 1 FROM discord_registrations WHERE discord_id=?", (user_id,)
         )):
-            raise RegistrationError("这个 Discord 账号已经领取过 Key。")
+            raise RegistrationError("这个 Discord 账号已经领取过 Key，可用 /quota 查看、/resetkey 重置。")
         await self._check_capacity()
         self.pending = {k: v for k, v in self.pending.items() if v[1] > time.time()}
         if sum(u == user_id for u, _ in self.pending.values()) >= 2:
@@ -115,10 +129,11 @@ class RegistrationService:
         expected_id = pending[0]
         # The state is one-use; no OAuth token is persisted.
         async with self.lock:
+            await self._release_if_expired(expected_id)
             if (await self.db._db.execute_fetchall(
                 "SELECT 1 FROM discord_registrations WHERE discord_id=?", (expected_id,)
             )):
-                raise RegistrationError("这个 Discord 账号已经领取过 Key。")
+                raise RegistrationError("这个 Discord 账号已经领取过 Key，可用 /quota 查看、/resetkey 重置。")
             cfg = await self._check_capacity()
             try:
                 response = await self.http.post("https://discord.com/api/oauth2/token", data={
@@ -200,4 +215,5 @@ def configured_service(db, http: httpx.AsyncClient) -> RegistrationService | Non
         key_image_scope="all" if os.getenv("REGISTER_IMAGE_SCOPE") == "all" else "legacy",
         key_expires_days=number("REGISTER_EXPIRES_DAYS", 30), key_rpm=max(1, number("REGISTER_RPM", 5)),
         max_users=number("REGISTER_MAX_USERS", 0), reset_at=os.getenv("REGISTER_RESET_AT", "").strip(),
-        key_features=os.getenv("REGISTER_FEATURES", "image").strip())
+        key_features=os.getenv("REGISTER_FEATURES", "image").strip(),
+        min_account_days=number("REGISTER_MIN_ACCOUNT_DAYS", 7))
