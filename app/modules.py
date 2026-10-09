@@ -277,8 +277,42 @@ def observation(state) -> Module:
         checks=checks, hard_note="关闭后不再做数据一致性核对；日志照常记录")
 
 
+# ---------------- ③ 公平调度（DRR）----------------
+def scheduling(state) -> Module:
+    from . import scheduling as sch
+
+    async def get_enabled(k: Kernel):
+        return (await state.db.get_setting(sch.MODE_SETTING, "observe")) != "off"
+
+    async def set_enabled(k: Kernel, on: bool):
+        await state.db.set_setting(sch.MODE_SETTING, "observe" if on else "off")
+
+    async def tick(k: Kernel):
+        r = getattr(state, "sched").report()
+        return f"近 10 分钟 {r['active_keys']} 把 Key · 不公平决策 {r['unfair_rate']:.0%} · 最大差距 {r['skew']}"
+
+    async def checks(k: Kernel):
+        r = getattr(state, "sched").report()
+        if r["shadow_decisions"] < 20:
+            return [Check("公平性（影子）", True, f"样本不足（{r['shadow_decisions']} 次多人排队）")]
+        # 影子观察：没有人被明显垄断、也没人被饿着时算健康；FIFO 下不公平率高 = DRR 值得开
+        return [Check("没有 Key 垄断队列", r["monopoly"] <= 0.6,
+                      f"近 10 分钟最高一把 Key 占 {r['monopoly']:.0%}，出图差距 {r['skew']}，"
+                      f"FIFO 不公平决策 {r['unfair_rate']:.0%}（DRR 可消除）")]
+
+    return Module(
+        name="scheduling", title="③ 公平调度（DRR）", question="账号空出槽位时，下一张图轮到谁？",
+        reality="每把 Key 最近 10 分钟的出图数、当前排队的 Key",
+        principle="亏损轮询（DRR）：挑最近服务最少的 Key 先出；参数 quantum（一把连出几张后让队）",
+        get_enabled=get_enabled, set_enabled=set_enabled, tick=tick, checks=checks,
+        hard_note="关闭后完全按 FIFO；observe 模式只统计不改顺序（冻结期保持 observe）",
+        params=[Param("配额粒度 quantum", lambda: P("scheduling.quantum", sch.DEFAULT_QUANTUM), "A", "",
+                      "1 = 严格轮流最公平；越大越偏吞吐。待用影子数据自动调", key="scheduling.quantum"),
+                Param("模式", lambda: "observe（影子，不改顺序）", "A", "", "冻结期保持；审核后切 enforce")])
+
+
 def build(state, bug) -> Kernel:
     k = Kernel(state, bug)
-    for make in (observation, capacity, allocation, anlas, autopilot_module, integrity, registration):
+    for make in (observation, capacity, allocation, scheduling, anlas, autopilot_module, integrity, registration):
         k.register(make(state))
     return k
