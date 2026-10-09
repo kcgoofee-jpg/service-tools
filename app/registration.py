@@ -23,7 +23,15 @@ class RegistrationError(Exception):
 
 class RegistrationService:
     def __init__(self, db, http: httpx.AsyncClient, *, client_id: str, client_secret: str,
-                 bot_token: str, bridge_secret: str, redirect_uri: str):
+                 bot_token: str, bridge_secret: str, redirect_uri: str,
+                 command_guild: str = COMMAND_GUILD, membership_guild: str = MEMBERSHIP_GUILD,
+                 membership_role: str = MEMBERSHIP_ROLE, site_url: str = SITE_URL,
+                 key_daily_images: int = 100, key_daily_v5: int = 50,
+                 key_image_scope: str = "all", key_expires_days: int = 0, key_rpm: int = 5):
+        self.command_guild, self.membership_guild = command_guild, membership_guild
+        self.membership_role, self.site_url = membership_role, site_url
+        self.key_daily_images, self.key_daily_v5 = key_daily_images, key_daily_v5
+        self.key_image_scope, self.key_expires_days, self.key_rpm = key_image_scope, key_expires_days, key_rpm
         self.db, self.http = db, http
         self.client_id, self.client_secret = client_id, client_secret
         self.bot_token, self.bridge_secret = bot_token, bridge_secret
@@ -32,7 +40,7 @@ class RegistrationService:
         self.lock = asyncio.Lock()
 
     async def begin(self, user_id: str, guild_id: str) -> str:
-        if guild_id != COMMAND_GUILD or not user_id.isdecimal():
+        if guild_id != self.command_guild or not user_id.isdecimal():
             raise RegistrationError("请在指定服务器使用 /register。")
         if (await self.db._db.execute_fetchall(
             "SELECT 1 FROM discord_registrations WHERE discord_id=?", (user_id,)
@@ -78,29 +86,33 @@ class RegistrationService:
                 user = await self._discord("GET", "/users/@me", bearer="Bearer " + token)
                 if str(user.get("id")) != expected_id:
                     raise RegistrationError("授权的 Discord 账号与命令发起者不一致。")
-                member = await self._discord("GET", f"/users/@me/guilds/{MEMBERSHIP_GUILD}/member",
+                member = await self._discord("GET", f"/users/@me/guilds/{self.membership_guild}/member",
                                              bearer="Bearer " + token)
-                if MEMBERSHIP_ROLE not in member.get("roles", []):
+                if self.membership_role and self.membership_role not in member.get("roles", []):
                     raise RegistrationError("未检测到指定身份组，无法领取 Key。")
                 channel = await self._discord("POST", "/users/@me/channels",
                     bearer="Bot " + self.bot_token, json={"recipient_id": expected_id})
                 key = gen_key("nai")
                 row = await self.db.create_key({
                     "name": "Discord:" + expected_id, "token": key,
-                    "daily_images": 100, "daily_v5": 50, "daily_anlas": 0,
-                    "monthly_anlas": 0, "daily_text_tokens": 0, "rpm": 5,
+                    "daily_images": self.key_daily_images, "daily_v5": self.key_daily_v5,
+                    "daily_anlas": 0, "monthly_anlas": 0, "daily_text_tokens": 0,
+                    "rpm": self.key_rpm,
                     "allow_anlas": False, "allow_img2img": False,
-                    "exclude_global_v5": False, "image_model_scope": "all",
-                    "expires_at": None,
+                    "exclude_global_v5": False, "image_model_scope": self.key_image_scope,
+                    "expires_at": (time.time() + self.key_expires_days * 86400)
+                                  if self.key_expires_days > 0 else None,
                 })
                 await self.db._db.execute(
                     "INSERT INTO discord_registrations(discord_id,key_id,created_at) VALUES (?,?,?)",
                     (expected_id, row["id"], time.time()))
                 await self.db._db.commit()
+                quota = f"V4.5 及以下 {self.key_daily_images} 张" + (
+                    f"；V5 {self.key_daily_v5} 张" if self.key_daily_v5 else "")
                 try:
                     await self._discord("POST", f"/channels/{channel['id']}/messages",
                         bearer="Bot " + self.bot_token,
-                        json={"content": f"你的 NAI Gate API Key：`{key}`\n网址：{SITE_URL}\n每日额度：V5 50 张；V4.5 及以下 100 张。请勿公开分享此 Key。",
+                        json={"content": f"你的 NAI Gate API Key：`{key}`\n网址：{self.site_url}\n每日额度：{quota}。请勿公开分享此 Key。",
                               "allowed_mentions": {"parse": []}})
                 except Exception:
                     await self.db._db.execute("DELETE FROM discord_registrations WHERE discord_id=?", (expected_id,))
@@ -112,9 +124,26 @@ class RegistrationService:
 
 
 def configured_service(db, http: httpx.AsyncClient) -> RegistrationService | None:
-    names = ("DISCORD_CLIENT_ID", "DISCORD_CLIENT_SECRET", "DISCORD_BOT_TOKEN", "REGISTRATION_BRIDGE_SECRET")
+    """全部配置来自环境变量；缺任意一项则自助注册保持关闭。
+    DISCORD_GUILD_ID 为发出 /register 的服务器；DISCORD_ROLE_ID 留空则该服务器任意成员可领取。"""
+    names = ("DISCORD_CLIENT_ID", "DISCORD_CLIENT_SECRET", "DISCORD_BOT_TOKEN",
+             "REGISTRATION_BRIDGE_SECRET", "DISCORD_GUILD_ID", "SITE_URL")
     if not all(os.getenv(name) for name in names):
         return None
-    return RegistrationService(db, http, client_id=os.environ[names[0]], client_secret=os.environ[names[1]],
-        bot_token=os.environ[names[2]], bridge_secret=os.environ[names[3]],
-        redirect_uri=SITE_URL + "self-register/callback")
+    site = os.environ["SITE_URL"].rstrip("/") + "/"
+    guild = os.environ["DISCORD_GUILD_ID"].strip()
+
+    def number(name: str, default: int) -> int:
+        try:
+            return max(0, int(os.getenv(name, default)))
+        except ValueError:
+            return default
+
+    return RegistrationService(db, http, client_id=os.environ["DISCORD_CLIENT_ID"],
+        client_secret=os.environ["DISCORD_CLIENT_SECRET"], bot_token=os.environ["DISCORD_BOT_TOKEN"],
+        bridge_secret=os.environ["REGISTRATION_BRIDGE_SECRET"], redirect_uri=site + "self-register/callback",
+        command_guild=guild, membership_guild=guild, membership_role=os.getenv("DISCORD_ROLE_ID", "").strip(),
+        site_url=site, key_daily_images=number("REGISTER_DAILY_IMAGES", 30),
+        key_daily_v5=number("REGISTER_DAILY_V5", 0),
+        key_image_scope="all" if os.getenv("REGISTER_IMAGE_SCOPE") == "all" else "legacy",
+        key_expires_days=number("REGISTER_EXPIRES_DAYS", 30), key_rpm=max(1, number("REGISTER_RPM", 5)))

@@ -105,3 +105,32 @@ class RegistrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("nai-", done.text)
             self.assertEqual(done.headers["cache-control"], "no-store")
             self.assertEqual(done.headers["referrer-policy"], "no-referrer")
+
+
+class ConfiguredServiceTests(unittest.IsolatedAsyncioTestCase):
+    def _env(self, **extra):
+        base = dict(DISCORD_CLIENT_ID="c", DISCORD_CLIENT_SECRET="s", DISCORD_BOT_TOKEN="b",
+                    REGISTRATION_BRIDGE_SECRET="x", DISCORD_GUILD_ID="123", SITE_URL="https://gate.example.com")
+        base.update(extra)
+        return base
+
+    async def test_disabled_unless_fully_configured(self):
+        from unittest.mock import patch
+        from app.registration import configured_service
+        env = self._env()
+        del env["SITE_URL"]
+        with patch.dict("os.environ", env, clear=True):
+            self.assertIsNone(configured_service(None, None))
+
+    async def test_env_values_drive_guild_role_site_and_key_defaults(self):
+        from unittest.mock import patch
+        from app.registration import configured_service
+        with patch.dict("os.environ", self._env(DISCORD_ROLE_ID="999"), clear=True):
+            svc = configured_service(None, None)
+        self.assertEqual((svc.command_guild, svc.membership_guild, svc.membership_role), ("123", "123", "999"))
+        self.assertEqual(svc.site_url, "https://gate.example.com/")
+        self.assertEqual((svc.key_daily_images, svc.key_daily_v5, svc.key_image_scope, svc.key_expires_days),
+                         (30, 0, "legacy", 30))
+        self.assertEqual(svc.redirect_uri, "https://gate.example.com/self-register/callback")
+        with self.assertRaises(RegistrationError):
+            await svc.begin("777", "1480185480048808009")   # the original author's guild is not accepted
