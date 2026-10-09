@@ -547,6 +547,10 @@ class Database:
                 await db.rollback()
                 raise
 
+    async def forget_registration_for_key(self, key_id: int) -> None:
+        await self._db.execute("DELETE FROM discord_registrations WHERE key_id=?", (key_id,))
+        await self._db.commit()
+
     async def add_log(
         self, key_id: Optional[int], key_name: str, kind: str, model: str,
         status: str, images: int = 0, anlas: float = 0.0, tokens: int = 0,

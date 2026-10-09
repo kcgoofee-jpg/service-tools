@@ -42,6 +42,7 @@ class GateState:
         self._global_sem = asyncio.Semaphore(max(1, settings.global_concurrency))
         self._key_sems: dict[int, asyncio.Semaphore] = {}
         self._key_image_next_at: dict[int, float] = {}
+        self._key_image_taken: dict[int, tuple[float, float]] = {}
         self._rpm: dict[int, deque[float]] = {}
         self._tag_active: set[int] = set()
         self._tag_next_at: dict[int, float] = {}
@@ -134,14 +135,27 @@ class GateState:
                     now = time.monotonic()
                     wait = max(0.0, self._key_image_next_at.get(key_id, 0.0) - now)
                     if not wait:
-                        self._key_image_next_at[key_id] = now + max(
-                            0.0, self.settings.key_image_min_interval)
+                        prev = self._key_image_next_at.get(key_id, 0.0)
+                        new = now + max(0.0, self.settings.key_image_min_interval)
+                        self._key_image_next_at[key_id] = new
+                        self._key_image_taken[key_id] = (prev, new)
+                        if len(self._key_image_next_at) > 1024:
+                            for k in [k for k, v in self._key_image_next_at.items() if v <= now]:
+                                self._key_image_next_at.pop(k, None)
+                                self._key_image_taken.pop(k, None)
                         return
                 self._image_pacing_waiting += 1
                 try:
                     await asyncio.sleep(wait)
                 finally:
                     self._image_pacing_waiting -= 1
+
+    async def refund_key_image_slot(self, key_id: int) -> None:
+        """请求在到达上游前被拒绝（如额度不足）时归还冷却占用；已被后续请求覆盖则不动。"""
+        async with self._lock:
+            taken = self._key_image_taken.pop(key_id, None)
+            if taken and self._key_image_next_at.get(key_id) == taken[1]:
+                self._key_image_next_at[key_id] = taken[0]
 
     def queue_snapshot(self) -> dict:
         """Aggregate visibility only; no identities, requests or token values."""
@@ -203,6 +217,10 @@ class GateState:
             if len(win) >= max(1, rpm):
                 return False
             win.append(now)
+            if len(self._rpm) > 1024:
+                for k in [k for k, w in self._rpm.items() if not w or now - w[-1] > 60]:
+                    if k != key_id:
+                        self._rpm.pop(k, None)
             return True
 
     async def hit_login(self, client_id: str) -> bool:
@@ -226,6 +244,8 @@ class GateState:
         key_ids = await self.db.inactive_key_ids(time.time() - days * 86400)
         for key_id in key_ids:
             await self.db.delete_key(key_id)
+            # 释放对应的 Discord 领取记录，否则用户永远无法重新领取。
+            await self.db.forget_registration_for_key(key_id)
         return len(key_ids)
 
     # ---------- upstream image cooldown ----------
