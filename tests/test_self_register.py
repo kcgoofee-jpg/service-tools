@@ -134,3 +134,56 @@ class ConfiguredServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(svc.redirect_uri, "https://gate.example.com/self-register/callback")
         with self.assertRaises(RegistrationError):
             await svc.begin("777", "1480185480048808009")   # the original author's guild is not accepted
+
+
+class CapacityAndAdminTests(RegistrationTests):
+    """Reuses the Discord mock from RegistrationTests (inherited tests re-run harmlessly)."""
+
+    async def mint(self, user="777"):
+        self.service.max_users = 0
+        link = await self.service.begin(user, "1480185480048808009")
+        state = parse_qs(urlparse(link).query)["state"][0]
+        return await self.service.finish("auth-code", state)
+
+    async def test_capacity_blocks_new_registrations_and_revoke_frees_slot(self):
+        await self.mint()
+        self.assertEqual(await self.service.count_active(), 1)
+        self.service.max_users = 1
+        with self.assertRaises(RegistrationError):
+            await self.service.begin("888", "1480185480048808009")
+        self.assertTrue(await self.service.revoke("777"))
+        self.assertEqual(await self.service.count_active(), 0)
+        link = await self.service.begin("888", "1480185480048808009")   # slot is free again
+        self.assertIn("state=", link)
+        self.assertFalse(await self.service.revoke("777"))
+
+    async def test_reset_all_removes_keys_and_registrations_so_users_can_return(self):
+        await self.mint()
+        self.assertEqual(await self.service.reset_all(), 1)
+        self.assertEqual((await self.db._db.execute_fetchall("SELECT count(*) FROM api_keys"))[0][0], 0)
+        self.assertEqual((await self.db._db.execute_fetchall("SELECT count(*) FROM discord_registrations"))[0][0], 0)
+        self.assertEqual(await self.mint(), "sent")
+
+    async def test_quota_and_resetkey_endpoints_need_secret_and_right_guild(self):
+        await self.mint()
+        app = FastAPI()
+        app.include_router(router)
+        app.state.registrar = self.service
+        from types import SimpleNamespace
+        app.state.gate = SimpleNamespace(db=self.db, day=lambda: "2026-10-09")
+        auth = {"Authorization": "Bearer bridge-secret"}
+        body = {"discord_id": "777", "guild_id": "1480185480048808009"}
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="https://x") as client:
+            self.assertEqual((await client.post("/self-register/quota", json=body)).status_code, 401)
+            self.assertEqual((await client.post("/self-register/quota", headers=auth,
+                json={**body, "guild_id": "1"})).status_code, 403)
+            quota = await client.post("/self-register/quota", headers=auth, json=body)
+            self.assertEqual(quota.status_code, 200)
+            self.assertEqual(quota.json()["daily_images"], 100)
+            old = (await self.db._db.execute_fetchall("SELECT token FROM api_keys"))[0][0]
+            new = (await client.post("/self-register/resetkey", headers=auth, json=body)).json()["key"]
+            self.assertNotEqual(old, new)
+            self.assertIsNone(await self.db.get_key_by_token(old))
+            self.assertIsNotNone(await self.db.get_key_by_token(new))
+            self.assertEqual((await client.post("/self-register/quota", headers=auth,
+                json={**body, "discord_id": "999"})).status_code, 404)

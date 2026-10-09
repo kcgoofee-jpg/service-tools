@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta
 import json
 import logging
 import time
@@ -135,14 +136,16 @@ async def lifespan(app: FastAPI):
     registration_http = httpx.AsyncClient()
     app.state.registrar = configured_service(STATE.db, registration_http)
     cleanup_task = asyncio.create_task(inactive_key_cleanup_loop())
+    reset_task = asyncio.create_task(registration_reset_loop())
     try:
         yield
     finally:
-        cleanup_task.cancel()
-        try:
-            await cleanup_task
-        except asyncio.CancelledError:
-            pass
+        for task in (cleanup_task, reset_task):
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
         await registration_http.aclose()
         await STATE.nai.close()
         await STATE.db.close()
@@ -198,6 +201,30 @@ async def inactive_key_cleanup_loop() -> None:
         except Exception as exc:
             print(f"[warn] inactive key cleanup failed: {exc}")
         await asyncio.sleep(3600)
+
+
+async def registration_reset_loop() -> None:
+    """可选：每天固定时刻（REGISTER_RESET_AT=HH:MM，按 TZ）清空全部自助注册用户。"""
+    while True:
+        service = getattr(app.state, "registrar", None)
+        at = service.reset_at if service else ""
+        try:
+            hour, minute = (int(part) for part in at.split(":"))
+            if not (0 <= hour < 24 and 0 <= minute < 60):
+                raise ValueError
+        except ValueError:
+            await asyncio.sleep(3600)   # 未配置或格式错误：保持关闭，但允许改配置后重启生效
+            continue
+        now = datetime.now(STATE.tz)
+        target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if target <= now:
+            target += timedelta(days=1)
+        await asyncio.sleep((target - now).total_seconds())
+        try:
+            removed = await service.reset_all()
+            print(f"[info] scheduled registration reset: removed {removed} user(s)")
+        except Exception as exc:
+            print(f"[warn] registration reset failed: {exc}")
 
 
 async def check_rpm(key) -> None:
