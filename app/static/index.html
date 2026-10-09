@@ -733,8 +733,12 @@ NAI_TOKEN_V5_DAILY_LIMITS=0,150</pre><button class="btn mini" type="button" data
             <div class="form-grid" id="guardFields"></div>
             <button class="btn primary" data-act="save-guard">保存账号保护设置</button>
           </div>
+          <div class="card panel" id="quotaAlgo">
+            <div class="panel-head"><h2>动态额度</h2><div class="desc">所有「交给算法」的成员同一套额度，每 10 分钟重算；每天按前一天的拥挤程度微调上限和保底。成员页里手动改过的 Key 不受影响</div></div>
+            <div id="qaBody"><div class="skel" style="height:80px"></div></div>
+          </div>
           <div class="card panel">
-            <div class="panel-head"><h2>Anlas 自动分配</h2><div class="desc">Anlas 每个账单周期补满、不累积。每小时按「(剩余 − 保留) ÷ 距续费天数」重算每日池，平均分给近 7 天活跃、能用 V5 的成员，只用于当天 V5 用完后的「续杯」，仍保留免费尺寸钳制。手动设置过 Anlas 的 Key 不受影响</div></div>
+            <div class="panel-head"><h2>Anlas 自动分配</h2><div class="desc">Anlas 每个账单周期补满、不累积。每 10 分钟按「(剩余 − 保留) ÷ 距续费天数」重算每日池，平均分给近 7 天活跃、能用 V5 的成员，只用于当天 V5 用完后的「续杯」，仍保留免费尺寸钳制。手动设置过 Anlas 的 Key 不受影响</div></div>
             <div id="anlasLive" class="hint" style="margin-bottom:12px;white-space:pre-line">正在读取…</div>
             <div class="form-grid" id="anlasFields"></div>
             <button class="btn primary" data-act="save-anlas">保存并立即重算</button>
@@ -1148,6 +1152,7 @@ function tab(name){
   if(name==='logs') loadLogs();
   if(name==='actions') loadActions();
   if(name==='set' || name==='limits') loadSettings();
+  if(name==='limits') loadQuotaAlgo();
   if(name==='up'){ loadOverview(); loadReconciliation(); loadPerf(); loadShadow(); }
   if(name==='bugs') loadBugs();
 }
@@ -1570,9 +1575,11 @@ function permControls(m){
   const mode = m.anlas_mode || 'auto', daily = Math.round(m.daily_anlas || 0);
   const manual = ANLAS_PRESETS.includes(daily) ? ANLAS_PRESETS : [...ANLAS_PRESETS, daily].filter(Boolean).sort((a,b)=>a-b);
   const autoLabel = m.anlas_auto ? `算法 · 今日 ${daily}` : '交给算法';
-  return `<select class="psel" data-perm="scope" data-id="${m.id}" aria-label="模型权限">
-      <option value="legacy"${scope==='legacy'?' selected':''}>仅 V4.5</option>
-      <option value="all"${scope==='all'?' selected':''}>V4.5 + V5${m.daily_v5?' ('+m.daily_v5+'/天)':''}</option></select>
+  const qa = m.quota_auto !== false;
+  return `<select class="psel" data-perm="scope" data-id="${m.id}" aria-label="额度">
+      <option value="auto"${qa?' selected':''}>算法 · ${m.daily_images}${m.daily_v5?' + V5 '+m.daily_v5:''}</option>
+      <option value="legacy"${!qa&&scope==='legacy'?' selected':''}>手动 · 仅 V4.5</option>
+      <option value="all"${!qa&&scope==='all'?' selected':''}>手动 · V4.5 + V5</option></select>
     <select class="psel" data-perm="anlas" data-id="${m.id}" aria-label="Anlas 权限">
       <option value="off"${mode==='off'?' selected':''}>Anlas 关闭</option>
       <option value="auto"${mode==='auto'?' selected':''}>${esc(autoLabel)}</option>
@@ -1583,7 +1590,7 @@ document.addEventListener('change', async e => {
   const sel = e.target.closest('select[data-perm]'); if(!sel) return;
   const m = (membersCache||[]).find(x=>x.id===+sel.dataset.id); if(!m) return;
   const v = sel.value, body = {};
-  if(sel.dataset.perm === 'scope') body.image_model_scope = v;
+  if(sel.dataset.perm === 'scope'){ if(v === 'auto') body.quota_mode = 'auto'; else body.image_model_scope = v; }
   else if(v.startsWith('manual:')){ body.anlas_mode = 'manual'; body.daily_anlas = +v.slice(7); }
   else body.anlas_mode = v;
   sel.disabled = true;
@@ -1827,6 +1834,7 @@ function renderOpsReg(){
       <div class="field"><label for="reg_v5">每日 V5</label><input id="reg_v5" type="number" min="0" value="${esc(r.daily_v5)}"><div class="hint">0 = 不限（仅“含 V5”时生效）</div></div>
       <div class="field"><label for="reg_scope">图片模型范围</label><select id="reg_scope"><option value="legacy" ${r.image_scope==='legacy'?'selected':''}>仅 V4.5 及以下</option><option value="all" ${r.image_scope==='all'?'selected':''}>含 V5</option></select></div>
     </div>
+    <div class="hint" style="margin:-4px 0 12px">每日图片、每日 V5、模型范围由「额度与保护 › 动态额度」自动设置，这里改了也会在 10 分钟内被算法覆盖。</div>
     <label>新成员默认开通的功能</label>
     <div class="opt-group">
       <label class="check"><input type="radio" name="reg_feat_mode" value="legacy" ${r.features==null?'checked':''}><span>全部已开放功能（含以后新开放的）</span></label>
@@ -2183,6 +2191,21 @@ async function loadGuard(){
 }
 const ANLAS_LABELS = {anlas_auto_enabled:['开启自动分配（1 开 / 0 关）',0,1], anlas_reserve:['保留不分的 Anlas',0,10000],
   anlas_member_daily_cap:['每人每天最多',0,1000], anlas_min_images_7d:['近 7 天至少出图张数',0,10000], anlas_min_key_age_days:['领取满几天',0,365]};
+/* 动态额度：结果 + 每日微调历史（数据来自 /admin/api/quota-algo，算法说明见 app/quota_algo.py） */
+async function loadQuotaAlgo(){
+  try{
+    const d = await api('/admin/api/quota-algo'), l = d.last || {}, v = l.v5 || {};
+    const rows = (d.history || []).slice(-7).reverse().map(h => `<tr><td class="mono">${esc(h.day)}</td><td class="num">${esc(h.used)} / ${esc(h.cap)}</td><td class="num">${esc(h.hourly_blocks)}</td><td class="num">${esc(h.ceiling_hits)}</td><td class="num">${esc(h.from[0])}→${esc(h.to[0])} · ${esc(h.from[1])}→${esc(h.to[1])}</td><td class="muted">${esc((h.reasons||[]).join('；'))}</td></tr>`).join('');
+    $('#qaBody').innerHTML = l.enabled === false ? '<div class="muted">动态额度已关闭</div>' : `
+      <div class="cols-3">
+        <div><div class="muted sm">V4.5 每人每天</div><div class="num" style="font-size:22px;font-weight:700">${esc(l.ceiling ?? '—')} <span class="muted" style="font-size:13px">保底 ${esc(l.base ?? '—')}</span></div></div>
+        <div><div class="muted sm">V5 每人每天 / 全站</div><div class="num" style="font-size:22px;font-weight:700">${esc(v.each ?? '—')} <span class="muted" style="font-size:13px">/ ${esc(v.global ?? '—')}</span></div></div>
+        <div><div class="muted sm">账号 V5 剩余 · 恢复</div><div class="num" style="font-size:22px;font-weight:700">${v.percent==null?'—':esc(Math.round(v.percent))+'%'} <span class="muted" style="font-size:13px">${esc(v.rate ?? '—')}%/天 · 系数 ${esc(v.k ?? '—')}</span></div></div>
+      </div>
+      <div class="muted sm" style="margin:8px 0">由算法管理 ${esc(l.members ?? 0)} 人 · V5 按 ${esc(v.people ?? '—')} 人分 · 更新于 ${l.updated_at?esc(new Date(l.updated_at*1000).toLocaleString()):'—'}</div>
+      ${rows?`<div class="table-wrap"><table class="rt"><thead><tr><th>日期</th><th>用量 / 账号日上限</th><th>每小时拦截</th><th>顶格人数</th><th>上限 · 保底</th><th>理由</th></tr></thead><tbody>${rows}</tbody></table></div>`:'<div class="muted sm">每日微调记录会在明天出现</div>'}`;
+  }catch(e){ $('#qaBody').innerHTML = '<div class="muted">读取失败</div>'; }
+}
 async function loadAnlasPool(){
   try{
     const d = await api('/admin/api/anlas-pool'), v = d.settings, L = d.last;

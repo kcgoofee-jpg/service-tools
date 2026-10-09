@@ -568,6 +568,17 @@ async def patch_key(request: Request, key_id: int):
         fields["expires_at"] = (time.time() + d * 86400) if d > 0 else None
     before = await st.db.get_key(key_id)
     await st.db.update_key(key_id, fields)
+    quota_mode = body.get("quota_mode")
+    if quota_mode == "auto" or any(k in fields for k in ("daily_images", "daily_v5", "image_model_scope")):
+        # 手动改了额度或模型 → 这把 Key 由站长管理（-1），动态额度算法不再覆盖；选「交给算法」恢复为 1 并立即重算
+        await st.db._db.execute("UPDATE api_keys SET quota_auto=? WHERE id=?", (1 if quota_mode == "auto" else -1, key_id))
+        await st.db._db.commit()
+        if quota_mode == "auto":
+            try:
+                from . import quota_algo
+                await quota_algo.run(st)
+            except Exception as exc:
+                st.bugs.capture("quota_algo", exc) if getattr(st, "bugs", None) else None
     if mode == "auto" or "allow_anlas" in fields or "daily_anlas" in fields:
         # 手动设置后由站长管理（-1），自动分配不会再覆盖；选「交给算法」则回到 0，下次重算时按条件分配
         await st.db._db.execute("UPDATE api_keys SET anlas_auto=? WHERE id=?", (0 if mode == "auto" else -1, key_id))
@@ -645,6 +656,43 @@ async def logs(request: Request, key_id: Optional[int] = None, page: int = 1,
         "total": total,
         "pages": pages,
     }
+
+
+@router.get("/quota-algo")
+async def quota_algo_get(request: Request):
+    """动态额度：当前结果、参数、最近 30 天的每日微调记录。"""
+    require_admin(request)
+    from . import quota_algo
+    db = request.app.state.gate.db
+    params = {k: await db.get_setting(k, v) for k, v in quota_algo.DEFAULTS.items()}
+    return {"last": json.loads(await db.get_setting(quota_algo.STATE_KEY, "{}") or "{}"),
+            "history": json.loads(await db.get_setting(quota_algo.HISTORY_KEY, "[]") or "[]"),
+            "params": params}
+
+
+@router.put("/quota-algo")
+async def quota_algo_put(request: Request):
+    """修改初始值 / 步长 / 范围；保存后立即重算。"""
+    require_admin(request)
+    from . import quota_algo
+    body = await read_json_body(request)
+    st = request.app.state.gate
+    bounds = {"quota_auto_enabled": (0, 1), "quota_target_avg": (10, 2000), "quota_base": (0, 2000),
+              "quota_ceiling_max": (10, 5000), "quota_base_min": (0, 2000), "quota_step": (1, 500),
+              "quota_base_step": (1, 500), "quota_v5_min": (0, 500), "quota_v5_max": (1, 500)}
+    updates = {}
+    for k, v in body.items():
+        if k in bounds:
+            updates[k] = _num(v, int, bounds[k][0], bounds[k][1], k)
+    if updates:
+        await st.db.set_settings_bulk(updates)
+        # 改了初始值时，同步当前值（否则要等明天的微调）
+        if "quota_target_avg" in updates:
+            await st.db.set_setting("quota_ceiling", updates["quota_target_avg"])
+        if "quota_base" in updates:
+            await st.db.set_setting("quota_base_now", updates["quota_base"])
+    result = await quota_algo.run(st)
+    return {"ok": True, "last": result}
 
 
 @router.get("/errors")
@@ -1006,6 +1054,7 @@ async def members(request: Request):
             "allow_anlas": bool(row["allow_anlas"]), "anlas_auto": row["anlas_auto"] == 1,
             "anlas_mode": "manual" if row["anlas_auto"] == -1 and row["allow_anlas"] else "off" if row["anlas_auto"] == -1 else "auto",
             "daily_anlas": row["daily_anlas"], "image_model_scope": row["image_model_scope"],
+            "quota_auto": row["quota_auto"] == 1,
             "today": {"images": counter["images"], "v5": counter["v5"], "anlas": round(float(counter["anlas"]), 2),
                       "text_tokens": counter["text_tokens"], "requests": counter["requests"]},
             "week": {"images": int(w.get("images", 0)), "v5": int(w.get("v5", 0)),
