@@ -35,7 +35,7 @@ async def test_v5_model_with_whitespace_is_still_v5(state):
     for spelling in ("nai-diffusion-5", "nai-diffusion-5 ", " NAI-Diffusion-5"):
         body = image_body()
         body["model"] = spelling
-        assert (await post("/ai/generate-image", body)).status_code == 429   # 每日 V5 已用完
+        assert (await post("/ai/generate-image", body)).status_code == 402   # 每日 V5 已用完
     assert not state.nai.calls
 
 
@@ -632,7 +632,9 @@ async def test_disabled_key_rejection_is_logged(state):
 async def test_quota_exhausted_rejection_is_logged_once(state):
     state.db.keys["fixture-1"]["daily_images"] = 1
     assert (await post("/ai/generate-image", image_body())).status_code == 200
-    assert (await post("/ai/generate-image", image_body())).status_code == 429
+    rejected = await post("/ai/generate-image", image_body())
+    assert rejected.status_code == 402          # 额度用完不可重试；429 会让客户端自动重试并隐藏原因
+    assert rejected.json()["message"].startswith("猫头鹰公益站提醒：") and "额度" in rejected.json()["message"]
     await asyncio.sleep(0)
     rejected = _rejections(state)
     assert len(rejected) == 1 and "额度已用完" in rejected[0][2]

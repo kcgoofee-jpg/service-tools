@@ -198,7 +198,7 @@ async def test_free_legacy_daily_quota_is_per_key_and_counts_success_only(state)
     assert first.status_code == 200
     assert state.db.charges[-1][1]["legacy_free_images"] == 1
     rejected = await post("/ai/generate-image", image_body())
-    assert rejected.status_code == 429
+    assert rejected.status_code == 402
     assert "免费图额度" in rejected.json()["error"]["message"]
     assert len(state.nai.calls) == 1
     other = await post("/ai/generate-image", image_body(), token="fixture-2")
@@ -256,7 +256,7 @@ async def test_img2img_batch_counts_only_one_free_image_against_daily_limit(stat
     assert (await post('/ai/generate-image', batch)).status_code == 200
     charge, = state.db.charges
     assert (charge[1]['anlas'], charge[1]['images'], charge[1]['legacy_free_images']) == (8, 3, 1)
-    assert (await post('/ai/generate-image', batch)).status_code == 429
+    assert (await post('/ai/generate-image', batch)).status_code == 402
     assert len(state.nai.calls) == 1
 
 

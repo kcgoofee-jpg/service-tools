@@ -168,7 +168,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "1.8.1"
+__version__ = "1.8.2"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -288,7 +288,10 @@ async def gate_error_handler(request: Request, exc: GateError):
         bug("upstream" if exc.status in (502, 503, 504) else "gate", title=f"{exc.status} {exc.message}"[:200],
             path=request.url.path, level="warn")
     message = exc.message if exc.message.startswith(NOTICE_PREFIX) else NOTICE_PREFIX + exc.message
-    return JSONResponse({"error": {"message": message, "status": exc.status, "request_id": request_timing.rid()}},
+    # 额度用完一律 402（不可重试）：客户端遇到 429 会自动重试，并把原因替换成自己的「请求过于频繁」。
+    # 顶层 statusCode / message 与 NovelAI 官方错误格式一致，客户端直接显示这句话。
+    return JSONResponse({"statusCode": exc.status, "message": message,
+                         "error": {"message": message, "status": exc.status, "request_id": request_timing.rid()}},
                         status_code=exc.status)
 
 
@@ -685,7 +688,7 @@ async def quota_image_check(key, est: dict, *, legacy_free_images: int = 0,
     if legacy_free_images and key["daily_images"] > 0:
         used_legacy = c["legacy_free_images"] + sum(r.legacy for r in own_day)
         if used_legacy + legacy_free_images > key["daily_images"]:
-            raise err(429, f"今日 V4.5 及以下免费图额度已用完（{key['daily_images']} 张/天），明日恢复")
+            raise err(402, f"今日 V4.5 及以下免费图额度已用完（{key['daily_images']} 张/天），明日恢复")
         # 保底与借用：超过每日保底后，只在全站空闲（没人排队、本小时用量不高）时放行，直到 Key 的每日上限。
         guard = getattr(STATE, "guard", None)
         base = guard.values["base_daily_images"] if guard is not None else 0
@@ -697,7 +700,7 @@ async def quota_image_check(key, est: dict, *, legacy_free_images: int = 0,
     if est["v5"] > 0:
         # V5 周额度是账户级共享资源，用全站日计数镜像（恢复量 ~190 张/天）
         if key["daily_v5"] > 0 and c["v5"] + sum(r.v5 for r in own_day) + est["v5"] > key["daily_v5"]:
-            raise err(429, f"已达今日 V5 额度（{key['daily_v5']} 张/天），明天恢复后再用")
+            raise err(402, f"已达今日 V5 额度（{key['daily_v5']} 张/天），明天恢复后再用")
         g = float(await STATE.db.get_setting(
             "global_daily_v5", STATE.settings.global_daily_v5) or 0)
         if g > 0 and not key["exclude_global_v5"]:
@@ -877,7 +880,7 @@ async def _text_quota_check(key, payload: dict) -> None:
         return
     c = await STATE.db.get_counter(key["id"], STATE.day())
     if key["daily_text_tokens"] >= 0 and c["text_tokens"] >= key["daily_text_tokens"]:
-        raise err(429, f"已达今日文本额度（{key['daily_text_tokens']} tokens/天），明日再来吧")
+        raise err(402, f"已达今日文本额度（{key['daily_text_tokens']} tokens/天），明日再来吧")
 
 
 # ============================================================== 图片生成 =====
