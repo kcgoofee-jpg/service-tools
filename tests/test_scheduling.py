@@ -44,3 +44,13 @@ def test_shadow_counts_unfairness_without_changing_order():
     r = sched.report(now + 6)
     assert r["shadow_decisions"] == 2 and r["unfair_rate"] == 0.5
     assert r["active_keys"] == 2 and r["skew"] == 2 and r["monopoly"] == 0.75
+
+
+def test_drr_anti_starvation_overrides_fairness():
+    from app.scheduling import drr_pick
+    # key 9 服务最少(本该它先)，但 key 1 的图已经等了 70 秒 → 防饥饿强制 key 1
+    served = {1: 5, 9: 0}
+    ages = {1: 70, 9: 2}
+    assert drr_pick([9, 1], served, ages=ages, starvation=60) == 1
+    # 没人超时 → 回到公平(服务少的先)
+    assert drr_pick([9, 1], {1: 5, 9: 0}, ages={1: 10, 9: 2}, starvation=60) == 9

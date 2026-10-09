@@ -77,7 +77,10 @@ CREATE TABLE IF NOT EXISTS generation_audit (
     status TEXT NOT NULL DEFAULT '',
     prompt TEXT NOT NULL DEFAULT '',
     negative TEXT NOT NULL DEFAULT '',
-    thumb BLOB
+    extra TEXT NOT NULL DEFAULT '',
+    thumb BLOB,
+    image BLOB,
+    image_type TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_audit_ts ON generation_audit(ts);
 CREATE INDEX IF NOT EXISTS idx_audit_key ON generation_audit(key_id, ts);
@@ -292,6 +295,9 @@ class Database:
             "ALTER TABLE api_keys ADD COLUMN quota_auto INTEGER NOT NULL DEFAULT 1",
             "ALTER TABLE usage_log ADD COLUMN src TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE usage_log ADD COLUMN ver TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE generation_audit ADD COLUMN extra TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE generation_audit ADD COLUMN image BLOB",
+            "ALTER TABLE generation_audit ADD COLUMN image_type TEXT NOT NULL DEFAULT ''",
         ):
             try:
                 await self._db.execute(ddl)
@@ -736,19 +742,20 @@ class Database:
         return list(await (await self._db.execute(sql, args)).fetchall())
 
     async def add_audit(self, key_id, key_name: str, kind: str, model: str, status: str,
-                        prompt: str, negative: str, thumb: Optional[bytes]) -> None:
+                        prompt: str, negative: str, thumb: Optional[bytes], extra: str = "",
+                        image: Optional[bytes] = None, image_type: str = "") -> None:
         await self._db.execute(
-            """INSERT INTO generation_audit (ts,key_id,key_name,kind,model,status,prompt,negative,thumb)
-               VALUES (?,?,?,?,?,?,?,?,?)""",
-            (time.time(), key_id, key_name[:80], kind, model[:80], status, prompt, negative, thumb))
+            """INSERT INTO generation_audit (ts,key_id,key_name,kind,model,status,prompt,negative,extra,thumb,image,image_type)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (time.time(), key_id, key_name[:80], kind, model[:80], status, prompt, negative, extra, thumb, image, image_type))
         await self._db.commit()
 
     async def list_audit(self, limit: int, offset: int, key_id: Optional[int] = None) -> tuple[list, int]:
         where, args = ("WHERE key_id=?", (key_id,)) if key_id is not None else ("", ())
         total = (await (await self._db.execute(f"SELECT COUNT(*) FROM generation_audit {where}", args)).fetchone())[0]
         rows = await (await self._db.execute(
-            f"""SELECT id,ts,key_id,key_name,kind,model,status,prompt,negative,
-                       (thumb IS NOT NULL) AS has_thumb
+            f"""SELECT id,ts,key_id,key_name,kind,model,status,prompt,negative,extra,
+                       (thumb IS NOT NULL) AS has_thumb, (image IS NOT NULL) AS has_image
                 FROM generation_audit {where} ORDER BY id DESC LIMIT ? OFFSET ?""",
             (*args, limit, offset))).fetchall()
         return rows, int(total)
@@ -756,6 +763,20 @@ class Database:
     async def audit_thumb(self, audit_id: int) -> Optional[bytes]:
         row = await (await self._db.execute("SELECT thumb FROM generation_audit WHERE id=?", (audit_id,))).fetchone()
         return bytes(row["thumb"]) if row and row["thumb"] is not None else None
+
+    async def audit_image(self, audit_id: int) -> tuple[Optional[bytes], str]:
+        row = await (await self._db.execute(
+            "SELECT image, image_type FROM generation_audit WHERE id=?", (audit_id,))).fetchone()
+        if row and row["image"] is not None:
+            return bytes(row["image"]), (row["image_type"] or "image/png")
+        return None, ""
+
+    async def audit_images_for(self, key_id: int):
+        """导出用：某成员所有带原图的记录，产出 (id, ts, image_type, prompt, negative, image)。"""
+        rows = await self._db.execute_fetchall(
+            "SELECT id, ts, image_type, prompt, negative, image FROM generation_audit "
+            "WHERE key_id=? AND image IS NOT NULL ORDER BY ts", (key_id,))
+        return rows
 
     async def touch_key_source(self, key_id: int, net_hash: str, label: str,
                                now: float, window_start: float) -> bool:
