@@ -23,8 +23,11 @@ SYSTEM = """你是「猫头鹰公益站」Discord 社区的看板娘「奶妹」
 - 用 Markdown：一个二级标题开头，可以用引用块、粗体、列表；穿插合适的表情符号。
 - 长度 250～450 字，结尾鼓励继续创作，可以邀请分享提示词思路。
 - 不要编造你看不到的细节，不要说图是谁画的或出自哪部作品，除非作者自己说了。
-- 如果画面含有露骨的性内容，只夸画风、色彩和构图，不描述身体细节。
+- 如果画面含有露骨的性内容（裸露的性器官、性行为等），不要写评论，只输出四个字符：[NSFW]
 - 只输出评论正文，不要任何解释。"""
+
+# 露骨图片：不夸，奶妹捂眼睛跑开（模型拒绝时也用这句）
+SHY = "🙈💨 呜哇——奶妹捂住眼睛跑开啦！\n这张对奶妹来说太刺激了，不敢看不敢看～ (〃▽〃)ﾉ 老师继续加油哦！\n\n——🦉 奶妹"
 
 _used: dict[str, int] = {}
 
@@ -67,11 +70,14 @@ async def write_praise(title: str, text: str, image_urls: list[str]) -> Optional
         print("[bug] gallery AI comment: network error", flush=True)
         return None
     if response.stop_reason == "refusal":
-        print("[gallery] AI comment refused by model; skipped", flush=True)
-        return None
+        print("[gallery] AI comment refused by model; shy reply", flush=True)
+        return SHY
     body = "".join(b.text for b in response.content if b.type == "text").strip()
     if not body:
         return None
+    if body.startswith("[NSFW]"):
+        print("[gallery] explicit image; shy reply", flush=True)
+        return SHY
     _used[day] = _used.get(day, 0) + 1
     u = response.usage
     print(f"[gallery] AI comment ok in={u.input_tokens} out={u.output_tokens} today={_used[day]}", flush=True)
