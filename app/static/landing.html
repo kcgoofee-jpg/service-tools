@@ -167,6 +167,33 @@ section{margin-top:40px;scroll-margin-top:72px}
 .dseg i.me{background:var(--warn)}
 .drow{display:flex;justify-content:space-between;font-size:13px;font-variant-numeric:tabular-nums}
 @media (prefers-reduced-motion: reduce){.dash *{transition:none!important}}
+/* 算法动画（首页底部） */
+.algo .flow-line{position:relative;height:12px;border-top:1px dashed var(--border-strong);margin:4px 0 18px}
+.algo .flow-line span{position:absolute;top:-6px;width:12px;height:12px;border-radius:50%;background:var(--accent);opacity:0;animation:algoFlow 8s linear infinite}
+.algo .flow-line span.me{background:var(--warn);animation-name:algoFlowB;animation-delay:2.6s}
+.algo .flow-line span:nth-child(3){animation-delay:5.3s}
+@keyframes algoFlow{0%{left:0;opacity:0}6%{opacity:1}30%{left:30%}48%{left:46%}62%{left:46%}80%{left:72%}94%{left:calc(100% - 12px);opacity:1}100%{left:calc(100% - 12px);opacity:0}}
+@keyframes algoFlowB{0%{left:0;opacity:0}6%{opacity:1}30%{left:30%}52%{left:46%}70%{left:52%}84%{left:72%}96%{left:calc(100% - 12px);opacity:1}100%{left:calc(100% - 12px);opacity:0}}
+.algo-grid{display:grid;gap:12px;grid-template-columns:minmax(0,1fr)}
+@media (min-width:640px){.algo-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (min-width:900px){.algo-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
+.algo-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.algo-card .n{font-size:12px;color:var(--muted)}
+.algo-card h3{margin:0;font-size:15px}
+.algo-card p{margin:0;font-size:12.5px;color:var(--muted);line-height:1.65}
+.algo-bar{height:8px;border-radius:4px;background:var(--surface-3);display:flex;overflow:hidden}
+.algo-bar i{display:block;height:100%;background:var(--accent)}
+.algo-bar i.soft{background:color-mix(in srgb,var(--accent) 45%,var(--surface-3))}
+.algo-bar i.v5{background:#14a3a3;transition:width .6s}
+.algo-bar.tick i{width:100%;transform-origin:left;animation:algoTick 2.6s linear infinite}
+@keyframes algoTick{0%{transform:scaleX(1)}100%{transform:scaleX(0)}}
+.algo-seg{display:flex;gap:4px}.algo-seg i{flex:1;height:8px;border-radius:4px;background:var(--surface-3)}
+.algo-seg i.on{background:var(--accent)}.algo-seg i.me{background:var(--warn)}
+.algo-scale{display:flex;justify-content:space-between;font-size:11px;color:var(--muted)}
+.algo-foot{margin-top:12px;display:flex;align-items:center;gap:10px;padding:12px 16px;border-radius:12px;background:var(--surface);border:1px solid var(--border);font-size:13px;color:var(--text-2)}
+.algo-foot i{width:10px;height:10px;border-radius:50%;background:var(--accent);flex:none;animation:algoPulse 2s ease-in-out infinite}
+@keyframes algoPulse{50%{box-shadow:0 0 0 7px color-mix(in srgb,var(--accent) 20%,transparent)}}
+@media (prefers-reduced-motion: reduce){.algo *{animation:none!important}.algo .flow-line span{opacity:1}}
 /* steps */
 .steps{display:grid;gap:16px;grid-template-columns:1fr}
 .step{position:relative;display:flex;flex-direction:column;gap:8px}
@@ -364,6 +391,27 @@ footer{max-width:960px;margin:0 auto;padding:24px 16px 40px;text-align:center;co
       <li id="audit" hidden><span class="ri" data-ic="info"></span><span><b>测试期</b>：<span id="auditTxt"></span></span></li>
     </ul>
   </section>
+  <section id="algo" class="algo">
+    <div class="sec-head"><h2>调度算法</h2><p>所有成员共用一个 NovelAI 账号：先分额度，再排队，最后按节奏发出去。</p></div>
+    <div class="flow-line" aria-hidden="true"><span></span><span class="me"></span><span></span></div>
+    <div class="algo-grid">
+      <div class="algo-card"><div class="n">① 额度</div><h3>保底 + 空闲借用</h3>
+        <div><div class="algo-bar"><i id="aBase" style="width:67%"></i><i class="soft" id="aBorrow" style="width:33%"></i></div>
+        <div class="algo-scale"><span id="aBaseT">保底 100</span><span id="aCeilT">上限 150</span></div></div>
+        <p>每人每天先保证保底张数，全站空闲时可以用到上限。前一天拥挤就收紧、有余量且有人用满就放宽，新老成员同一套额度。</p></div>
+      <div class="algo-card"><div class="n">② 排队</div><h3>先来先画</h3>
+        <div class="algo-seg" aria-hidden="true"><i class="on"></i><i class="me"></i><i class="on"></i><i></i><i></i><i></i></div>
+        <p id="aQueue">每人同时 1 张、再排 1 张，没人能占满队伍；后台同时用「轮流画」做对比，有人抢占时再切换。</p></div>
+      <div class="algo-card"><div class="n">③ 控速</div><h3>像一个人在用</h3>
+        <div class="algo-bar tick" aria-hidden="true"><i></i></div>
+        <p id="aPace">每张隔 15–20 秒（带随机抖动）；每小时、每天出图有总量上限；凌晨放慢。</p></div>
+      <div class="algo-card"><div class="n">④ V5 与 Anlas</div><h3>按恢复速度分配</h3>
+        <div class="algo-bar"><i class="v5" id="aV5" style="width:60%"></i></div>
+        <p id="aV5T">V5 额度每天自动恢复，账号剩得多就多发、剩得少就收紧，按在用人数平分；用完后活跃成员用自动分配的 Anlas 续杯。</p></div>
+    </div>
+    <div class="algo-foot"><i aria-hidden="true"></i><span>NovelAI 看到的是一个用得多、但有作息、从不并发的正常用户</span></div>
+  </section>
+
 </main>
 
 <footer>猫头鹰公益站 · 公益测试服务，不保证可用性</footer>
@@ -739,6 +787,26 @@ $('chkForm').addEventListener('submit', function(e){
       .then(function(){ setTimeout(poll, visible ? (failed ? 5000 : 1000) : 10000); });
   }
   poll();
+})();
+
+/* 算法动画的数字：和实时看板共用 /public/live 的 rules（每 30 秒刷新一次就够了） */
+(function(){
+  if(!document.getElementById('algo')) return;
+  function $id(id){ return document.getElementById(id); }
+  function load(){
+    fetch('/public/live', {cache:'no-store', credentials:'omit'}).then(function(r){ return r.ok ? r.json() : null; }).then(function(d){
+      if(!d || !d.rules) return;
+      var r = d.rules, q = r.quota || {}, base = r.base || 0, ceil = q.ceiling || base;
+      if(ceil){ $id('aBase').style.width = Math.round(base / ceil * 100) + '%'; $id('aBorrow').style.width = Math.round((ceil - base) / ceil * 100) + '%'; }
+      $id('aBaseT').textContent = '保底 ' + base; $id('aCeilT').textContent = '上限 ' + ceil;
+      $id('aQueue').textContent = '每人同时 1 张、再排 ' + (r.key_queue || 0) + ' 张，全站最多排 ' + (r.queue_cap || 0) + ' 张，没人能占满队伍；后台同时用「轮流画」做对比，有人抢占时再切换。';
+      var lo = Math.round(r.min_interval || 15);
+      $id('aPace').textContent = '每张隔 ' + lo + '–' + (lo + (r.jitter || 0)) + ' 秒（带随机抖动）；每小时最多 ' + (r.hourly_cap || 0) + ' 张、每天最多 ' + (r.daily_cap || 0) + ' 张；凌晨 ' + r.quiet_start + '–' + r.quiet_end + ' 点每小时 ' + (r.quiet_cap || 0) + ' 张。';
+      if(q.v5_percent != null) $id('aV5').style.width = Math.max(4, Math.min(100, Math.round(q.v5_percent))) + '%';
+      if(q.v5_each) $id('aV5T').textContent = 'V5 每天约恢复 ' + q.v5_rate + '%（约 ' + Math.round(q.v5_rate * 14.2) + ' 张），账号剩得多就多发、剩得少就收紧。今天每人 ' + q.v5_each + ' 张、全站 ' + q.v5_global + ' 张；用完后活跃成员用自动分配的 Anlas 续杯。';
+    }).catch(function(){});
+  }
+  load(); setInterval(load, 30000);
 })();
 </script>
 </body>
