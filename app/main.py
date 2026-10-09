@@ -152,11 +152,12 @@ async def lifespan(app: FastAPI):
     cleanup_task = asyncio.create_task(inactive_key_cleanup_loop())
     reset_task = asyncio.create_task(registration_reset_loop())
     maintenance_task = asyncio.create_task(maintenance_loop())
+    anlas_task = asyncio.create_task(anlas_rebalance_loop())
     notify_owner("startup", "服务已启动（重启或更新部署后会收到这条）。", 60)
     try:
         yield
     finally:
-        for task in (cleanup_task, reset_task, maintenance_task):
+        for task in (cleanup_task, reset_task, maintenance_task, anlas_task):
             task.cancel()
             try:
                 await task
@@ -271,6 +272,9 @@ def _kind_for_path(path: str) -> str:
     return next((kind for needle, kind in _PATH_KIND if needle in path), "account")
 
 
+NOTICE_PREFIX = "猫头鹰公益站提醒："     # 成员在客户端里看到的每条报错都带上来源，免得以为是 NovelAI 官方出错
+
+
 @app.exception_handler(GateError)
 async def gate_error_handler(request: Request, exc: GateError):
     key = _REQUEST_KEY.get()
@@ -283,7 +287,8 @@ async def gate_error_handler(request: Request, exc: GateError):
     if exc.status >= 500:          # 上游失败 / 网关故障：按消息归并，方便看出哪类问题在变多
         bug("upstream" if exc.status in (502, 503, 504) else "gate", title=f"{exc.status} {exc.message}"[:200],
             path=request.url.path, level="warn")
-    return JSONResponse({"error": {"message": exc.message, "status": exc.status, "request_id": request_timing.rid()}},
+    message = exc.message if exc.message.startswith(NOTICE_PREFIX) else NOTICE_PREFIX + exc.message
+    return JSONResponse({"error": {"message": message, "status": exc.status, "request_id": request_timing.rid()}},
                         status_code=exc.status)
 
 
@@ -298,7 +303,7 @@ async def fallback_handler(request: Request, exc: Exception):
                                    detail=f"500 {type(exc).__name__}"[:160], rid=rid)
         except Exception:
             pass
-    return JSONResponse({"error": {"message": f"服务器内部错误，已自动记录。反馈时请附上错误编号 {rid}",
+    return JSONResponse({"error": {"message": f"{NOTICE_PREFIX}服务器内部错误，已自动记录。反馈时请附上错误编号 {rid}",
                                    "status": 500, "request_id": rid}}, status_code=500,
                         headers={"X-Request-Id": rid} if rid else None)
 
@@ -452,17 +457,6 @@ async def inactive_key_cleanup_loop() -> None:
     """常驻服务每小时回收一次长期闲置 Key。"""
     while True:
         try:
-            try:
-                from . import anlas_pool
-                reg = getattr(app.state, "registrar", None)
-
-                async def _dm(key_id, text, reg=reg):
-                    did = await reg.registration_for_key(key_id) if reg is not None else None
-                    if did is not None:
-                        await reg.send_dm(did, "🦉 猫头鹰公益站通知：" + text)
-                await anlas_pool.rebalance(STATE, notify=_dm)          # 每小时重算一次 Anlas 自动分配
-            except Exception as exc:
-                bug("anlas_pool", exc)
             registrar = getattr(app.state, "registrar", None)
             if registrar is not None:
                 await STATE.remind_idle_keys(registrar.send_dm, SETTINGS.site_url.rstrip("/"))
@@ -472,6 +466,26 @@ async def inactive_key_cleanup_loop() -> None:
         except Exception as exc:
             bug("cleanup", exc)
         await asyncio.sleep(3600)
+
+
+ANLAS_REBALANCE_SECONDS = 600
+
+
+async def anlas_rebalance_loop() -> None:
+    """每 10 分钟按上游实际剩余 Anlas 重算一次自动分配（实际扣费在每次请求时按每人每日上限实时检查）。"""
+    from . import anlas_pool
+    while True:
+        try:
+            reg = getattr(app.state, "registrar", None)
+
+            async def _dm(key_id, text, reg=reg):
+                did = await reg.registration_for_key(key_id) if reg is not None else None
+                if did is not None:
+                    await reg.send_dm(did, "🦉 猫头鹰公益站通知：" + text)
+            await anlas_pool.rebalance(STATE, notify=_dm)
+        except Exception as exc:
+            bug("anlas_pool", exc)
+        await asyncio.sleep(ANLAS_REBALANCE_SECONDS)
 
 
 async def registration_reset_loop() -> None:
@@ -675,6 +689,9 @@ async def quota_image_check(key, est: dict, *, legacy_free_images: int = 0,
     if est["anlas"] > 0:
         if not key["allow_anlas"]:
             raise err(402, "该请求会消耗 Anlas，此 Key 未开通付费额度权限")
+        if _flag(key, "anlas_auto") and not est.get("topup"):
+            # 自动分配的 Anlas 只给「V5 续杯」用：放大、导演工具、Vibe、超规格尺寸等都不能用它
+            raise err(402, "系统自动分配给你的 Anlas 只能在当天 V5 用完后继续生成免费规格的 V5 图，这个请求不在此列")
         if key["daily_anlas"] > 0 and c["anlas"] + sum(r.anlas for r in own_day) + est["anlas"] > key["daily_anlas"]:
             raise err(402, f"今日 Anlas 额度不足（已用 {c['anlas']:.0f} / 上限 "
                            f"{key['daily_anlas']:.0f}），明日恢复")
@@ -1014,7 +1031,8 @@ async def _generate_image(request: Request, *, streaming: bool):
         raise err(400, "不支持或尚未开放的图片模型")
     if model_tier == "v5" and not key["is_admin"] and key["image_model_scope"] != "all":
         record(key, "image", model, "rejected", detail="模型权限：仅允许 V4.5 及更低")
-        raise err(403, "该 Key 仅允许 V4.5 及更低图片模型")
+        raise err(403, "你的 Key 目前只能用 V4.5 及更低模型（V5 是全站共享的有限额度，暂时只开放给早期成员）。"
+                       "请在客户端把模型换成 NAI Diffusion V4.5 再生成")
 
     # 图生图功能权限与费用分开判断；免费规格也沿用 Anlas 权限要求。
     if body.get("image") or body.get("mask"):
@@ -1063,7 +1081,7 @@ async def _generate_image(request: Request, *, streaming: bool):
     # V5 续杯：自动分配了 Anlas 的成员，当天个人 V5 用完后改用 Anlas 生成同规格 V5（受每日 Anlas 限额约束）
     if est["v5"] and _flag(key, "anlas_auto") and key["allow_anlas"] and key["daily_v5"] > 0:
         if (await STATE.db.get_counter(key["id"], STATE.day()))["v5"] >= key["daily_v5"]:
-            est = estimate_image_cost(body, is_opus=True, v5_allowance_available=False)
+            est = {**estimate_image_cost(body, is_opus=True, v5_allowance_available=False), "topup": True}
             notes = list(notes) + ["今日 V5 已用完，使用自动分配的 Anlas 续杯"]
     legacy_free_images = (
         1 if model_tier == "legacy" and legacy_normal_free_eligible(body) else 0

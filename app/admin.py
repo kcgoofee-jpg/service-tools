@@ -978,6 +978,7 @@ async def members(request: Request):
             "created_at": row["created_at"], "last_used_at": row["last_used_at"],
             "expires_at": row["expires_at"],
             "daily_images": row["daily_images"], "daily_v5": row["daily_v5"],
+            "allow_anlas": bool(row["allow_anlas"]), "anlas_auto": bool(row["anlas_auto"]),
             "today": {"images": counter["images"], "v5": counter["v5"], "anlas": round(float(counter["anlas"]), 2),
                       "text_tokens": counter["text_tokens"], "requests": counter["requests"]},
             "week": {"images": int(w.get("images", 0)), "v5": int(w.get("v5", 0)),

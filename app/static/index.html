@@ -236,7 +236,31 @@ td .tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
 .seg{display:inline-flex;background:var(--surface-3);border-radius:var(--radius-sm);padding:3px;gap:2px}
 .seg button{border:0;background:none;padding:5px 12px;border-radius:6px;cursor:pointer;color:var(--text-2);font-weight:500;min-height:30px}
 .seg button.active{background:var(--surface);color:var(--text);box-shadow:var(--shadow-sm)}
-.member-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px}
+.member-grid{display:block}
+.msum{display:flex;flex-wrap:wrap;gap:6px 18px;color:var(--text-2);font-size:13.5px;margin-bottom:14px}
+.msum b{color:var(--text);font-variant-numeric:tabular-nums}
+.mtable td{vertical-align:middle;padding-top:10px;padding-bottom:10px}
+.mtable tr.dim{opacity:.55}
+.mtable td.muted{white-space:nowrap;font-size:12.5px}
+#memberFilter .fchip{min-height:28px;padding:3px 10px;font-size:12.5px}
+.mrow{display:flex;gap:10px;align-items:center}
+.avatar.sm{width:28px;height:28px;font-size:12px;flex:none}
+.avatar.sm .av{width:28px;height:28px}
+.mn{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px}
+.mn .muted{font-weight:400;font-size:12px}
+.mflags{display:flex;flex-wrap:wrap;gap:4px;margin-top:2px}
+.mf{font-size:11px;line-height:1.5;padding:0 6px;border-radius:4px;background:var(--surface-2);color:var(--text-2)}
+.mf.new{background:var(--accent-soft);color:var(--accent-text)}
+.mf.info{background:var(--surface-3,var(--surface-2));color:var(--muted)}
+.mf.warn{background:var(--warn-soft);color:var(--warn)}
+.mf.bad{background:var(--bad-soft);color:var(--bad)}
+.mq{display:flex;align-items:center;gap:10px;white-space:nowrap}
+.mbar{width:90px;height:6px;border-radius:3px;background:var(--surface-2);display:flex;overflow:hidden;flex:none}
+.mbar i{display:block;height:100%;background:var(--accent)}
+.mbar i.v5{background:#14a3a3}
+.mbar.full i{background:var(--bad)}
+.mact{white-space:nowrap;text-align:right}
+.mact .menu{display:inline-block}
 .member{padding:20px;display:flex;flex-direction:column;gap:16px;transition:border-color .15s,box-shadow .15s}
 .member:hover{border-color:var(--border-strong);box-shadow:var(--shadow)}
 .member.dim>:not(.member-foot){opacity:.5}
@@ -544,7 +568,7 @@ NAI_TOKEN_V5_DAILY_LIMITS=0,150</pre><button class="btn mini" type="button" data
 
         <!-- 成员 -->
         <section id="tab-members" hidden>
-          <div class="page-head"><div class="ttl"><h1>成员</h1><p>每位成员的用量概况；点击卡片可查看其生成记录</p></div>
+          <div class="page-head"><div class="ttl"><h1>成员</h1><p>每位成员的今日 / 近 7 天用量与状态；站长和测试账号在「测试（站长）」里</p></div>
             <div class="tools"><button class="btn" data-act="refresh-members"><span data-ic="refresh"></span>刷新</button></div></div>
           <div class="stats" id="memberStats"></div>
           <div class="toolbar">
@@ -1481,6 +1505,7 @@ function memberFilters(now){
   const idleDays = memberMeta.inactivity_days || 3, nets = memberMeta.share_alert_nets || 3;
   return [
     ['all', '全部', () => true],
+    ['new', '新加入（24 小时）', m => m.registered_at && now - m.registered_at < D],
     ['today', '今日活跃', m => m.today.requests > 0],
     ['quick', '领取 1 小时内出图', m => m.first_image_at && m.first_image_at - m.registered_at <= H],
     ['stuck', '领取超 1 小时仍未出图', m => !m.first_image_at && !m.is_admin && now - m.registered_at > H],
@@ -1491,6 +1516,7 @@ function memberFilters(now){
     ['rejected', '24 小时内有被拒', m => m.rejected_24h > 0],
     ['shared', '疑似分享', m => nets > 0 && m.sources_24h >= nets],
     ['disabled', '已停用', m => !m.enabled],
+    ['staff', '测试（站长）', m => m.is_test || m.is_admin],
   ];
 }
 function ago(sec){ return sec < H ? Math.max(1, Math.round(sec/60)) + ' 分钟' : sec < D ? Math.round(sec/H) + ' 小时' : Math.round(sec/D) + ' 天'; }
@@ -1501,82 +1527,83 @@ function onboardLine(m, now){
   return `<div class="sm" style="color:var(--warn)">领取 ${ago(now - m.registered_at)}${tried}还没出过图</div>`;
 }
 function renderMembers(){
-  const all = (membersCache || []).filter(m => !m.is_test);   // 测试 Key 只在「Key 管理」里出现
+  const everyone = membersCache || [];
   const now = Date.now()/1000;
-  const topWeek = new Set(all.length>3 ? all.filter(m=>m.week.images>0).sort((a,b)=>b.week.images-a.week.images).slice(0,3).map(m=>m.id) : []);
-  $('#memberStats').innerHTML =
-    statCard('成员总数', all.length, '', `${all.filter(m=>m.enabled).length} 个已启用`) +
-    statCard('今日活跃', all.filter(m=>m.today.requests>0||m.today.images>0).length, '人', '今日有请求') +
-    statCard('从未出图', all.filter(m=>!m.first_image_at && !m.is_admin).length, '人', `其中 ${all.filter(m=>!m.first_image_at && !m.is_admin && m.last_used_at).length} 人查过额度`, 'accent') +
-    statCard('已绑定 Discord', all.filter(m=>m.discord_id).length, '人');
+  const isStaff = m => m.is_test || m.is_admin;
   const filters = memberFilters(now);
+  const testView = memberFilter === 'staff';
+  const all = everyone.filter(m => testView ? isStaff(m) : !isStaff(m));      // 站长 / 测试账号只在「测试（站长）」里出现，不混进成员统计
+  const members = everyone.filter(m => !isStaff(m));
+  const topWeek = new Set(members.length>3 ? members.filter(m=>m.week.images>0).sort((a,b)=>b.week.images-a.week.images).slice(0,3).map(m=>m.id) : []);
+  const cnt = fn => members.filter(fn).length;
+  $('#memberStats').innerHTML = `<div class="msum"><span><b>${members.length}</b> 位成员</span><span>今日活跃 <b>${cnt(m=>m.today.requests>0)}</b></span>
+    <span>今日出图 <b>${members.reduce((t,m)=>t+m.today.images,0)}</b> 张</span><span>从未出图 <b>${cnt(m=>!m.first_image_at)}</b></span>
+    ${cnt(m=>!m.enabled)?`<span>已停用 <b>${cnt(m=>!m.enabled)}</b></span>`:''}</div>`;
   $('#memberFilter').innerHTML = filters.map(([id, label, fn]) => {
-    const n = all.filter(fn).length;
-    return `<button class="fchip${memberFilter===id?' active':''}" data-mfilter="${id}" ${n||id==='all'?'':'disabled'}>${esc(label)} <span class="num">${n}</span></button>`;
+    const n = id === 'staff' ? everyone.filter(isStaff).length : cnt(fn);
+    if(!n && id !== 'all' && memberFilter !== id) return '';
+    return `<button class="fchip${memberFilter===id?' active':''}" data-mfilter="${id}">${esc(label)} <span class="num">${n}</span></button>`;
   }).join('');
-  const activeFilter = (filters.find(f => f[0] === memberFilter) || filters[0])[2];
+  const activeFilter = testView ? (() => true) : (filters.find(f => f[0] === memberFilter) || filters[0])[2];
   const q = memberQuery.trim().toLowerCase();
   let list = all.filter(activeFilter).filter(m=>!q || m.name.toLowerCase().includes(q) || String(m.discord_id||'').includes(q)
     || (m.discord && [m.discord.username, m.discord.display_name].some(v=>String(v||'').toLowerCase().includes(q))));
   const keyf = {today:m=>m.today.images, week:m=>m.week.images, total:m=>m.total_images, recent:m=>m.last_used_at||0}[memberSort];
   list = list.slice().sort((a,b)=>keyf(b)-keyf(a) || a.name.localeCompare(b.name));
   if(!list.length){
-    $('#memberGrid').innerHTML = `<div class="empty card" style="grid-column:1/-1"><div class="ico">${ic('users')}</div><h3>${all.length?'没有匹配的成员':'还没有成员'}</h3><p>${all.length?'换个关键词试试。':'在「密钥管理」中创建 Key 后，成员会出现在这里。'}</p></div>`;
+    $('#memberGrid').innerHTML = `<div class="empty card"><div class="ico">${ic('users')}</div><h3>${everyone.length?'没有匹配的成员':'还没有成员'}</h3><p>${everyone.length?'换个筛选或关键词试试。':'成员在 Discord 领取 Key 后会出现在这里。'}</p></div>`;
     return;
   }
-  $('#memberGrid').innerHTML = list.map(m=>{
-    const ratio = memberLimitRatio(m), limited = m.daily_images>0;
-    const cls = ratio>=1 ? 'bad' : ratio>=.8 ? 'warn' : '';
-    const exp = m.expires_at ? (m.expires_at < now ? '<span class="tag off">已过期</span>'
-      : m.expires_at-now < 3*86400 ? `<span class="tag warn">${new Date(m.expires_at*1000).toLocaleDateString('zh-CN')} 到期</span>`
-      : `到期 ${new Date(m.expires_at*1000).toLocaleDateString('zh-CN')}`) : '永久有效';
+  const flag = (cls, text, title) => `<span class="mf ${cls}"${title?` title="${esc(title)}"`:''}>${esc(text)}</span>`;
+  const rows = list.map(m=>{
     const dc = m.discord || null;
     const title = (dc && (dc.display_name || dc.username)) || m.name;
     const handle = dc && dc.username && dc.username !== title ? '@' + dc.username : '';
     const av = dc ? safeUrl(dc.avatar_url, DC_CDN) : '';
     const prof = dc ? safeUrl(dc.profile_url, DC_SITE) : '';
     const dcId = dc ? String(dc.id) : (m.discord_id ? String(m.discord_id) : '');
-    return `<article class="card member ${m.enabled?'':'dim'}">
-      <div class="member-top">
-        <div class="avatar ${dc?'dc':''}">${esc([...String(title||'?')][0]||'?')}${av?`<img class="av" src="${esc(av)}" alt="" width="40" height="40" referrerpolicy="no-referrer" loading="lazy">`:''}</div>
-        <div style="min-width:0;flex:1">
-          <div class="nm">${esc(title)}</div>
-          ${handle?`<div class="nm2">${esc(handle)}</div>`:''}
-          <div class="tags">
-            ${m.enabled?'<span class="tag on">启用</span>':'<span class="tag off">已停用</span>'}
-            ${m.is_admin?'<span class="tag info">站长</span>':''}${m.is_test?'<span class="tag dim">测试</span>':''}
-            ${m.discord_id?`<span class="tag info" title="Discord ID ${esc(m.discord_id)}">Discord 已绑定</span>`:'<span class="tag dim">未绑定 Discord</span>'}
-            ${!m.last_used_at?'<span class="tag warn">从未使用</span>':''}
-            ${ratio>=1?'<span class="tag off">已达日限</span>':ratio>=.8?'<span class="tag warn">接近日限</span>':''}
-            ${topWeek.has(m.id)?'<span class="tag warn">高频使用</span>':''}
-          </div>
-        </div>
-      </div>
-      ${m.features!==undefined?`<div class="chips">${featChips(m.features)}</div>`:''}
-      ${dcId?`<div class="dc-row">${prof?`<a class="btn mini" href="${esc(prof)}" target="_blank" rel="noopener noreferrer">在 Discord 打开</a>`:''}<button class="btn mini" type="button" data-act="copy-dc" data-dcid="${esc(dcId)}">${ic('copy')}复制 Discord ID</button></div>`:''}
-      <div class="quota">
-        <div class="row"><span>今日图片</span><span class="num"><b>${m.today.images}</b> / ${limited?m.daily_images:'不限'}${m.today.v5?` · V5 ${m.today.v5}${m.daily_v5>0?'/'+m.daily_v5:''}`:''}</span></div>
-        ${limited?`<div class="bar ${cls}" role="progressbar" aria-valuenow="${Math.round(Math.min(1,ratio)*100)}" aria-valuemin="0" aria-valuemax="100"><i style="width:${Math.min(100,Math.round(ratio*100))}%"></i></div>`:'<div class="bar"><i style="width:0"></i></div>'}
-      </div>
-      <div class="trio">
-        <div><div class="n">${m.today.images}</div><div class="l">今日</div></div>
-        <div><div class="n">${m.week.images}</div><div class="l">近 7 天</div></div>
-        <div><div class="n">${m.total_images}</div><div class="l">累计</div></div>
-      </div>
-      <div class="member-foot">
-        <div class="meta"><span>最近使用：${esc(rel(m.last_used_at))}</span><span>${exp}</span>${onboardLine(m, now)}</div>
-        <div class="m-actions">
-          <button class="btn mini" data-act="view-audit" data-id="${m.id}">${ic('image')}生成记录</button>
-          <details class="menu"><summary class="btn mini" aria-label="更多操作：${esc(title)}">更多 ▾</summary>
-            <div class="menu-pop">
-              <button type="button" data-act="member-toggle" data-id="${m.id}" data-on="${m.enabled?0:1}">${m.enabled?'停用':'启用'}</button>
-              ${m.is_admin?'':`<button type="button" class="danger" data-act="member-del" data-id="${m.id}">${dcId?'删除（可重新领取）':'删除'}</button>`}
-              ${m.is_admin||!dcId?'':`<button type="button" class="danger" data-act="member-ban" data-id="${m.id}">删除并永久禁止领取</button>`}
-            </div></details>
-        </div>
-      </div>
-    </article>`;
+    const cap = m.daily_images > 0 ? m.daily_images : 0;
+    const v45 = Math.max(0, m.today.images - (m.today.v5||0)), v5 = m.today.v5 || 0;
+    const pct = x => cap ? Math.min(100, x / cap * 100) : 0;
+    const full = cap && m.today.images >= cap;
+    const flags = [
+      !m.enabled ? flag('bad', '已停用') : '',
+      m.is_admin ? flag('info', '站长') : '', m.is_test ? flag('info', '测试') : '',
+      m.registered_at && now - m.registered_at < D ? flag('new', '新加入') : '',
+      !m.first_image_at && !isStaff(m) ? flag('warn', m.registered_at && now - m.registered_at > H ? '还没出过图' : '未出图') : '',
+      full ? flag('bad', '已达日限') : '',
+      topWeek.has(m.id) ? flag('', '高频') : '',
+      m.rejected_24h > 0 ? flag('warn', '被拒 ' + m.rejected_24h, '近 24 小时被拒次数') : '',
+      (memberMeta.share_alert_nets||3) > 0 && m.sources_24h >= (memberMeta.share_alert_nets||3) ? flag('bad', '疑似分享', `近 24 小时 ${m.sources_24h} 个网段`) : '',
+      m.expires_at && m.expires_at < now ? flag('bad', '已过期') : m.expires_at && m.expires_at - now < 3*D ? flag('warn', '快到期') : '',
+      m.allow_anlas ? flag('info', m.anlas_auto ? 'Anlas 自动' : 'Anlas') : '',
+      m.features === undefined ? '' : m.features == null ? flag('info', '全部功能') :
+        flag('info', m.features.map(n => (FEAT[n]||[n])[0]).join(' · ') || '无功能', '已开通的功能；在「密钥管理」里可手动增减'),
+    ].join('');
+    return `<tr class="${m.enabled?'':'dim'}">
+      <td class="mcell" data-label="成员"><div class="mrow">
+        <div class="avatar sm ${dc?'dc':''}">${esc([...String(title||'?')][0]||'?')}${av?`<img class="av" src="${esc(av)}" alt="" width="28" height="28" referrerpolicy="no-referrer" loading="lazy">`:''}</div>
+        <div style="min-width:0"><div class="mn">${esc(title)} ${handle?`<span class="muted">${esc(handle)}</span>`:''}</div><div class="mflags">${flags}</div></div></div></td>
+      <td data-label="今日"><div class="mq"><div class="mbar${full?' full':''}" title="V4.5 ${v45} · V5 ${v5}${cap?' / 上限 '+cap:''}"><i style="width:${pct(v45)}%"></i><i class="v5" style="width:${pct(v5)}%"></i></div>
+        <span class="num"><b>${m.today.images}</b>${cap?'/'+cap:''}${v5||m.daily_v5?` <span class="muted">V5 ${v5}${m.daily_v5>0?'/'+m.daily_v5:''}</span>`:''}</span></div></td>
+      <td class="num" data-label="近 7 天">${m.week.images}</td>
+      <td class="num" data-label="累计">${m.total_images}</td>
+      <td data-label="最近使用" class="muted">${esc(rel(m.last_used_at))}</td>
+      <td data-label="领取" class="muted">${m.registered_at?esc(rel(m.registered_at)):'—'}</td>
+      <td class="mact">
+        <button class="btn mini icon" data-act="view-audit" data-id="${m.id}" title="生成记录" aria-label="生成记录：${esc(title)}">${ic('image')}</button>
+        <details class="menu"><summary class="btn mini icon" aria-label="更多操作：${esc(title)}">⋯</summary>
+          <div class="menu-pop">
+            ${prof?`<a href="${esc(prof)}" target="_blank" rel="noopener noreferrer">在 Discord 打开</a>`:''}
+            ${dcId?`<button type="button" data-act="copy-dc" data-dcid="${esc(dcId)}">复制 Discord ID</button>`:''}
+            <button type="button" data-act="member-toggle" data-id="${m.id}" data-on="${m.enabled?0:1}">${m.enabled?'停用':'启用'}</button>
+            ${m.is_admin?'':`<button type="button" class="danger" data-act="member-del" data-id="${m.id}">${dcId?'删除（可重新领取）':'删除'}</button>`}
+            ${m.is_admin||!dcId?'':`<button type="button" class="danger" data-act="member-ban" data-id="${m.id}">删除并永久禁止领取</button>`}
+          </div></details></td>
+    </tr>`;
   }).join('');
+  $('#memberGrid').innerHTML = `<div class="card panel" style="padding:4px 0"><div class="table-wrap"><table class="rt mtable">
+    <thead><tr><th>成员</th><th>今日图片</th><th class="num">近 7 天</th><th class="num">累计</th><th>最近使用</th><th>领取</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
 
 /* ---------- audit ---------- */
