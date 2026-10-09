@@ -441,7 +441,7 @@ def clamp_image_params(payload: dict, *, max_pixels: int, max_steps: int,
     # img2img / inpaint 审查
     is_img2img = bool(p.get("image") or p.get("mask"))
     if is_img2img and not allow_img2img:
-        return out, notes, "本站未开放 img2img / 局部重绘"
+        return out, notes, "本站不支持图生图（img2img）/ 局部重绘（会消耗 Anlas）。请在客户端里移除参考图（原图）后再生成"
 
     if max_pixels < 64 * 64:
         return out, notes, "MAX_PIXELS 不能小于 4096（最小尺寸 64x64）"

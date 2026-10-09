@@ -343,6 +343,7 @@ def _key_json(row, counter, generated_images_total: int = 0) -> dict[str, Any]:
         "exclude_global_v5": bool(row["exclude_global_v5"]),
         "image_model_scope": row["image_model_scope"],
         "is_admin": bool(row["is_admin"]),
+        "is_test": bool(row["is_test"]) if "is_test" in row.keys() else False,
         "features": feature_defs.key_features(row),
         "expires_at": row["expires_at"],
         "created_at": row["created_at"],
@@ -450,6 +451,7 @@ async def create_key(request: Request):
         "allow_anlas": bool(body.get("allow_anlas", False)),
         "allow_img2img": bool(body.get("allow_img2img", False)),
         "exclude_global_v5": bool(body.get("exclude_global_v5", False)),
+        "is_test": bool(body.get("is_test", False)),
         "image_model_scope": image_model_scope,
         "features": await _new_key_features(request, body),
         "expires_at": expires_at,
@@ -498,6 +500,8 @@ async def patch_key(request: Request, key_id: int):
         fields["allow_img2img"] = bool(body["allow_img2img"])
     if "exclude_global_v5" in body:
         fields["exclude_global_v5"] = bool(body["exclude_global_v5"])
+    if "is_test" in body:
+        fields["is_test"] = bool(body["is_test"])
     if "image_model_scope" in body:
         fields["image_model_scope"] = "all" if body["image_model_scope"] == "all" else "legacy"
     if "features" in body:
@@ -544,7 +548,7 @@ async def delete_key(request: Request, key_id: int, ban: bool = False):
 
 @router.get("/logs")
 async def logs(request: Request, key_id: Optional[int] = None, page: int = 1,
-               feature: Optional[str] = None):
+               feature: Optional[str] = None, hide_test: bool = False):
     require_admin(request)
     per_page = 20
     page = max(1, min(int(page), 1_000_000))
@@ -552,11 +556,11 @@ async def logs(request: Request, key_id: Optional[int] = None, page: int = 1,
     if feature and feature not in feature_defs.FEATURES:
         raise HTTPException(422, "未知功能")
     kinds = feature_defs.kinds_for(feature) if feature else None
-    total = await db.count_logs(key_id=key_id, kinds=kinds)
+    total = await db.count_logs(key_id=key_id, kinds=kinds, hide_test=hide_test)
     pages = max(1, (total + per_page - 1) // per_page)
     page = min(page, pages)
     rows = await db.list_logs(limit=per_page, offset=(page - 1) * per_page,
-                              key_id=key_id, kinds=kinds)
+                              key_id=key_id, kinds=kinds, hide_test=hide_test)
     return {
         "logs": [dict(r) for r in rows],
         "page": page,
@@ -572,6 +576,15 @@ async def upstream_perf(request: Request):
     require_admin(request)
     from . import perf
     return await perf.collect(request.app.state.gate, time.time())
+
+
+@router.get("/shadow")
+async def scheduler_shadow(request: Request, hours: int = 24):
+    """调度影子模式：用真实请求回放新规则，只计算不执行。hours=24 或 168。"""
+    require_admin(request)
+    from . import shadow
+    hours = 168 if hours >= 168 else 24
+    return await shadow.collect(request.app.state.gate, time.time() - hours * 3600)
 
 
 @router.get("/actions")
@@ -823,7 +836,7 @@ async def members(request: Request):
         w = week.get(row["id"], {})
         out.append({
             "id": row["id"], "name": row["name"], "enabled": bool(row["enabled"]),
-            "is_admin": bool(row["is_admin"]), "discord_id": str(reg[row["id"]][1]) if row["id"] in reg else None,
+            "is_admin": bool(row["is_admin"]), "is_test": bool(row["is_test"]), "discord_id": str(reg[row["id"]][1]) if row["id"] in reg else None,
             "discord": _discord_profile(reg.get(row["id"])),
             "created_at": row["created_at"], "last_used_at": row["last_used_at"],
             "expires_at": row["expires_at"],

@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
     exclude_global_v5 INTEGER NOT NULL DEFAULT 0,
     image_model_scope TEXT NOT NULL DEFAULT 'legacy',
     is_admin INTEGER NOT NULL DEFAULT 0,
+    is_test INTEGER NOT NULL DEFAULT 0,   -- 测试 Key：不计入成员统计、上游表现，不会被闲置回收
     expires_at REAL,
     created_at REAL NOT NULL,
     last_used_at REAL
@@ -169,6 +170,9 @@ BEGIN
 END;
 """
 
+# 统计成员用量 / 上游表现时排除测试 Key 的日志。删除测试 Key 前先删它的日志，否则这些日志会重新算进成员统计。
+NOT_TEST = "COALESCE(key_id, 0) NOT IN (SELECT id FROM api_keys WHERE is_test=1)"
+
 _INSERT_LOG = """INSERT INTO usage_log (ts, key_id, key_name, kind, model, status,
                                       images, anlas, tokens, detail, unconfirmed_anlas,
                                       wait_ms, dur_ms, client, up_status)
@@ -221,6 +225,7 @@ class Database:
             "ALTER TABLE usage_log ADD COLUMN dur_ms INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE usage_log ADD COLUMN client TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE usage_log ADD COLUMN up_status INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE api_keys ADD COLUMN is_test INTEGER NOT NULL DEFAULT 0",
         ):
             try:
                 await self._db.execute(ddl)
@@ -406,8 +411,9 @@ class Database:
         cur = await self._db.execute(
             """INSERT INTO api_keys
                (name, token, enabled, daily_images, daily_anlas, daily_v5, monthly_anlas,
-               daily_text_tokens, rpm, allow_anlas, allow_img2img, exclude_global_v5, image_model_scope, is_admin, expires_at, created_at, features)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               daily_text_tokens, rpm, allow_anlas, allow_img2img, exclude_global_v5, image_model_scope, is_admin, expires_at, created_at, features,
+               is_test)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 fields["name"],
                 fields["token"],
@@ -426,6 +432,7 @@ class Database:
                 fields.get("expires_at"),
                 now,
                 fields.get("features"),
+                1 if fields.get("is_test") else 0,
             ),
         )
         await self._db.commit()
@@ -451,13 +458,14 @@ class Database:
         allowed = {
             "name", "enabled", "daily_images", "daily_anlas", "daily_v5", "monthly_anlas",
             "daily_text_tokens", "rpm", "allow_anlas", "allow_img2img", "exclude_global_v5", "image_model_scope", "expires_at", "features",
+            "is_test",
         }
         sets, vals = [], []
         for k, v in fields.items():
             if k not in allowed:
                 continue
             sets.append(f"{k}=?")
-            if k in ("enabled", "allow_anlas", "allow_img2img", "exclude_global_v5"):
+            if k in ("enabled", "allow_anlas", "allow_img2img", "exclude_global_v5", "is_test"):
                 v = 1 if v else 0
             vals.append(v)
         if not sets:
@@ -485,7 +493,7 @@ class Database:
             return []
         cur = await self._db.execute(
             """SELECT id FROM api_keys
-               WHERE is_admin=0 AND enabled=1 AND MAX(COALESCE(last_used_at, created_at), ?) < ?
+               WHERE is_admin=0 AND is_test=0 AND enabled=1 AND MAX(COALESCE(last_used_at, created_at), ?) < ?
                ORDER BY id ASC""",
             (grace_started_at, cutoff),
         )
@@ -776,8 +784,11 @@ class Database:
         await self._db.commit()
 
     @staticmethod
-    def _log_filter(key_id: Optional[int], kinds: Optional[list[str]]) -> tuple[str, tuple]:
+    def _log_filter(key_id: Optional[int], kinds: Optional[list[str]],
+                    hide_test: bool = False) -> tuple[str, tuple]:
         clauses, args = [], []
+        if hide_test:
+            clauses.append(NOT_TEST)
         if key_id:
             clauses.append("key_id=?")
             args.append(key_id)
@@ -788,17 +799,17 @@ class Database:
 
     async def list_logs(self, limit: int = 20, offset: int = 0,
                         key_id: Optional[int] = None,
-                        kinds: Optional[list[str]] = None) -> list[aiosqlite.Row]:
+                        kinds: Optional[list[str]] = None, hide_test: bool = False) -> list[aiosqlite.Row]:
         limit = max(1, min(int(limit), 500))
         offset = max(0, int(offset))
-        where, args = self._log_filter(key_id, kinds)
+        where, args = self._log_filter(key_id, kinds, hide_test)
         cur = await self._db.execute(
             f"SELECT * FROM usage_log{where} ORDER BY id DESC LIMIT ? OFFSET ?", args + (limit, offset))
         return list(await cur.fetchall())
 
     async def count_logs(self, key_id: Optional[int] = None,
-                         kinds: Optional[list[str]] = None) -> int:
-        where, args = self._log_filter(key_id, kinds)
+                         kinds: Optional[list[str]] = None, hide_test: bool = False) -> int:
+        where, args = self._log_filter(key_id, kinds, hide_test)
         cur = await self._db.execute(f"SELECT COUNT(*) AS c FROM usage_log{where}", args)
         row = await cur.fetchone()
         return int(row["c"])
@@ -824,6 +835,16 @@ class Database:
         cur = await self._db.execute(
             """SELECT ts, model, status, images, wait_ms, dur_ms, up_status, detail FROM usage_log
                WHERE ts>=? AND kind IN ('image','image_stream') AND status IN ('ok','error')
+                 AND """ + NOT_TEST + """
+               ORDER BY ts""", (since,))
+        return [tuple(r) for r in await cur.fetchall()]
+
+    async def shadow_rows(self, since: float) -> list[tuple]:
+        """调度影子模式回放用：出图请求的 (ts, key_id, key_name, status, images, wait_ms, dur_ms)，不含测试 Key。"""
+        cur = await self._db.execute(
+            """SELECT ts, key_id, key_name, status, images, wait_ms, dur_ms FROM usage_log
+               WHERE ts>=? AND kind IN ('image','image_stream') AND status IN ('ok','error')
+                 AND """ + NOT_TEST + """
                ORDER BY ts""", (since,))
         return [tuple(r) for r in await cur.fetchall()]
 
@@ -832,6 +853,7 @@ class Database:
         cur = await self._db.execute(
             """SELECT status, COUNT(*) FROM usage_log
                WHERE ts>=? AND kind IN ('image','image_stream') AND status IN ('ok','error')
+                 AND """ + NOT_TEST + """
                GROUP BY status""", (since,))
         out = {"ok": 0, "error": 0}
         for status, n in await cur.fetchall():
@@ -844,7 +866,7 @@ class Database:
             """SELECT kind, status, COUNT(*) AS n, COALESCE(SUM(images),0) AS images,
                       COALESCE(SUM(tokens),0) AS tokens, COALESCE(SUM(anlas),0) AS anlas,
                       COUNT(DISTINCT key_id) AS users
-               FROM usage_log WHERE ts>=? GROUP BY kind, status""", (since,))
+               FROM usage_log WHERE ts>=? AND """ + NOT_TEST + """ GROUP BY kind, status""", (since,))
         return [dict(r) for r in await cur.fetchall()]
 
     async def generated_image_totals(self, key_id: Optional[int] = None) -> dict[int, int]:

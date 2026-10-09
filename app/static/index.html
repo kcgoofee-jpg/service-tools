@@ -487,6 +487,11 @@ details.neg div{margin-top:6px;white-space:pre-wrap;overflow-wrap:anywhere;max-h
             <div id="perfHourly" style="margin-top:12px"></div>
           </div>
           <div class="card panel">
+            <div class="panel-head"><h2>调度影子模式</h2><div class="desc">用真实请求回放「保底 + 空闲借用 + 成员间轮流 + 账号每日上限」，<b>只计算、不改变实际出图顺序</b>。观察 1–2 周后决定是否启用</div>
+              <select id="shadowRange" aria-label="回放范围" style="width:120px"><option value="24">最近 24 小时</option><option value="168">最近 7 天</option></select></div>
+            <div id="shadowBody"><div class="hint">正在回放…</div></div>
+          </div>
+          <div class="card panel">
             <div class="panel-head"><h2>上游 NovelAI 令牌池</h2><button class="btn primary" type="button" id="tokAddBtn" data-act="tok-add"><span data-ic="plus"></span>添加 Token</button></div>
             <div id="pool"></div>
             <div id="allowanceDetails" class="hint" style="white-space:pre-line;margin-top:16px">V5 余量：正在读取本地状态…</div>
@@ -591,6 +596,7 @@ NAI_TOKEN_V5_DAILY_LIMITS=0,150</pre><button class="btn mini" type="button" data
               <select id="logFeature" aria-label="按功能筛选" style="width:160px"><option value="">全部功能</option>
                 <option value="image">文生图</option><option value="upscale">放大</option><option value="augment">导演工具</option>
                 <option value="vibe">Vibe 编码</option><option value="tags">标签补全</option><option value="text">文本 / 聊天</option><option value="voice">语音合成</option></select>
+              <label class="check" style="white-space:nowrap"><input type="checkbox" id="logHideTest" checked><span>隐藏测试 Key</span></label>
               <select id="logFilter" aria-label="按 Key 筛选" style="width:200px"><option value="">全部 Key</option></select>
               <button class="btn" data-act="refresh-logs"><span data-ic="refresh"></span>刷新</button>
             </div></div>
@@ -696,6 +702,7 @@ NAI_TOKEN_V5_DAILY_LIMITS=0,150</pre><button class="btn mini" type="button" data
       <label class="check"><input id="f_allow_anlas" type="checkbox"><span>允许消耗 Anlas（旧模型和 V5 的付费规格均受 日Anlas/月Anlas/全站预算 约束；不开启时仅允许免费档或 V5 额度规格）</span></label>
       <label class="check"><input id="f_allow_img2img" type="checkbox"><span>允许 img2img / 局部重绘（需同时开启上面一项）</span></label>
       <label class="check"><input id="f_exclude_global_v5" type="checkbox"><span>独立 V5 额度（此 Key 的 V5 使用不计入、也不受全站 V5 日额度限制）</span></label>
+      <label class="check"><input id="f_is_test" type="checkbox"><span>测试 Key（不计入成员统计、上游表现和首页稳定性，不会被闲置回收）</span></label>
       <div class="sec-title">功能权限</div>
       <div class="opt-group">
         <label class="check"><input type="radio" name="f_feat_mode" value="legacy" checked><span>全部已开放功能（含以后新开放的）</span></label>
@@ -1076,9 +1083,48 @@ async function loadPerf(){
     }).join('');
   }catch(e){ $('#perfBody').innerHTML = '<tr><td colspan="9" class="empty-cell">读取失败</td></tr>'; }
 }
+async function loadShadow(){
+  const box = $('#shadowBody');
+  try{
+    const d = await api('/admin/api/shadow?hours=' + $('#shadowRange').value);
+    const sec = v => v==null ? '—' : v >= 60 ? (v/60).toFixed(1) + ' 分' : Math.round(v) + ' 秒';
+    const pct = v => v==null ? '—' : Math.round(v*100) + '%';
+    if(!d.samples){ box.innerHTML = '<div class="hint">这段时间还没有带耗时的出图记录（1.3.0 起记录），暂时无法回放。</div>'; return; }
+    const c = d.contention, q = d.quota, L = d.load, P = d.params;
+    const cmp = (a, b) => { if(a==null||b==null) return sec(b); const cls = b < a - 1 ? 'color:var(--ok)' : b > a + 1 ? 'color:var(--bad)' : ''; return `<span style="${cls}">${sec(b)}</span>`; };
+    const verdict = c.contended_share == null ? '' : c.contended_share < 0.1
+      ? `✅ ${pct(1 - c.contended_share)} 的出图发出时没有其他成员在排队：现在换成轮流不会有明显差别，继续观察。`
+      : `⚠ ${pct(c.contended_share)} 的出图发出时有其他成员在排队（最多同时 ${c.peak_waiting_members} 人）：轮流出图开始有收益，可以考虑启用。`;
+    const hist = c.hist, tot = Math.max(1, c.dispatches);
+    const bars = ['0','1','2','3+'].map(k => `<div style="display:flex;align-items:center;gap:8px"><span class="muted sm" style="width:70px">${k==='0'?'无人排队':k+' 人在排队'}</span><div class="bar" style="flex:1;height:10px"><i style="width:${hist[k]/tot*100}%"></i></div><span class="num sm" style="width:44px;text-align:right">${hist[k]}</span></div>`).join('');
+    const members = q.members.slice(0, 8).map(m => `<tr><td>${esc(m.name)}</td><td class="num">${m.images}</td><td>${m.over_ceil?`<span class="tag off">超出借用上限 ${m.over_ceil}</span>`:m.borrowed?`<span class="tag warn">借用 ${m.borrowed}</span>`:'<span class="tag on">保底内</span>'}</td></tr>`).join('');
+    box.innerHTML = `
+      <div class="notice-box" style="margin-bottom:12px">${verdict}</div>
+      <div class="table-wrap"><table class="rt"><thead><tr><th>等待时间</th><th>实际（现在的规则）</th><th>回放：先到先出</th><th>回放：成员间轮流</th></tr></thead><tbody>
+        <tr><td>全体 P50</td><td class="num">${sec(d.actual.p50)}</td><td class="num">${sec(d.fifo.p50)}</td><td class="num">${cmp(d.fifo.p50, d.drr.p50)}</td></tr>
+        <tr><td>全体 P90</td><td class="num">${sec(d.actual.p90)}</td><td class="num">${sec(d.fifo.p90)}</td><td class="num">${cmp(d.fifo.p90, d.drr.p90)}</td></tr>
+        <tr><td>轻度用户 P90（当天 ≤10 张）</td><td class="num">${sec(d.actual.light_p90)}</td><td class="num">${sec(d.fifo.light_p90)}</td><td class="num">${cmp(d.fifo.light_p90, d.drr.light_p90)}</td></tr>
+        <tr><td>等得最久那个人的平均</td><td class="num">—</td><td class="num">${sec(d.fifo.worst_member_mean)}</td><td class="num">${cmp(d.fifo.worst_member_mean, d.drr.worst_member_mean)}</td></tr>
+      </tbody></table></div>
+      <div class="hint" style="margin:6px 0 14px">样本 ${d.samples} 次出图。「实际」是日志里记录的等待；回放按相同到达时间、生成耗时和 ${P.interval} 秒间隔重新排队，两者应接近，差距大说明模型需要校准。</div>
+      <div class="two-col">
+        <div><h3 style="font-size:14px;margin-bottom:8px">发出时有几位其他成员在排队</h3>${bars}</div>
+        <div><h3 style="font-size:14px;margin-bottom:8px">繁忙程度（15 分钟窗口）</h3>
+          <div class="row" style="display:flex;justify-content:space-between"><span class="muted sm">峰值利用率</span><span class="num">${pct(L.peak_util)}</span></div>
+          <div class="row" style="display:flex;justify-content:space-between"><span class="muted sm">处于「繁忙」的时间</span><span class="num">${L.busy_minutes} 分钟</span></div>
+          <div class="hint">利用率 &gt; ${pct(P.busy_util)} 进入繁忙（只服务保底内请求），&lt; ${pct(P.idle_util)} 回到空闲（允许借用）。</div></div>
+      </div>
+      <h3 style="font-size:14px;margin:14px 0 8px">保底与借用（保底 ${q.base} 张 / 借用上限 ${q.ceil} 张；账号每日上限 ${q.account_cap} 张）</h3>
+      <div class="row" style="display:flex;justify-content:space-between;margin-bottom:6px"><span class="muted sm">账号总量 / 每日上限</span><span class="num">${q.total} / ${q.account_cap}（${pct(q.cap_used)}）</span></div>
+      <div class="bar" style="margin-bottom:10px"><i style="width:${Math.min(100, q.cap_used*100)}%"></i></div>
+      <div class="table-wrap"><table class="rt"><thead><tr><th>成员</th><th>出图</th><th>新规则下</th></tr></thead><tbody>${members || '<tr><td colspan="3" class="empty-cell">暂无</td></tr>'}</tbody></table></div>
+      <div class="hint">${q.borrowers ? `有 ${q.borrowers} 人超过保底，共借用 ${q.borrowed_images} 张：新规则下这些请求只在空闲时放行。` : '没有人超过保底：新规则下所有请求都在保底内，体验不变。'} 7 天视图按 7 天合计张数显示，保底按天计算，仅供参考。</div>`;
+  }catch(e){ box.innerHTML = '<div class="hint">回放失败</div>'; }
+}
 async function loadOverview(){
   loadReconciliation();
   loadPerf();
+  loadShadow();
   loadStatus();
   if(!$('#ovCards').children.length) $('#ovCards').innerHTML = skeletons(8, 96);
   try{
@@ -1370,7 +1416,7 @@ function onboardLine(m, now){
   return `<div class="sm" style="color:var(--warn)">领取 ${ago(now - m.registered_at)}${tried}还没出过图</div>`;
 }
 function renderMembers(){
-  const all = membersCache || [];
+  const all = (membersCache || []).filter(m => !m.is_test);   // 测试 Key 只在「Key 管理」里出现
   const now = Date.now()/1000;
   const topWeek = new Set(all.length>3 ? all.filter(m=>m.week.images>0).sort((a,b)=>b.week.images-a.week.images).slice(0,3).map(m=>m.id) : []);
   $('#memberStats').innerHTML =
@@ -1413,7 +1459,7 @@ function renderMembers(){
           ${handle?`<div class="nm2">${esc(handle)}</div>`:''}
           <div class="tags">
             ${m.enabled?'<span class="tag on">启用</span>':'<span class="tag off">已停用</span>'}
-            ${m.is_admin?'<span class="tag info">站长</span>':''}
+            ${m.is_admin?'<span class="tag info">站长</span>':''}${m.is_test?'<span class="tag dim">测试</span>':''}
             ${m.discord_id?`<span class="tag info" title="Discord ID ${esc(m.discord_id)}">Discord 已绑定</span>`:'<span class="tag dim">未绑定 Discord</span>'}
             ${!m.last_used_at?'<span class="tag warn">从未使用</span>':''}
             ${ratio>=1?'<span class="tag off">已达日限</span>':ratio>=.8?'<span class="tag warn">接近日限</span>':''}
@@ -1653,7 +1699,7 @@ async function loadKeys(){
         <td class="cell-name" data-label="名称">${esc(k.name)}
           <div class="tags">
             ${k.enabled?'<span class="tag on">启用</span>':'<span class="tag off">禁用</span>'}
-            ${k.is_admin?'<span class="tag info">站长</span>':''}
+            ${k.is_admin?'<span class="tag info">站长</span>':''}${k.is_test?'<span class="tag dim">测试</span>':''}
             ${k.allow_anlas?'<span class="tag warn">Anlas</span>':''}
             <span class="tag ${k.image_model_scope==='all'?'info':'dim'}">${k.image_model_scope==='all'?'含 V5':'仅 V4.5↓'}</span>
             ${k.allow_img2img?'<span class="tag warn">img2img</span>':''}
@@ -1707,6 +1753,7 @@ async function openCreate(){
   $('#f_expires').placeholder='';
   $('#f_allow_anlas').checked=false; $('#f_allow_img2img').checked=false;
   $('#f_exclude_global_v5').checked=false;
+  $('#f_is_test').checked=false;
   // 默认只开通“新成员默认功能”（通常只有文生图），而不是全部功能。
   const newKeyFeat = opsData && opsData.features ? opsData.features.new_key : undefined;
   setFeatForm(newKeyFeat === undefined ? ['image'] : newKeyFeat);
@@ -1735,6 +1782,7 @@ function openEdit(id){
   $('#f_allow_anlas').checked = k.allow_anlas;
   $('#f_allow_img2img').checked = k.allow_img2img;
   $('#f_exclude_global_v5').checked = k.exclude_global_v5;
+  $('#f_is_test').checked = !!k.is_test;
   setFeatForm(k.features == null ? null : k.features);
   $('#modalErr').textContent=''; openOverlay('#modal');
 }
@@ -1756,6 +1804,7 @@ async function saveKey(){
       allow_anlas: $('#f_allow_anlas').checked,
       allow_img2img: $('#f_allow_img2img').checked,
       exclude_global_v5: $('#f_exclude_global_v5').checked,
+      is_test: $('#f_is_test').checked,
     };
     if(!editingId || $('#f_expires').value.trim() !== '') body.expires_days = readNum('f_expires', '有效天数', {max:3650});
   }catch(e){ $('#modalErr').textContent = e.message; return; }
@@ -1832,9 +1881,9 @@ function fmtTiming(l){
 }
 async function loadLogs(){
   try{
-    const kf = $('#logFilter').value, ff = $('#logFeature').value;
+    const kf = $('#logFilter').value, ff = $('#logFeature').value, ht = $('#logHideTest').checked && !kf;
     const d = await api('/admin/api/logs?' + (kf?`key_id=${encodeURIComponent(kf)}&`:'') +
-                        (ff?`feature=${encodeURIComponent(ff)}&`:'') + `page=${logPage}`);
+                        (ff?`feature=${encodeURIComponent(ff)}&`:'') + (ht?'hide_test=true&':'') + `page=${logPage}`);
     logPage = d.page;
     $('#logBody').innerHTML = d.logs.map(l=>`
       <tr>
@@ -2052,6 +2101,8 @@ document.addEventListener('change', ev=>{
 });
 $('#logFilter').addEventListener('change', ()=>{ logPage=1; loadLogs(); });
 $('#logFeature').addEventListener('change', ()=>{ logPage=1; loadLogs(); });
+$('#logHideTest').addEventListener('change', ()=>{ logPage=1; loadLogs(); });
+$('#shadowRange').addEventListener('change', loadShadow);
 $('#auditFilter').addEventListener('change', ()=>{ auditPage=1; loadAudit(); });
 $('#memberSearch').addEventListener('input', e=>{ memberQuery = e.target.value; renderMembers(); });
 $('#memberFilter').addEventListener('click', e=>{
