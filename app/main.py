@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+from contextvars import ContextVar
 import shutil
 from datetime import datetime, timedelta
 import json
@@ -165,7 +166,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "1.1.1"
+__version__ = "1.2.0"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -217,6 +218,26 @@ class NaiPathAliasMiddleware:
 
 
 app.add_middleware(NaiPathAliasMiddleware)
+
+
+class RequestContextMiddleware:
+    """每个请求开始时清空“当前 Key / 是否已记日志”，结束后还原，避免跨请求串用。"""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        key_token, logged_token = _REQUEST_KEY.set(None), _REQUEST_LOGGED.set(False)
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            _REQUEST_KEY.reset(key_token)
+            _REQUEST_LOGGED.reset(logged_token)
+
+
+app.add_middleware(RequestContextMiddleware)
 if SETTINGS.cors_origins:
     app.add_middleware(CORSMiddleware, allow_origins=SETTINGS.cors_origins,
                        allow_methods=["*"], allow_headers=["*"], allow_credentials=False)
@@ -224,8 +245,28 @@ app.include_router(admin.router)
 app.include_router(registration_routes.router)
 
 
+# 当前请求已认出的 Key，以及本请求是否已写过用量日志；用于在统一错误处理里补记“被拒绝”。
+_REQUEST_KEY: ContextVar = ContextVar("gate_request_key", default=None)
+_REQUEST_LOGGED: ContextVar = ContextVar("gate_request_logged", default=False)
+_PATH_KIND = (("generate-image-stream", "image_stream"), ("suggest-tags", "tags"), ("generate-image", "image"),
+              ("encode-vibe", "vibe_encode"), ("upscale", "upscale"), ("augment-image", "augment-image"),
+              ("generate-voice", "voice"), ("generate-stream", "text"), ("/ai/generate", "text"),
+              ("/v1/chat/completions", "chat"))
+
+
+def _kind_for_path(path: str) -> str:
+    return next((kind for needle, kind in _PATH_KIND if needle in path), "account")
+
+
 @app.exception_handler(GateError)
 async def gate_error_handler(request: Request, exc: GateError):
+    key = _REQUEST_KEY.get()
+    if key is not None and 400 <= exc.status < 500 and not _REQUEST_LOGGED.get():
+        # 鉴权之后被拒（Key 停用 / 过期、功能未开通、额度用完、限流、排队超时……）统一记一条，方便排查成员问题
+        try:
+            record(key, _kind_for_path(request.url.path), "", "rejected", detail=f"{exc.status} {exc.message}"[:160])
+        except Exception:
+            pass
     return JSONResponse({"error": {"message": exc.message, "status": exc.status}},
                         status_code=exc.status)
 
@@ -249,6 +290,8 @@ async def authenticate(request: Request):
             raise GateError(429, f"无效请求过多，请 {wait // 60 + 1} 分钟后再试")
         raise err(401, "缺少 API Key")
     row = await STATE.db.get_key_by_token(token)
+    if row:
+        _REQUEST_KEY.set(row)
     if not row:
         # 被拦截的 IP 只拦“无效 Key”；持有有效 Key 的成员（如同一出口 IP 的其他人）不受影响。
         if wait:
@@ -343,6 +386,9 @@ async def inactive_key_cleanup_loop() -> None:
     """常驻服务每小时回收一次长期闲置 Key。"""
     while True:
         try:
+            registrar = getattr(app.state, "registrar", None)
+            if registrar is not None:
+                await STATE.remind_idle_keys(registrar.send_dm, SETTINGS.site_url.rstrip("/"))
             removed = await STATE.delete_inactive_keys()
             if removed:
                 print(f"[info] deleted {removed} inactive API key(s)")
@@ -551,6 +597,7 @@ def record(key, kind: str, model: str, status: str, *, images: int = 0,
            legacy_free_images: int = 0, detail: str = "",
            unconfirmed_anlas: float = 0.0) -> asyncio.Task:
     """写日志；成功请求额外计入每日配额。"""
+    _REQUEST_LOGGED.set(True)
     async def _go():
         if status == "ok":
             await STATE.db.record_success(

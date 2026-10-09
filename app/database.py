@@ -101,6 +101,11 @@ CREATE TABLE IF NOT EXISTS upstream_token_counters (
     v5 INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (token_id, day)
 );
+CREATE TABLE IF NOT EXISTS key_idle_reminders (
+    key_id INTEGER PRIMARY KEY,
+    activity REAL NOT NULL,       -- 提醒时 Key 的最后活动时间；之后再有活动会重新计时并允许再次提醒
+    sent_at REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS admin_actions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ts REAL NOT NULL,
@@ -456,6 +461,7 @@ class Database:
         # The trigger archives the V5 flag and removes offsets atomically.
         # Counters/logs also accept late settlement from already admitted work.
         await self._db.execute("DELETE FROM key_sources WHERE key_id=?", (key_id,))
+        await self._db.execute("DELETE FROM key_idle_reminders WHERE key_id=?", (key_id,))
         await self._db.execute("DELETE FROM api_keys WHERE id=?", (key_id,))
         await self._db.commit()
 
@@ -475,6 +481,33 @@ class Database:
             (grace_started_at, cutoff),
         )
         return [int(row["id"]) for row in await cur.fetchall()]
+
+    async def keys_due_for_idle_reminder(self, remind_before: float) -> list[dict[str, Any]]:
+        """闲置回收前的提醒对象：Discord 自助领取、仍启用、最后活动早于 remind_before、本轮尚未提醒。"""
+        raw_grace = await self.get_setting("key_inactivity_grace_started_at", 0)
+        try:
+            grace = float(raw_grace)
+        except (TypeError, ValueError):
+            return []
+        if not math.isfinite(grace) or grace < 0:
+            return []
+        cur = await self._db.execute(
+            """SELECT k.id AS key_id, k.name AS name, r.discord_id AS discord_id,
+                      MAX(COALESCE(k.last_used_at, k.created_at), ?) AS activity,
+                      EXISTS (SELECT 1 FROM usage_log u WHERE u.key_id=k.id AND u.status='ok') AS ever_used
+               FROM api_keys k JOIN discord_registrations r ON r.key_id=k.id
+               LEFT JOIN key_idle_reminders m ON m.key_id=k.id
+               WHERE k.is_admin=0 AND k.enabled=1
+                 AND MAX(COALESCE(k.last_used_at, k.created_at), ?) < ?
+                 AND (m.key_id IS NULL OR m.activity <> MAX(COALESCE(k.last_used_at, k.created_at), ?))""",
+            (grace, grace, remind_before, grace))
+        return [dict(r) for r in await cur.fetchall()]
+
+    async def mark_idle_reminded(self, key_id: int, activity: float) -> None:
+        await self._db.execute(
+            "INSERT OR REPLACE INTO key_idle_reminders (key_id, activity, sent_at) VALUES (?,?,?)",
+            (key_id, activity, time.time()))
+        await self._db.commit()
 
     async def list_keys(self) -> list[aiosqlite.Row]:
         cur = await self._db.execute("SELECT * FROM api_keys ORDER BY id DESC")

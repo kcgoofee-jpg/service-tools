@@ -324,6 +324,31 @@ class GateState:
                     self._login_attempts.pop(k, None)
             return True
 
+    async def remind_idle_keys(self, send_dm, site: str) -> int:
+        """闲置回收前 24 小时私信提醒（附配置方法）；同一段闲置只提醒一次，之后有活动会重新计时。"""
+        days = max(0, self.settings.key_inactivity_delete_days)
+        if days < 1 or send_dm is None:
+            return 0
+        due = await self.db.keys_due_for_idle_reminder(time.time() - max(days - 1, 0.5) * 86400)
+        sent = 0
+        for row in due:
+            if row["ever_used"]:
+                text = (f"🦉 猫头鹰公益站提醒：你的 Key 已经有一段时间没有使用了，再过约 24 小时仍没有请求就会自动回收，"
+                        f"名额会让给其他人。随便生成一张图即可重新计时；回收后有名额时可以再用 /register 领取。")
+            else:
+                text = (f"🦉 猫头鹰公益站提醒：你领取的 Key 还没有成功生成过图片。领取后连续 {days} 天没有使用会自动回收，"
+                        f"你的 Key 还剩约 24 小时。\n"
+                        f"配置方法（以柏宝绘为例）：渠道 → 配置 → 新建接入点，接口地址填 `{site}`，API Key 填私信里 `nai-` 开头的 Key。"
+                        f"可以先在 {site} 的「查看我的额度」里粘贴 Key 测试。\n"
+                        f"遇到问题可在 🛠️｜问题反馈 发截图；Key 丢了用 /resetkey 重新获取。")
+            ok = await send_dm(row["discord_id"], text)
+            await self.db.mark_idle_reminded(row["key_id"], row["activity"])
+            await log_action(self.db, "系统", "闲置回收前提醒", f"Key #{row['key_id']} {row['name']}",
+                             ("从未使用；" if not row["ever_used"] else "") + ("已私信" if ok else "私信失败（对方可能关闭了私信）"),
+                             ok=ok)
+            sent += int(ok)
+        return sent
+
     async def delete_inactive_keys(self) -> int:
         """永久回收长期未使用的虚拟 Key；0 天表示关闭。"""
         days = max(0, self.settings.key_inactivity_delete_days)
