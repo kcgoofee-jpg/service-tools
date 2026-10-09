@@ -83,6 +83,14 @@ async def build(state, registrar, now: Optional[float] = None) -> dict[str, Any]
                  "enabled": bool(last.get("enabled"))}
     except (TypeError, ValueError):
         pass
+    quota = {}
+    try:
+        q = _json.loads(await state.db.get_setting("quota_algo_last", None) or "{}")
+        v5 = q.get("v5") or {}
+        quota = {"ceiling": q.get("ceiling"), "v5_each": v5.get("each"), "v5_global": v5.get("global"),
+                 "v5_rate": v5.get("rate"), "v5_percent": v5.get("percent")}
+    except (TypeError, ValueError):
+        pass
     token_ids = [t.token_id for t in pool if t.usable]
     body["rules"] = {
         "base": gv.get("base_daily_images", 0), "key_queue": gv.get("key_image_queue", 0),
@@ -93,6 +101,7 @@ async def build(state, registrar, now: Optional[float] = None) -> dict[str, Any]
         "min_interval": float(getattr(state.settings, "image_min_interval", 15) or 15), "jitter": gv.get("interval_jitter", 0),
         "borrow_open": bool(guard.site_idle(-1, token_ids, now)) if guard else False,
         "anlas": anlas,
+        "quota": quota,          # 动态额度的当前结果（quota_algo.py）
     }
     if registrar is not None:
         cfg = await registrar.settings()

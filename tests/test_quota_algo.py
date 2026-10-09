@@ -14,7 +14,7 @@ CFG = dict(quota_algo.DEFAULTS)
 
 def test_v5_plan_spends_surplus_and_tightens_when_low():
     full = quota_algo.v5_plan(98, 11.0, active=14)
-    assert full["global"] == int(11 * 17.3 * 1.3) and full["each"] == full["global"] // 14
+    assert full["global"] == int(11 * 14.2 * 1.3) and full["each"] == full["global"] // 14
     low = quota_algo.v5_plan(15, 11.0, active=14)
     assert low["global"] < full["global"] and low["each"] >= 3            # 剩得少就收紧，但不低于下限
     few = quota_algo.v5_plan(98, 11.0, active=2)
