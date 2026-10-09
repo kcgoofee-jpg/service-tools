@@ -265,3 +265,110 @@ async def bot_report(request: Request, body: BotReport):
     from . import bot_config
     await bot_config.report(request.app.state.gate.db, body.status, body.event)
     return {"ok": True}
+
+
+# ============ 网页「用 Discord 登录」（成员端，复用现有 OAuth；不粘贴 Key 即可看状态） ============
+import hashlib
+import hmac as _hmac
+import secrets
+import time as _time
+
+from fastapi.responses import RedirectResponse
+
+member_router = APIRouter()
+MEMBER_COOKIE = "owl_member"
+STATE_COOKIE = "owl_login_state"
+SESSION_DAYS = 30
+
+
+def _member_secret(request: Request) -> str:
+    from .admin import _secret
+    return _secret(request) + ":member-login"
+
+
+def _sign_member(request: Request, discord_id: str, exp: int) -> str:
+    payload = f"{discord_id}:{exp}"
+    sig = _hmac.new(_member_secret(request).encode(), payload.encode(), hashlib.sha256).hexdigest()
+    return payload + "." + sig
+
+
+def _member_session(request: Request) -> Optional[str]:
+    raw = request.cookies.get(MEMBER_COOKIE, "")
+    if "." not in raw:
+        return None
+    payload, sig = raw.rsplit(".", 1)
+    good = _hmac.new(_member_secret(request).encode(), payload.encode(), hashlib.sha256).hexdigest()
+    try:
+        if not _hmac.compare_digest(sig, good):
+            return None
+        discord_id, exp = payload.rsplit(":", 1)
+        return discord_id if int(exp) > _time.time() else None
+    except (ValueError, TypeError):
+        return None
+
+
+def _set_cookie(response, name: str, value: str, max_age: int) -> None:
+    response.set_cookie(name, value, max_age=max_age, httponly=True, secure=True,
+                        samesite="lax", path="/")
+
+
+@member_router.get("/login")
+async def login_start(request: Request):
+    service = getattr(request.app.state, "registrar", None)
+    if service is None:
+        raise HTTPException(503, "登录尚未配置")
+    state = secrets.token_urlsafe(24)
+    resp = RedirectResponse(service.web_login_url(state))
+    _set_cookie(resp, STATE_COOKIE, state, 600)
+    return resp
+
+
+@member_router.get("/login/callback")
+async def login_callback(request: Request, code: str = "", state: str = ""):
+    service = getattr(request.app.state, "registrar", None)
+    if service is None:
+        raise HTTPException(503, "登录尚未配置")
+    if not code or not state or state != request.cookies.get(STATE_COOKIE, ""):
+        return RedirectResponse("/?login=failed")
+    try:
+        who = await service.web_identify(code)
+    except RegistrationError:
+        return RedirectResponse("/?login=failed")
+    resp = RedirectResponse("/")
+    exp = int(_time.time()) + SESSION_DAYS * 86400
+    _set_cookie(resp, MEMBER_COOKIE, _sign_member(request, who["id"], exp), SESSION_DAYS * 86400)
+    resp.delete_cookie(STATE_COOKIE, path="/")
+    await _log_bot(request, who["id"], "网页登录")
+    return resp
+
+
+@member_router.post("/logout")
+async def logout(request: Request):
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie(MEMBER_COOKIE, path="/")
+    return resp
+
+
+@member_router.get("/public/me")
+async def public_me(request: Request):
+    """登录后的个人状态：不用粘贴 Key 就能看额度、排队、到期；并提供自己的 Key 供一键复制。"""
+    discord_id = _member_session(request)
+    if discord_id is None:
+        return JSONResponse({"logged_in": False}, headers={"Cache-Control": "no-store"})
+    service = getattr(request.app.state, "registrar", None)
+    gate = request.app.state.gate
+    reg = await service.registration_profile(discord_id) if service else None
+    key = await service.key_row_for(discord_id) if service else None
+    out: dict[str, Any] = {"logged_in": True, "discord": reg}
+    if key is None or not key["enabled"]:
+        out["has_key"] = False
+    else:
+        c = await gate.db.get_counter(key["id"], gate.day())
+        guard = getattr(gate, "guard", None)
+        qv = guard.queue_view(key["id"]) if guard is not None else {}
+        out.update(has_key=True, key=key["token"], name=key["name"],
+                   expires_at=key["expires_at"], image_scope=key["image_model_scope"],
+                   today={"images": c["images"], "v5": c["v5"],
+                          "daily_images": key["daily_images"], "daily_v5": key["daily_v5"]},
+                   queue=qv.get("mine", []))
+    return JSONResponse(out, headers={"Cache-Control": "no-store"})
