@@ -13,9 +13,12 @@ def test_idle_and_slots_rules():
     assert autopilot.idle_days_rule(30, 50, 3)[0] == 2
     assert autopilot.idle_days_rule(20, 50, 0)[0] == 5
     assert autopilot.idle_days_rule(40, 50, 0)[0] == 3
-    assert autopilot.slots_rule(50, 3, 0.3, 0)[0] == 55
-    assert autopilot.slots_rule(50, 3, 0.3, 12)[0] == 50          # 拥挤时不再加
-    assert autopilot.slots_rule(100, 3, 0.1, 0)[0] == 100
+    assert autopilot.slots_rule(50, 50, 3, 0.3, 0)[0] == 55       # 满员 + 候补 + 有余量
+    assert autopilot.slots_rule(50, 48, 0, 0.3, 0)[0] == 55       # 快满（空位 ≤ 2）
+    assert autopilot.slots_rule(50, 30, 0, 0.3, 0)[0] == 50       # 空位多，不加
+    assert autopilot.slots_rule(50, 50, 3, 0.3, 3)[0] == 50       # 3 个小时被拦：不再加
+    assert autopilot.slots_rule(50, 50, 3, 0.7, 0)[0] == 50       # 昨天用量高：不再加
+    assert autopilot.slots_rule(100, 100, 3, 0.1, 0)[0] == 100    # 上限 100
 
 
 def test_breaker_and_key_guard():
