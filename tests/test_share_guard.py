@@ -201,6 +201,34 @@ async def test_guard_hour_count_survives_restart(guard):
 def test_minutes_until_free_waits_for_enough_slots():
     from app.guard import Guard
     g, now = Guard(), 1_000_000.0
+    g.values["account_hourly_cap"] = 80
     for i in range(106):                       # 超了 26 张：要等第 27 张滑出窗口
         g.record_start("tok", now - 3600 + 30 + i * 30)
     assert g.minutes_until_free("tok", now) == 14
+
+
+
+@pytest.mark.asyncio
+async def test_hourly_cap_aimd_and_3h_window(guard):
+    from app.guard import Guard
+    db = guard.db
+    g, now = Guard(db), 2_000_000.0
+    assert g.values["account_hourly_cap"] == 150
+    assert await g.on_upstream_429(now) == (150, 100)          # 上游限流：减半，不低于 100
+    assert await g.on_upstream_429(now + 1) is None             # 已经在下限
+    assert await g.adapt_daily(now + 3600) is None               # 24 小时内有过限流：不加
+    assert await g.adapt_daily(now + 86401) == (100, 110)        # 平稳一天 +10
+    assert await g.adapt_daily(now + 86500) is None              # 一天最多一次
+    g2 = Guard(db); await g2.load()
+    assert g2.values["account_hourly_cap"] == 110                # 持久化
+    # 3 小时窗口：每小时都在上限内，但 3 小时累计到 400 也要拦
+    g3, t = Guard(), 3_000_000.0
+    for i in range(400):
+        g3.record_start("tok", t - 3 * 3600 + 60 + i * 26)
+    reason = await g3.token_block_reason(_DB0(), "tok", "d", t)
+    assert reason and "3 小时" in reason
+
+
+class _DB0:
+    async def get_upstream_counter(self, token_id, day):
+        return {"images": 0}
