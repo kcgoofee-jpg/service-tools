@@ -1,0 +1,7 @@
+# Caddy 自动申请并续期 HTTPS 证书。把域名换成你自己的，并让它的 A 记录指向本机公网 IP。
+# 用法（Caddy 以 host 网络运行，才能访问只绑定在 127.0.0.1 的网关）：
+#   docker run -d --name caddy --restart unless-stopped --network host \
+#     -v $PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro -v caddy_data:/data -v caddy_config:/config caddy:2
+gate.example.com {
+	reverse_proxy 127.0.0.1:3003
+}
