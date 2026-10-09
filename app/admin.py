@@ -1146,6 +1146,22 @@ async def members(request: Request):
             "SELECT key_id, score, score_ts, strikes, paused_until FROM share_state"):
         share_map[kid] = {"score": round(decayed(score, ts, time.time()), 1), "strikes": strikes,
                           "paused_until": paused if paused > time.time() else 0}
+    # 今日「重置今日额度」痕迹：按服务日起点统计次数与最近一次（从操作日志取，只读）
+    import re as _re
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo as _ZI
+    _tz = getattr(st, "tz", None) or _ZI(st.settings.tz)
+    day_start = _dt.now(_tz).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+    reset_map: dict[int, dict] = {}
+    for a_ts, a_target in await st.db._db.execute_fetchall(
+            "SELECT ts, target FROM admin_actions WHERE action='重置今日额度' AND ok=1 AND ts>=?", (day_start,)):
+        mm = _re.match(r"Key #(\d+)", a_target or "")
+        if not mm:
+            continue
+        e = reset_map.setdefault(int(mm.group(1)), {"count": 0, "last_ts": 0.0})
+        e["count"] += 1
+        if a_ts > e["last_ts"]:
+            e["last_ts"] = a_ts
     for row in await st.db.list_keys():
         counter = await st.db.get_counter(row["id"], today)
         w = week.get(row["id"], {})
@@ -1172,6 +1188,7 @@ async def members(request: Request):
             "rejected_24h": milestones.get(row["id"], {}).get("rejected_24h", 0),
             "sources_24h": len(sources.get(row["id"], [])),
             "share": share_map.get(row["id"]),
+            "reset_today": reset_map.get(row["id"]),
         })
     return {"members": out, "share_alert_nets": st.settings.key_share_alert_nets,
             "inactivity_days": st.settings.key_inactivity_delete_days}

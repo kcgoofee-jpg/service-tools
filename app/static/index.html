@@ -1726,6 +1726,7 @@ function memberPanel(m, now){
     const extra = [k.allow_img2img ? 'img2img' : '', k.exclude_global_v5 ? '独立 V5' : ''].filter(Boolean).join(' · ');
     quotaGrp = `${m.is_admin ? '' : `<div class="mx-perm">${permControls(m)}</div>`}
       <dl class="kv"><dt>今日用量</dt><dd>免费 ${u.legacy_free_images||0} · V5 ${u.v5||0} · Anlas ${u.anlas} · 文本 ${fmt(u.text_tokens)}</dd>
+        ${m.reset_today ? `<dt>今日重置</dt><dd><span class="mf ${m.reset_today.count>=2?'warn':'info'}">站长重置 ×${m.reset_today.count}</span> 最近 ${esc(new Date(m.reset_today.last_ts*1000).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}))}<span class="muted sm"> · 操作日志可查</span></dd>` : ''}
         ${quota}
         <dt>功能</dt><dd><div class="chips">${featChips(k.features)}</div></dd>
         ${extra ? `<dt>其他</dt><dd>${esc(extra)}</dd>` : ''}</dl>
@@ -1792,6 +1793,7 @@ function renderMembers(){
       full ? flag('bad', '已达日限') : '',
       m.expires_at && m.expires_at >= now && m.expires_at - now < 3*D ? flag('warn', '快到期') : '',
       m.rejected_24h > 0 ? flag('warn', '被拒 ' + m.rejected_24h, '近 24 小时被拒次数') : '',
+      m.reset_today && m.reset_today.count > 0 ? flag('info', '今日重置 ×' + m.reset_today.count, '今日被站长手动重置额度的次数') : '',
       m.is_admin ? flag('info', '站长') : '', m.is_test ? flag('info', '测试') : '', isManual(m) ? flag('info', '手动', '后台手动创建的 Key') : '',
       m.registered_at && now - m.registered_at < D ? flag('new', '新加入') : '',
       !m.first_image_at && !isStaff(m) ? flag('warn', m.registered_at && now - m.registered_at > H ? '还没出过图' : '未出图') : '',

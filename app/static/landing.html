@@ -592,13 +592,14 @@ $('themeBtn').addEventListener('click', function(){
 /* toast + copy */
 var toastT;
 function toast(msg){ var t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(function(){ t.classList.remove('show'); }, 1800); }
-function copyText(text){
+function copyText(text, msg){
   if(!text) return;
+  msg = msg || '已复制';
   function fallback(){
-    try{ var ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select(); var ok = document.execCommand('copy'); document.body.removeChild(ta); toast(ok ? '已复制' : '复制失败，请手动选择'); }
+    try{ var ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select(); var ok = document.execCommand('copy'); document.body.removeChild(ta); toast(ok ? msg : '复制失败，请手动选择'); }
     catch(_){ toast('复制失败，请手动选择'); }
   }
-  if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(text).then(function(){ toast('已复制'); }, fallback); }
+  if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(text).then(function(){ toast(msg); }, fallback); }
   else fallback();
 }
 

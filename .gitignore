@@ -10,3 +10,6 @@ data/
 .DS_Store
 *.db-wal
 *.db-shm
+
+# Claude Code local session dirs
+.claude/
