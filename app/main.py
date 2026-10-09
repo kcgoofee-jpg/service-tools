@@ -1764,6 +1764,15 @@ _PUBLIC_STATUS_CACHE: dict = {"at": 0.0, "body": None}
 async def public_live(request: Request):
     """首页实时架构图：每秒轮询，只含汇总数字（请求数、额度、排队数、账号保护、名额与打码的候补名单）。"""
     body = await live.build(STATE, getattr(request.app.state, "registrar", None))
+    # 登录的成员：附上「我的排队」，看板第一格直接显示排第几（不用再粘贴 Key）
+    from .registration_routes import _member_session
+    discord_id = _member_session(request)
+    body["me"] = None
+    if discord_id:
+        reg = getattr(request.app.state, "registrar", None)
+        key = await reg.key_row_for(discord_id) if reg is not None else None
+        if key is not None and key["enabled"]:
+            body["me"] = live.mine(STATE, key["id"])
     return JSONResponse(body, headers={"Cache-Control": "no-store"})
 
 
