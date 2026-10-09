@@ -1,6 +1,7 @@
 """No billable upstream calls: Discord OAuth enrollment contract."""
 import asyncio
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -187,3 +188,36 @@ class CapacityAndAdminTests(RegistrationTests):
             self.assertIsNotNone(await self.db.get_key_by_token(new))
             self.assertEqual((await client.post("/self-register/quota", headers=auth,
                 json={**body, "discord_id": "999"})).status_code, 404)
+
+
+class OpenRegistrationTests(RegistrationTests):
+    """First-come-first-served registration: no role needed, expired members rotate out, young accounts blocked."""
+
+    async def mint(self, user="777"):
+        link = await self.service.begin(user, "1480185480048808009")
+        return await self.service.finish("auth-code", parse_qs(urlparse(link).query)["state"][0])
+
+    async def test_no_role_required_when_role_is_empty(self):
+        self.service.membership_role = ""
+        self.roles = []
+        self.assertEqual(await self.mint(), "sent")
+
+    async def test_expired_key_frees_slot_and_member_can_register_again(self):
+        self.service.max_users = 1
+        await self.mint()
+        self.assertEqual(await self.service.count_active(), 1)
+        with self.assertRaises(RegistrationError):
+            await self.service.begin("888", "1480185480048808009")      # full
+        await self.db._db.execute("UPDATE api_keys SET expires_at=?", (time.time() - 5,))
+        await self.db._db.commit()
+        self.assertEqual(await self.service.count_active(), 0)           # expired key no longer holds the slot
+        self.assertEqual(await self.mint("777"), "sent")                 # same person renews
+        self.assertEqual((await self.db._db.execute_fetchall("SELECT count(*) FROM api_keys"))[0][0], 1)
+
+    async def test_young_discord_accounts_cannot_grab_slots(self):
+        self.service.min_account_days = 7
+        young = str(((int(time.time() * 1000) - 86_400_000) - 1420070400000) << 22)   # created yesterday
+        with self.assertRaises(RegistrationError):
+            await self.service.begin(young, "1480185480048808009")
+        old = str(((int(time.time() * 1000) - 30 * 86_400_000) - 1420070400000) << 22)
+        self.assertIn("state=", await self.service.begin(old, "1480185480048808009"))
