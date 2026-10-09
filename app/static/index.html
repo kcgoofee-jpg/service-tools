@@ -466,12 +466,14 @@ details.neg div{margin-top:6px;white-space:pre-wrap;overflow-wrap:anywhere;max-h
             <div class="card panel"><div class="panel-head"><h2>状态与防护</h2></div><div class="status-list" id="statusPanel"></div></div>
           </div>
           <div class="card panel">
-            <div class="panel-head"><h2>上游 NovelAI 令牌池</h2></div>
+            <div class="panel-head"><h2>上游 NovelAI 令牌池</h2><button class="btn primary" type="button" id="tokAddBtn" data-act="tok-add"><span data-ic="plus"></span>添加 Token</button></div>
             <div id="pool"></div>
             <div id="allowanceDetails" class="hint" style="white-space:pre-line;margin-top:16px">V5 余量：正在读取本地状态…</div>
             <details class="help" id="tokenHelp"><summary>添加更多上游 Token</summary>
               <div class="help-body">
-                <p>上游 Token 是在服务器的 <code>.env</code> 文件里配置的，不能在这个页面直接添加。</p>
+                <p><b>最简单的方式：点上方的「添加 Token」按钮</b>，把 NovelAI 的 <code>pst-</code> 开头 Token 粘贴进去即可；每把 Token 也可以在列表里「替换」或「删除」。后台会先向 NovelAI 验证，通过后才保存。</p>
+                <p>一旦在后台使用过这些功能，令牌池就改由后台管理，<code>.env</code> 里的 <code>NAI_TOKENS</code> 不再被读取（它只用于第一次使用前初始化令牌池）。</p>
+                <p style="margin-top:8px"><b>首次部署或备用方式：在服务器 <code>.env</code> 里配置</b></p>
                 <ol>
                   <li>编辑 <code>.env</code>，用英文逗号分隔多个 Token，<b>顺序有意义</b>：
                     <div class="codeblk"><pre>NAI_TOKENS=pst-aaa,pst-bbb</pre><button class="btn mini" type="button" data-act="copy-code">复制</button></div></li>
@@ -681,6 +683,22 @@ NAI_TOKEN_V5_DAILY_LIMITS=0,150</pre><button class="btn mini" type="button" data
       <div class="keybox"><input id="keyModalVal" readonly aria-label="Key"><button class="btn primary" data-act="copy-modal-key">复制</button></div>
     </div>
     <div class="dialog-foot"><button class="btn" data-act="close-keymodal">完成</button></div>
+  </div>
+</div>
+
+<!-- ===== Upstream token modal ===== -->
+<div class="overlay" id="tokModal">
+  <div class="dialog sm-d" role="dialog" aria-modal="true" aria-labelledby="tokTitle">
+    <div class="dialog-head"><h3 id="tokTitle">添加上游 Token</h3><button class="btn ghost icon" type="button" data-act="tok-close" aria-label="关闭"><span data-ic="x"></span></button></div>
+    <div class="dialog-body">
+      <p class="hint" id="tokIntro" style="margin:0 0 12px" hidden></p>
+      <div class="field"><label for="tok_val">上游 Token</label>
+        <div class="pwbox"><input id="tok_val" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="pst-…"><button class="btn" type="button" data-act="toggle-pw" data-for="tok_val">显示</button></div></div>
+      <label class="check" id="tokAnlasBox"><input id="tok_anlas" type="checkbox"><span>允许这把 Token 消耗 Anlas（付费）<br><span class="muted sm">不勾选 = 这把 Token 只会用于免费额度，不会产生 Anlas 扣费。</span></span></label>
+      <p class="hint">Token 只会保存在服务器上一个仅 root 可读的文件里，后台不会再次显示完整 Token。</p>
+      <div class="err" id="tokErr" role="alert"></div>
+    </div>
+    <div class="dialog-foot"><button class="btn" type="button" id="tokCancel" data-act="tok-close">取消</button><button class="btn primary" type="button" id="tokSubmit" data-act="tok-submit">添加</button></div>
   </div>
 </div>
 
@@ -1010,6 +1028,8 @@ async function loadOverview(){
               : '<span class="tag on"><i class="dot"></i>正常</span>'}
             ${!p.admin_enabled && p.disabled ? '<span class="tag warn">401 失效</span>' : ''}
             <span class="sp"></span>
+            <button class="btn mini" data-act="tok-replace" data-id="${id}" data-label="#${esc(p.position)} ${esc(p.token)}">替换 Token</button>
+            <button class="btn mini danger" data-act="tok-del" data-id="${id}" data-label="#${esc(p.position)} ${esc(p.token)}" ${d.pool.length<=1?'disabled title="令牌池里只剩这一把，不能删除"':''}>删除</button>
             <button class="btn mini ${p.admin_enabled?'danger':''}" data-act="up-enabled" data-id="${id}" data-on="${p.admin_enabled?0:1}">${p.admin_enabled?'停用':'启用'}</button>
           </div>
           <div class="token-meta num">今日生成 ${p.images_today||0} 张 · 失败 ${p.fails} · Anlas ${p.allow_anlas?'允许':'禁止'} · 免费 V5 ${p.v5_used}/${p.v5_daily_limit||'∞'}</div>
@@ -1114,6 +1134,61 @@ async function setUpstreamEnabled(tokenId, enabled){
       method:'PUT', body:JSON.stringify({enabled})});
     toast(enabled?'上游 Key 已启用（401 失效仍需更换 Token）':'上游 Key 已停用', 'ok');
     loadOverview();
+  }catch(e){ toastErr(e); }
+}
+
+/* ---------- upstream token management ---------- */
+let tokMode = 'add', tokTarget = '', tokBusy = false, tokOpener = null;
+function openTokModal(mode, id, label, opener){
+  tokMode = mode; tokTarget = id || ''; tokOpener = opener || null;
+  $('#tokTitle').textContent = mode==='add' ? '添加上游 Token' : '替换上游 Token' + (label ? '：' + label : '');
+  const intro = $('#tokIntro');
+  intro.hidden = mode==='add';
+  intro.textContent = mode==='add' ? '' : '在 NovelAI 重置 Token 后，把新的粘贴到这里；这把 Token 的 V5 日限、启停、并发和今日计数会延续。';
+  $('#tokAnlasBox').hidden = mode!=='add';
+  $('#tok_val').value = ''; $('#tok_val').type = 'password';
+  $('#tokModal [data-act=toggle-pw]').textContent = '显示';
+  $('#tok_anlas').checked = false; $('#tokErr').textContent = '';
+  $('#tokSubmit').textContent = mode==='add' ? '添加' : '替换';
+  setTokBusy(false);
+  openOverlay('#tokModal'); setTimeout(()=>$('#tok_val').focus(), 30);
+}
+function closeTokModal(){
+  if(tokBusy) return;
+  closeOverlay('#tokModal'); $('#tok_val').value = '';
+  if(tokOpener && document.contains(tokOpener)) tokOpener.focus();
+  tokOpener = null;
+}
+function setTokBusy(b){
+  tokBusy = b;
+  $('#tokSubmit').disabled = b; $('#tokCancel').disabled = b; $('#tok_val').disabled = b; $('#tok_anlas').disabled = b;
+  $('#tokSubmit').textContent = b ? '正在向 NovelAI 验证…' : (tokMode==='add' ? '添加' : '替换');
+}
+async function submitTok(){
+  if(tokBusy) return;
+  const token = $('#tok_val').value.trim(), err = $('#tokErr');
+  err.textContent = '';
+  if(!token.startsWith('pst-')){ err.textContent = 'Token 格式不对：应以 pst- 开头（NovelAI 账号设置 → Get Persistent API Token）'; $('#tok_val').focus(); return; }
+  const add = tokMode==='add';
+  setTokBusy(true);
+  try{
+    const d = await api('/admin/api/upstream-tokens' + (add ? '' : '/' + encodeURIComponent(tokTarget)), {
+      method: add ? 'POST' : 'PUT',
+      body: JSON.stringify(add ? {token, allow_anlas: $('#tok_anlas').checked} : {token})});
+    setTokBusy(false); closeTokModal();
+    toast(`验证通过（订阅等级 ${d.tier}），${add?'已加入令牌池':'已替换'}`, 'ok');
+    loadOverview(); loadAllowance();
+  }catch(e){
+    setTokBusy(false);
+    err.textContent = e.message; toastErr(e);
+    $('#tok_val').focus();
+  }
+}
+async function deleteUpstreamToken(id, label){
+  if(!await askConfirm(`确定从令牌池删除上游 Token ${label}？\n它将不再接收新请求，已发出的请求继续完成。删除后如需恢复，要重新粘贴这把 Token。`, '删除')) return;
+  try{
+    await api('/admin/api/upstream-tokens/' + encodeURIComponent(id), {method:'DELETE'});
+    toast('已删除上游 Token', 'ok'); loadOverview(); loadAllowance();
   }catch(e){ toastErr(e); }
 }
 
@@ -1714,7 +1789,7 @@ document.addEventListener('click', ev=>{
   const el = ev.target.closest('[data-act]');
   if(!el){
     if(ev.target.classList && ev.target.classList.contains('overlay') && ev.target.id!=='confirmModal'){
-      closeOverlay('#'+ev.target.id);
+      if(ev.target.id==='tokModal') closeTokModal(); else closeOverlay('#'+ev.target.id);
     }
     return;
   }
@@ -1744,6 +1819,11 @@ document.addEventListener('click', ev=>{
     case 'toggle-audit-set': auditSetOpen = !auditSetOpen; renderAuditSettings(); break;
     case 'goto-audit': ev.preventDefault(); tab('audit'); break;
     case 'save-pw': changePassword(); break;
+    case 'tok-add': openTokModal('add', '', '', el); break;
+    case 'tok-replace': openTokModal('replace', el.dataset.id, el.dataset.label, el); break;
+    case 'tok-del': deleteUpstreamToken(el.dataset.id, el.dataset.label); break;
+    case 'tok-close': closeTokModal(); break;
+    case 'tok-submit': submitTok(); break;
     case 'toggle-pw': { const i = document.getElementById(el.dataset.for); const show = i.type === 'password'; i.type = show ? 'text' : 'password'; el.textContent = show ? '隐藏' : '显示'; break; }
     case 'copy-code': { const t = el.parentElement.querySelector('pre').textContent; copyText(t, '已复制').then(ok=>{ if(!ok) toast('复制失败，请手动选择文本', 'err'); }); break; }
     case 'copy-dc': copyText(el.dataset.dcid, 'Discord ID 已复制').then(ok=>{ if(!ok) toast('复制失败，请手动选择文本', 'err'); }); break;
@@ -1792,10 +1872,20 @@ $('#memberSort').addEventListener('click', e=>{
   renderMembers();
 });
 document.addEventListener('keydown', e=>{
+  if($('#tokModal').classList.contains('show') && !$('#confirmModal').classList.contains('show')){
+    if(e.key==='Enter' && e.target.id==='tok_val'){ e.preventDefault(); submitTok(); return; }
+    if(e.key==='Tab'){
+      const f = $$('#tokModal button:not(:disabled), #tokModal input:not(:disabled)').filter(x=>x.offsetParent!==null);
+      if(f.length){ const first=f[0], last=f[f.length-1];
+        if(e.shiftKey && document.activeElement===first){ e.preventDefault(); last.focus(); }
+        else if(!e.shiftKey && document.activeElement===last){ e.preventDefault(); first.focus(); } }
+    }
+  }
   if(e.key!=='Escape') return;
   if($('#confirmModal').classList.contains('show')) settleConfirm(false);
   else if($('#lightbox').classList.contains('show')){ closeOverlay('#lightbox'); }
   else if($('#keyModal').classList.contains('show')){ closeOverlay('#keyModal'); $('#keyModalVal').value=''; }
+  else if($('#tokModal').classList.contains('show')) closeTokModal();
   else if($('#modal').classList.contains('show')) closeModal();
   document.body.classList.remove('nav-open');
 });
