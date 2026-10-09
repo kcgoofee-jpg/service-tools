@@ -1292,6 +1292,12 @@ async def test_anlas_rebalance_grants_active_v5_members_and_revokes(tmp_path):
         row = await db.get_key(active["id"])
         assert row["allow_anlas"] == 0 and row["anlas_auto"] == 0 and sent == [active["id"]]
         assert json.loads(await db.get_setting(anlas_pool.STATE_KEY, "{}"))["per_member"] == 0
+        # 站长在成员页选了「Anlas 关闭」（-1）：即使又活跃了，算法也不会再开
+        await db._db.execute("UPDATE api_keys SET anlas_auto=-1 WHERE id=?", (active["id"],))
+        await db._db.execute("INSERT INTO counters(key_id, day, images) VALUES (?,?,20)", (active["id"], today))
+        await db._db.commit()
+        r = await anlas_pool.rebalance(st, now=now, account={"anlas": 5000, "refill_at": now + 10 * 86400}, notify=notify)
+        assert r["members"] == [] and (await db.get_key(active["id"]))["allow_anlas"] == 0
     finally:
         await db.close()
 
