@@ -36,6 +36,7 @@ from .image_payload import read_image_body
 from .nai import NaiClient, UpstreamError, _wait_cleanup
 from .policy import (
     normalize_image_request,
+    upstream_parameter_problem,
     clamp_image_params,
     clamp_text_params,
     estimate_image_cost,
@@ -164,7 +165,9 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-app = FastAPI(title="猫头鹰公益站", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
+__version__ = "1.1.0"
+
+app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
 
 class AdminNoStoreMiddleware:
@@ -804,6 +807,10 @@ async def _generate_image(request: Request, *, streaming: bool):
         record(key, "image", str(body.get("model", "?"))[:80], "rejected", detail=str(exc))
         raise err(400, f"图片参数无效：{exc}") from None
     model = body["model"]
+    problem = upstream_parameter_problem(body)
+    if problem:
+        record(key, "image", model, "rejected", detail=problem[:120])
+        raise err(400, problem)
     if any(body["parameters"].get(name) for name in REFERENCE_FIELDS):
         await require_feature(key, "vibe")      # 参考图 / Vibe 经由 generate-image 传入时同样受功能开关约束
     model_tier = image_model_tier(model)
@@ -1396,7 +1403,7 @@ async def v1_chat(request: Request):
 
 @app.get("/healthz")
 async def healthz():
-    return {"ok": True, "upstream": STATE.nai.configured if STATE else False}
+    return {"ok": True, "version": __version__, "upstream": STATE.nai.configured if STATE else False}
 
 
 # 公告是管理员存储的 HTML：沙箱化后脚本无法执行，也读不到与 /admin 同源的数据。
@@ -1465,6 +1472,8 @@ async def _public_status_body(request: Request) -> dict:
         "audit_notice": audit_notice(*(await audit_flags(STATE.db, SETTINGS))),
         "discord_invite": SETTINGS.discord_invite_url,
         "key_inactivity_delete_days": SETTINGS.key_inactivity_delete_days,
+        # 正在处理的出图任务数（含正在生成的那一个）；全站串行出图，成员据此估计等待时间
+        "image_jobs": len(getattr(STATE, "image_reservations", {}) or {}),
         "has_announcement": bool(p.exists() and p.read_text(encoding="utf-8").strip()),
     }
 

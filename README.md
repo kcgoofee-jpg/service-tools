@@ -145,6 +145,8 @@ docker compose exec nai-gate python -c "import sqlite3; c=sqlite3.connect('/app/
 docker compose restart nai-gate
 ```
 
+升级：先备份 `data/`，再 `git pull && docker compose --profile discord up -d --build`，最后用 `curl 127.0.0.1:3003/healthz` 确认版本号。从 1.0.x 升到 1.1.0 起容器以非 root（UID 10001）运行，需先执行一次 `sudo chown -R 10001:10001 data`。各版本变化见 [CHANGELOG.md](CHANGELOG.md)。
+
 发布前后可用 `deploy/live_smoke.py` 对线上做一次冒烟测试（Key 从环境变量读，不会打印）。
 
 添加、替换、删除上游 Token：直接在后台“总览 → 上游令牌池”操作。粘贴新 Token 后，服务器会先向 NovelAI 验证它是否有效，通过才保存；在 NovelAI 重置了 Token 时用“替换 Token”，该槽位的 V5 日限、启停、并发和当天计数会延续。第一次在后台操作后，令牌池由后台管理：Token 保存在 `data/upstream_tokens.json`（权限 600，**不写入数据库**，数据库备份里也不会有它），`.env` 里的 `NAI_TOKENS` 只用于首次启动时初始化，之后不再读取。后台任何一次添加 / 替换 / 删除都会给站长发 Discord 告警。后台密码可在“设置 → 后台密码”里修改。

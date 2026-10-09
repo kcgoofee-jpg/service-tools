@@ -426,7 +426,9 @@ function renderStatus(d){
   var st = up.status;
   if(st === 'ok') pills.appendChild(pill('ok', '服务正常', true));
   else if(st === 'degraded') pills.appendChild(pill('warn', '服务不稳定', true));
-  else pills.appendChild(pill('idle', '服务空闲', true));
+  else pills.appendChild(pill('ok', '服务正常 · 空闲', true));
+  var jobs = Number(d.image_jobs) || 0;
+  if(jobs > 1) pills.appendChild(pill('info', '出图排队中 ' + jobs + ' 个任务 · 约 15 秒一张', false));
   if(reg.open){
     var t = '注册开放中';
     if(reg.slots_left != null) t += ' · 剩余名额 ' + reg.slots_left;

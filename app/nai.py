@@ -350,6 +350,13 @@ class NaiClient:
         ts.blocked_until = time.time() + clamp_retry_after(retry_after)
         ts.fails += 1
 
+    def _warn_account(self, status: int) -> None:
+        """402 / 403 只提醒站长、不自动停用：402 也可能只是单次请求 Anlas 不足，
+        只有一把 Token 时自动停用会导致全站不可用。"""
+        if status in (402, 403):
+            reason = "需要付费 / 订阅或 Anlas 不足" if status == 402 else "拒绝访问，账号可能受限"
+            self._event(f"upstream_{status}", f"NovelAI 返回 {status}（{reason}），请检查上游账号状态。Token 未被自动停用。", 1800)
+
     def mark_unauthorized(self, ts: TokenState) -> None:
         ts.disabled = True
 
@@ -496,6 +503,7 @@ class NaiClient:
                     if image_lane:
                         raise UpstreamError(429, "上游限流(429)，全站图片生成已进入冷却")
                     continue
+                self._warn_account(resp.status_code)
                 if resp.status_code == 401:
                     self.mark_unauthorized(ts)
                     self._event("upstream_401", "NovelAI 返回 401：上游 Token 已失效，生图和文本全部不可用，请尽快更换 Token。", 1800)
@@ -617,6 +625,7 @@ class NaiClient:
             if resp.status_code == 429:
                 await self._rate_limit(ts, resp, on_rate_limited)
                 raise UpstreamError(429, "上游限流(429)，全站图片生成已进入冷却")
+            self._warn_account(resp.status_code)
             if resp.status_code == 401:
                 self.mark_unauthorized(ts)
                 self._event("upstream_401", "NovelAI 返回 401：上游 Token 已失效，生图和文本全部不可用，请尽快更换 Token。", 1800)
