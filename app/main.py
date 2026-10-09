@@ -1132,12 +1132,16 @@ async def healthz():
     return {"ok": True, "upstream": STATE.nai.configured if STATE else False}
 
 
+# 公告是管理员存储的 HTML：沙箱化后脚本无法执行，也读不到与 /admin 同源的数据。
+_ANNOUNCEMENT_HEADERS = {"Content-Security-Policy": "sandbox allow-popups allow-popups-to-escape-sandbox", "X-Content-Type-Options": "nosniff"}
+
+
 @app.get("/")
 async def index():
     p = SETTINGS.announcement_path
     if p.exists() and p.read_text(encoding="utf-8").strip():
-        return Response(p.read_text(encoding="utf-8"), media_type="text/html")
-    return Response(DEFAULT_ANNOUNCEMENT, media_type="text/html")
+        return Response(p.read_text(encoding="utf-8"), media_type="text/html", headers=_ANNOUNCEMENT_HEADERS)
+    return Response(DEFAULT_ANNOUNCEMENT, media_type="text/html", headers=_ANNOUNCEMENT_HEADERS)
 
 
 @app.get("/admin")

@@ -554,7 +554,7 @@ class Database:
     ) -> None:
         await self._db.execute(
             _INSERT_LOG,
-            (time.time(), key_id, key_name, kind, model, status,
+            (time.time(), key_id, key_name[:80], kind, model[:80], status,
              images, anlas, tokens, detail[:500], unconfirmed_anlas),
         )
         await self._db.commit()

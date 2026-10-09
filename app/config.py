@@ -60,6 +60,7 @@ class Settings:
     key_image_min_interval: float = _float("KEY_IMAGE_MIN_INTERVAL", 15)
     image_min_interval: float = _float("IMAGE_MIN_INTERVAL", 15)  # 每把上游 Token 的图片请求间隔
     image_429_cooldown_seconds: float = _float("IMAGE_429_COOLDOWN_SECONDS", 60)
+    admin_allowed_origins: tuple = tuple(o.strip() for o in os.getenv("ADMIN_ALLOWED_ORIGINS", "").split(",") if o.strip())
     login_max_attempts: int = _int("LOGIN_MAX_ATTEMPTS", 5)
     login_window_seconds: int = _int("LOGIN_WINDOW_SECONDS", 300)
     key_inactivity_delete_days: int = _int("KEY_INACTIVITY_DELETE_DAYS", 3)
