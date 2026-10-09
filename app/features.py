@@ -19,6 +19,18 @@ FEATURES: dict[str, str] = {
 }
 GLOBAL_KEY = "features_global"
 
+# 用量日志 usage_log.kind → 功能。后台按功能统计与筛选日志时使用。
+KIND_FEATURE: dict[str, str] = {
+    "image": "image", "image_stream": "image",
+    "upscale": "upscale", "augment-image": "augment",
+    "vibe_encode": "vibe", "tags": "tags",
+    "text": "text", "chat": "text", "voice": "voice",
+}
+
+
+def kinds_for(feature: str) -> list[str]:
+    return [kind for kind, name in KIND_FEATURE.items() if name == feature]
+
 
 def parse_list(value: Any) -> Optional[list[str]]:
     """把 Key 上的 features 字段解析为列表；None 表示沿用旧行为。"""

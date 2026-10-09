@@ -14,7 +14,7 @@ from pathlib import Path
 from . import alerts, token_store
 from .config import Settings
 from .database import Database
-from .nai import NaiClient
+from .nai import NaiClient, clamp_retry_after
 from .reconciliation import ManualReconciliation
 
 
@@ -340,14 +340,18 @@ class GateState:
     async def load_image_cooldown(self) -> None:
         raw = await self.db.get_setting("image_cooldown_until", 0)
         try:
-            self._image_blocked_until = max(0.0, float(raw or 0))
+            value = float(raw or 0)
+            # 历史上可能持久化过 inf / 超大值：最多保留 1 小时冷却，否则视为无效。
+            if not (value == value) or value > time.time() + 3600:
+                value = 0.0
+            self._image_blocked_until = max(0.0, value)
         except (TypeError, ValueError):
             self._image_blocked_until = 0.0
 
     async def block_image_generation(self, retry_after: float) -> int:
         """暂停全站图片请求，并返回当前剩余冷却秒数。"""
         self._image_blocked_until = max(
-            self._image_blocked_until, time.time() + max(5.0, retry_after)
+            self._image_blocked_until, time.time() + clamp_retry_after(retry_after)
         )
         await self.db.set_setting("image_cooldown_until", self._image_blocked_until)
         remaining = max(1, int(self._image_blocked_until - time.time()))

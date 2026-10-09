@@ -64,6 +64,29 @@ class TokenState:
         return self.admin_enabled and not self.disabled and time.time() >= self.blocked_until
 
 
+RETRY_AFTER_MIN = 5.0
+RETRY_AFTER_MAX = 3600.0
+
+
+def clamp_retry_after(value: Any) -> float:
+    """任何来源的冷却秒数都钳制到 5..3600 的有限值（inf/NaN/超大值不能造成永久停摆）。"""
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        return 20.0
+    if seconds != seconds:          # NaN
+        return 20.0
+    return min(RETRY_AFTER_MAX, max(RETRY_AFTER_MIN, seconds))
+
+
+def parse_retry_after(header: Optional[str]) -> float:
+    """只接受十进制秒数；HTTP 日期等其它格式按默认 20 秒处理。"""
+    value = (header or "").strip()
+    if not value or len(value) > 10 or not value.isascii() or not value.isdigit():
+        return 20.0
+    return clamp_retry_after(int(value))
+
+
 async def _wait_cleanup(task: asyncio.Task) -> Any:
     """Finish accounting under ASGI cancel scopes and direct task cancellation."""
     cancelled = False
@@ -324,7 +347,7 @@ class NaiClient:
             self._image_min_interval = seconds
 
     def mark_rate_limited(self, ts: TokenState, retry_after: float = 20.0) -> None:
-        ts.blocked_until = time.time() + max(5.0, retry_after)
+        ts.blocked_until = time.time() + clamp_retry_after(retry_after)
         ts.fails += 1
 
     def mark_unauthorized(self, ts: TokenState) -> None:
@@ -385,13 +408,10 @@ class NaiClient:
 
     async def _rate_limit(self, ts: TokenState, resp: httpx.Response,
                           callback: Optional[Callable[[float], Awaitable[None]]]) -> None:
-        try:
-            retry_after = float(resp.headers.get("retry-after", "20"))
-        except (ValueError, TypeError):
-            retry_after = 20.0
+        retry_after = parse_retry_after(resp.headers.get("retry-after"))
         self.mark_rate_limited(ts, retry_after)
         if callback:
-            await callback(max(5.0, retry_after))
+            await callback(retry_after)
 
     async def request(
         self, method: str, url: str, json_body: Any = None,
@@ -521,17 +541,12 @@ class NaiClient:
 
     @asynccontextmanager
     async def _dispatch_guard(self, ts: TokenState, image_lane: bool):
-        if image_lane:
-            # Admin disable observes this check, then waits for the image slot
-            # before returning. The HTTP operation itself may overlap peers.
-            async with ts.dispatch_lock:
-                if not ts.admin_enabled:
-                    yield
-                    return
-            yield
-        else:
-            async with ts.dispatch_lock:
-                yield
+        # 只在检查 admin_enabled 时持锁；HTTP 请求本身不能持锁，否则一个慢文本请求
+        # 会把这把 Token 上的所有图片派发卡住（且不受 queue_timeout 约束）。
+        # 停用开关仍会等图片槽空闲后才返回。
+        async with ts.dispatch_lock:
+            pass                    # 与 set_admin_enabled 串行：之后发出的请求一定能看到新状态
+        yield
 
     @asynccontextmanager
     async def image_stream(
@@ -646,8 +661,7 @@ class NaiClient:
         if resp.status_code not in (200, 201):
             if resp.status_code == 401:
                 self.mark_unauthorized(ts)
-            elif resp.status_code == 429:
-                self.mark_rate_limited(ts)
+            # 文本 429 不冻结整把 Token：否则成员刷文本就能让全站生图停摆。
             # Error bodies may stall or contain private upstream details.
             # Close before handing the failure back to the route, even on cancel.
             try:

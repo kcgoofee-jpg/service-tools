@@ -60,11 +60,11 @@ class RegistrationService:
         self.lock = asyncio.Lock()
 
     async def count_active(self) -> int:
-        """占用名额的人数：持有有效（启用且未过期）Key 的已注册用户。Key 过期或被删则名额释放。"""
-        rows = await self.db._db.execute_fetchall(
-            """SELECT COUNT(*) FROM discord_registrations r JOIN api_keys k ON k.id=r.key_id
-               WHERE k.enabled=1 AND (k.expires_at IS NULL OR k.expires_at > ?)""", (time.time(),))
-        return int(rows[0][0])
+        """占用名额的人数：持有未过期 Key 的已注册用户。Key 过期或被删则名额释放。
+
+        被站长停用（暂停）的成员仍占名额：否则停用即空出名额，重新启用后会超出上限。
+        """
+        return await count_registered(self.db)
 
     async def _set_role(self, discord_id: str, grant: bool) -> bool:
         """给 / 摘「已领 Key」身份组。失败只记日志，不影响注册或撤销。"""
@@ -113,8 +113,10 @@ class RegistrationService:
         for (discord_id,) in pending:
             if await self._set_role(str(discord_id), False):
                 await self.db._db.execute("DELETE FROM pending_role_removals WHERE discord_id=?", (str(discord_id),))
+                # 立即提交：不能在持有未提交写事务时去等下一个 Discord 请求，
+                # 否则另一连接上的计费写入会因 database is locked 失败、用量丢失。
+                await self.db._db.commit()
                 done += 1
-        await self.db._db.commit()
         return done
 
     async def backfill_profiles(self, limit: int = 5) -> int:
@@ -137,9 +139,8 @@ class RegistrationService:
             key = await self.db.get_key(key_id)
             if key is not None and str(key["name"]).startswith("Discord:"):
                 await self.db.update_key(key_id, {"name": member_label(user)})
+            await self.db._db.commit()      # 下一轮网络请求前提交，原因同 sync_roles
             done += 1
-        if done:
-            await self.db._db.commit()
         return done
 
     async def registration_for_key(self, key_id: int):
@@ -152,11 +153,17 @@ class RegistrationService:
         return bool(rows)
 
     async def ban(self, discord_id: str) -> None:
-        """永久禁止该 Discord 账号领取：写入封禁表，并撤销其现有 Key 与身份组。"""
-        await self.db._db.execute("INSERT OR IGNORE INTO discord_bans(discord_id, created_at) VALUES (?,?)",
-                                  (discord_id, time.time()))
-        await self.db._db.commit()
-        await self.revoke(discord_id)
+        """永久禁止该 Discord 账号领取：写入封禁表，并撤销其现有 Key 与身份组。
+
+        与 finish 共用 self.lock：否则在对方 OAuth 回调进行中封禁，回调仍会发出有效 Key。
+        """
+        async with self.lock:
+            await self.db._db.execute("INSERT OR IGNORE INTO discord_bans(discord_id, created_at) VALUES (?,?)",
+                                      (discord_id, time.time()))
+            await self.db._db.commit()
+            had_key = await self.revoke(discord_id, remove_role=False)
+        if had_key:
+            await self.release_role(discord_id)
 
     async def unban(self, discord_id: str) -> bool:
         cur = await self.db._db.execute("DELETE FROM discord_bans WHERE discord_id=?", (discord_id,))
@@ -277,6 +284,8 @@ class RegistrationService:
                     raise RegistrationError("未检测到指定身份组，无法领取 Key。")
                 channel = await self._discord("POST", "/users/@me/channels",
                     bearer="Bot " + self.bot_token, json={"recipient_id": expected_id})
+                if await self.is_banned(expected_id):      # 网络等待期间可能刚被封禁
+                    raise RegistrationError("这个 Discord 账号已被站长停用，无法领取 Key。")
                 key = gen_key("nai")
                 row = await self.db.create_key({
                     "name": "Discord:" + expected_id, "token": key,
@@ -312,7 +321,9 @@ class RegistrationService:
                     await self.db.delete_key(row["id"])
                     raise
                 if self.member_role_id:
-                    # 先记标志再调用 Discord：即使中途崩溃，到期同步也会尝试摘除，不会残留
+                    # 先记标志再调用 Discord：即使中途崩溃，到期同步也会尝试摘除，不会残留。
+                    # 同时清掉此前失败遗留的“待摘除”记录，否则下一轮同步会摘掉刚发的新身份组。
+                    await self.db._db.execute("DELETE FROM pending_role_removals WHERE discord_id=?", (expected_id,))
                     await self.db._db.execute("UPDATE discord_registrations SET role_granted=1 WHERE discord_id=?",
                                               (expected_id,))
                     await self.db._db.commit()
@@ -320,6 +331,13 @@ class RegistrationService:
                 return "sent"
             except (httpx.HTTPError, KeyError, ValueError) as exc:
                 raise RegistrationError("Discord 服务暂时不可用，请稍后重试。") from exc
+
+
+async def count_registered(db) -> int:
+    rows = await db.execute_fetchall_compat(
+        """SELECT COUNT(*) FROM discord_registrations r JOIN api_keys k ON k.id=r.key_id
+           WHERE k.expires_at IS NULL OR k.expires_at > ?""", (time.time(),))
+    return int(rows[0][0])
 
 
 def configured_service(db, http: httpx.AsyncClient) -> RegistrationService | None:

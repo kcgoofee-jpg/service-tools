@@ -90,6 +90,7 @@ input[type=checkbox]{width:16px;height:16px;min-height:0;padding:0;accent-color:
 .btn.primary:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
 .btn.danger{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 40%,var(--border))}
 .btn.danger:hover{background:var(--bad-soft);border-color:var(--bad)}
+.btn.solid-danger{background:var(--bad);border-color:var(--bad);color:#fff}
 .btn.ghost{background:transparent;border-color:transparent;box-shadow:none;color:var(--text-2)}
 .btn.ghost:hover{background:var(--surface-3)}
 .btn.mini{min-height:28px;padding:2px 10px;font-size:12.5px;box-shadow:none}
@@ -102,6 +103,8 @@ input[type=checkbox]{width:16px;height:16px;min-height:0;padding:0;accent-color:
 .tag.on{background:var(--ok-soft);color:var(--ok)}
 .tag.off{background:var(--bad-soft);color:var(--bad)}
 .tag.warn{background:var(--warn-soft);color:var(--warn)}
+.num.bad{color:var(--bad);font-weight:600}.num.warn{color:var(--warn);font-weight:600}
+tr.muted td{opacity:.6}
 .tag.info{background:var(--accent-soft);color:var(--accent-text)}
 .tag.dim{background:var(--surface-3);color:var(--muted)}
 .dot{width:7px;height:7px;border-radius:50%;background:currentColor;flex:none}
@@ -414,7 +417,7 @@ details.neg div{margin-top:6px;white-space:pre-wrap;overflow-wrap:anywhere;max-h
     <p class="sub">请输入管理密码登录</p>
     <div class="field">
       <label for="pwd">管理密码</label>
-      <input id="pwd" type="password" placeholder="ADMIN_PASSWORD" autocomplete="current-password">
+      <input id="pwd" type="password" placeholder="管理密码" autocomplete="current-password">
     </div>
     <div class="err" id="loginErr"></div>
     <button class="btn primary block" id="loginBtn">登录</button>
@@ -464,6 +467,10 @@ details.neg div{margin-top:6px;white-space:pre-wrap;overflow-wrap:anywhere;max-h
           <div class="two-col">
             <div class="card panel"><div class="panel-head"><h2>近 7 天生成量（图片）</h2></div><div class="chart" id="chart"></div></div>
             <div class="card panel"><div class="panel-head"><h2>状态与防护</h2></div><div class="status-list" id="statusPanel"></div></div>
+          </div>
+          <div class="card panel">
+            <div class="panel-head"><h2>各功能用量</h2><div class="desc">按用量日志统计（日志保留期内）；点功能名查看对应日志</div></div>
+            <div class="table-wrap"><table class="rt"><thead><tr><th>功能</th><th>今日 成功 / 失败 / 拒绝</th><th>今日产出</th><th>近 7 天 成功 / 失败 / 拒绝</th><th>近 7 天产出</th></tr></thead><tbody id="featUsage"></tbody></table></div>
           </div>
           <div class="card panel">
             <div class="panel-head"><h2>上游 NovelAI 令牌池</h2><button class="btn primary" type="button" id="tokAddBtn" data-act="tok-add"><span data-ic="plus"></span>添加 Token</button></div>
@@ -555,6 +562,9 @@ NAI_TOKEN_V5_DAILY_LIMITS=0,150</pre><button class="btn mini" type="button" data
         <section id="tab-logs" hidden>
           <div class="page-head"><div class="ttl"><h1>用量日志</h1><p>最近的请求、消耗与错误信息</p></div>
             <div class="tools">
+              <select id="logFeature" aria-label="按功能筛选" style="width:160px"><option value="">全部功能</option>
+                <option value="image">文生图</option><option value="upscale">放大</option><option value="augment">导演工具</option>
+                <option value="vibe">Vibe 编码</option><option value="tags">标签补全</option><option value="text">文本 / 聊天</option><option value="voice">语音合成</option></select>
               <select id="logFilter" aria-label="按 Key 筛选" style="width:200px"><option value="">全部 Key</option></select>
               <button class="btn" data-act="refresh-logs"><span data-ic="refresh"></span>刷新</button>
             </div></div>
@@ -578,12 +588,12 @@ NAI_TOKEN_V5_DAILY_LIMITS=0,150</pre><button class="btn mini" type="button" data
             <div class="form-grid">
               <div class="field">
                 <label for="s_budget">全站月度 Anlas 预算</label>
-                <input id="s_budget" type="number" value="10000">
+                <input id="s_budget" type="number" min="0" step="1" required value="10000">
                 <div class="hint">0 = 不限。Opus Anlas 每月账单日回满到 10000、不叠加，建议留 20~30% 余量。</div>
               </div>
               <div class="field">
                 <label for="s_v5">全站每日 V5 张数</label>
-                <input id="s_v5" type="number" value="150">
+                <input id="s_v5" type="number" min="0" step="1" required value="150">
                 <div class="hint">0 = 不限。V5 周额度由 NovelAI 服务端按 ~190 张/天恢复，账户内所有人共享；此处镜像限制，默认 150 留安全边际。</div>
               </div>
               <div class="field">
@@ -624,7 +634,7 @@ NAI_TOKEN_V5_DAILY_LIMITS=0,150</pre><button class="btn mini" type="button" data
             <p class="hint" style="margin-top:16px">忘记密码时，可在服务器 <code>.env</code> 中设置 <code>ADMIN_PASSWORD</code>，并删除数据库里的 <code>admin_password_hash</code> 设置来重置。</p>
           </div>
           <div class="card panel">
-            <div class="panel-head"><h2>服务端配置</h2><div class="desc">只读，修改请编辑 .env 后重启</div></div>
+            <div class="panel-head"><h2>服务端概况</h2><div class="desc">只读摘要；上游 Token 在「总览 › 上游 NovelAI 令牌池」管理，其余敏感配置在 .env</div></div>
             <div id="cfgInfo" class="mono" style="line-height:2;overflow-wrap:anywhere"></div>
           </div>
         </section>
@@ -639,7 +649,7 @@ NAI_TOKEN_V5_DAILY_LIMITS=0,150</pre><button class="btn mini" type="button" data
   <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
     <div class="dialog-head"><h3 id="modalTitle">新建 Key</h3><button class="btn ghost icon" data-act="close-modal" aria-label="关闭"><span data-ic="x"></span></button></div>
     <div class="dialog-body">
-      <div class="field"><label for="f_name">名称 / 备注</label><input id="f_name" placeholder="例如：张三"></div>
+      <div class="field"><label for="f_name">名称 / 备注</label><input id="f_name" placeholder="例如：张三" maxlength="60"></div>
       <div class="field"><label for="f_image_model_scope">图片模型范围</label>
         <select id="f_image_model_scope">
           <option value="legacy">仅 V4.5 及更低（默认）</option>
@@ -647,13 +657,13 @@ NAI_TOKEN_V5_DAILY_LIMITS=0,150</pre><button class="btn mini" type="button" data
         </select></div>
       <div class="sec-title">额度</div>
       <div class="form-grid">
-        <div class="field"><label for="f_daily_images">每日 V4.5 及以下免费图张数</label><input id="f_daily_images" type="number" value="100"><div class="hint">0 = 不限</div></div>
-        <div class="field"><label for="f_daily_v5">每日 V5 张数（走官方周额度）</label><input id="f_daily_v5" type="number" value="50"><div class="hint">0 = 不限</div></div>
-        <div class="field"><label for="f_daily_anlas">每日 Anlas 上限</label><input id="f_daily_anlas" type="number" value="100"><div class="hint">0 = 不限</div></div>
-        <div class="field"><label for="f_monthly_anlas">每月 Anlas 上限</label><input id="f_monthly_anlas" type="number" value="2500"></div>
-        <div class="field"><label for="f_daily_text">每日文本 tokens</label><input id="f_daily_text" type="number" value="150000"></div>
-        <div class="field"><label for="f_rpm">每分钟请求数 (RPM)</label><input id="f_rpm" type="number" value="10"></div>
-        <div class="field"><label for="f_expires">有效天数</label><input id="f_expires" type="number" value="30"><div class="hint">0 = 永久</div></div>
+        <div class="field"><label for="f_daily_images">每日 V4.5 及以下免费图张数</label><input id="f_daily_images" type="number" min="0" step="1" required value="100"><div class="hint">0 = 不限</div></div>
+        <div class="field"><label for="f_daily_v5">每日 V5 张数（走官方周额度）</label><input id="f_daily_v5" type="number" min="0" step="1" required value="50"><div class="hint">0 = 不限</div></div>
+        <div class="field"><label for="f_daily_anlas">每日 Anlas 上限</label><input id="f_daily_anlas" type="number" min="0" step="1" required value="100"><div class="hint">0 = 不限</div></div>
+        <div class="field"><label for="f_monthly_anlas">每月 Anlas 上限</label><input id="f_monthly_anlas" type="number" min="0" step="1" required value="2500"><div class="hint">0 = 不限</div></div>
+        <div class="field"><label for="f_daily_text">每日文本 tokens</label><input id="f_daily_text" type="number" min="0" step="1" required value="150000"><div class="hint">0 = 禁止使用文本</div></div>
+        <div class="field"><label for="f_rpm">每分钟请求数 (RPM)</label><input id="f_rpm" type="number" min="1" step="1" required value="10"><div class="hint">1～600</div></div>
+        <div class="field"><label for="f_expires">有效天数</label><input id="f_expires" type="number" min="0" step="1" required value="30"><div class="hint">0 = 永久</div></div>
       </div>
       <div class="sec-title">权限</div>
       <label class="check"><input id="f_allow_anlas" type="checkbox"><span>允许消耗 Anlas（旧模型和 V5 的付费规格均受 日Anlas/月Anlas/全站预算 约束；不开启时仅允许免费档或 V5 额度规格）</span></label>
@@ -661,7 +671,7 @@ NAI_TOKEN_V5_DAILY_LIMITS=0,150</pre><button class="btn mini" type="button" data
       <label class="check"><input id="f_exclude_global_v5" type="checkbox"><span>独立 V5 额度（此 Key 的 V5 使用不计入、也不受全站 V5 日额度限制）</span></label>
       <div class="sec-title">功能权限</div>
       <div class="opt-group">
-        <label class="check"><input type="radio" name="f_feat_mode" value="legacy" checked><span>沿用旧行为（全部已开放功能）</span></label>
+        <label class="check"><input type="radio" name="f_feat_mode" value="legacy" checked><span>全部已开放功能（含以后新开放的）</span></label>
         <label class="check"><input type="radio" name="f_feat_mode" value="custom"><span>仅选中的功能</span></label>
       </div>
       <div class="feat-checks off" id="f_feat_list"></div>
@@ -818,11 +828,27 @@ async function api(path, opts={}){
 }
 function openOverlay(id){ $(id).classList.add('show'); }
 function closeOverlay(id){ $(id).classList.remove('show'); }
+/* 读取数值输入：空值、非数字、负数、越界一律报错（这些字段 0 = 不限，绝不能把空值当 0）。 */
+function readNum(id, label, {min=0, max=1e9, int=true}={}){
+  const el = $('#'+id), raw = el.value.trim(), v = Number(raw);
+  const bad = msg => { el.focus(); el.setAttribute('aria-invalid','true'); throw new Error(label + msg); };
+  if(raw === '') bad('不能为空（0 表示不限）');
+  if(!Number.isFinite(v)) bad('必须是数字');
+  if(int && !Number.isInteger(v)) bad('必须是整数');
+  if(v < min || v > max) bad(`必须在 ${min}～${max} 之间`);
+  el.removeAttribute('aria-invalid');
+  return v;
+}
 let confirmResolve = null;
+const DANGER_WORDS = /删除|禁止|停用|重新生成|重置|禁用/;
 function askConfirm(msg, okText){
   $('#confirmMsg').textContent = msg;
   $('#confirmYes').textContent = okText || '确定';
-  openOverlay('#confirmModal'); $('#confirmYes').focus();
+  const danger = DANGER_WORDS.test(okText || '');
+  $('#confirmYes').classList.toggle('primary', !danger);
+  $('#confirmYes').classList.toggle('solid-danger', danger);
+  // 默认聚焦“取消”：避免误按回车直接执行删除 / 封禁。
+  openOverlay('#confirmModal'); $('#confirmNo').focus();
   return new Promise(res=>{ confirmResolve = res; });
 }
 function settleConfirm(v){ closeOverlay('#confirmModal'); if(confirmResolve){ const r=confirmResolve; confirmResolve=null; r(v); } }
@@ -1006,6 +1032,15 @@ async function loadOverview(){
       `<div class="card stat" title="按今日、本月累计；查询官方余额不会清空这些记录"><div class="k">失败请求可能产生的费用</div>
         <div class="v">${t.unconfirmed_anlas||0} <small>Anlas</small></div>
         <div class="sub">今日预估 ${t.unconfirmed_requests||0} 笔 · 本月 ${d.month.unconfirmed_anlas||0} Anlas / ${d.month.unconfirmed_requests||0} 笔<br>仅为估算，实际扣款尚未确认。</div></div>`;
+    $('#featUsage').innerHTML = (d.feature_usage||[]).map(f=>{
+      const cnt = b => `<span class="num">${b.ok}</span> / <span class="num ${b.error?'bad':''}">${b.error}</span> / <span class="num ${b.rejected?'warn':''}">${b.rejected}</span>`;
+      const out = b => [b.images?`${b.images} 张`:'', b.tokens?`${fmt(b.tokens)} tokens`:'', b.anlas?`${b.anlas} Anlas`:''].filter(Boolean).join(' · ') || '—';
+      const idle = !f.week.ok && !f.week.error && !f.week.rejected;
+      return `<tr class="${idle?'muted':''}">
+        <td data-label="功能"><button class="btn mini ghost" data-act="feat-logs" data-feat="${esc(f.id)}">${esc(f.label)}</button></td>
+        <td data-label="今日">${cnt(f.today)}</td><td data-label="今日产出">${esc(out(f.today))}</td>
+        <td data-label="近 7 天">${cnt(f.week)}</td><td data-label="近 7 天产出">${esc(out(f.week))}</td></tr>`;
+    }).join('');
     const max = Math.max(1, ...d.week.map(w=>w.images));
     $('#chart').innerHTML = d.week.map(w=>`
       <div class="col" title="${esc(w.day)}：${w.images} 张 / ${w.anlas}A / ${esc(fmt(w.text_tokens))}tk">
@@ -1015,7 +1050,7 @@ async function loadOverview(){
       </div>`).join('');
     const pool = d.pool.length ? d.pool : [];
     $('#pool').innerHTML = (!d.pool_configured)
-      ? `<span class="tag warn">未配置上游 Token —— 请设置环境变量 NAI_TOKENS 后重启</span>`
+      ? `<span class="tag warn">未配置上游 Token —— 请点右侧「添加 Token」</span>`
       : pool.map(p=>{
         const id = esc(p.token_id);
         return `
@@ -1417,7 +1452,7 @@ const FEAT = {image:['文生图','文生图'], upscale:['放大','放大图片']
 const FEAT_NAMES = Object.keys(FEAT);
 function featLabel(n){ return (opsData && opsData.features.labels[n]) || FEAT[n][0]; }
 function featChips(list){
-  if(list == null) return '<span class="tag mini dim" title="沿用旧行为：所有已开放的功能">功能：全部</span>';
+  if(list == null) return '<span class="tag mini dim" title="所有已开放的功能">功能：全部</span>';
   if(!list.length) return '<span class="tag mini off">无功能</span>';
   return list.map(n=>`<span class="tag mini info">${esc((FEAT[n]||[n])[0])}</span>`).join('');
 }
@@ -1469,13 +1504,13 @@ function renderOpsReg(){
     <div class="cols-3">
       <div class="field"><label for="reg_max">名额上限</label><input id="reg_max" type="number" min="0" value="${esc(r.max_users)}"><div class="hint">0 = 不限</div></div>
       <div class="field"><label for="reg_exp">有效期（天）</label><input id="reg_exp" type="number" min="0" value="${esc(r.expires_days)}"><div class="hint">0 = 永久</div></div>
-      <div class="field"><label for="reg_img">每日图片</label><input id="reg_img" type="number" min="0" value="${esc(r.daily_images)}"></div>
-      <div class="field"><label for="reg_v5">每日 V5</label><input id="reg_v5" type="number" min="0" value="${esc(r.daily_v5)}"></div>
+      <div class="field"><label for="reg_img">每日图片</label><input id="reg_img" type="number" min="0" value="${esc(r.daily_images)}"><div class="hint">0 = 不限</div></div>
+      <div class="field"><label for="reg_v5">每日 V5</label><input id="reg_v5" type="number" min="0" value="${esc(r.daily_v5)}"><div class="hint">0 = 不限（仅“含 V5”时生效）</div></div>
       <div class="field"><label for="reg_scope">图片模型范围</label><select id="reg_scope"><option value="legacy" ${r.image_scope==='legacy'?'selected':''}>仅 V4.5 及以下</option><option value="all" ${r.image_scope==='all'?'selected':''}>含 V5</option></select></div>
     </div>
     <label>新成员默认开通的功能</label>
     <div class="opt-group">
-      <label class="check"><input type="radio" name="reg_feat_mode" value="legacy" ${r.features==null?'checked':''}><span>沿用旧行为（全部开放）</span></label>
+      <label class="check"><input type="radio" name="reg_feat_mode" value="legacy" ${r.features==null?'checked':''}><span>全部已开放功能（含以后新开放的）</span></label>
       <label class="check"><input type="radio" name="reg_feat_mode" value="custom" ${r.features!=null?'checked':''}><span>仅选中的功能</span></label>
     </div>
     <div class="feat-checks ${r.features==null?'off':''}" id="reg_feat_list">${featChecks(r.features,'reg')}</div>
@@ -1491,9 +1526,11 @@ async function toggleRegOpen(input){
   catch(e){ input.checked = !val; input.disabled = false; toastErr(e); }
 }
 async function saveReg(){
-  const num = id => Number($('#'+id).value);
-  const vals = {max_users:num('reg_max'), expires_days:num('reg_exp'), daily_images:num('reg_img'), daily_v5:num('reg_v5')};
-  for(const [k,v] of Object.entries(vals)) if(!Number.isInteger(v) || v<0){ toast('请填写不小于 0 的整数', 'err'); return; }
+  let vals;
+  try{
+    vals = {max_users:readNum('reg_max','名额上限',{max:1000}), expires_days:readNum('reg_exp','有效期',{max:3650}),
+            daily_images:readNum('reg_img','每日图片',{max:100000}), daily_v5:readNum('reg_v5','每日 V5',{max:100000})};
+  }catch(e){ toastErr(e); return; }
   try{ await putReg({...vals, image_scope:$('#reg_scope').value, features:readFeatMode('reg_feat_mode','#reg_feat_list')}, '开放设置已保存'); }
   catch(e){ toastErr(e); }
 }
@@ -1553,18 +1590,21 @@ async function copyKey(btn){
   const t = btn.closest('td').querySelector('[data-tok]').dataset.tok;
   if(!await copyText(t)) showKey('请手动复制', '浏览器不允许自动复制，请手动选择并复制：', t);
 }
-function openCreate(){
+async function openCreate(){
+  if(!opsData){ try{ opsData = await api('/admin/api/ops'); }catch(_){} }
   editingId = null;
   $('#modalTitle').textContent = '新建 Key';
   $('#modalSave').textContent = '创建';
   $('#f_name').value=''; $('#f_daily_anlas').value=100;
   $('#f_image_model_scope').value='legacy';
-  $('#f_daily_images').value=100; $('#f_daily_v5').value=50; $('#f_monthly_anlas').value=2500;
+  $('#f_daily_images').value=100; $('#f_daily_v5').value=0; $('#f_monthly_anlas').value=2500;
   $('#f_daily_text').value=150000; $('#f_rpm').value=10; $('#f_expires').value=30;
   $('#f_expires').placeholder='';
   $('#f_allow_anlas').checked=false; $('#f_allow_img2img').checked=false;
   $('#f_exclude_global_v5').checked=false;
-  setFeatForm(null);
+  // 默认只开通“新成员默认功能”（通常只有文生图），而不是全部功能。
+  const newKeyFeat = opsData && opsData.features ? opsData.features.new_key : undefined;
+  setFeatForm(newKeyFeat === undefined ? ['image'] : newKeyFeat);
   $('#modalErr').textContent=''; openOverlay('#modal');
 }
 function setFeatForm(list){
@@ -1594,29 +1634,34 @@ function openEdit(id){
   $('#modalErr').textContent=''; openOverlay('#modal');
 }
 function closeModal(){ closeOverlay('#modal'); }
+let savingKey = false;
 async function saveKey(){
-  const body = {
-    name: $('#f_name').value,
-    image_model_scope: $('#f_image_model_scope').value,
-    daily_anlas: +$('#f_daily_anlas').value,
-    daily_images: +$('#f_daily_images').value,
-    daily_v5: +$('#f_daily_v5').value,
-    monthly_anlas: +$('#f_monthly_anlas').value,
-    daily_text_tokens: +$('#f_daily_text').value,
-    rpm: +$('#f_rpm').value,
-    allow_anlas: $('#f_allow_anlas').checked,
-    allow_img2img: $('#f_allow_img2img').checked,
-    exclude_global_v5: $('#f_exclude_global_v5').checked,
-  };
+  if(savingKey) return;
+  let body;
+  try{
+    body = {
+      name: $('#f_name').value,
+      image_model_scope: $('#f_image_model_scope').value,
+      daily_anlas: readNum('f_daily_anlas', '每日 Anlas 上限', {max:100000, int:false}),
+      daily_images: readNum('f_daily_images', '每日免费图张数', {max:1000000}),
+      daily_v5: readNum('f_daily_v5', '每日 V5 张数', {max:100000}),
+      monthly_anlas: readNum('f_monthly_anlas', '每月 Anlas 上限', {max:100000, int:false}),
+      daily_text_tokens: readNum('f_daily_text', '每日文本 tokens', {max:100000000}),
+      rpm: readNum('f_rpm', 'RPM', {min:1, max:600}),
+      allow_anlas: $('#f_allow_anlas').checked,
+      allow_img2img: $('#f_allow_img2img').checked,
+      exclude_global_v5: $('#f_exclude_global_v5').checked,
+    };
+    if(!editingId || $('#f_expires').value.trim() !== '') body.expires_days = readNum('f_expires', '有效天数', {max:3650});
+  }catch(e){ $('#modalErr').textContent = e.message; return; }
+  savingKey = true; $('#modalSave').disabled = true;
   try{
     if(editingId){
-      if($('#f_expires').value.trim() !== '') body.expires_days = +$('#f_expires').value;
       const cur = keysCache.find(x=>x.id===editingId), nf = readFeatMode('f_feat_mode','#f_feat_list');
       if(!cur || !sameFeat(nf, cur.features)) body.features = nf;
       await api('/admin/api/keys/'+editingId, {method:'PATCH', body: JSON.stringify(body)});
       toast('已保存', 'ok');
     }else{
-      body.expires_days = +$('#f_expires').value;
       body.features = readFeatMode('f_feat_mode','#f_feat_list');
       const d = await api('/admin/api/keys', {method:'POST', body: JSON.stringify(body)});
       membersCache = null;
@@ -1627,6 +1672,7 @@ async function saveKey(){
     membersCache = null;
     closeModal(); loadKeys();
   }catch(e){ $('#modalErr').textContent = e.message; }
+  finally{ savingKey = false; $('#modalSave').disabled = false; }
 }
 async function toggleKey(id, enabled){
   await api('/admin/api/keys/'+id, {method:'PATCH', body: JSON.stringify({enabled})}).catch(toastErr);
@@ -1673,8 +1719,9 @@ async function delKey(id){
 /* ---------- logs ---------- */
 async function loadLogs(){
   try{
-    const kf = $('#logFilter').value;
-    const d = await api('/admin/api/logs?' + (kf?`key_id=${encodeURIComponent(kf)}&`:'') + `page=${logPage}`);
+    const kf = $('#logFilter').value, ff = $('#logFeature').value;
+    const d = await api('/admin/api/logs?' + (kf?`key_id=${encodeURIComponent(kf)}&`:'') +
+                        (ff?`feature=${encodeURIComponent(ff)}&`:'') + `page=${logPage}`);
     logPage = d.page;
     $('#logBody').innerHTML = d.logs.map(l=>`
       <tr>
@@ -1706,10 +1753,10 @@ async function loadSettings(){
       $('#r_'+name).value = r[name];
     }
     $('#cfgInfo').innerHTML =
-      `上游令牌池：${o.pool_configured ? o.pool.map(p=>esc(p.token)).join(', ') : '未配置（设置 NAI_TOKENS）'}<br>` +
+      `上游令牌池：${o.pool_configured ? o.pool.map(p=>esc(p.token)).join(', ') : '未配置（在总览页添加 Token）'}<br>` +
       `本月 Anlas：${esc(o.month.anlas)} / 预算 ${o.anlas_budget>0?esc(o.anlas_budget):'∞'}<br>` +
       `今日请求：${esc(o.today.requests)} ｜ 图片 ${esc(o.today.images)} ｜ Anlas ${esc(o.today.anlas)}<br>` +
-      `敏感配置仍在 .env；更多说明见项目 README`;
+      `其余敏感配置在 .env；更多说明见项目 README`;
   }catch(e){ toastErr(e); }
 }
 async function changePassword(){
@@ -1747,9 +1794,9 @@ async function changePassword(){
 async function saveBudget(){
   try{
     const d = await api('/admin/api/settings', {method:'PUT', body: JSON.stringify({
-      global_monthly_anlas: +$('#s_budget').value,
-      global_daily_v5: +$('#s_v5').value,
-      v5_alert_threshold: +$('#s_v5_alert').value,
+      global_monthly_anlas: readNum('s_budget', '全站月度 Anlas 预算', {max:1000000, int:false}),
+      global_daily_v5: readNum('s_v5', '全站每日 V5 张数', {max:100000}),
+      v5_alert_threshold: readNum('s_v5_alert', 'V5 告警阈值', {min:1, max:100}),
     })});
     toast('已保存：月预算 ' + d.global_monthly_anlas + 'A / V5 日限 ' + d.global_daily_v5, 'ok');
     loadAllowance();
@@ -1788,7 +1835,8 @@ document.addEventListener('click', ev=>{
   if(nav){ tab(nav.dataset.tab); return; }
   const el = ev.target.closest('[data-act]');
   if(!el){
-    if(ev.target.classList && ev.target.classList.contains('overlay') && ev.target.id!=='confirmModal'){
+    // 点遮罩不关闭确认框与 Key 编辑框（避免误触丢失未保存的修改）。
+    if(ev.target.classList && ev.target.classList.contains('overlay') && !['confirmModal','modal'].includes(ev.target.id)){
       if(ev.target.id==='tokModal') closeTokModal(); else closeOverlay('#'+ev.target.id);
     }
     return;
@@ -1796,6 +1844,7 @@ document.addEventListener('click', ev=>{
   const id = Number(el.dataset.id);
   switch(el.dataset.act){
     case 'refresh-ov': loadOverview(); loadAllowance(); break;
+    case 'feat-logs': $('#logFeature').value = el.dataset.feat; $('#logFilter').value = ''; logPage = 1; tab('logs'); break;
     case 'refresh-members': membersCache=null; loadMembers(); break;
     case 'refresh-audit': loadAuditSettings(); loadAudit(); break;
     case 'refresh-keys': loadKeys(); break;
@@ -1863,6 +1912,7 @@ document.addEventListener('change', ev=>{
   else if(t.name==='f_feat_mode') syncFeatMode('f_feat_mode','#f_feat_list');
 });
 $('#logFilter').addEventListener('change', ()=>{ logPage=1; loadLogs(); });
+$('#logFeature').addEventListener('change', ()=>{ logPage=1; loadLogs(); });
 $('#auditFilter').addEventListener('change', ()=>{ auditPage=1; loadAudit(); });
 $('#memberSearch').addEventListener('input', e=>{ memberQuery = e.target.value; renderMembers(); });
 $('#memberSort').addEventListener('click', e=>{

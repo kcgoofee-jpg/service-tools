@@ -40,7 +40,7 @@ async def registration_settings(db, service) -> dict[str, Any]:
         "configured": service is not None,
         "open": False if open_raw is None else str(open_raw) in ("1", "true", "True"),   # 默认关闭：站长明确开放后才接受注册
         "max_users": to_int(await read("register_max_users"), defaults.max_users if defaults else 0),
-        "features": features.parse_list(feats_raw) if feats_raw is not None else
+        "features": (None if feats_raw == "*" else features.parse_list(feats_raw)) if feats_raw is not None else
                     (features.parse_list(defaults.key_features) if defaults else None),
         "daily_images": to_int(await read("register_daily_images"), defaults.key_daily_images if defaults else 30),
         "daily_v5": to_int(await read("register_daily_v5"), defaults.key_daily_v5 if defaults else 0),
@@ -50,9 +50,8 @@ async def registration_settings(db, service) -> dict[str, Any]:
 
 
 async def _active_count(db) -> int:
-    rows = await db.execute_fetchall_compat(
-        "SELECT COUNT(*) FROM discord_registrations r JOIN api_keys k ON k.id=r.key_id")
-    return int(rows[0][0])
+    from .registration import count_registered      # 与实际名额检查同一口径
+    return await count_registered(db)
 
 
 async def set_registration(db, body: dict, state=None, service=None) -> None:
@@ -71,7 +70,8 @@ async def set_registration(db, body: dict, state=None, service=None) -> None:
     if "image_scope" in body:
         values["register_image_scope"] = "all" if body["image_scope"] == "all" else "legacy"
     if "features" in body:
-        values["register_features"] = features.dump(body["features"]) or ""
+        # None = 全部已开放功能，用 "*" 显式保存；空字符串表示“一个功能都不开”。
+        values["register_features"] = "*" if body["features"] is None else features.dump(body["features"])
     if values:
         await db.set_settings_bulk(values)
     announcer = getattr(state, "announcer", None) if state is not None else None
