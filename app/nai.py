@@ -12,7 +12,7 @@ from typing import Any, AsyncIterator, Awaitable, Callable, Optional
 import anyio
 import httpx
 
-from . import token_store
+from . import request_timing, token_store
 from .policy import mask_token
 from .allowance import AllowanceCache, AllowanceUnavailable
 from .concurrency import AdjustableLimiter
@@ -468,6 +468,7 @@ class NaiClient:
                     if before_dispatch is not None:
                         before_dispatch()
                     send_started = True
+                    request_timing.mark_sent()
                     if max_response_bytes is None:
                         resp = await self._client.request(
                             method, url, json=json_body, headers=self._headers(ts, accept))
@@ -621,6 +622,7 @@ class NaiClient:
                 if on_dispatch is not None:
                     on_dispatch()
                 send_started = True
+                request_timing.mark_sent()
                 resp = await self._client.send(req, stream=True)
             if resp.status_code == 429:
                 await self._rate_limit(ts, resp, on_rate_limited)

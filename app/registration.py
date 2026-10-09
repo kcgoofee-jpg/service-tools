@@ -34,6 +34,32 @@ def member_label(user: dict) -> str:
     return (display or username or "Discord:" + str(user.get("id", "")))[:60]
 
 
+def welcome_dm(key: str, site: str, quota: str, expires_days: int, idle_days: int, notice: str = "",
+               opened: str = "") -> str:
+    """领取成功私信：Key + 一步步配置教程 + 规则。控制在 Discord 2000 字以内。"""
+    rules = [f"• 每日额度：{quota}（次日自动恢复）"]
+    if opened:
+        rules.append(f"• 已开通功能：{opened}")
+    if expires_days:
+        rules.append(f"• 有效期 {expires_days} 天，到期后可重新 /register")
+    if idle_days:
+        rules.append(f"• 连续 {idle_days} 天没有使用会被自动回收（回收前 1 天私信提醒）")
+    rules.append("• 一人一把，请勿分享（本站记录打码后的来源网段防分享，不存完整 IP，7 天后删除）")
+    text = (f"🦉 **欢迎来到猫头鹰公益站！** 这是你的 API Key（只发这一次，请先保存）：\n`{key}`\n\n"
+            f"**三步开始出图（以柏宝绘为例）**\n"
+            f"1. 打开柏宝绘 → 渠道 → 配置 → 新建接入点\n"
+            f"2. 接口地址填 `{site}`（**不要**加 /v1）\n"
+            f"3. API Key 填上面 `nai-` 开头的整串，保存后随便生成一张图试试\n"
+            f"其他支持自定义 NovelAI 地址的客户端同样这样填。\n\n"
+            f"**不确定填对没有？** 打开 {site} 在「查看我的额度」里粘贴 Key，能显示额度就说明 Key 正常。\n\n"
+            f"**规则**\n" + "\n".join(rules) + "\n\n"
+            f"**常用命令**：`/quota` 看额度和服务状态 · `/resetkey` Key 丢了或泄露时换新 · `/help` 简要说明\n"
+            f"遇到问题到 🛠️｜问题反馈 发截图（记得打码 Key）。")
+    if notice:
+        text += f"\n{notice}"
+    return text[:1990]
+
+
 class RegistrationService:
     def __init__(self, db, http: httpx.AsyncClient, *, client_id: str, client_secret: str,
                  bot_token: str, bridge_secret: str, redirect_uri: str,
@@ -43,7 +69,8 @@ class RegistrationService:
                  key_image_scope: str = "all", key_expires_days: int = 0, key_rpm: int = 5,
                  max_users: int = 0, reset_at: str = "", key_features: str | None = None,
                  min_account_days: int = 0, member_role_id: str = "",
-                 admin_ids: tuple = ()):
+                 admin_ids: tuple = (), idle_days: int = 0):
+        self.idle_days = idle_days
         self.member_role_id = member_role_id
         self.admin_ids = tuple(admin_ids)
         self.max_users, self.reset_at, self.key_features = max_users, reset_at, key_features
@@ -326,12 +353,12 @@ class RegistrationService:
                 notice = audit_notice(*(await audit_flags(self.db, env_audit_defaults())))
                 quota = f"V4.5 及以下 {cfg['daily_images']} 张" + (
                     f"；V5 {cfg['daily_v5']} 张" if cfg["daily_v5"] else "")
-                if cfg["features"] is not None:
-                    quota += "。已开通：" + "、".join(features.FEATURES[f] for f in cfg["features"])
+                opened = ("、".join(features.FEATURES[f] for f in cfg["features"])
+                          if cfg["features"] is not None else "全部已开放功能")
                 try:
                     await self._discord("POST", f"/channels/{channel['id']}/messages",
                         bearer="Bot " + self.bot_token,
-                        json={"content": f"你的猫头鹰公益站 API Key：`{key}`\n网址：{self.site_url}\n每日额度：{quota}。请勿公开分享此 Key（本站会记录来源网段用于防分享，不保存完整 IP，7 天后删除）。" + (f"\n{notice}" if notice else ""),
+                        json={"content": welcome_dm(key, self.site_url, quota, cfg["expires_days"], self.idle_days, notice, opened),
                               "allowed_mentions": {"parse": []}})
                 except Exception:
                     await self.db._db.execute("DELETE FROM discord_registrations WHERE discord_id=?", (expected_id,))
@@ -388,4 +415,5 @@ def configured_service(db, http: httpx.AsyncClient) -> RegistrationService | Non
         key_features=os.getenv("REGISTER_FEATURES", "image").strip(),
         min_account_days=number("REGISTER_MIN_ACCOUNT_DAYS", 7),
         member_role_id=os.getenv("DISCORD_MEMBER_ROLE_ID", "").strip(),
-        admin_ids=tuple(x.strip() for x in os.getenv("ADMIN_DISCORD_IDS", "").split(",") if x.strip().isdecimal()))
+        admin_ids=tuple(x.strip() for x in os.getenv("ADMIN_DISCORD_IDS", "").split(",") if x.strip().isdecimal()),
+        idle_days=number("KEY_INACTIVITY_DELETE_DAYS", 3))

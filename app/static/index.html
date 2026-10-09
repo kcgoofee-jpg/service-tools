@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <title>猫头鹰公益站 管理后台</title>
 <style>
 /* ===== Design tokens ===== */
@@ -591,7 +592,7 @@ NAI_TOKEN_V5_DAILY_LIMITS=0,150</pre><button class="btn mini" type="button" data
             <div class="table-wrap">
               <table class="rt logs">
                 <thead><tr><th>时间</th><th>Key</th><th>类型</th><th>模型</th><th>状态</th>
-                  <th>图</th><th>Anlas</th><th title="失败请求可能产生的费用，实际扣款尚未确认">可能消耗 Anlas</th><th>tokens</th><th>备注</th></tr></thead>
+                  <th>图</th><th title="等待：收到请求到发往上游（排队 + 冷却）；生成：上游处理时间">耗时</th><th>Anlas</th><th title="失败请求可能产生的费用，实际扣款尚未确认">可能消耗 Anlas</th><th>tokens</th><th>备注</th></tr></thead>
                 <tbody id="logBody"></tbody>
               </table>
             </div>
@@ -1778,6 +1779,14 @@ async function delKey(id){
 }
 
 /* ---------- logs ---------- */
+function fmtTiming(l){
+  const sec = ms => ms >= 10000 ? Math.round(ms/1000) + 's' : (ms/1000).toFixed(1) + 's';
+  if(!l.wait_ms && !l.dur_ms) return '—';
+  const parts = [];
+  if(l.wait_ms >= 100) parts.push('等 ' + sec(l.wait_ms));
+  if(l.dur_ms) parts.push('生成 ' + sec(l.dur_ms));
+  return esc(parts.join(' · ') || '—');
+}
 async function loadLogs(){
   try{
     const kf = $('#logFilter').value, ff = $('#logFeature').value;
@@ -1787,14 +1796,14 @@ async function loadLogs(){
     $('#logBody').innerHTML = d.logs.map(l=>`
       <tr>
         <td class="mono" data-label="时间">${esc(new Date(l.ts*1000).toLocaleString())}</td>
-        <td data-label="Key">${esc(l.key_name)}</td>
+        <td data-label="Key">${esc(l.key_name)}${l.client?`<div class="muted" style="font-size:11.5px" title="客户端自报的 User-Agent，仅供参考">${esc(l.client)}</div>`:''}</td>
         <td data-label="类型">${esc(l.kind)}</td>
         <td class="mono" data-label="模型">${esc(l.model)}</td>
         <td data-label="状态">${l.status==='ok'?'<span class="tag on">ok</span>':l.status==='rejected'?'<span class="tag warn">拒绝</span>':'<span class="tag off">错误</span>'}</td>
-        <td class="num" data-label="图">${esc(l.images||'')}</td><td class="num" data-label="Anlas">${esc(l.anlas||'')}</td>
+        <td class="num" data-label="图">${esc(l.images||'')}</td><td class="num" data-label="耗时">${fmtTiming(l)}</td><td class="num" data-label="Anlas">${esc(l.anlas||'')}</td>
         <td data-label="可能消耗 Anlas">${l.unconfirmed_anlas>0?`<span class="tag warn">≈ ${esc(l.unconfirmed_anlas)}</span>`:'—'}</td><td class="num" data-label="tokens">${esc(l.tokens||'')}</td>
         <td class="muted" data-label="备注">${esc(l.detail)}</td>
-      </tr>`).join('') || '<tr><td colspan="10" class="empty-cell">暂无记录</td></tr>';
+      </tr>`).join('') || '<tr><td colspan="11" class="empty-cell">暂无记录</td></tr>';
     pager($('#logPager'), d, 'log');
   }catch(e){ toastErr(e); }
 }

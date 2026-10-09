@@ -699,3 +699,111 @@ async def test_get_v1_root_answers_connection_tests(state):
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url="http://gate") as c:
         r = await c.get("/v1")
     assert r.status_code == 200 and r.json()["object"] == "list"
+
+
+# ---------------------------------------------------------------- v1.3：私信教程、图标、耗时与客户端、精简命令
+
+def test_welcome_dm_is_a_full_tutorial_and_fits_discord():
+    from app.registration import welcome_dm
+    text = welcome_dm("nai-" + "k" * 48, "https://gate.example/", "V4.5 及以下 300 张", 30, 3, "📝 记录声明", "文生图")
+    assert "nai-" + "k" * 48 in text and "https://gate.example/" in text
+    assert "不要**加 /v1" in text and "柏宝绘" in text and "/resetkey" in text
+    assert "30 天" in text and "连续 3 天" in text and "文生图" in text and "📝 记录声明" in text
+    assert len(text) < 2000
+    plain = welcome_dm("nai-x", "https://g/", "q", 0, 0)
+    assert "有效期" not in plain and "回收" not in plain
+
+
+def test_client_name_is_sanitized_and_bounded():
+    from app.request_timing import client_name
+    assert client_name("Mozilla/5.0\r\nX-Evil: 1") == "Mozilla/5.0 X-Evil: 1"
+    assert len(client_name("a" * 500)) == 60
+    assert client_name("") == ""
+
+
+@pytest.mark.asyncio
+async def test_log_records_wait_generation_time_and_client(state, monkeypatch):
+    from app import request_timing
+    real = state.nai.request
+
+    async def slow_request(*args, **kwargs):
+        await asyncio.sleep(0.05)
+        request_timing.mark_sent()
+        await asyncio.sleep(0.05)
+        return await real(*args, **kwargs)
+    monkeypatch.setattr(state.nai, "request", slow_request)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app),
+                                 base_url="http://fixture.invalid") as client:
+        r = await client.post("/ai/generate-image", json=image_body(),
+                              headers={"Authorization": "Bearer fixture-1", "User-Agent": "BaiBaoHui/2.3"})
+    assert r.status_code == 200
+    await asyncio.sleep(0)
+    _args, kwargs = state.db.logs[-1]
+    assert kwargs["client"] == "BaiBaoHui/2.3"
+    assert kwargs["wait_ms"] >= 40 and kwargs["dur_ms"] >= 40
+
+
+@pytest.mark.asyncio
+async def test_rejection_without_dispatch_has_no_generation_time(state):
+    state.db.keys["fixture-1"]["enabled"] = 0
+    assert (await post("/ai/generate-image", image_body())).status_code == 403
+    await asyncio.sleep(0)
+    rejected = [kw for args, kw in state.db.logs if args[4] == "rejected"]
+    assert rejected and rejected[-1]["dur_ms"] == 0
+
+
+@pytest.mark.asyncio
+async def test_usage_log_timing_columns_round_trip(tmp_path):
+    db = Database(str(tmp_path / "t.db"))
+    await db.connect()
+    try:
+        await db.add_log(1, "k", "image", "m", "ok", wait_ms=1500, dur_ms=8200, client="X" * 100)
+        await db.record_success(1, "k", "image", "m", "2026-10-09", images=1, wait_ms=-5, dur_ms=10, client="c")
+        rows = await db.list_logs(limit=5, offset=0)
+        by_wait = {r["wait_ms"]: dict(r) for r in rows}
+        assert by_wait[1500]["dur_ms"] == 8200 and len(by_wait[1500]["client"]) == 60
+        assert by_wait[0]["client"] == "c" and by_wait[0]["dur_ms"] == 10
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_old_usage_log_gets_timing_columns(tmp_path):
+    import sqlite3
+    path = tmp_path / "old.db"
+    con = sqlite3.connect(path)
+    con.execute("""CREATE TABLE usage_log (id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL NOT NULL, key_id INTEGER,
+                   key_name TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL, model TEXT NOT NULL DEFAULT '',
+                   status TEXT NOT NULL, images INTEGER NOT NULL DEFAULT 0, anlas REAL NOT NULL DEFAULT 0,
+                   tokens INTEGER NOT NULL DEFAULT 0, detail TEXT NOT NULL DEFAULT '')""")
+    con.execute("INSERT INTO usage_log (ts, kind, status) VALUES (1, 'image', 'ok')")
+    con.commit(); con.close()
+    db = Database(str(path))
+    await db.connect()
+    try:
+        await db.add_log(1, "k", "image", "m", "ok", wait_ms=3, dur_ms=4, client="c")
+        rows = await db.list_logs(limit=5, offset=0)
+        assert {r["wait_ms"] for r in rows} == {0, 3}
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_favicon_served_as_svg(state):
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url="http://fixture.invalid") as c:
+        for path in ("/favicon.ico", "/favicon.svg"):
+            r = await c.get(path)
+            assert r.status_code == 200 and r.headers["content-type"].startswith("image/svg+xml")
+            assert r.content.startswith(b"<svg")
+    for page in ("landing.html", "index.html"):
+        assert 'rel="icon"' in (Path(main.__file__).parent / "static" / page).read_text()
+
+
+def test_bot_command_set_is_trimmed():
+    import ast
+    src = (Path(__file__).parent.parent / "integration" / "discord_bot.py").read_text()
+    names = set()
+    for node in ast.walk(ast.parse(src)):
+        if isinstance(node, ast.Call) and getattr(node.func, "attr", "") == "command":
+            names |= {kw.value.value for kw in node.keywords if kw.arg == "name"}
+    assert names == {"register", "quota", "resetkey", "help", "open", "limit", "ban", "unban", "slots", "revoke"}

@@ -90,7 +90,10 @@ CREATE TABLE IF NOT EXISTS usage_log (
     anlas REAL NOT NULL DEFAULT 0,
     tokens INTEGER NOT NULL DEFAULT 0,
     unconfirmed_anlas REAL NOT NULL DEFAULT 0,
-    detail TEXT NOT NULL DEFAULT ''
+    detail TEXT NOT NULL DEFAULT '',
+    wait_ms INTEGER NOT NULL DEFAULT 0,   -- 从收到请求到发往上游（排队 + 冷却）
+    dur_ms INTEGER NOT NULL DEFAULT 0,    -- 上游处理耗时；没发到上游为 0
+    client TEXT NOT NULL DEFAULT ''       -- User-Agent 摘要，客户端自报，仅供参考
 );
 CREATE INDEX IF NOT EXISTS idx_log_ts ON usage_log (ts DESC);
 CREATE INDEX IF NOT EXISTS idx_log_key ON usage_log (key_id, ts DESC);
@@ -166,8 +169,9 @@ END;
 """
 
 _INSERT_LOG = """INSERT INTO usage_log (ts, key_id, key_name, kind, model, status,
-                                      images, anlas, tokens, detail, unconfirmed_anlas)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?)"""
+                                      images, anlas, tokens, detail, unconfirmed_anlas,
+                                      wait_ms, dur_ms, client)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)"""
 _UPSERT_COUNTERS = """INSERT INTO counters
                      (key_id, day, images, anlas, text_tokens, requests, v5, legacy_free_images)
                      VALUES (?,?,?,?,?,?,?,?)
@@ -212,6 +216,9 @@ class Database:
             "ALTER TABLE discord_registrations ADD COLUMN display_name TEXT",
             "ALTER TABLE discord_registrations ADD COLUMN avatar TEXT",
             "ALTER TABLE upstream_token_counters ADD COLUMN images INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE usage_log ADD COLUMN wait_ms INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE usage_log ADD COLUMN dur_ms INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE usage_log ADD COLUMN client TEXT NOT NULL DEFAULT ''",
         ):
             try:
                 await self._db.execute(ddl)
@@ -619,6 +626,7 @@ class Database:
         self, key_id: int, key_name: str, kind: str, model: str, day: str, *,
         images: int = 0, anlas: float = 0.0, tokens: int = 0, v5: int = 0,
         legacy_free_images: int = 0, detail: str = "", unconfirmed_anlas: float = 0.0,
+        wait_ms: int = 0, dur_ms: int = 0, client: str = "",
     ) -> None:
         """成功日志、额度与使用时间一起提交；写入失败时整笔回退。"""
         # 不使用共享连接，避免其他请求的 commit 提前保存半笔记账。
@@ -628,7 +636,8 @@ class Database:
                 now = time.time()
                 await db.execute(_INSERT_LOG, (
                     now, key_id, key_name, kind, model, "ok", images, anlas,
-                    tokens, detail[:500], unconfirmed_anlas,
+                    tokens, detail[:500], unconfirmed_anlas, max(0, int(wait_ms)),
+                    max(0, int(dur_ms)), client[:60],
                 ))
                 await db.execute(_UPSERT_COUNTERS, (
                     key_id, day, images, anlas, tokens, 1, v5, legacy_free_images,
@@ -754,11 +763,13 @@ class Database:
         self, key_id: Optional[int], key_name: str, kind: str, model: str,
         status: str, images: int = 0, anlas: float = 0.0, tokens: int = 0,
         detail: str = "", unconfirmed_anlas: float = 0.0,
+        wait_ms: int = 0, dur_ms: int = 0, client: str = "",
     ) -> None:
         await self._db.execute(
             _INSERT_LOG,
             (time.time(), key_id, key_name[:80], kind, model[:80], status,
-             images, anlas, tokens, detail[:500], unconfirmed_anlas),
+             images, anlas, tokens, detail[:500], unconfirmed_anlas,
+             max(0, int(wait_ms)), max(0, int(dur_ms)), client[:60]),
         )
         await self._db.commit()
 

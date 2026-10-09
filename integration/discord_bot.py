@@ -1,4 +1,8 @@
-"""Standalone Discord bot: /register /quota /resetkey /help for members, /slots /revoke for admins."""
+"""Standalone Discord bot.
+
+成员：/register /quota /resetkey /help。管理员：/open /limit /slots /ban /unban /revoke。
+功能授权和生成记录开关只在网页后台操作。
+"""
 from __future__ import annotations
 
 import os
@@ -14,11 +18,6 @@ BACKEND = os.getenv("REGISTRATION_BACKEND_URL", "http://127.0.0.1:3003").rstrip(
 SITE = os.getenv("SITE_URL", "").rstrip("/")
 
 
-FEATURE_CHOICES = [
-    app_commands.Choice(name=label, value=name) for name, label in (
-        ("image", "文生图"), ("upscale", "放大"), ("augment", "导演工具"), ("vibe", "Vibe 编码"),
-        ("tags", "标签补全"), ("text", "文本 / 聊天"), ("voice", "语音合成"))
-]
 STATUS_TEXT = {"ok": "🟢 正常", "idle": "🟢 正常（近期无请求）", "degraded": "🟠 不稳定（近期失败较多）"}
 
 
@@ -46,7 +45,7 @@ def build_client() -> tuple[discord.Client, app_commands.CommandTree, discord.Ob
     async def register(interaction: discord.Interaction):
         await handle_register(interaction)
 
-    @tree.command(name="quota", description="查看今天还剩多少额度、Key 何时过期", guild=guild)
+    @tree.command(name="quota", description="查看今日额度、Key 有效期和服务状态", guild=guild)
     async def quota(interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         status, data = await backend("/self-register/quota", interaction)
@@ -67,6 +66,15 @@ def build_client() -> tuple[discord.Client, app_commands.CommandTree, discord.Ob
             lines.append(f"Key 剩余有效期：约 {days} 天")
         if not data["enabled"]:
             lines.append("⚠ 这把 Key 已被停用，请联系站长。")
+        code, info = await backend("/self-register/info", interaction)
+        if code == 200:
+            up = info["upstream"]
+            state = f"服务状态：{STATUS_TEXT.get(up['status'], up['status'])}"
+            if up["recent"]:
+                state += f"（近 10 分钟 {up['recent']} 次请求，失败 {up['failed']} 次）"
+            lines.append(state)
+            if up["image_cooldown_seconds"]:
+                lines.append(f"⏳ 上游限流冷却中，约 {up['image_cooldown_seconds']} 秒后恢复生图")
         await interaction.followup.send("\n".join(lines), ephemeral=True)
 
     @tree.command(name="resetkey", description="Key 丢了或泄露了？换一把新的（旧的立即失效）", guild=guild)
@@ -83,31 +91,13 @@ def build_client() -> tuple[discord.Client, app_commands.CommandTree, discord.Ob
     async def help_(interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         status, data = await backend("/self-register/info", interaction)
-        lines = ["1. 用 `/register` 领取 Key，会私信发给你。",
-                 f"2. 在柏宝绘等支持自定义 NovelAI 地址的客户端里，接口地址填 `{SITE}`，Key 填你领到的 `nai-…`。",
-                 "3. `/quota` 查看今日额度和已开通功能，`/resetkey` 重置 Key，`/status` 看上游是否正常。",
-                 "4. 请勿分享 Key；额度用完次日重置。"]
+        lines = [f"`/register` 领取 Key（私信发送，含配置教程）· `/quota` 额度和服务状态 · `/resetkey` 换新 Key",
+                 f"客户端接口地址填 `{SITE}`（不加 /v1），Key 填 `nai-` 开头的整串。详细说明：{SITE}"]
         if status == 200:
-            lines.append("新成员默认开通：" + "、".join(f["label"] for f in data["default_features"]) + "。")
             if not data["open"]:
                 lines.append("⚠ 目前暂未开放注册。")
             if data["notice"]:
                 lines.append("📢 " + data["notice"])
-        await interaction.followup.send("\n".join(lines), ephemeral=True)
-
-    @tree.command(name="status", description="查看上游（NovelAI）当前是否正常", guild=guild)
-    async def status_(interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-        code, data = await backend("/self-register/info", interaction)
-        if code != 200:
-            await interaction.followup.send(str(data), ephemeral=True)
-            return
-        up = data["upstream"]
-        lines = [f"上游状态：{STATUS_TEXT.get(up['status'], up['status'])}"]
-        if up["recent"]:
-            lines.append(f"近 10 分钟：{up['recent']} 次请求，失败 {up['failed']} 次")
-        if up["image_cooldown_seconds"]:
-            lines.append(f"⏳ 上游限流冷却中，约 {up['image_cooldown_seconds']} 秒后恢复生图")
         await interaction.followup.send("\n".join(lines), ephemeral=True)
 
     async def run_ops(interaction: discord.Interaction, action: str, **extra):
@@ -126,14 +116,6 @@ def build_client() -> tuple[discord.Client, app_commands.CommandTree, discord.Ob
     async def limit(interaction: discord.Interaction, count: app_commands.Range[int, 0, 1000]):
         await run_ops(interaction, "limit", value=str(count))
 
-    @tree.command(name="grant", description="（管理员）给成员开通或关闭某项功能", guild=guild)
-    @app_commands.default_permissions(manage_guild=True)
-    @app_commands.choices(feature=FEATURE_CHOICES,
-                          state=[app_commands.Choice(name="开通", value="on"), app_commands.Choice(name="关闭", value="off")])
-    async def grant(interaction: discord.Interaction, member: discord.Member,
-                    feature: app_commands.Choice[str], state: app_commands.Choice[str]):
-        await run_ops(interaction, "grant", target=str(member.id), feature=feature.value, value=state.value)
-
     @tree.command(name="ban", description="（管理员）永久禁止某位成员领取 Key，并撤销其现有 Key", guild=guild)
     @app_commands.default_permissions(manage_guild=True)
     async def ban(interaction: discord.Interaction, member: discord.Member):
@@ -143,12 +125,6 @@ def build_client() -> tuple[discord.Client, app_commands.CommandTree, discord.Ob
     @app_commands.default_permissions(manage_guild=True)
     async def unban(interaction: discord.Interaction, member: discord.Member):
         await run_ops(interaction, "unban", target=str(member.id))
-
-    @tree.command(name="audit", description="（管理员）开关生成记录（提示词与缩略图）并通知成员", guild=guild)
-    @app_commands.default_permissions(manage_guild=True)
-    @app_commands.choices(state=[app_commands.Choice(name="开启", value="on"), app_commands.Choice(name="关闭", value="off")])
-    async def audit(interaction: discord.Interaction, state: app_commands.Choice[str]):
-        await run_ops(interaction, "audit", value=state.value)
 
     @tree.command(name="slots", description="（管理员）查看名额占用", guild=guild)
     @app_commands.default_permissions(manage_guild=True)
