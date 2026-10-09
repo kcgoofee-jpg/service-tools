@@ -265,6 +265,7 @@ td .tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
 .mperm{white-space:nowrap}
 .psel{font-size:12px;padding:3px 6px;min-height:28px;border-radius:6px;width:auto;margin:1px 0;display:block}
 .mact .menu{display:inline-block}
+.nav-badge{margin-left:auto;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--bad);color:#fff;font-size:11px;display:inline-grid;place-items:center}
 .mwrap{overflow:visible;max-height:none}
 .mtable .menu-pop{bottom:auto;top:calc(100% + 6px)}
 .menu-pop a{display:block;padding:8px 10px;border-radius:6px;color:var(--text);font-weight:500;white-space:nowrap;text-decoration:none}
@@ -471,17 +472,20 @@ details.neg div{margin-top:6px;white-space:pre-wrap;overflow-wrap:anywhere;max-h
   <aside class="sidebar" id="sidebar">
     <div class="brand"><span class="brand-mark" aria-hidden="true" style="font-size:20px">🦉</span>猫头鹰公益站</div>
     <nav class="nav" aria-label="主导航">
-      <div class="nav-label">概览</div>
       <button data-tab="ov" class="active"><span data-ic="home"></span>总览</button>
-      <div class="nav-label">用户</div>
+      <div class="nav-label">成员</div>
       <button data-tab="members"><span data-ic="users"></span>成员</button>
+      <button data-tab="keys"><span data-ic="key"></span>Key 管理</button>
+      <button data-tab="ops"><span data-ic="toggle"></span>领 Key 与功能</button>
       <button data-tab="audit"><span data-ic="image"></span>生成记录</button>
-      <button data-tab="keys"><span data-ic="key"></span>密钥管理</button>
-      <button data-tab="ops"><span data-ic="toggle"></span>功能与开放</button>
-      <div class="nav-label">系统</div>
+      <div class="nav-label">监控</div>
+      <button data-tab="up"><span data-ic="pulse"></span>上游</button>
+      <button data-tab="bugs"><span data-ic="alert"></span>Bug 追踪<span class="nav-badge" id="navBugs" hidden></span></button>
       <button data-tab="logs"><span data-ic="list"></span>用量日志</button>
       <button data-tab="actions"><span data-ic="list"></span>操作日志</button>
-      <button data-tab="set"><span data-ic="sliders"></span>设置</button>
+      <div class="nav-label">设置</div>
+      <button data-tab="limits"><span data-ic="sliders"></span>额度与保护</button>
+      <button data-tab="set"><span data-ic="sliders"></span>系统</button>
     </nav>
     <div class="side-foot">
       <button id="themeBtn" type="button"><span data-ic="moon" id="themeIc"></span><span id="themeLb">切换主题</span></button>
@@ -503,7 +507,7 @@ details.neg div{margin-top:6px;white-space:pre-wrap;overflow-wrap:anywhere;max-h
 
         <!-- 总览 -->
         <section id="tab-ov">
-          <div class="page-head"><div class="ttl"><h1>总览</h1><p>今日用量、上游令牌池与系统防护状态</p></div>
+          <div class="page-head"><div class="ttl"><h1>总览</h1><p>今日用量与系统状态</p></div>
             <div class="tools"><button class="btn" data-act="refresh-ov"><span data-ic="refresh"></span>刷新</button></div></div>
           <div class="stats" id="ovCards"></div>
           <div class="two-col">
@@ -518,26 +522,14 @@ details.neg div{margin-top:6px;white-space:pre-wrap;overflow-wrap:anywhere;max-h
             <div class="chart" id="chart"></div></div>
             <div class="card panel"><div class="panel-head"><h2>状态与防护</h2></div><div class="status-list" id="statusPanel"></div></div>
           </div>
-          <div class="card panel" id="bugPanel">
-            <div class="panel-head"><h2>Bug 追踪 <span class="tag" id="bugCount"></span></h2><div class="desc">程序没预料到的错误、上游故障、后台任务失败、成员在出图完成前断开、网页脚本报错，按特征归并；新 bug 和复发会私信提醒。点「错误编号」可查对应日志</div>
-              <label class="check" style="white-space:nowrap"><input type="checkbox" id="bugAll"><span>含已处理</span></label></div>
-            <div class="table-wrap"><table class="rt"><thead><tr><th>级别</th><th>来源</th><th>内容</th><th>次数</th><th>首次 / 最近</th><th>最近错误编号</th><th></th></tr></thead><tbody id="bugBody"></tbody></table></div>
-          </div>
           <div class="card panel">
             <div class="panel-head"><h2>各功能用量</h2><div class="desc">按用量日志统计（日志保留期内）；点功能名查看对应日志</div></div>
             <div class="table-wrap"><table class="rt"><thead><tr><th>功能</th><th>今日 成功 / 失败 / 拒绝</th><th>今日产出</th><th>近 7 天 成功 / 失败 / 拒绝</th><th>近 7 天产出</th></tr></thead><tbody id="featUsage"></tbody></table></div>
           </div>
-          <div class="card panel">
-            <div class="panel-head"><h2>上游表现</h2><div class="desc">出图耗时、排队、限流与产能，按 V4.5 / V5 分开；对比过去 7 天（不含最近 24 小时）。异常时会私信提醒</div></div>
-            <div id="perfFlags"></div>
-            <div class="table-wrap"><table class="rt"><thead><tr><th>模型</th><th>时段</th><th>请求 / 成功率</th><th title="上游返回 429 的次数">限流</th><th title="上游返回 401/402/403/5xx 或连接失败">其他失败</th><th>中位生成</th><th>P90 生成</th><th title="收到请求到发往上游：排队 + 冷却">平均排队</th><th title="按中位生成耗时和请求间隔估算：全站 / 单个成员">估算产能 / 小时</th></tr></thead><tbody id="perfBody"></tbody></table></div>
-            <div id="perfHourly" style="margin-top:12px"></div>
-          </div>
-          <div class="card panel">
-            <div class="panel-head"><h2>调度影子模式</h2><div class="desc">用真实请求回放「保底 + 空闲借用 + 成员间轮流 + 账号每日上限」，<b>只计算、不改变实际出图顺序</b>。观察 1–2 周后决定是否启用</div>
-              <select id="shadowRange" aria-label="回放范围" style="width:120px"><option value="24">最近 24 小时</option><option value="168">最近 7 天</option></select></div>
-            <div id="shadowBody"><div class="hint">正在回放…</div></div>
-          </div>
+        </section>
+        <!-- 上游 -->
+        <section id="tab-up" hidden>
+          <div class="page-head"><div class="ttl"><h1>上游</h1><p>NovelAI 令牌池、出图表现、调度影子模式与 Anlas 核对</p></div><div class="tools"><button class="btn" data-act="refresh-up"><span data-ic="refresh"></span>刷新</button></div></div>
           <div class="card panel">
             <div class="panel-head"><h2>上游 NovelAI 令牌池</h2><button class="btn primary" type="button" id="tokAddBtn" data-act="tok-add"><span data-ic="plus"></span>添加 Token</button></div>
             <div id="pool"></div>
@@ -561,6 +553,17 @@ NAI_TOKEN_V5_DAILY_LIMITS=0,150</pre><button class="btn mini" type="button" data
               </div></details>
           </div>
           <div class="card panel">
+            <div class="panel-head"><h2>上游表现</h2><div class="desc">出图耗时、排队、限流与产能，按 V4.5 / V5 分开；对比过去 7 天（不含最近 24 小时）。异常时会私信提醒</div></div>
+            <div id="perfFlags"></div>
+            <div class="table-wrap"><table class="rt"><thead><tr><th>模型</th><th>时段</th><th>请求 / 成功率</th><th title="上游返回 429 的次数">限流</th><th title="上游返回 401/402/403/5xx 或连接失败">其他失败</th><th>中位生成</th><th>P90 生成</th><th title="收到请求到发往上游：排队 + 冷却">平均排队</th><th title="按中位生成耗时和请求间隔估算：全站 / 单个成员">估算产能 / 小时</th></tr></thead><tbody id="perfBody"></tbody></table></div>
+            <div id="perfHourly" style="margin-top:12px"></div>
+          </div>
+          <div class="card panel">
+            <div class="panel-head"><h2>调度影子模式</h2><div class="desc">用真实请求回放「保底 + 空闲借用 + 成员间轮流 + 账号每日上限」，<b>只计算、不改变实际出图顺序</b>。观察 1–2 周后决定是否启用</div>
+              <select id="shadowRange" aria-label="回放范围" style="width:120px"><option value="24">最近 24 小时</option><option value="168">最近 7 天</option></select></div>
+            <div id="shadowBody"><div class="hint">正在回放…</div></div>
+          </div>
+          <div class="card panel">
             <div class="panel-head"><h2>Anlas 消耗核对</h2>
               <button class="btn" id="reconReload" data-act="recon-reload">刷新记录</button>
               <button class="btn primary" id="reconRun" data-act="recon-run" disabled>查询并核对</button>
@@ -571,6 +574,15 @@ NAI_TOKEN_V5_DAILY_LIMITS=0,150</pre><button class="btn mini" type="button" data
               <p class="hint" style="margin:12px 0">点击「查询并核对」会读取官方账号余额，再和本站记录的消耗比较。充值、续费或在其他地方使用账号，也会影响余额。核对结果不会修改用户积分。</p>
               <div class="table-wrap"><table class="rt"><thead><tr><th>查询时间</th><th>官方余额</th><th>余额减少</th><th>本站记录</th><th>相差</th><th>说明</th></tr></thead><tbody id="reconHistory"></tbody></table></div>
             </details>
+          </div>
+        </section>
+        <!-- Bug 追踪 -->
+        <section id="tab-bugs" hidden>
+          <div class="page-head"><div class="ttl"><h1>Bug 追踪</h1><p>程序错误、上游故障、后台任务失败等，按特征归并</p></div><div class="tools"><button class="btn" data-act="refresh-bugs"><span data-ic="refresh"></span>刷新</button></div></div>
+          <div class="card panel" id="bugPanel">
+            <div class="panel-head"><h2>Bug 追踪 <span class="tag" id="bugCount"></span></h2><div class="desc">程序没预料到的错误、上游故障、后台任务失败、成员在出图完成前断开、网页脚本报错，按特征归并；新 bug 和复发会私信提醒。点「错误编号」可查对应日志</div>
+              <label class="check" style="white-space:nowrap"><input type="checkbox" id="bugAll"><span>含已处理</span></label></div>
+            <div class="table-wrap"><table class="rt"><thead><tr><th>级别</th><th>来源</th><th>内容</th><th>次数</th><th>首次 / 最近</th><th>最近错误编号</th><th></th></tr></thead><tbody id="bugBody"></tbody></table></div>
           </div>
         </section>
 
@@ -606,13 +618,13 @@ NAI_TOKEN_V5_DAILY_LIMITS=0,150</pre><button class="btn mini" type="button" data
           <div class="page-head"><div class="ttl"><h1>功能与开放</h1><p>全局功能开关与 Discord 自助领取</p></div>
             <div class="tools"><button class="btn" data-act="refresh-ops"><span data-ic="refresh"></span>刷新</button></div></div>
           <div class="card panel"><div class="panel-head"><h2>功能开关</h2><div class="desc">切换后立即保存。关闭后管理员 Key 仍可使用。</div></div><div id="opsFeatures"><div class="skel" style="height:200px"></div></div></div>
-          <div class="card panel"><div class="panel-head"><h2>开放注册（Discord 自助领取）</h2></div><div id="opsReg"><div class="skel" style="height:260px"></div></div></div>
+          <div class="card panel"><div class="panel-head"><h2>领 Key</h2><div class="desc">成员在 Discord 用 /register 自助领取</div></div><div id="opsReg"><div class="skel" style="height:260px"></div></div></div>
           <p class="hint" style="margin:-8px 0 24px">生成记录设置已移到「<a href="#" data-act="goto-audit">生成记录</a>」页</p>
         </section>
 
-        <!-- 密钥 -->
+        <!-- Key 管理 -->
         <section id="tab-keys" hidden>
-          <div class="page-head"><div class="ttl"><h1>密钥管理</h1><p>创建、编辑与管理虚拟 Key</p></div>
+          <div class="page-head"><div class="ttl"><h1>Key 管理</h1><p>创建、编辑与管理成员的 Key</p></div>
             <div class="tools"><button class="btn" data-act="refresh-keys"><span data-ic="refresh"></span>刷新</button>
               <button class="btn primary" data-act="new-key"><span data-ic="plus"></span>新建 Key</button></div></div>
           <div class="card panel" style="padding:16px">
@@ -661,8 +673,9 @@ NAI_TOKEN_V5_DAILY_LIMITS=0,150</pre><button class="btn mini" type="button" data
         </section>
 
         <!-- 设置 -->
-        <section id="tab-set" hidden>
-          <div class="page-head"><div class="ttl"><h1>设置</h1><p>全站预算、图片排队与站点公告</p></div></div>
+        <!-- 额度与保护 -->
+        <section id="tab-limits" hidden>
+          <div class="page-head"><div class="ttl"><h1>额度与保护</h1><p>全站预算、排队与冷却、账号保护、Anlas 自动分配</p></div></div>
           <div class="card panel">
             <div class="panel-head"><h2>Anlas 与 V5 预算</h2></div>
             <div class="form-grid">
@@ -709,6 +722,9 @@ NAI_TOKEN_V5_DAILY_LIMITS=0,150</pre><button class="btn mini" type="button" data
             <div class="form-grid" id="anlasFields"></div>
             <button class="btn primary" data-act="save-anlas">保存并立即重算</button>
           </div>
+        </section>
+        <section id="tab-set" hidden>
+          <div class="page-head"><div class="ttl"><h1>系统</h1><p>站点公告、后台密码与服务端概况</p></div></div>
           <div class="card panel">
             <div class="panel-head"><h2>站点公告</h2><div class="desc">用户访问首页看到的内容，支持 HTML</div></div>
             <textarea id="announce" rows="10" placeholder="&lt;h2&gt;欢迎&lt;/h2&gt;&lt;p&gt;申请 Key 请联系……&lt;/p&gt;" aria-label="站点公告"></textarea>
@@ -727,7 +743,7 @@ NAI_TOKEN_V5_DAILY_LIMITS=0,150</pre><button class="btn mini" type="button" data
             <p class="hint" style="margin-top:16px">忘记密码时，可在服务器 <code>.env</code> 中设置 <code>ADMIN_PASSWORD</code>，并删除数据库里的 <code>admin_password_hash</code> 设置来重置。</p>
           </div>
           <div class="card panel">
-            <div class="panel-head"><h2>服务端概况</h2><div class="desc">只读摘要；上游 Token 在「总览 › 上游 NovelAI 令牌池」管理，其余敏感配置在 .env</div></div>
+            <div class="panel-head"><h2>服务端概况</h2><div class="desc">只读摘要；上游 Token 在「上游」页管理，其余敏感配置在 .env</div></div>
             <div id="cfgInfo" class="mono" style="line-height:2;overflow-wrap:anywhere"></div>
           </div>
         </section>
@@ -1101,7 +1117,7 @@ async function boot(){
 }
 
 /* ---------- tabs ---------- */
-const TABS = ['ov','members','audit','keys','ops','logs','actions','set'];
+const TABS = ['ov','members','keys','ops','audit','up','bugs','logs','actions','limits','set'];
 function tab(name){
   document.body.classList.remove('nav-open');
   $$('.nav button').forEach(b=>b.classList.toggle('active', b.dataset.tab===name));
@@ -1114,7 +1130,9 @@ function tab(name){
   if(name==='ops') loadOps();
   if(name==='logs') loadLogs();
   if(name==='actions') loadActions();
-  if(name==='set') loadSettings();
+  if(name==='set' || name==='limits') loadSettings();
+  if(name==='up'){ loadOverview(); loadReconciliation(); loadPerf(); loadShadow(); }
+  if(name==='bugs') loadBugs();
 }
 
 /* ---------- overview ---------- */
@@ -1227,6 +1245,7 @@ async function loadBugs(){
   try{
     const d = await api('/admin/api/errors' + ($('#bugAll').checked ? '?all=true' : ''));
     $('#bugCount').textContent = d.open ? d.open + ' 个未处理' : '无未处理';
+    $('#navBugs').hidden = !d.open; $('#navBugs').textContent = d.open;
     $('#bugCount').className = 'tag ' + (d.open ? 'warn' : 'on');
     const t = x => new Date(x*1000).toLocaleString();
     $('#bugBody').innerHTML = d.errors.map(e=>`
@@ -1249,10 +1268,7 @@ document.addEventListener('click', async e => {
   if(r){ e.preventDefault(); logRid = r.dataset.rid; logPage = 1; tab('logs'); }
 });
 async function loadOverview(){
-  loadBugs();
-  loadReconciliation();
-  loadPerf();
-  loadShadow();
+  loadBugs();                     // 只为更新边栏的未处理数；面板本身在「Bug 追踪」页
   loadStatus();
   if(!$('#ovCards').children.length) $('#ovCards').innerHTML = skeletons(8, 96);
   try{
@@ -1616,7 +1632,7 @@ function renderMembers(){
       m.expires_at && m.expires_at < now ? flag('bad', '已过期') : m.expires_at && m.expires_at - now < 3*D ? flag('warn', '快到期') : '',
       m.allow_anlas ? flag('info', m.anlas_auto ? 'Anlas 自动' : 'Anlas') : '',
       m.features === undefined ? '' : m.features == null ? flag('info', '全部功能') :
-        flag('info', m.features.map(n => (FEAT[n]||[n])[0]).join(' · ') || '无功能', '已开通的功能；在「密钥管理」里可手动增减'),
+        flag('info', m.features.map(n => (FEAT[n]||[n])[0]).join(' · ') || '无功能', '已开通的功能；在「Key 管理」里可手动增减'),
     ].join('');
     return `<tr class="${m.enabled?'':'dim'}">
       <td class="mcell" data-label="成员"><div class="mrow">
@@ -1788,8 +1804,8 @@ function renderOpsReg(){
   $('#opsReg').innerHTML = `
     ${r.configured?'':'<div class="notice-box">Discord 机器人尚未配置，以下设置会保存，但在机器人启用后才会生效。</div>'}
     ${r.v5_capacity&&r.v5_capacity.short?`<div class="notice-box">⚠ ${esc(r.v5_capacity.message)}</div>`:''}
-    <div class="big-toggle"><label class="switch big"><input type="checkbox" id="regOpen" ${r.open?'checked':''} aria-label="开放注册"><span></span></label>
-      <div class="body"><div class="t">${r.open?'注册已开放':'注册已关闭'}</div><div class="hint" style="margin:0">${r.open?'成员可通过 Discord /register 自助领取 Key':'新成员暂时无法领取 Key'}${r.reset_at?` · 重置时间 ${esc(r.reset_at)}`:''}</div></div>
+    <div class="big-toggle"><label class="switch big"><input type="checkbox" id="regOpen" ${r.open?'checked':''} aria-label="领 Key 开关"><span></span></label>
+      <div class="body"><div class="t">${r.open?'可领取':'未开放'}</div><div class="hint" style="margin:0">${r.open?'成员可通过 Discord /register 自助领取 Key':'新成员暂时无法领取 Key'}${r.reset_at?` · 重置时间 ${esc(r.reset_at)}`:''}</div></div>
       <div style="min-width:200px;flex:1;max-width:280px"><div class="quota"><div class="row"><span>名额</span><span class="num"><b>${esc(r.active)}</b> / ${r.max_users>0?esc(r.max_users):'不限'}</span></div>
       <div class="bar ${cls}"><i style="width:${pct}%"></i></div></div></div></div>
     ${(r.waitlist||[]).length ? `<div class="notice-box">候补 ${r.waitlist.length} 人（名额满时 /register 自动排队；有空位后按顺序私信邀请，保留 24 小时）：${r.waitlist.map((w,i)=>`${i+1}. ${esc(w.name||('Discord '+w.discord_id))}${w.invited_at?'（已邀请，'+esc(new Date(w.invited_at*1000).toLocaleString())+'）':''}`).join('；')}</div>` : ''}
@@ -1814,7 +1830,7 @@ async function putReg(body, okMsg){
 }
 async function toggleRegOpen(input){
   const val = input.checked; input.disabled = true;
-  try{ await putReg({open:val}, val?'注册已开放':'注册已关闭'); }
+  try{ await putReg({open:val}, val?'已开放领 Key':'已关闭领 Key'); }
   catch(e){ input.checked = !val; input.disabled = false; toastErr(e); }
 }
 async function saveReg(){
@@ -2232,6 +2248,8 @@ document.addEventListener('click', ev=>{
     case 'refresh-audit': loadAuditSettings(); loadAudit(); break;
     case 'refresh-keys': loadKeys(); break;
     case 'refresh-logs': loadLogs(); break;
+    case 'refresh-up': loadOverview(); loadReconciliation(); loadPerf(); loadShadow(); break;
+    case 'refresh-bugs': loadBugs(); break;
     case 'refresh-actions': loadActions(); break;
     case 'recon-reload': loadReconciliation(); break;
     case 'recon-run': runReconciliation(); break;

@@ -18,7 +18,7 @@ async def handle_register(interaction):
         return
     secret = os.getenv("REGISTRATION_BRIDGE_SECRET", "")
     if not secret:
-        await interaction.response.send_message("自助注册尚未配置完成。", ephemeral=True)
+        await interaction.response.send_message("领 Key 功能尚未配置完成。", ephemeral=True)
         return
     await interaction.response.defer(ephemeral=True)
     try:
@@ -33,7 +33,7 @@ async def handle_register(interaction):
         elif response.status_code == 403:
             message = response.json().get("detail", "未通过资格检查。")
         else:
-            message = "自助注册暂不可用，请稍后再试。"
+            message = "领 Key 暂不可用，请稍后再试。"
     except (httpx.HTTPError, ValueError, KeyError):
-        message = "自助注册暂不可用，请稍后再试。"
+        message = "领 Key 暂不可用，请稍后再试。"
     await interaction.followup.send(message, ephemeral=True)

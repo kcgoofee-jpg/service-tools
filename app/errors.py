@@ -106,7 +106,7 @@ class Tracker:
             if state and e["level"] == "error" and self.notify is not None:
                 head = "🐞 新 bug" if state == "new" else "🐞 bug 复发"
                 where = f" · 请求 {e['rid']}" if e["rid"] else ""
-                self.notify(f"bug_{e['sig']}", f"{head}（{e['source']}）：{e['title'][:200]}{where}。详情见后台「总览 → Bug 追踪」。", 3600)
+                self.notify(f"bug_{e['sig']}", f"{head}（{e['source']}）：{e['title'][:200]}{where}。详情见后台「Bug 追踪」。", 3600)
         except Exception as exc:
             print(f"[bug] store failed: {type(exc).__name__}", flush=True)
 

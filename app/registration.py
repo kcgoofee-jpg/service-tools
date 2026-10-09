@@ -223,7 +223,7 @@ class RegistrationService:
         其他人只有在「空位 > 排在前面还没被邀请的候补人数」时才能直接领取，否则加入候补并告知排位。"""
         cfg = await self.settings()
         if not cfg["open"]:
-            raise RegistrationError("注册暂未开放，请等待站长开放。")
+            raise RegistrationError("领 Key 暂未开放，请等待站长开放。")
         if not cfg["max_users"]:
             return cfg
         now = time.time()
@@ -328,7 +328,7 @@ class RegistrationService:
         if self.min_account_days:
             age_days = (time.time() * 1000 - ((int(user_id) >> 22) + 1420070400000)) / 86_400_000
             if age_days < self.min_account_days:
-                raise RegistrationError(f"Discord 账号注册满 {self.min_account_days} 天后才能领取，请稍后再来。")
+                raise RegistrationError(f"Discord 账号创建满 {self.min_account_days} 天后才能领 Key，请稍后再来。")
         if await self.is_banned(user_id):
             raise RegistrationError("这个 Discord 账号已被站长停用，无法领取 Key。")
         await self._release_if_expired(user_id)
