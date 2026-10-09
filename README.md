@@ -54,7 +54,7 @@ curl http://127.0.0.1:3003/healthz        # {"ok":true,"upstream":true}
 3. “成员”页看每个人今日 / 近 7 天 / 累计用量；“用量日志”和“生成记录”用来排查问题。
 4. “总览”看上游 Token 池、V5 额度和 Anlas 核对；“设置”调整排队超时、图片任务间隔与上游 429 冷却。
 
-多把上游 Token 用英文逗号写入 `NAI_TOKENS`。`NAI_TOKEN_ALLOW_ANLAS=1,0` 按顺序指定哪些 Token 允许付费；`NAI_TOKEN_V5_DAILY_LIMITS=0,150` 设初始免费 V5 日限额（`0` 不限）。后台保存的设置优先于环境变量。
+首次部署可以把上游 Token 用英文逗号写入 `NAI_TOKENS`（之后建议在后台管理）。`NAI_TOKEN_ALLOW_ANLAS=1,0` 按顺序指定哪些 Token 允许付费；`NAI_TOKEN_V5_DAILY_LIMITS=0,150` 设初始免费 V5 日限额（`0` 不限）。后台保存的设置优先于环境变量。
 
 ## Discord 自助领取（可选）
 
@@ -133,7 +133,7 @@ ssh -t root@你的服务器 "cd /opt/service-tools && bash deploy/set-secret.sh 
 # 同理可用于 DISCORD_BOT_TOKEN、DISCORD_CLIENT_SECRET、REGISTRATION_BRIDGE_SECRET 等
 ```
 
-添加更多上游 Token：把它们用英文逗号接在 `NAI_TOKENS` 后面（顺序有意义），可选地在同一顺序下设置 `NAI_TOKEN_ALLOW_ANLAS=1,0`、`NAI_TOKEN_V5_DAILY_LIMITS=0,150`，再 `docker compose up -d`；重启后每把 Token 都会出现在后台“总览 → 上游令牌池”，可单独启停并设置各自的 V5 日限额和图片并发。后台密码可在“设置 → 后台密码”里直接修改。
+添加、替换、删除上游 Token：直接在后台“总览 → 上游令牌池”操作。粘贴新 Token 后，服务器会先向 NovelAI 验证它是否有效，通过才保存；在 NovelAI 重置了 Token 时用“替换 Token”，该槽位的 V5 日限、启停、并发和当天计数会延续。第一次在后台操作后，令牌池由后台管理：Token 保存在 `data/upstream_tokens.json`（权限 600，**不写入数据库**，数据库备份里也不会有它），`.env` 里的 `NAI_TOKENS` 只用于首次启动时初始化，之后不再读取。后台任何一次添加 / 替换 / 删除都会给站长发 Discord 告警。后台密码可在“设置 → 后台密码”里修改。
 
 ## 配置与测试
 
