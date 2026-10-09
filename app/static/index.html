@@ -237,8 +237,6 @@ td .tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
 .seg button{border:0;background:none;padding:5px 12px;border-radius:6px;cursor:pointer;color:var(--text-2);font-weight:500;min-height:30px}
 .seg button.active{background:var(--surface);color:var(--text);box-shadow:var(--shadow-sm)}
 .member-grid{display:block}
-.msum{display:flex;flex-wrap:wrap;gap:6px 18px;color:var(--text-2);font-size:13.5px;margin-bottom:14px}
-.msum b{color:var(--text);font-variant-numeric:tabular-nums}
 .mtable td{vertical-align:middle;padding-top:10px;padding-bottom:10px}
 .mtable tr.dim{opacity:.55}
 .mtable td.muted{white-space:nowrap;font-size:12px;line-height:1.5}
@@ -265,6 +263,11 @@ td .tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
 .mperm{white-space:nowrap}
 .psel{font-size:12px;padding:3px 6px;min-height:28px;border-radius:6px;width:auto;margin:1px 0;display:block}
 .mact .menu{display:inline-block}
+.mtools{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:14px}
+.mtools .search{flex:0 1 260px}
+.mtools .chips-filter{margin:0}
+th.sortable{cursor:pointer;user-select:none}
+th.sortable.on{color:var(--text)}
 .nav-badge{margin-left:auto;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--bad);color:#fff;font-size:11px;display:inline-grid;place-items:center}
 .mwrap{overflow:visible;max-height:none}
 .mtable .menu-pop{bottom:auto;top:calc(100% + 6px)}
@@ -447,6 +450,24 @@ details.neg div{margin-top:6px;white-space:pre-wrap;overflow-wrap:anywhere;max-h
   table.rt td.empty-cell{display:block;text-align:center}
   table.rt td.empty-cell::before{display:none}
 }
+/* 成员表手机布局：一位成员一张紧凑卡片，名字一行、用量一行、权限一行 */
+@media (max-width:720px){
+  table.mtable tr{display:grid;grid-template-columns:1fr auto;grid-template-areas:"m act" "q q" "w t" "p p";gap:6px 10px;padding:12px 14px}
+  table.mtable td{display:block;padding:0;text-align:left}
+  table.mtable td::before{display:none}
+  table.mtable td.mcell{grid-area:m}
+  table.mtable td.mact{grid-area:act;align-self:start;justify-self:end}
+  table.mtable .mbar{flex:1;width:auto}
+  table.mtable td[data-label="今日"]{grid-area:q}
+  table.mtable td[data-label="近 7 天 / 累计"]{grid-area:w;font-size:12.5px;color:var(--text-2)}
+  table.mtable td[data-label="近 7 天 / 累计"]::before{display:inline;content:"7 天 ";color:var(--muted)}
+  table.mtable td.mtime{grid-area:t;text-align:right}
+  table.mtable td.mtime br{display:none}
+  table.mtable .mreg::before{content:" · "}
+  table.mtable td.mperm{grid-area:p;display:flex;gap:8px}
+  table.mtable .psel{display:inline-block;flex:1}
+  table.mtable .mq{flex-direction:row;align-items:center;gap:10px}
+}
 </style>
 </head>
 <body>
@@ -588,16 +609,12 @@ NAI_TOKEN_V5_DAILY_LIMITS=0,150</pre><button class="btn mini" type="button" data
 
         <!-- 成员 -->
         <section id="tab-members" hidden>
-          <div class="page-head"><div class="ttl"><h1>成员</h1><p>每位成员的今日 / 近 7 天用量与状态；站长和测试账号在「测试（站长）」里</p></div>
+          <div class="page-head"><div class="ttl"><h1>成员</h1></div>
             <div class="tools"><button class="btn" data-act="refresh-members"><span data-ic="refresh"></span>刷新</button></div></div>
-          <div class="stats" id="memberStats"></div>
-          <div class="toolbar">
-            <div class="search"><span data-ic="search"></span><input id="memberSearch" type="search" placeholder="搜索成员名称或 Discord ID" aria-label="搜索成员"></div>
-            <div class="seg" id="memberSort" role="group" aria-label="排序">
-              <button data-sort="today" class="active">今日</button><button data-sort="week">近 7 天</button><button data-sort="total">累计</button><button data-sort="recent">最近使用</button>
-            </div>
+          <div class="mtools">
+            <div class="search"><span data-ic="search"></span><input id="memberSearch" type="search" placeholder="搜索名称或 Discord ID" aria-label="搜索成员"></div>
+            <div class="chips-filter" id="memberFilter" role="group" aria-label="筛选成员"></div>
           </div>
-          <div class="chips-filter" id="memberFilter" role="group" aria-label="筛选成员"></div>
           <div class="member-grid" id="memberGrid"></div>
         </section>
 
@@ -1475,7 +1492,7 @@ async function ensureMembers(){
   return membersCache;
 }
 async function loadMembers(){
-  if(!membersCache){ $('#memberGrid').innerHTML = skeletons(6, 230); $('#memberStats').innerHTML = skeletons(4, 80); }
+  if(!membersCache){ $('#memberGrid').innerHTML = skeletons(6, 56); }
   try{
     { const d = await api('/admin/api/members'); membersCache = d.members; memberMeta = d; }
     try{ const ks = (await api('/admin/api/keys')).keys; const fm = new Map(ks.map(k=>[k.id,k.features])); membersCache.forEach(m=>{ m.features = fm.has(m.id) ? fm.get(m.id) : undefined; }); }catch(_){}
@@ -1529,15 +1546,11 @@ function memberFilters(now){
   const idleDays = memberMeta.inactivity_days || 3, nets = memberMeta.share_alert_nets || 3;
   return [
     ['all', '全部', () => true],
-    ['new', '新加入（24 小时）', m => m.registered_at && now - m.registered_at < D],
+    ['new', '新加入', m => m.registered_at && now - m.registered_at < D],
     ['today', '今日活跃', m => m.today.requests > 0],
-    ['quick', '领取 1 小时内出图', m => m.first_image_at && m.first_image_at - m.registered_at <= H],
-    ['stuck', '领取超 1 小时仍未出图', m => !m.first_image_at && !m.is_admin && now - m.registered_at > H],
-    ['never', '从未出图', m => !m.first_image_at && !m.is_admin],
-    ['idle1', '24 小时未使用', m => !m.is_admin && now - activityAt(m) > D],
-    ['reclaim', `即将回收（≥${idleDays - 1} 天未用）`, m => !m.is_admin && m.enabled && now - activityAt(m) > (idleDays - 1) * D],
-    ['expiring', '3 天内到期', m => m.expires_at && m.expires_at > now && m.expires_at - now < 3 * D],
-    ['rejected', '24 小时内有被拒', m => m.rejected_24h > 0],
+    ['never', '未出图', m => !m.first_image_at && !m.is_admin],
+    ['reclaim', '快回收', m => !m.is_admin && m.enabled && now - activityAt(m) > (idleDays - 1) * D],
+    ['rejected', '被拒', m => m.rejected_24h > 0],
     ['shared', '疑似分享', m => nets > 0 && m.sources_24h >= nets],
     ['disabled', '已停用', m => !m.enabled],
     ['staff', '测试（站长）', m => m.is_test || m.is_admin],
@@ -1580,6 +1593,7 @@ document.addEventListener('change', async e => {
     membersCache = null; await loadMembers();
   }catch(err){ toastErr(err); sel.disabled = false; }
 });
+const sortTh = (k, label, cls='') => `<th class="sortable ${cls}${memberSort===k?' on':''}" data-sort="${k}" aria-sort="${memberSort===k?'descending':'none'}">${label}${memberSort===k?' ↓':''}</th>`;
 function renderMembers(){
   const everyone = membersCache || [];
   const now = Date.now()/1000;
@@ -1590,9 +1604,6 @@ function renderMembers(){
   const members = everyone.filter(m => !isStaff(m));
   const topWeek = new Set(members.length>3 ? members.filter(m=>m.week.images>0).sort((a,b)=>b.week.images-a.week.images).slice(0,3).map(m=>m.id) : []);
   const cnt = fn => members.filter(fn).length;
-  $('#memberStats').innerHTML = `<div class="msum"><span><b>${members.length}</b> 位成员</span><span>今日活跃 <b>${cnt(m=>m.today.requests>0)}</b></span>
-    <span>今日出图 <b>${members.reduce((t,m)=>t+m.today.images,0)}</b> 张</span><span>从未出图 <b>${cnt(m=>!m.first_image_at)}</b></span>
-    ${cnt(m=>!m.enabled)?`<span>已停用 <b>${cnt(m=>!m.enabled)}</b></span>`:''}</div>`;
   $('#memberFilter').innerHTML = filters.map(([id, label, fn]) => {
     const n = id === 'staff' ? everyone.filter(isStaff).length : cnt(fn);
     if(!n && id !== 'all' && memberFilter !== id) return '';
@@ -1642,7 +1653,7 @@ function renderMembers(){
         <span class="num"><b>${m.today.images}</b>${cap?'/'+cap:''}${v5||m.daily_v5?` <span class="muted">V5 ${v5}${m.daily_v5>0?'/'+m.daily_v5:''}</span>`:''}</span></div></td>
       <td data-label="权限" class="mperm">${m.is_admin ? '<span class="muted">站长</span>' : permControls(m)}</td>
       <td class="num" data-label="近 7 天 / 累计">${m.week.images}<span class="muted"> / ${m.total_images}</span></td>
-      <td data-label="使用 / 领取" class="muted mtime">${esc(rel(m.last_used_at))}<br>${m.registered_at?'领取 '+esc(rel(m.registered_at)):'—'}</td>
+      <td data-label="使用 / 领取" class="muted mtime">${esc(rel(m.last_used_at))}<br><span class="mreg">${m.registered_at?'领取 '+esc(rel(m.registered_at)):'—'}</span></td>
       <td class="mact">
         <details class="menu"><summary class="btn mini icon" aria-label="更多操作：${esc(title)}">⋯</summary>
           <div class="menu-pop">
@@ -1656,7 +1667,7 @@ function renderMembers(){
     </tr>`;
   }).join('');
   $('#memberGrid').innerHTML = `<div class="card panel" style="padding:4px 0"><div class="table-wrap mwrap"><table class="rt mtable">
-    <thead><tr><th>成员</th><th>今日图片</th><th title="改动立即生效，并私信通知该成员">权限</th><th class="num">7 天 / 累计</th><th>最近使用</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+    <thead><tr><th>成员</th>${sortTh('today','今日图片')}<th title="改动立即生效，并私信通知该成员">权限</th>${sortTh('week','7 天 / 累计','num')}${sortTh('recent','最近使用')}<th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
 
 /* ---------- audit ---------- */
@@ -2326,11 +2337,9 @@ $('#memberFilter').addEventListener('click', e=>{
   const b = e.target.closest('[data-mfilter]'); if(!b || b.disabled) return;
   memberFilter = b.dataset.mfilter; renderMembers();
 });
-$('#memberSort').addEventListener('click', e=>{
-  const b = e.target.closest('button[data-sort]'); if(!b) return;
-  memberSort = b.dataset.sort;
-  $$('#memberSort button').forEach(x=>x.classList.toggle('active', x===b));
-  renderMembers();
+document.addEventListener('click', e=>{
+  const b = e.target.closest('th[data-sort]'); if(!b) return;
+  memberSort = b.dataset.sort; renderMembers();
 });
 document.addEventListener('keydown', e=>{
   if($('#tokModal').classList.contains('show') && !$('#confirmModal').classList.contains('show')){
