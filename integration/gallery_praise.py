@@ -49,7 +49,9 @@ async def write_praise(title: str, text: str, image_urls: list[str]) -> Optional
         print(f"[gallery] daily AI comment limit {DAILY_LIMIT} reached", flush=True)
         return None
     import anthropic                          # 只有启用时才需要这个依赖
-    client = anthropic.AsyncAnthropic()       # 从环境变量 ANTHROPIC_API_KEY 读取
+    # 从环境变量 ANTHROPIC_API_KEY 读取；与用户身份绑定的 Key 需要在请求头里带 workspace ID
+    ws = os.getenv("ANTHROPIC_WORKSPACE_ID", "").strip()
+    client = anthropic.AsyncAnthropic(default_headers={"anthropic-workspace-id": ws} if ws else None)
     content: list[dict] = [{"type": "image", "source": {"type": "url", "url": u}} for u in image_urls[:3]]
     content.append({"type": "text", "text": f"帖子标题：{title or '（无）'}\n作者的话：{text or '（无）'}\n\n请为这个帖子写评论。"})
     try:
