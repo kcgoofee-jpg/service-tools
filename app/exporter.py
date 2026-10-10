@@ -10,7 +10,6 @@ import io
 import json
 import time
 import zipfile
-from typing import Any
 
 _EXT = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}
 

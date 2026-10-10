@@ -27,14 +27,14 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from . import admin, live, registration_routes, request_timing
 from .registration import configured_service
-from .body import read_bounded_body, read_json_body
+from .body import read_json_body
 from .config import load_settings
 from .client_views import subscription_payload
 from .image_events import ImageEventTracker, ImageStreamProtocolError, STREAM_MEDIA_TYPES
 from .image_streaming import ImageStreamResponse
 from .image_tools import prepare_tool, validate_result, MAX_RESPONSE_BYTES
 from .image_payload import read_image_body
-from .nai import NaiClient, UpstreamError, _wait_cleanup
+from .nai import UpstreamError, _wait_cleanup
 from .policy import (
     normalize_image_request,
     upstream_parameter_problem,
@@ -55,33 +55,13 @@ from . import features
 from .policy import REFERENCE_FIELDS
 from .key_sources import RETENTION_SECONDS as KEY_SOURCE_RETENTION
 from .action_log import RETENTION_DAYS as ADMIN_ACTION_RETENTION_DAYS
-from .audit import (audit_flags, audit_disclosure, audit_image_days, prompt_texts,
-                    capture_prompts, full_image)
+from .audit import audit_flags, audit_disclosure, audit_image_days, capture_prompts, full_image
 from .upstream_errors import upstream_error_message, text_stream_events
 from .sse import encode_sse
 
 SETTINGS = load_settings()
 STATE: Optional[GateState] = None
 
-DEFAULT_ANNOUNCEMENT = """<!doctype html>
-<html lang="zh"><head><meta charset="utf-8"><title>猫头鹰公益站</title>
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<style>
-body{font-family:system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
-     max-width:760px;margin:48px auto;padding:0 20px;color:#e6e6e6;background:#11171f;line-height:1.8}
-h1{color:#7cc4ff;font-size:1.6em} code{background:#1d2733;padding:2px 8px;border-radius:6px}
-a{color:#7cc4ff} .card{background:#161e29;border:1px solid #243043;border-radius:12px;padding:18px 22px;margin:18px 0}
-</style></head><body>
-<h1>猫头鹰公益站 · NovelAI 中转网关</h1>
-<div class="card">
-本站为 NovelAI 资源分发的中转服务。使用方法：<br>
-1. 向站长申请一把虚拟 Key（形如 <code>nai-xxxxxxxx</code>）。<br>
-2. 在支持自定义 NovelAI API 地址的客户端中，把 API 地址改为本站地址，Key 填虚拟 Key。<br>
-3. 也提供 OpenAI 兼容接口 <code>/v1/chat/completions</code>（文本续写）。<br>
-4. 站长入口：<a href="/admin">管理后台</a>。
-</div>
-<div class="card">站长可在后台「公告设置」中编辑本页面内容。</div>
-</body></html>"""
 
 
 class GateError(Exception):

@@ -1,6 +1,8 @@
 """Discord OAuth self-enrollment for restricted NAI Gate keys (no image requests)."""
 from __future__ import annotations
 
+from typing import Optional
+
 import asyncio
 import os
 import secrets

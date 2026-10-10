@@ -30,12 +30,11 @@ from __future__ import annotations
 
 import json
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Optional
 
 from .action_log import log_action
 
-RULES = ("idle_days", "slots", "reset_hour", "breaker", "key_guard", "economy")
 STATE_KEY = "autopilot_last"
 HISTORY_KEY = "autopilot_history"
 

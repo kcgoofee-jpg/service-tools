@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import anyio
 
-import base64
 import hashlib
 import hmac
 import math
@@ -948,7 +947,7 @@ async def overview(request: Request):
 
 async def _feature_usage(st) -> list[dict]:
     """每项功能今日 / 近 7 天的调用次数（成功 / 失败 / 拒绝）、图片、tokens、Anlas 与使用人数。"""
-    from datetime import datetime, timedelta
+    from datetime import datetime
     from zoneinfo import ZoneInfo
     day_start = datetime.fromisoformat(st.day()).replace(tzinfo=ZoneInfo(st.db.tz)).timestamp()
     week_start = day_start - 6 * 86400
