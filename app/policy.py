@@ -268,9 +268,8 @@ def upstream_parameter_problem(body: dict) -> Optional[str]:
             size = len(text.encode("utf-8"))
             if size >= MAX_PROMPT_BYTES:
                 return f"提示词过长：{path} 有 {size} 字节（中文每字 3 字节），上游上限 {MAX_PROMPT_BYTES} 字节"
-            # 权重括号嵌套过深（>=8层），会导致上游 Attention FP16 计算溢出报错 NaN
-            if re.search(r"(?:\{\s*){8,}|(?:\}\s*){8,}|(?:\(\s*){8,}|(?:\)\s*){8,}", text):
-                return "提示词中权重括号嵌套过深（超过 7 层），会导致上游显卡浮点溢出（NaN）；请减少花括号或圆括号数量"
+            # 不按括号层数拦截：NAI 花括号每层只 ×1.05（8 层≈1.48 倍），圆括号不是权重语法，不会溢出；
+            # 10/11 这条规则误拦了一位成员的 V5 请求，已移除。NaN 的真实原因是下面的超大数值权重。
             # 异常数值权重（如画师名带数字紧挨着 :: 导致超大权重与 NaN 计算溢出）
             for m in re.finditer(r"([-+]?\d+(?:\.\d+)?)::", text):
                 try:
