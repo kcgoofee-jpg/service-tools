@@ -540,3 +540,17 @@ class NoWaitlistTests(RegistrationTests):
         self.assertEqual(await self.count("waitlist"), 0)
         await self.service.revoke("777")
         self.assertIn("nai-", (await self.mint("888"))["key"])
+
+
+class GiftTests(RegistrationTests):
+    async def test_gift_issues_key_even_when_closed_and_is_idempotent(self):
+        # 站长 / 机器人奖励：领 Key 关着（或名额满）也给没有 Key 的人发一把；已经有 Key 就不再发
+        await self.db.set_setting("register_open", "0")
+        with self.assertRaises(RegistrationError):
+            await self.mint("888")
+        g = await self.service.gift({"id": "888", "username": "sese", "global_name": "涩涩"})
+        self.assertTrue(g["new"])
+        self.assertIn(g["key"], g["message"])
+        again = await self.service.gift({"id": "888"})
+        self.assertEqual((again["new"], again["key_id"]), (False, g["key_id"]))
+        self.assertEqual(await self.count("api_keys"), 1)
