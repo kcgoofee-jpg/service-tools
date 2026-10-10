@@ -27,6 +27,13 @@ async def set_economy(db, on: bool, state=None, *, by: str = "站长") -> bool:
         return False
     await site_flags.put(db, site_flags.ECONOMY, bool(on))
     await log_action(db, by, "节约模式", "", "开启" if on else "关闭")
+    if state is not None and getattr(state, "nai", None) is not None:
+        # V5 额度跟着节约模式放大 / 回落：立刻重算一次，不等 10 分钟一次的定时任务
+        try:
+            from . import quota_algo
+            await quota_algo.run(state)
+        except Exception as exc:
+            print(f"[warn] quota recalc after economy toggle failed: {type(exc).__name__}", flush=True)
     announcer = getattr(state, "announcer", None) if state is not None else None
     if announcer is not None:
         if on:
