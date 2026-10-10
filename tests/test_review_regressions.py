@@ -853,7 +853,7 @@ def test_bot_command_set_is_trimmed():
     for node in ast.walk(ast.parse(src)):
         if isinstance(node, ast.Call) and getattr(node.func, "attr", "") == "command":
             names |= {kw.value.value for kw in node.keywords if kw.arg == "name"}
-    assert names == {"register", "quota", "resetkey", "help", "open", "limit", "ban", "unban", "slots", "revoke"}
+    assert names == {"register", "quota", "resetkey", "help", "open", "limit", "ban", "unban", "slots", "revoke", "反馈"}
 
 
 # ---------------------------------------------------------------- v1.4：V5 名额提醒、上游表现分析

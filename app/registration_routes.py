@@ -237,6 +237,35 @@ async def issue(request: Request, body: IssueRequest):
     return JSONResponse(result, headers={"Cache-Control": "no-store"})
 
 
+class FeedbackRequest(Who):
+    username: str = ""
+    answers: dict = {}
+
+
+@router.post("/feedback")
+async def feedback_submit(request: Request, body: FeedbackRequest):
+    """/反馈 表单提交（机器人转来）。没领 Key 的成员也能提交。"""
+    service = _service(request)
+    discord_id = _checked(service, body)
+    key = await service.key_row_for(discord_id)
+    from . import feedback
+    try:
+        message = await feedback.submit(request.app.state.gate.db, discord_id, body.username,
+                                        key["id"] if key is not None else None, body.answers)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    await _log_bot(request, discord_id, "提交反馈（/反馈）")
+    return {"message": message}
+
+
+@router.post("/feedback/questions")
+async def feedback_questions(request: Request):
+    """机器人启动时来读问卷题目（改题目不用改机器人代码）。"""
+    _service(request)
+    from . import feedback
+    return {"questions": feedback.QUESTIONS}
+
+
 class BotReport(BaseModel):
     status: dict | None = None
     event: dict | None = None

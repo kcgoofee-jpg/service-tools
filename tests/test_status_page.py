@@ -13,7 +13,8 @@ async def test_incident_lifecycle_banner_bars_and_history(tmp_path):
     await db.connect()
     try:
         await sp.ensure_schema(db)
-        now = time.time()
+        lt = time.localtime()
+        now = time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 12, 0, 0, 0, 0, -1))   # 固定在当天中午：0 点附近跑也不跨天
         a = await sp.create_incident(db, "部署期间出图接口报错", "major", ["api"], "investigating", "正在调查", now - 3600)
         await sp.add_update(db, a, "identified", "已定位：快照锁库", now - 3000)
         await sp.add_update(db, a, "resolved", "已修复", now - 1800)
