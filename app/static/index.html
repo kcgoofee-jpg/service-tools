@@ -522,6 +522,35 @@ details.neg div{margin-top:6px;white-space:pre-wrap;overflow-wrap:anywhere;max-h
   .overlay.show,.overlay.show .dialog,.toast{animation:none}
   .thumb img,.btn,.nav button,.card,.fchip,.mx-arrow{transition:none!important}}
 
+/* 画廊：等高行（justified rows）——每行一样高，每张按自己的比例占宽，不裁切、不留空洞；卡片上只有用户名 */
+.gallery.jg{display:flex;flex-wrap:wrap;gap:8px;--rh:220px}
+.gallery.jg.large{--rh:360px}
+@media (max-width:640px){.gallery.jg{--rh:150px;gap:6px}.gallery.jg.large{--rh:240px}}
+.gallery.jg::after{content:"";flex-grow:1000000}
+.jt{position:relative;flex-grow:var(--r);flex-basis:calc(var(--r) * var(--rh));aspect-ratio:var(--r);max-height:calc(var(--rh) * 1.6);padding:0;border:0;border-radius:var(--radius-sm);overflow:hidden;cursor:zoom-in;background:#0b0d14;color:#fff;display:block}
+.jt img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .25s ease}
+.jt:hover img{transform:scale(1.03)}
+.jt .jt-who{position:absolute;left:0;right:0;bottom:0;padding:22px 10px 7px;font-size:12px;font-weight:500;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  background:linear-gradient(to bottom,rgba(8,10,16,0),rgba(8,10,16,.55));text-shadow:0 1px 2px rgba(0,0,0,.6);opacity:.9}
+.jt .jt-st{position:absolute;top:6px;right:6px}
+.jt.none{display:grid;place-items:center;color:rgba(255,255,255,.5);cursor:pointer}
+.jt.none .ic{width:28px;height:28px}
+#lightbox .lb{display:grid;grid-template-columns:minmax(0,1fr) 360px;width:min(96vw,1400px);height:min(92vh,1000px);background:#0b0d14;border-radius:14px;overflow:hidden;box-shadow:var(--shadow-lg)}
+#lightbox .lb-img{position:relative;display:grid;place-items:center;background:#000;min-height:0}
+#lightbox .lb-img img{width:100%;height:100%;max-height:none;object-fit:contain;border-radius:0;box-shadow:none}
+#lightbox .lb-none{color:rgba(255,255,255,.6)}
+#lightbox .lb-nav{position:absolute;top:50%;transform:translateY(-50%);background:rgba(255,255,255,.12);color:#fff;border:0;font-size:22px;width:40px;height:40px}
+#lightbox .lb-nav.prev{left:10px}#lightbox .lb-nav.next{right:10px}
+#lightbox .lb-nav:hover{background:rgba(255,255,255,.24)}
+#lightbox .lb-info{overflow:auto;padding:20px;color:#d6dbe8;font-size:13px;display:flex;flex-direction:column;gap:12px;border-left:1px solid rgba(255,255,255,.08)}
+#lightbox .lb-info h3{font-size:16px;color:#fff;margin:0;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+#lightbox .lb-info .meta{color:rgba(255,255,255,.6);font-size:12.5px}
+#lightbox .lb-info .blk{display:flex;flex-direction:column;gap:6px}
+#lightbox .lb-info .blk-h{display:flex;justify-content:space-between;align-items:center;color:rgba(255,255,255,.6);font-size:12px}
+#lightbox .lb-info .txt{white-space:pre-wrap;overflow-wrap:anywhere;background:rgba(255,255,255,.05);border-radius:8px;padding:8px 10px;line-height:1.6;color:#e7eaf3}
+#lightbox .lb-info .btn{color:#e7eaf3;border-color:rgba(255,255,255,.18);background:rgba(255,255,255,.06)}
+#lightbox .lb-info .params{font-family:var(--mono);font-size:12px;color:rgba(255,255,255,.7)}
+@media (max-width:860px){#lightbox .lb{grid-template-columns:1fr;grid-template-rows:minmax(0,55%) minmax(0,45%);height:94vh}#lightbox .lb-info{border-left:0;border-top:1px solid rgba(255,255,255,.08)}}
 /* ===== Modal / toast / lightbox ===== */
 .overlay{position:fixed;inset:0;background:var(--overlay);z-index:60;display:none;align-items:center;justify-content:center;padding:16px;backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}
 .overlay.show{display:flex;animation:ovfade .18s ease}
@@ -843,7 +872,7 @@ td.note{min-width:220px}
             <div class="tools"><button class="btn rf" data-act="refresh-members" aria-label="刷新" title="刷新"><span data-ic="refresh"></span><span class="lbl">刷新</span></button>
               <button class="btn primary" data-act="new-key"><span data-ic="plus"></span>新建 Key</button></div></div>
           <div class="mtools">
-            <div class="search"><span data-ic="search"></span><input id="memberSearch" type="search" placeholder="搜索名称或 Discord ID" aria-label="搜索成员"></div>
+            <div class="search"><span data-ic="search"></span><input id="memberSearch" type="search" placeholder="搜索名称、Discord ID、标签或备注" aria-label="搜索成员"></div>
             <div class="chips-filter" id="memberFilter" role="group" aria-label="筛选成员"></div>
           </div>
           <div class="member-grid" id="memberGrid"></div>
@@ -868,8 +897,8 @@ td.note{min-width:220px}
         <section id="tab-ops" hidden>
           <div class="page-head"><div class="ttl"><h1>领 Key 与功能</h1><p class="pv" id="pv-ops"></p></div>
             <div class="tools"><button class="btn rf" data-act="refresh-ops" aria-label="刷新" title="刷新"><span data-ic="refresh"></span><span class="lbl">刷新</span></button></div></div>
-          <div class="card panel"><div class="panel-head"><h2>功能开关</h2><div class="desc">关闭后管理员 Key 仍可使用</div></div><div id="opsFeatures"><div class="skel" style="height:200px"></div></div></div>
           <div class="card panel"><div class="panel-head"><h2>领 Key</h2><div class="desc">成员在 Discord 用 /register 自助领取</div></div><div id="opsReg"><div class="skel" style="height:260px"></div></div></div>
+          <div class="card panel"><div class="panel-head"><h2>功能开关</h2><div class="desc">关闭后管理员 Key 仍可使用</div></div><div id="opsFeatures"><div class="skel" style="height:200px"></div></div></div>
         </section>
 
         <!-- 操作日志 -->
@@ -1081,8 +1110,11 @@ td.note{min-width:220px}
 <!-- ===== Lightbox ===== -->
 <div class="overlay" id="lightbox">
   <button class="btn icon x" data-act="close-lightbox" aria-label="关闭"><span data-ic="x"></span></button>
-  <img id="lbImg" alt="生成图预览">
-  <div class="cap" id="lbCap"></div>
+  <div class="lb">
+    <div class="lb-img"><img id="lbImg" alt="生成图预览"><div class="lb-none" id="lbNone" hidden>原图已过期</div>
+      <button class="btn icon lb-nav prev" data-act="lb-prev" aria-label="上一张">‹</button><button class="btn icon lb-nav next" data-act="lb-next" aria-label="下一张">›</button></div>
+    <aside class="lb-info" id="lbCap"></aside>
+  </div>
 </div>
 
 <div id="toasts" aria-live="polite"></div>
@@ -1466,12 +1498,17 @@ async function loadRisk(){
     const cls = st => st==='ok' ? 'ok' : st==='warn' ? 'warn' : st==='bad' ? 'bad' : 'info';
     setPV('risk', s.bad ? 'bad' : s.warn ? 'warn' : 'ok', s.bad ? `有 ${s.bad} 项风险要处理${s.warn ? `，另有 ${s.warn} 项值得留意` : ''}` : s.warn ? `没有紧急风险，${s.warn} 项值得留意` : '没有发现要处理的风险');
     $('#riskSummary').innerHTML = '';      // 结论已经写在标题下面
-    box.innerHTML = d.items.map(it => {
+    const item = it => {
       const ev = (it.evidence || []).map(e => `<div class="hint" style="margin:3px 0;white-space:pre-wrap">${esc(e)}</div>`).join('');
       return `<div style="padding:12px 0;border-bottom:1px solid var(--border)">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b>${esc(it.title)}</b><span class="mf ${cls(it.status)}">${esc(it.label)}</span></div>
         <div class="hint" style="margin:4px 0 2px">${esc(it.detail)}</div>${ev}</div>`;
-    }).join('') || '<div class="hint">没有检查项。</div>';
+    };
+    // 先看要处理 / 值得留意的，正常和不适用的收起来
+    const hot = d.items.filter(it => it.status === 'bad' || it.status === 'warn').sort((a, b) => (a.status === 'bad' ? 0 : 1) - (b.status === 'bad' ? 0 : 1));
+    const rest = d.items.filter(it => !hot.includes(it));
+    box.innerHTML = (hot.map(item).join('') || '<div class="hint" style="padding:8px 0">没有要处理或值得留意的项。</div>')
+      + (rest.length ? `<details class="mod-params" style="margin-top:12px"><summary class="btn mini ghost">其余 ${rest.length} 项（正常 / 不适用） ${ic('chev')}</summary>${rest.map(item).join('')}</details>` : '');
   }catch(e){
     box.innerHTML = `<div class="notice-box bad">${ic('alert')}读取失败：${esc(e.message || e)}</div>`;
   }
@@ -2122,7 +2159,8 @@ function renderMembers(){
   const pool = staffish(memberFilter) ? everyone : members;
   const q = memberQuery.trim().toLowerCase();
   let list = pool.filter(active[2]).filter(m=>!q || m.name.toLowerCase().includes(q) || String(m.discord_id||'').includes(q)
-    || (m.discord && [m.discord.username, m.discord.display_name].some(v=>String(v||'').toLowerCase().includes(q))));
+    || (m.discord && [m.discord.username, m.discord.display_name].some(v=>String(v||'').toLowerCase().includes(q)))
+    || (m.tags||[]).some(t => (t.tag + ' ' + (t.note||'')).toLowerCase().includes(q)));      // 标签和备注也能搜（邀请 Key 没有 Discord 资料）
   const keyf = {today:m=>m.today.images, week:m=>m.week.images, total:m=>m.total_images, recent:m=>m.last_used_at||0}[memberSort] || (m=>m.today.images);
   list = list.slice().sort((a,b)=>keyf(b)-keyf(a) || a.name.localeCompare(b.name));
   if(!list.length){
@@ -2218,7 +2256,7 @@ async function loadAudit(){
     if(!statusCache){ try{ statusCache = await api('/admin/api/status'); }catch(_){} }
     const kf = $('#auditFilter').value;
     const d = await api('/admin/api/audit?' + (kf?`key_id=${encodeURIComponent(kf)}&`:'') + `page=${auditPage}&per_page=${auditPer}`);
-    grid.className = 'gallery' + (auditView==='large'?' large':auditView==='list'?' list':'');
+    grid.className = 'gallery' + (auditView==='list' ? ' list' : ' jg' + (auditView==='large' ? ' large' : ''));
     if(ver !== auditVer) return;
     auditPage = d.page;
     auditPrompts.clear();
@@ -2235,8 +2273,15 @@ async function loadAudit(){
     grid.innerHTML = d.items.map(it=>{
       let ex = {}; try{ ex = it.extra ? JSON.parse(it.extra) : {}; }catch(_){}
       const chars = ex.char_prompts || [], nchars = ex.char_negatives || [], pr = ex.params || {};
-      auditPrompts.set(it.id, {p: it.prompt||'', n: it.negative||'', who: it.key_name, chars, nchars});
+      auditPrompts.set(it.id, {p: it.prompt||'', n: it.negative||'', who: it.key_name, chars, nchars, it, pr});
       const id = Number(it.id);
+      if(auditView !== 'list'){
+        const w = Number(pr.width), h = Number(pr.height), r = w > 0 && h > 0 ? w / h : 2/3, pic = it.has_image || it.has_thumb;
+        return `<button class="jt${pic ? '' : ' none'}" style="--r:${r.toFixed(4)}" data-act="zoom" data-id="${id}" aria-label="查看 ${esc(it.key_name)} 的图和提示词">
+          ${pic ? `<img loading="lazy" decoding="async" alt="" src="/admin/api/audit/${id}/thumb">` : ic('image')}
+          ${it.status && it.status !== 'ok' ? `<span class="jt-st">${statusTag(it.status)}</span>` : ''}
+          <span class="jt-who">${esc(it.key_name)}</span></button>`;
+      }
       const sz = (pr.width&&pr.height) ? `${pr.width}×${pr.height}` : '';
       const parts = [pr.seed!=null?`种子 ${esc(pr.seed)}`:'', pr.sampler?esc(pr.sampler):'', pr.steps?esc(pr.steps)+'步':'', pr.scale!=null?'CFG '+esc(pr.scale):'', sz].filter(Boolean);
       const hasPic = it.has_image||it.has_thumb;
@@ -2260,11 +2305,28 @@ async function loadAudit(){
     pager($('#auditPager'), d, 'audit');
   }catch(e){ toastErr(e); grid.innerHTML = ''; }
 }
+let lbId = null;
 function openLightbox(id){
-  const m = auditPrompts.get(id) || {};
-  $('#lbImg').src = `/admin/api/audit/${Number(id)}/image`;
-  $('#lbCap').textContent = (m.who ? m.who + ' · ' : '') + (m.p || '');
+  const m = auditPrompts.get(id) || {}, it = m.it || {}, pr = m.pr || {};
+  lbId = id;
+  const pic = it.has_image || it.has_thumb;
+  $('#lbImg').hidden = !pic; $('#lbNone').hidden = !!pic;
+  if(pic) $('#lbImg').src = `/admin/api/audit/${Number(id)}/${it.has_image ? 'image' : 'thumb'}`; else $('#lbImg').removeAttribute('src');
+  const sz = (pr.width && pr.height) ? `${pr.width}×${pr.height}` : '';
+  const params = [pr.seed != null ? `种子 ${pr.seed}` : '', pr.sampler || '', pr.steps ? pr.steps + ' 步' : '', pr.scale != null ? 'CFG ' + pr.scale : '', sz].filter(Boolean).join(' · ');
+  const blk = (title, text, act) => text ? `<div class="blk"><div class="blk-h"><span>${title}</span>${act ? `<button class="btn mini" data-act="${act}" data-id="${Number(id)}">${ic('copy')}复制</button>` : ''}</div><div class="txt">${esc(text)}</div></div>` : '';
+  $('#lbCap').innerHTML = `<h3>${esc(m.who || '')} ${it.status ? statusTag(it.status) : ''}</h3>
+    <div class="meta">${esc([shortModel(it.model), (FEAT[it.kind]||[it.kind||''])[0], it.ts ? fullTime(it.ts) : '', it.has_image ? '' : (pic ? '原图已过期，这是缩略图' : '')].filter(Boolean).join(' · '))}</div>
+    ${blk('正面提示词', m.p || '（未记录）', m.p ? 'copy-pos' : '')}
+    ${(m.chars||[]).length ? blk(`角色提示词 ×${m.chars.length}`, m.chars.map((c, i) => `角色${i+1}：${c}`).join('\n'), 'copy-chars') : ''}
+    ${blk('负面提示词', [m.n, ...(m.nchars||[]).map((c, i) => `角色${i+1}负面：${c}`)].filter(Boolean).join('\n'), m.n ? 'copy-neg' : '')}
+    ${params ? `<div class="params">${esc(params)}</div>` : ''}`;
   openOverlay('#lightbox');
+}
+function lbStep(d){
+  const ids = [...auditPrompts.keys()], i = ids.indexOf(lbId);
+  if(i < 0) return; const j = i + d; if(j < 0 || j >= ids.length) return;
+  openLightbox(ids[j]);
 }
 function pager(el, d, kind){
   const p = d.page, n = d.pages;
@@ -2282,6 +2344,8 @@ function pager(el, d, kind){
 const FEAT = {image:['文生图','文生图'], upscale:['放大','放大图片'], augment:['导演工具','线稿、上色等导演工具'],
   vibe:['Vibe 编码','Vibe Transfer 编码'], tags:['标签补全','提示词标签补全'], text:['文本 / 聊天','文本生成与 OpenAI 兼容聊天'], voice:['语音合成','文字转语音']};
 const FEAT_NAMES = Object.keys(FEAT);
+/* 说明和名称说的是同一件事（「放大 / 放大图片」）就不重复显示 */
+function featDescUseful(n){ const l = featLabel(n) + FEAT[n][0], d = FEAT[n][1].replace(/[与等的、\s]/g, ''); return [...d].filter(c => !l.includes(c)).length > 2; }
 function featLabel(n){ return (opsData && opsData.features.labels[n]) || FEAT[n][0]; }
 function featChips(list){
   if(list == null) return '<span class="tag mini dim" title="所有已开放的功能">功能：全部</span>';
@@ -2315,7 +2379,7 @@ async function loadOps(){
 }
 function renderOpsFeatures(){
   const g = opsData.features.global;
-  $('#opsFeatures').innerHTML = FEAT_NAMES.map(n=>`<div class="feat-row"><div class="body"><div class="t">${esc(featLabel(n))}</div><div class="d">${esc(FEAT[n][1])}</div></div>
+  $('#opsFeatures').innerHTML = FEAT_NAMES.map(n=>`<div class="feat-row"><div class="body"><div class="t">${esc(featLabel(n))}</div>${featDescUseful(n) ? `<div class="d">${esc(FEAT[n][1])}</div>` : ''}</div>
     <label class="switch"><input type="checkbox" data-feat="${n}" ${g[n]?'checked':''} aria-label="${esc(featLabel(n))}"><span></span></label></div>`).join('')
 ;
 }
@@ -2932,6 +2996,8 @@ document.addEventListener('click', ev=>{
     case 'view-audit': viewAudit(id); break;
     case 'zoom': openLightbox(id); break;
     case 'close-lightbox': closeOverlay('#lightbox'); $('#lbImg').removeAttribute('src'); break;
+    case 'lb-prev': lbStep(-1); break;
+    case 'lb-next': lbStep(1); break;
     case 'expand': el.classList.toggle('open'); break;
         case 'copy-pos': { const m = auditPrompts.get(Number(el.dataset.id)); if(m) copyText(m.p, '已复制正面提示词'); break; }
     case 'copy-neg': { const m = auditPrompts.get(Number(el.dataset.id)); if(m) copyText(m.n, '已复制负面提示词'); break; }
@@ -3014,6 +3080,10 @@ $('#memberFilter').addEventListener('click', e=>{
 document.addEventListener('click', e=>{
   const b = e.target.closest('th[data-sort]'); if(!b) return;
   memberSort = b.dataset.sort; renderMembers();
+});
+document.addEventListener('keydown', e=>{      // 大图里 ← / → 切换上一张 / 下一张
+  if(!$('#lightbox').classList.contains('show') || e.target.closest('input,textarea,select')) return;
+  if(e.key === 'ArrowLeft'){ e.preventDefault(); lbStep(-1); } else if(e.key === 'ArrowRight'){ e.preventDefault(); lbStep(1); }
 });
 document.addEventListener('keydown', e=>{
   if(e.key!=='Enter' && e.key!==' ') return;

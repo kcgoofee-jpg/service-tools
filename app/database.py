@@ -268,6 +268,31 @@ _UPSERT_COUNTERS = """INSERT INTO counters
                        legacy_free_images = legacy_free_images + excluded.legacy_free_images"""
 
 
+def _rollback_on_error(conn) -> None:
+    """共享主连接上任何一条语句出错（最常见：database is locked）就回滚。
+
+    Python sqlite3 写之前会自动 BEGIN；语句失败时这个事务不会自己结束。之后同一连接再读一次就拿到一个旧快照，
+    别的连接一提交，这个连接上的每次写都立刻报 locked，直到重启（2026-10-10 19:20 部署快照时实际发生：
+    touch_key 等锁超时 → 之后所有走主连接的写全部 500，快照结束后也不恢复）。"""
+    import sqlite3
+    orig = conn._execute
+
+    async def _execute(fn, *args, **kwargs):
+        try:
+            return await orig(fn, *args, **kwargs)
+        except sqlite3.Error:
+            def _rb():
+                c = conn._conn
+                if c is not None and c.in_transaction:
+                    c.rollback()
+            try:
+                await orig(_rb)
+            except Exception:
+                pass
+            raise
+    conn._execute = _execute
+
+
 class Database:
     def __init__(self, path: str, tz: str = "Asia/Shanghai"):
         self.path = path
@@ -283,6 +308,7 @@ class Database:
 
     async def connect(self) -> None:
         self._db = await self._open_connection()
+        _rollback_on_error(self._db)
         self._db.row_factory = aiosqlite.Row
         await self._db.execute("PRAGMA journal_mode=WAL")
         await self._db.executescript(SCHEMA)
