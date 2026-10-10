@@ -258,6 +258,52 @@ def _prompt_texts(body: dict):
                     yield f"{key}.char_captions[{i}]", item.get("char_caption")
 
 
+_NAME_DIGITS_WEIGHT = re.compile(r"(?<=[A-Za-z_])(\d+(?:\.\d+)?)::")
+
+
+def fix_name_digit_weights(body: dict) -> int:
+    """名字结尾的数字紧挨着 ::（如画师 bm94199::）时，在 :: 前补一个空格，原地改写，返回改了几处。
+
+    本意是用 :: 结束一段加权，但上游会把 94199 当成权重，结果 NaN（10/11 线上 10 次失败全是这一种）。
+    只改「数字前面紧挨着字母或下划线」的情况，独立的 1.2:: / -3:: 这类正常权重不动。
+    10/11 有成员连续 9 次被预检拒绝、客户端看不到提示，所以改成自动纠正，不再拒绝。"""
+    n = 0
+
+    def fix(text):
+        nonlocal n
+        if not isinstance(text, str) or "::" not in text:
+            return text
+        new, k = _NAME_DIGITS_WEIGHT.subn(r"\1 ::", text)
+        n += k
+        return new
+
+    if isinstance(body.get("input"), str):
+        body["input"] = fix(body["input"])
+    p = body.get("parameters")
+    if not isinstance(p, dict):
+        return n
+    for key in ("prompt", "negative_prompt"):
+        if isinstance(p.get(key), str):
+            p[key] = fix(p[key])
+    if isinstance(p.get("characterPrompts"), list):
+        for item in p["characterPrompts"]:
+            if isinstance(item, dict):
+                for key in ("prompt", "uc"):
+                    if isinstance(item.get(key), str):
+                        item[key] = fix(item[key])
+    for key in ("v4_prompt", "v4_negative_prompt"):
+        caption = (p.get(key) or {}).get("caption") if isinstance(p.get(key), dict) else None
+        if not isinstance(caption, dict):
+            continue
+        if isinstance(caption.get("base_caption"), str):
+            caption["base_caption"] = fix(caption["base_caption"])
+        if isinstance(caption.get("char_captions"), list):
+            for item in caption["char_captions"]:
+                if isinstance(item, dict) and isinstance(item.get("char_caption"), str):
+                    item["char_caption"] = fix(item["char_caption"])
+    return n
+
+
 MAX_CHARACTERS = 6        # NovelAI V4 / V4.5 角色提示词上限
 
 

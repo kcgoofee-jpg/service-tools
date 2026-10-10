@@ -40,6 +40,7 @@ from .nai import IMAGE_COST_WEIGHT, UpstreamError, _wait_cleanup
 from .policy import (
     normalize_image_request,
     upstream_parameter_problem,
+    fix_name_digit_weights,
     clamp_image_params,
     clamp_text_params,
     estimate_image_cost,
@@ -183,7 +184,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "2.16.19"
+__version__ = "2.16.20"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -1187,6 +1188,7 @@ async def _generate_image(request: Request, *, streaming: bool):
         record(key, "image", str(body.get("model", "?"))[:80], "rejected", detail=str(exc))
         raise err(400, f"图片参数无效：{exc}") from None
     model = body["model"]
+    fix_name_digit_weights(body)               # bm94199:: → bm94199 ::（否则上游当成权重 94199 → NaN）
     problem = upstream_parameter_problem(body)
     if problem:
         record(key, "image", model, "rejected", detail=problem[:120])
