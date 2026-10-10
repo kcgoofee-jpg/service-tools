@@ -20,6 +20,7 @@ from starlette.concurrency import run_in_threadpool
 from fastapi.routing import APIRoute
 
 from . import site_flags
+from .registration import RegistrationError
 from .action_log import ADMIN_ACTIONS, log_action, summarize
 
 from . import features as feature_defs
@@ -661,6 +662,47 @@ async def give_coupon(request: Request, key_id: int):
     note = str(body.get("note") or "")[:200]
     c = await st.db.add_coupon(key_id, kind, float(days), note, str(body.get("by") or "站长")[:40])
     return {"ok": True, "coupon": c}
+
+
+@router.post("/gift")
+async def gift_member(request: Request):
+    """奖励一位 Discord 用户（站长手动触发，先做成接口，以后机器人夸人也走这里）：
+    {"discord_id", "username"?, "global_name"?, "reason", "coupon_days": 7,
+     "reply": {"channel_id", "message_id", "text"}?}
+    没有 Key → 直接发一把（不受名额限制）并私信 Key；然后发一张重置券（note = reason）；有 reply 就让奶妹回复那条消息。"""
+    require_admin(request)
+    body = await read_json_body(request)
+    if not isinstance(body, dict) or not str(body.get("discord_id", "")).isdecimal():
+        raise HTTPException(422, "需要 discord_id")
+    reg = getattr(request.app.state, "registrar", None)
+    if reg is None:
+        raise HTTPException(503, "Discord 机器人没有配置")
+    st = request.app.state.gate
+    user = {"id": str(body["discord_id"]), "username": str(body.get("username") or ""),
+            "global_name": str(body.get("global_name") or ""), "avatar": ""}
+    try:
+        g = await reg.gift(user)
+    except RegistrationError as exc:
+        raise HTTPException(409, str(exc)) from None
+    reason = str(body.get("reason") or "")[:200]
+    out: dict[str, Any] = {"new_key": g["new"], "key_id": g["key_id"]}
+    days = body.get("coupon_days", 7)
+    if days:
+        out["coupon"] = await st.db.add_coupon(g["key_id"], "reset", float(days), reason, "奶妹")
+    if g["new"]:
+        extra = (f"\n\n🎁 这把 Key 是奶妹送你的（{reason}）" if reason else "") + \
+                ("，还附带一张重置券，用 Key 登录首页就能看到、7 天内有效～" if days else "")
+        out["dm_sent"] = await reg.send_dm(user["id"], g["message"] + extra)
+        if not out["dm_sent"]:
+            out["dm_block"] = getattr(reg, "last_dm_block", "") or "对方关闭了私信"
+            out["key"] = g["key"]           # 私信没发出去：交给站长手动转交
+    rp = body.get("reply")
+    if isinstance(rp, dict) and rp.get("channel_id") and rp.get("message_id") and rp.get("text"):
+        out["replied"] = await reg.reply_in_channel(str(rp["channel_id"]), str(rp["message_id"]), str(rp["text"]))
+    await log_action(st.db, "后台", "奖励成员", f"Discord:{user['id']}",
+                     f"{'新发 Key · ' if g['new'] else ''}重置券 {days} 天 · {reason}"
+                     + (" · 已私信" if out.get("dm_sent") else "") + (" · 已回复" if out.get("replied") else ""))
+    return out
 
 
 @router.get("/keys/{key_id}/coupons")

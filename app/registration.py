@@ -471,6 +471,33 @@ class RegistrationService:
             user = {"id": user_id, "username": username, "global_name": global_name, "avatar": avatar}
             return await self._provision(user_id, cfg, user)
 
+    async def gift(self, user: dict) -> dict:
+        """站长 / 机器人奖励用：这个 Discord 用户没有 Key 就直接发一把（不走名额和候补），有就原样返回。
+        返回 {"new": bool, "key_id": int, 新发时还有 "key", "message"（欢迎私信）}。封禁的账号不发。"""
+        user_id = str(user.get("id") or "")
+        if not user_id.isdecimal():
+            raise RegistrationError("Discord ID 不对")
+        async with self.lock:
+            if await self.is_banned(user_id):
+                raise RegistrationError("这个 Discord 账号已被站长停用")
+            await self._release_if_expired(user_id, defer_role=True)
+            row = await self.key_row_for(user_id)
+            if row is not None:
+                return {"new": False, "key_id": row["id"]}
+            res = await self._provision(user_id, await self.settings(), user)
+            row = await self.key_row_for(user_id)
+            return {**res, "new": True, "key_id": row["id"]}
+
+    async def reply_in_channel(self, channel_id: str, message_id: str, text: str) -> bool:
+        """奶妹回复某条消息（站长在后台点了才发；不会自己找人回复）。"""
+        try:
+            await self._discord("POST", f"/channels/{int(channel_id)}/messages", bearer="Bot " + self.bot_token,
+                                json={"content": text[:1900], "message_reference": {"message_id": str(int(message_id)), "fail_if_not_exists": False},
+                                      "allowed_mentions": {"parse": [], "replied_user": True}})
+            return True
+        except (RegistrationError, httpx.HTTPError, KeyError, ValueError):
+            return False
+
     async def _provision(self, user_id: str, cfg: dict, user: dict) -> dict:
         """唯一发 Key 的地方：建 api_keys 行、写 discord_registrations、按成员名改 Key 名、
         身份组标志 / 清掉旧的待摘除、移出候补、提交、挂身份组、生成欢迎消息。
