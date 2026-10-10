@@ -29,12 +29,12 @@ async def test_incident_lifecycle_banner_bars_and_history(tmp_path):
         assert api["days"][0]["level"] is None                   # 记录开始之前：灰色无数据
         assert 0 < api["uptime"] < 100
         page = sp.render(snap)
-        assert "V5 额度口径偏差" in page and "观察中" in page and "已定位" in page and "所有服务运行正常" not in page
+        assert "V5 额度口径偏差" in page and "监控中" in page and "已确定" in page and "所有系统运行正常" not in page
         await sp.add_update(db, b, "resolved", "复盘结果正确", now)
         page = sp.render(await sp.snapshot(db, now + 1))
-        assert "所有服务运行正常" in page and "历史事件" in page
+        assert "所有系统运行正常" in page and "过去的事件" in page
         bot = next(c for c in (await sp.snapshot(db, now + 1))["components"] if c["key"] == "bot")
-        assert bot["status"] == "正常运行" and bot["uptime"] == 100.0
+        assert bot["status"] == "运行正常" and bot["uptime"] == 100.0
     finally:
         await db.close()
 
