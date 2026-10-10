@@ -170,9 +170,11 @@ async def run(state, registrar=None, now: Optional[float] = None) -> dict[str, A
 
     # 5 单个 Key
     events = list(getattr(getattr(state, "sources", None), "events", []) or [])
-    # 「Key 正在暂停」本身被拒的请求不算：否则暂停到期时上一小时全是暂停期间的拒绝，会立刻再暂停一次
+    # 只数成员自己造成的拒绝：「Key 正在暂停」本身的拒绝不算（否则暂停到期立刻再暂停），
+    # 全站层面的拒绝（排队满 / 账号上限 / 熔断 / 冷却）也不算——忙时自动重试的正常成员不能被当成死循环暂停
+    skip = "','".join((reasons.KEY_PAUSED,) + reasons.SITE_LEVEL)
     rejects = {r[0]: r[1] for r in await _q(db, "SELECT key_id, COUNT(*) FROM usage_log WHERE ts>=? AND status='rejected' "
-                                                 f"AND key_id IS NOT NULL AND reason<>'{reasons.KEY_PAUSED}' GROUP BY key_id",
+                                                 f"AND key_id IS NOT NULL AND reason NOT IN ('{skip}') GROUP BY key_id",
                                              now - 3600)}
     keys = {r[0]: r[1] for r in await _q(db, "SELECT id, name FROM api_keys WHERE enabled=1 AND is_admin=0 AND is_test=0")}
     decisions = []

@@ -167,10 +167,10 @@ async def test_streaming_responses_hold_inflight_slot_until_stream_ends():
         await asyncio.Event().wait()
     runs = [asyncio.create_task(r({"type": "http", "asgi": {"spec_version": "2.4"}}, receive, send)) for r in resps]
     await asyncio.sleep(0)
-    assert main._INFLIGHT["Bearer stream"] == main.MAX_INFLIGHT_PER_KEY
+    assert main._INFLIGHT["stream"] == main.MAX_INFLIGHT_PER_KEY
     done.set()
     await asyncio.gather(*runs)
-    assert "Bearer stream" not in main._INFLIGHT
+    assert "stream" not in main._INFLIGHT
 
 
 # ---------------------------------------------------------------- 上游
@@ -1517,3 +1517,47 @@ async def test_upstream_4xx_is_logged_once_not_also_as_rejected(state, monkeypat
     await asyncio.sleep(0)
     rows = [a[4] for a, kw in state.db.logs[before:]]
     assert rows.count("rejected") == 0 and rows.count("error") == 1, rows
+
+
+@pytest.mark.asyncio
+async def test_inflight_limit_normalizes_authorization_spelling():
+    # 审查 P2：「Bearer K」「bearer K」「Bearer  K」是同一把 Key，不能各算一份并发
+    gate = asyncio.Event()
+
+    async def slow(request):
+        await gate.wait()
+        return httpx.Response(200)
+
+    wrapped = main.limit_inflight(slow)
+
+    def req(h):
+        return type("R", (), {"headers": {"authorization": h}})()
+    spellings = ["Bearer K", "bearer K", "Bearer  K", "BEARER K"]
+    tasks = [asyncio.create_task(wrapped(req(h))) for h in spellings]
+    await asyncio.sleep(0)
+    with pytest.raises(main.GateError):
+        await wrapped(req("Bearer K "))
+    gate.set()
+    await asyncio.gather(*tasks)
+    assert not main._INFLIGHT
+
+
+def test_flags_fail_closed_on_unknown_spelling():
+    from app import site_flags as sf
+    assert sf.parse(sf.WEB_LOGIN_PAUSED, "TRUE", True) is True
+    assert sf.parse(sf.WEB_LOGIN_PAUSED, "enabled?", True) is True      # 认不出 → 回到默认（暂停）
+    assert sf.parse(sf.WEB_LOGIN_PAUSED, "0", True) is False
+    assert sf.parse(sf.DM_ENABLED, "Yes", False) is True
+
+
+def test_release_image_by_entry_keeps_the_running_one():
+    from app.guard import Guard
+    g = Guard()
+    assert g.admit_image(1, accounts=1) is None
+    a = g.entries[-1]["id"]
+    g.mark_running(1, a)
+    g.values["key_image_queue"] = 1
+    assert g.admit_image(1, accounts=1) is None
+    b = g.entries[-1]["id"]
+    g.release_image(1, b)                       # 排队的 B 被取消
+    assert [(e["id"], e["running"]) for e in g.entries] == [(a, True)]

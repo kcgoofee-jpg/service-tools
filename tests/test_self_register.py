@@ -499,3 +499,28 @@ class DepartedSweepTests(RegistrationTests):
         self.member_answers = {"777": httpx.Response(404, json={"code": 10007})}
         self.assertEqual(await self.service.sweep_departed(), 0)
         self.assertEqual(await self.count("discord_registrations"), 1)
+
+
+class SessionBindingTests(RegistrationTests):
+    async def test_resetkey_kills_sessions_opened_with_the_old_key(self):
+        # 审查 P0：泄露的 Key 被拿去 /login/key，成员 /resetkey 后，攻击者的会话必须失效、拿不到新 Key
+        from types import SimpleNamespace
+        from app.registration_routes import member_router, MEMBER_COOKIE, _KEY_LOGIN_FAILS
+        from app.policy import gen_key
+        app = FastAPI()
+        app.include_router(member_router)
+        app.state.registrar = self.service
+        app.state.gate = SimpleNamespace(db=self.db, settings=SimpleNamespace(secret_key="k" * 40, data_dir=None),
+                                         day=lambda: "2026-10-10")
+        await self.mint()
+        did = (await self.db._db.execute_fetchall("SELECT discord_id FROM discord_registrations"))[0][0]
+        old = await self.service.key_row_for(did)
+        _KEY_LOGIN_FAILS.clear()
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="https://fixture.invalid") as client:
+            login = await client.post("/login/key", json={"key": old["token"]})
+            cookie = {MEMBER_COOKIE: login.cookies[MEMBER_COOKIE]}
+            from app import registration_routes as mr
+            req = SimpleNamespace(cookies=cookie, app=app)
+            self.assertEqual(await mr._member_session(req), str(did))
+            await self.db.rotate_key_token(old["id"], gen_key("nai"))          # /resetkey
+            self.assertIsNone(await mr._member_session(req))

@@ -66,10 +66,11 @@ def parse(spec: Spec, raw: Any, fallback: Any = None) -> Any:
         return fallback
     s = str(raw).strip()
     try:
-        if spec.kind == "flag":
-            return s in ("1", "true", "True", "on")
+        low = s.lower()
+        if spec.kind == "flag":         # 认不出的写法回到默认值（fail-closed），不能当成「关」
+            return True if low in ("1", "true", "yes", "on") else False if low in ("0", "false", "no", "off") else fallback
         if spec.kind == "onoff":
-            return s == "on"
+            return True if low in ("on", "1", "true") else False if low in ("off", "0", "false") else fallback
         if spec.kind == "choice":
             return s if s in spec.choices else fallback
         if spec.kind == "str":

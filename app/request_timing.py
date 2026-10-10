@@ -55,6 +55,12 @@ def logged() -> bool:
     return bool(holder is not None and holder.get("logged"))
 
 
+def was_sent() -> bool:
+    """本请求是否已经发往上游（发出过一次就算，重试不影响）。"""
+    holder = _TIMING.get()
+    return bool(holder is not None and holder.get("sent") is not None)
+
+
 def mark_sent() -> None:
     """第一次真正把请求发往上游时调用；重试不覆盖。"""
     holder = _TIMING.get()

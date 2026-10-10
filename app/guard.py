@@ -244,10 +244,10 @@ class Guard:
         self.entries.append({"id": self._seq, "key": key_id, "since": time.time(), "running": False})
         return None
 
-    def mark_running(self, key_id: int) -> None:
-        """这把 Key 最早一张排队中的图开始发往上游（实时架构图用）。"""
+    def mark_running(self, key_id: int, entry_id: Optional[int] = None) -> None:
+        """这把 Key 的一张排队中的图开始发往上游（实时架构图用）；给了 entry_id 就标记那一张。"""
         for e in self.entries:
-            if e["key"] == key_id and not e["running"]:
+            if e["key"] == key_id and not e["running"] and (entry_id is None or e["id"] == entry_id):
                 e["running"] = True
                 return
 
@@ -255,15 +255,18 @@ class Guard:
         """当前排队中（未开始生成）的 key_id，按到达先后；公平调度影子对比用。"""
         return [e["key"] for e in sorted((e for e in self.entries if not e["running"]), key=lambda e: e["since"])]
 
-    def release_image(self, key_id: int) -> None:
+    def release_image(self, key_id: int, entry_id: Optional[int] = None) -> None:
         n = self.image_inflight.get(key_id, 0) - 1
         if n > 0:
             self.image_inflight[key_id] = n
         else:
             self.image_inflight.pop(key_id, None)
         mine = [e for e in self.entries if e["key"] == key_id]
-        if mine:      # 先移除正在生成的那张，否则移除最早的
-            done = next((e for e in mine if e["running"]), mine[0])
+        if entry_id is not None:      # 按条目编号移除：排队中的那张被取消时，不能误删正在生成的那张
+            done = next((e for e in mine if e["id"] == entry_id), None)
+        else:                         # 旧调用：先移除正在生成的那张，否则移除最早的
+            done = next((e for e in mine if e["running"]), mine[0] if mine else None)
+        if done is not None:
             self.entries.remove(done)
 
     def queue_view(self, key_id: Optional[int] = None) -> dict:

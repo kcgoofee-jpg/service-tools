@@ -153,3 +153,26 @@ async def test_upgrade_backfills_reason_codes_for_recent_rejections(tmp_path):
         assert got == ["queue_full", "key_paused", "hourly_cap"]
     finally:
         await db.close()
+
+
+@pytest.mark.asyncio
+async def test_key_guard_ignores_site_level_rejections(tmp_path):
+    # 审查 F4：全站排队满 / 每小时上限 / 冷却造成的拒绝，不能让自动重试的成员被暂停
+    db = Database(str(tmp_path / "k.sqlite"))
+    await db.connect()
+    try:
+        key = await db.create_key({"name": "m", "token": "nai-x", "daily_images": 10, "daily_v5": 0, "features": None,
+                                   "daily_anlas": 0, "monthly_anlas": 0, "daily_text_tokens": 0, "rpm": 5,
+                                   "allow_anlas": False, "allow_img2img": False, "exclude_global_v5": False,
+                                   "image_model_scope": "legacy", "expires_at": None})
+        for code in ("queue_full", "hourly_cap", "cooldown", "breaker") * 20:
+            await db.add_log(key["id"], "m", "image", "x", "rejected", detail="429", reason=code)
+        st = SimpleNamespace(db=db, guard=None, share=None, announcer=None, sources=SimpleNamespace(events=[]))
+        out = await autopilot.run(st, None, now=time.time())
+        assert out["rules"]["key_guard"]["value"] == []
+        for _ in range(60):
+            await db.add_log(key["id"], "m", "image", "x", "rejected", detail="429 key busy", reason="key_busy")
+        out = await autopilot.run(st, None, now=time.time())
+        assert [d["key"] for d in out["rules"]["key_guard"]["value"]] == [key["id"]]
+    finally:
+        await db.close()

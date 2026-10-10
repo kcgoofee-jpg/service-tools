@@ -278,13 +278,18 @@ def _member_secret(request: Request) -> str:
     return _secret(request) + ":member-login"
 
 
-def _sign_member(request: Request, discord_id: str, exp: int) -> str:
-    payload = f"{discord_id}:{exp}"
+def _key_tag(key) -> str:
+    """会话绑定的 Key 指纹：Key 一换（/resetkey、回收后重领），旧会话立刻失效。没有 Key 时为 "-"。"""
+    return hashlib.sha256(str(key["token"]).encode()).hexdigest()[:16] if key is not None else "-"
+
+
+def _sign_member(request: Request, discord_id: str, exp: int, tag: str = "-") -> str:
+    payload = f"{discord_id}:{exp}:{tag}"
     sig = _hmac.new(_member_secret(request).encode(), payload.encode(), hashlib.sha256).hexdigest()
     return payload + "." + sig
 
 
-def _member_session(request: Request) -> Optional[str]:
+def _parse_member(request: Request) -> Optional[tuple[str, str]]:
     raw = request.cookies.get(MEMBER_COOKIE, "")
     if "." not in raw:
         return None
@@ -293,10 +298,22 @@ def _member_session(request: Request) -> Optional[str]:
     try:
         if not _hmac.compare_digest(sig, good):
             return None
-        discord_id, exp = payload.rsplit(":", 1)
-        return discord_id if int(exp) > _time.time() else None
+        discord_id, exp, tag = payload.split(":")          # 旧格式（不带 Key 指纹）一律作废，重新登录
+        return (discord_id, tag) if int(exp) > _time.time() else None
     except (ValueError, TypeError):
         return None
+
+
+async def _member_session(request: Request) -> Optional[str]:
+    """有效会话返回 discord_id。会话签发时绑定了当时 Key 的指纹：泄露的 Key 被拿去登录后，
+    成员 /resetkey 换新 Key，攻击者的会话随即失效，看不到新 Key（2026-10-10 审查 P0）。"""
+    parsed = _parse_member(request)
+    if parsed is None:
+        return None
+    discord_id, tag = parsed
+    service = getattr(request.app.state, "registrar", None)
+    key = await service.key_row_for(discord_id) if service is not None else None
+    return discord_id if _hmac.compare_digest(tag, _key_tag(key)) else None
 
 
 def _set_cookie(response, name: str, value: str, max_age: int) -> None:
@@ -340,7 +357,8 @@ async def login_callback(request: Request, code: str = "", state: str = ""):
         return RedirectResponse("/?login=failed")
     resp = RedirectResponse("/")
     exp = int(_time.time()) + SESSION_DAYS * 86400
-    _set_cookie(resp, MEMBER_COOKIE, _sign_member(request, who["id"], exp), SESSION_DAYS * 86400)
+    tag = _key_tag(await service.key_row_for(str(who["id"])))
+    _set_cookie(resp, MEMBER_COOKIE, _sign_member(request, who["id"], exp, tag), SESSION_DAYS * 86400)
     resp.delete_cookie(STATE_COOKIE, path="/")
     await _log_bot(request, who["id"], "网页登录")
     return resp
@@ -362,6 +380,9 @@ async def login_with_key(request: Request, body: KeyLogin):
         raise HTTPException(403, "只接受本站页面的登录")        # 挡登录 CSRF：外站不能把访客登进别人的会话
     ip = request.client.host if request.client else "unknown"
     now = _time.time()
+    if len(_KEY_LOGIN_FAILS) > 5000:          # 定期清掉过期的来源，避免换 IP 喷射时内存只增不减
+        for k in [k for k, v in _KEY_LOGIN_FAILS.items() if not v or now - v[-1] >= 600]:
+            _KEY_LOGIN_FAILS.pop(k, None)
     fails = [t for t in _KEY_LOGIN_FAILS.get(ip, []) if now - t < 600]
     if len(fails) >= 8:
         raise HTTPException(429, "尝试次数太多，请 10 分钟后再试")
@@ -378,7 +399,7 @@ async def login_with_key(request: Request, body: KeyLogin):
     discord_id = str(reg[0][0])
     resp = JSONResponse({"ok": True})
     exp = int(now) + SESSION_DAYS * 86400
-    _set_cookie(resp, MEMBER_COOKIE, _sign_member(request, discord_id, exp), SESSION_DAYS * 86400)
+    _set_cookie(resp, MEMBER_COOKIE, _sign_member(request, discord_id, exp, _key_tag(row)), SESSION_DAYS * 86400)
     await _log_bot(request, discord_id, "Key 登录网页")
     return resp
 
@@ -393,7 +414,7 @@ async def logout(request: Request):
 @member_router.get("/public/me")
 async def public_me(request: Request):
     """登录后的个人状态：不用粘贴 Key 就能看额度、排队、到期；并提供自己的 Key 供一键复制。"""
-    discord_id = _member_session(request)
+    discord_id = await _member_session(request)
     if discord_id is None:
         return JSONResponse({"logged_in": False}, headers={"Cache-Control": "no-store"})
     service = getattr(request.app.state, "registrar", None)
@@ -421,6 +442,8 @@ async def public_me(request: Request):
 
 
 _EXPORT_AT: dict[str, float] = {}      # 每人上次打包时间（内存）：打包较重，限 1 次 / 60 秒
+_EXPORT_LOCK = None                    # 全站同时只打包 1 份：2GB 内存的机器，两个人同时打包几百 MB 原图会被撑爆（审查 F3）
+EXPORT_MAX_BYTES = 200 * 1024 * 1024   # 单次最多打包最新的 200MB 原图
 
 
 @member_router.get("/public/my-export")
@@ -429,7 +452,7 @@ async def my_export(request: Request, format: str = "zip"):
     import time as _t
     from starlette.concurrency import run_in_threadpool
     from . import exporter
-    discord_id = _member_session(request)
+    discord_id = await _member_session(request)
     if discord_id is None:
         raise HTTPException(401, "请先用 Discord 登录")
     if format not in ("zip", "epub"):
@@ -441,18 +464,27 @@ async def my_export(request: Request, format: str = "zip"):
     key = await service.key_row_for(discord_id) if service is not None else None
     if key is None:
         raise HTTPException(404, "你还没有领取 Key")
-    db = request.app.state.gate.db
-    rows = await db.audit_images_for(key["id"])
-    if not rows:
-        raise HTTPException(404, "暂时没有可打包的原图（原图只保留最近几天）")
-    _EXPORT_AT[discord_id] = now
-    who = key["name"] or "我的作品"
-    if format == "epub":
-        blob = await run_in_threadpool(exporter.build_epub, rows, who)
-        media, ext = "application/epub+zip", "epub"
-    else:
-        blob = await run_in_threadpool(exporter.build_zip, rows, who)
-        media, ext = "application/zip", "zip"
-    fname = f"owl-{len(rows)}.{ext}"
+    global _EXPORT_LOCK
+    import asyncio as _asyncio
+    if _EXPORT_LOCK is None:
+        _EXPORT_LOCK = _asyncio.Lock()
+    if _EXPORT_LOCK.locked():
+        raise HTTPException(429, "有人正在打包，请过半分钟再试")
+    async with _EXPORT_LOCK:
+        db = request.app.state.gate.db
+        rows = await db.audit_images_for(key["id"], max_bytes=EXPORT_MAX_BYTES)
+        if not rows:
+            raise HTTPException(404, "暂时没有可打包的原图（原图只保留最近几天）")
+        _EXPORT_AT[discord_id] = now
+        who = key["name"] or "我的作品"
+        if format == "epub":
+            blob = await run_in_threadpool(exporter.build_epub, rows, who)
+            media, ext = "application/epub+zip", "epub"
+        else:
+            blob = await run_in_threadpool(exporter.build_zip, rows, who)
+            media, ext = "application/zip", "zip"
+        count = len(rows)
+        del rows
+    fname = f"owl-{count}.{ext}"
     return Response(blob, media_type=media,
                     headers={"Content-Disposition": f'attachment; filename="{fname}"', "Cache-Control": "no-store"})

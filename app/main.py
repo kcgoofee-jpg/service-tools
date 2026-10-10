@@ -56,7 +56,7 @@ from .state import GateState
 from . import features
 from .policy import REFERENCE_FIELDS
 from .key_sources import RETENTION_SECONDS as KEY_SOURCE_RETENTION
-from .action_log import RETENTION_DAYS as ADMIN_ACTION_RETENTION_DAYS
+from .action_log import RETENTION_DAYS as ADMIN_ACTION_RETENTION_DAYS, log_action
 from .audit import audit_flags, audit_disclosure, audit_image_days, capture_prompts, full_image
 from .upstream_errors import upstream_error_message, text_stream_events
 from .sse import encode_sse
@@ -117,9 +117,13 @@ async def lifespan(app: FastAPI):
     if getattr(STATE, "share", None) is not None:
         await STATE.share.load()
     await STATE.load_image_cooldown()
-    removed_keys = await STATE.delete_inactive_keys()
-    if removed_keys:
-        print(f"[info] deleted {removed_keys} inactive API key(s)")
+    # 闲置回收不在启动时跑（交给每小时的循环，那时身份组回收回调已接好）。
+    # 停机检测：最后一条请求日志距今超过 1 小时 → 网关停过机，从现在重新起算闲置天数，
+    # 否则停机 ≥ 回收天数后一重启就会把所有成员的 Key 当成闲置一次删光（2026-10-10 审查 F2）。
+    last = (await STATE.db._db.execute_fetchall("SELECT MAX(ts) FROM usage_log"))[0][0]
+    if last and time.time() - float(last) > 3600:
+        await STATE.db.set_setting("key_inactivity_grace_started_at", time.time())
+        await log_action(STATE.db, "系统", "闲置计时重置", "", f"网关停机约 {(time.time() - float(last)) / 3600:.1f} 小时，闲置天数从现在重新计算")
     await STATE.nai.start()
     STATE.admin_pw_hash = await STATE.db.get_setting("admin_password_hash", None)   # 后台改过的密码（哈希）
     if SETTINGS.seed_demo_key:
@@ -169,7 +173,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "2.15.1"
+__version__ = "2.15.2"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -584,7 +588,7 @@ async def check_rpm(key) -> None:
 def check_image_cooldown() -> None:
     remaining = STATE.image_cooldown_remaining()
     if remaining:
-        raise err(429, f"上游图片服务限流保护中，所有图片生成暂停约 {remaining} 秒")
+        raise err(429, f"上游图片服务限流保护中，所有图片生成暂停约 {remaining} 秒", reasons.COOLDOWN)
 
 
 MAX_INFLIGHT_PER_KEY = 4
@@ -599,7 +603,10 @@ def limit_inflight(handler):
     """
     @functools.wraps(handler)
     async def wrapper(request: Request):
-        ident = request.headers.get("authorization", "")[:512]
+        raw = request.headers.get("authorization", "")[:512].strip()
+        scheme, _, rest = raw.partition(" ")
+        # 和鉴权一样归一化：「Bearer K」「bearer K」「Bearer  K」是同一把 Key，不能各算一份并发（审查 P2）
+        ident = rest.strip() if scheme.lower() == "bearer" else raw
         if not ident:
             return await handler(request)
         count = _INFLIGHT.get(ident, 0)
@@ -711,9 +718,10 @@ async def image_admission(key):
     reason = guard.admit_image(key["id"], accounts)
     if reason:
         raise err(429, reason)
+    entry_id = guard.entries[-1]["id"]           # admit_image 刚追加的那一条（中间没有 await，不会被别人插队）
     def _on_sent():
         waiting = guard.waiting_keys()           # 本张开始发往上游时，还在排队的其他 Key
-        guard.mark_running(key["id"])
+        guard.mark_running(key["id"], entry_id)
         sched = getattr(STATE, "sched", None)
         if sched is not None:
             try:
@@ -725,7 +733,7 @@ async def image_admission(key):
     try:
         yield
     finally:
-        guard.release_image(key["id"])
+        guard.release_image(key["id"], entry_id)
 
 
 @asynccontextmanager
@@ -1249,6 +1257,10 @@ async def _generate_image(request: Request, *, streaming: bool):
                 resolve_v5_cost=resolve_v5_cost if est["v5"] else None,
             )
         except GateError as exc:
+            if not request_timing.was_sent() and not exc.billing_uncertain:
+                # 还没发到上游就被本地拒绝：记「拒绝」+ 原因码，不算上游失败（审查 F6）
+                await record(key, "image", model, "rejected", detail=f"{exc.status} {exc.message}"[:160], reason=exc.code)
+                raise
             await record(key, "image", model, "error", detail=exc.message,
                          unconfirmed_anlas=est["anlas"] if exc.billing_uncertain else 0)
             await audit_generation(key, "image", model, "error", body)
@@ -1283,6 +1295,7 @@ async def _generate_image(request: Request, *, streaming: bool):
             dispatched = True
 
         async def perform_stream(response):
+            local_reject = False
             tracker = ImageEventTracker(image_count, wire_format)
             failure = None
             billing_uncertain = False
@@ -1335,30 +1348,36 @@ async def _generate_image(request: Request, *, streaming: bool):
                     str(exc) if isinstance(exc, ImageStreamProtocolError) else "图片流连接中断或超时")
                 failure = message
                 await response.error(status, message)
+            except GateError:
+                # 还没发到上游就被本地拒绝（冷却 / V5 用完等）：由 run_stream 记一条「拒绝」，
+                # 这里不能再记「上游出错」，也不能算进上游失败率（2026-10-10 审查 F6）
+                local_reject = not dispatched
+                raise
             finally:
                 completed = tracker.completed_images
-                settled_anlas = 0
-                if completed:
-                    # 按完整结果重算首张减免，沿用派发前确认的 V5 额度状态。
-                    completed_body = {**body, "parameters": {**p, "n_samples": completed}}
-                    settled = estimate_image_cost(
-                        completed_body, v5_allowance_available=bool(est["v5"]))
-                    settled_anlas = settled["anlas"]
-                    await settle_record(
-                        key, "image_stream", model, "ok", images=completed,
-                        anlas=settled["anlas"], v5=settled["v5"],
-                        legacy_free_images=legacy_free_images,
-                        detail=detail + (f"; 完成 {completed}/{image_count}" if completed < image_count else ""),
-                    )
-                await audit_generation(key, "image_stream", model, "ok" if completed and not failure else "error", body,
-                                       tracker.first_image if completed else None)
-                upstream_outcome(bool(completed) and not failure)
-                if failure or not completed:
-                    # 未结算部分单独记为待核对费用。
-                    await record(key, "image_stream", model, "error",
-                                 detail=failure or "未收到最终图片，未记费",
-                                 unconfirmed_anlas=max(0, est["anlas"]-settled_anlas)
-                                 if billing_uncertain else 0)
+                if not (local_reject and not completed):      # 本地拒绝且没出图：交给 run_stream 记「拒绝」
+                    settled_anlas = 0
+                    if completed:
+                        # 按完整结果重算首张减免，沿用派发前确认的 V5 额度状态。
+                        completed_body = {**body, "parameters": {**p, "n_samples": completed}}
+                        settled = estimate_image_cost(
+                            completed_body, v5_allowance_available=bool(est["v5"]))
+                        settled_anlas = settled["anlas"]
+                        await settle_record(
+                            key, "image_stream", model, "ok", images=completed,
+                            anlas=settled["anlas"], v5=settled["v5"],
+                            legacy_free_images=legacy_free_images,
+                            detail=detail + (f"; 完成 {completed}/{image_count}" if completed < image_count else ""),
+                        )
+                    await audit_generation(key, "image_stream", model, "ok" if completed and not failure else "error", body,
+                                           tracker.first_image if completed else None)
+                    upstream_outcome(bool(completed) and not failure)
+                    if failure or not completed:
+                        # 未结算部分单独记为待核对费用。
+                        await record(key, "image_stream", model, "error",
+                                     detail=failure or "未收到最终图片，未记费",
+                                     unconfirmed_anlas=max(0, est["anlas"]-settled_anlas)
+                                     if billing_uncertain else 0)
 
         async def run_stream(response):
             try:
@@ -1806,7 +1825,7 @@ async def public_live(request: Request):
     # 否则两个并发请求会在 await 处交错，把 A 的「我的排队」泄给没 Key 的 B。
     # 先把成员数据算好，再用浅拷贝拼成本次响应，保证按人隔离。
     from .registration_routes import _member_session
-    discord_id = _member_session(request)
+    discord_id = await _member_session(request)
     me = None
     if discord_id:
         reg = getattr(request.app.state, "registrar", None)
