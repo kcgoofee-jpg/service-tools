@@ -1561,3 +1561,13 @@ def test_release_image_by_entry_keeps_the_running_one():
     b = g.entries[-1]["id"]
     g.release_image(1, b)                       # 排队的 B 被取消
     assert [(e["id"], e["running"]) for e in g.entries] == [(a, True)]
+
+
+def test_injected_browser_scripts_are_not_bugs():
+    # 荣耀自带浏览器注入的脚本报错（堆栈全是 <anonymous>）不进 Bug 追踪；本站自己的报错照常上报
+    honor = "TypeError: Cannot read properties of undefined (reading 'trim')\n    at is_mark_able_element (<anonymous>:1:19339)\n    at hit_test (<anonymous>:1:13070)"
+    assert main._injected_script_error("Uncaught TypeError", honor)
+    assert main._injected_script_error("Script error.", "")
+    ours = "TypeError: x is undefined\n    at renderMe (https://gate.davidzhao.top/:812:9)"
+    assert not main._injected_script_error("Uncaught TypeError", ours, "gate.davidzhao.top")
+    assert not main._injected_script_error("Uncaught TypeError", "")       # 没堆栈：保留，宁可多看一条

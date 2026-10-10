@@ -173,7 +173,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "2.15.3"
+__version__ = "2.15.4"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -1838,6 +1838,18 @@ async def public_live(request: Request):
 _CLIENT_ERR: dict = {"window": 0.0, "total": 0, "ip": {}}
 
 
+def _injected_script_error(msg: str, stack: str, host: str = "") -> bool:
+    """手机自带浏览器（荣耀 / 华为 / 小米等）、翻译和广告插件往页面注入的脚本出的错：我们修不了，不进 Bug 追踪。
+    特征：堆栈里有调用帧，但没有一帧来自本站文件（全是 <anonymous> / 扩展协议）；或者是没有来源的「Script error.」。"""
+    if msg.strip() == "Script error.":
+        return True
+    frames = [ln.strip() for ln in stack.splitlines() if ln.strip().startswith("at ") or "@" in ln]
+    if not frames:
+        return False
+    ours = tuple(x for x in ("/static/", "/admin", host, "127.0.0.1", "localhost") if x)
+    return not any(any(o in f for o in ours) for f in frames)
+
+
 @app.post("/public/client-error")
 async def client_error(request: Request):
     """首页 / 后台网页的脚本报错上报（只收本站页面的错误；每 IP 每 10 分钟 10 条，全站每 10 分钟 100 条）。"""
@@ -1867,6 +1879,8 @@ async def client_error(request: Request):
     msg = request_timing.client_name(str(data.get("msg") or ""))[:200] or "unknown"
     where = request_timing.client_name(f"{data.get('src') or ''}:{data.get('line') or ''}")
     stack = str(data.get("stack") or "")[:1500]
+    if _injected_script_error(msg, stack, (request.headers.get("host") or "").lower()):
+        return Response(status_code=204)
     ua = request_timing.client_name(request.headers.get("user-agent", ""))
     bug(f"web:{page}", title=msg, detail=f"{where}\n{ua}\n{stack}", path=page, level="warn")
     return Response(status_code=204)
