@@ -698,6 +698,13 @@ async def gift_member(request: Request):
     if days:
         out["coupon"] = await st.db.add_coupon(g["key_id"], "reset", float(days), reason, "奶妹")
     if g["new"]:
+        # 奖励的 Key 不占别人的名额：名额上限跟着加 1，否则「已领人数 ≤ 名额」的交叉校验会报警（10/10 实际触发）
+        cfg = await reg.settings()
+        active = await reg.count_active()
+        if cfg.get("max_users") and active > cfg["max_users"]:
+            await ops.set_registration(st.db, {"max_users": active}, st, reg)
+            out["max_users"] = active
+    if g["new"]:
         extra = (f"\n\n🎁 这把 Key 是奶妹送你的（{reason}）" if reason else "") + \
                 ("，还附带一张重置券，用 Key 登录首页就能看到、7 天内有效～" if days else "")
         out["dm_sent"] = await reg.send_dm(user["id"], g["message"] + extra)
