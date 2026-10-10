@@ -829,7 +829,7 @@ function renderMe(d){
           + '<a class="btn exp" href="/public/my-export?format=zip">' + icon('image') + '<span>原图 ZIP<small>PNG 原图 + prompts.txt，适合存档或二次编辑</small></span></a></div>'
         : '<p class="muted sm">最近 ' + retDays + ' 天还没有可备份的原图。出图后会出现在这里。</p>');
     me.innerHTML = '<div class="me-grid"><div><span>今日 V4.5（张）</span><b>' + v45 + ' / ' + lim45 + '</b></div>'
-      + '<div><span>今日 V5（张）</span><b>' + (t.v5 || 0) + ' / ' + lim5 + '</b></div>'
+      + '<div><span>今日 V5（张）</span><b' + (lim5 === '不限' ? ' title="个人不限额度，仍受全站日上限约束"' : '') + '>' + (t.v5 || 0) + ' / ' + lim5 + '</b></div>'
       + '<div><span>出图状态</span><b>' + pos + '</b></div>'
       + '<div><span>有效期</span><b>' + (d.expires_at ? '至 ' + fmtDate(d.expires_at) : '长期') + '</b></div></div>'
       + couponsHtml(d.coupons || [])
@@ -981,7 +981,7 @@ function fmtDate(sec){
     if(tone !== 'bad' && tone !== 'warn' && hcap && hour >= hcap * 0.85) sub += '；本小时已出 ' + hour + ' / ' + hcap + ' 张，快到上限';
     var vd = $id('verdict'); vd.dataset.tone = tone;
     $id('vText').textContent = txt; $id('vSub').textContent = sub;
-    $id('kMem').textContent = m.max ? (m.active || 0) : '—';
+    $id('kMem').textContent = m.active != null ? m.active : '—';
     $id('kMemC').textContent = m.max ? '/ ' + m.max + (m.active >= m.max ? ' 已满' : '') : '';
     $id('kDay').textContent = q.images_today || 0;
     $id('kHour').textContent = hour; $id('kHour').classList.toggle('hot', !!(hcap && hour >= hcap * 0.85));
