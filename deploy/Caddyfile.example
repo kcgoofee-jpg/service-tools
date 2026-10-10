@@ -4,10 +4,9 @@
 #     -v $PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro -v caddy_data:/data -v caddy_config:/config caddy:2
 gate.example.com {
 	# 机器人与网关之间的桥接接口只在容器内网使用，不对公网开放。
-	# 用通配 + 白名单：以后新增的桥接路由默认也不会暴露；公网只放行 OAuth 回调。
+	# 用通配：以后新增的桥接路由默认也不会暴露（旧的 OAuth 领取回调已删除，不再需要放行）。
 	@bridge {
 		path /self-register /self-register/*
-		not path /self-register/callback
 	}
 	respond @bridge 404
 	respond /openapi.json 404

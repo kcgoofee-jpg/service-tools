@@ -4,7 +4,6 @@ import json
 import tempfile
 import time
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
 
 import httpx
 import pytest
@@ -271,17 +270,13 @@ ROLE_GUILD = "1480185480048808009"
 
 class _Discord:
     def __init__(self):
-        self.calls, self.delay_token, self.role_delay, self.role_status = [], 0.0, 0.0, 204
+        self.calls, self.member_delay, self.role_delay, self.role_status = [], 0.0, 0.0, 204
 
     async def handler(self, request):
         p = request.url.path
         self.calls.append((request.method, p))
-        if p == "/api/oauth2/token":
-            await asyncio.sleep(self.delay_token)
-            return httpx.Response(200, json={"access_token": "t"})
-        if p == "/api/users/@me":
-            return httpx.Response(200, json={"id": "777", "username": "u"})
-        if p.endswith("/member"):
+        if request.method == "GET" and "/members/" in p and "/roles/" not in p:     # 机器人核验身份组门槛
+            await asyncio.sleep(self.member_delay)
             return httpx.Response(200, json={"roles": ["1335363403870502912"]})
         if p == "/api/users/@me/channels":
             return httpx.Response(200, json={"id": "dm"})
@@ -300,31 +295,44 @@ async def _service(tmp, **kw):
     discord = _Discord()
     http = httpx.AsyncClient(transport=httpx.MockTransport(discord.handler))
     svc = RegistrationService(db, http, client_id="c", client_secret="s", bot_token="b",
-                              bridge_secret="x" * 40, redirect_uri="https://site/self-register/callback", **kw)
+                              bridge_secret="x" * 40, **kw)
     return db, http, svc, discord
 
 
-async def _state(svc, uid="777"):
-    return parse_qs(urlparse(await svc.begin(uid, ROLE_GUILD)).query)["state"][0]
+async def _issue(svc, uid="777"):
+    return await svc.issue_direct(uid, ROLE_GUILD)
 
 
 @pytest.mark.asyncio
 async def test_ban_during_inflight_registration_wins():
     with tempfile.TemporaryDirectory() as tmp:
         db, http, svc, discord = await _service(tmp)
-        st = await _state(svc)
-        discord.delay_token = 0.3
-        fin = asyncio.create_task(svc.finish("code", st))
+        discord.member_delay = 0.3                       # 身份组核验（网络等待）期间封禁
+        issue = asyncio.create_task(_issue(svc))
         await asyncio.sleep(0.1)
         await svc.ban("777")
         try:
-            await fin
+            await issue
         except Exception:
             pass
         assert await svc.is_banned("777")
         rows = await db._db.execute_fetchall(
             "SELECT 1 FROM discord_registrations WHERE discord_id='777'")
         assert not rows
+        assert (await db._db.execute_fetchall("SELECT count(*) FROM api_keys"))[0][0] == 0
+        await http.aclose()
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_register_for_same_user_mints_one_key():
+    with tempfile.TemporaryDirectory() as tmp:
+        db, http, svc, discord = await _service(tmp)
+        discord.member_delay = 0.2
+        results = await asyncio.gather(_issue(svc), _issue(svc), return_exceptions=True)
+        assert sum(isinstance(r, dict) and r["key"].startswith("nai-") for r in results) == 1
+        assert sum(isinstance(r, Exception) and "已经领取过" in str(r) for r in results) == 1
+        assert (await db._db.execute_fetchall("SELECT count(*) FROM api_keys"))[0][0] == 1
         await http.aclose()
         await db.close()
 
@@ -333,11 +341,11 @@ async def test_ban_during_inflight_registration_wins():
 async def test_reregistration_clears_stale_role_removal():
     with tempfile.TemporaryDirectory() as tmp:
         db, http, svc, discord = await _service(tmp, member_role_id="999")
-        assert await svc.finish("code", await _state(svc)) == "sent"
+        assert (await _issue(svc))["key"].startswith("nai-")
         discord.role_status = 429
         await svc.revoke("777")
         discord.role_status = 204
-        assert await svc.finish("code", await _state(svc)) == "sent"
+        assert (await _issue(svc))["key"].startswith("nai-")
         discord.calls.clear()
         await svc.sync_roles()
         assert ("DELETE", f"/api/v10/guilds/{ROLE_GUILD}/members/777/roles/999") not in discord.calls
@@ -368,7 +376,7 @@ async def test_paused_members_keep_their_slot():
     with tempfile.TemporaryDirectory() as tmp:
         db, http, svc, discord = await _service(tmp)
         await db.set_setting("register_max_users", "1")
-        assert await svc.finish("code", await _state(svc)) == "sent"
+        assert (await _issue(svc))["key"].startswith("nai-")
         key = await svc.key_row_for("777")
         await db.update_key(key["id"], {"enabled": False})
         assert await svc.count_active() == 1

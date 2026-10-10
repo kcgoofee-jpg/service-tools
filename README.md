@@ -11,7 +11,7 @@
 - **虚拟 Key**：每个成员一把，可单独设置每日图片 / V5 / Anlas 额度、请求频率、有效期、可用模型（仅 V4.5 及以下，或含 V5）和**功能权限**。
 - **功能开关**：文生图、放大、导演工具、Vibe 编码、标签补全、文本 / OpenAI 兼容聊天、语音合成，既能全局开关，也能按 Key 授权；新自助注册的成员默认只开通文生图。
 - **安全的免费档**：未开通 Anlas 的 Key 会被自动限制在免费规格内（单张、默认 ≤28 步、≤1024×1024、关闭 SMEA），不会消耗付费点数。
-- **Discord 自助领取**：成员在服务器里输入 `/register`，授权后 Key 私信发给本人；名额先到先得，Key 到期自动释放名额，可再次领取。
+- **Discord 自助领取**：成员在服务器里输入 `/register`，Key 直接在只有本人可见的回复里发放（不走 OAuth、不私信）；名额先到先得，Key 到期自动释放名额，可再次领取。
 - **后台**（`/admin`）：总览、成员用量、生成记录、密钥管理、用量日志、功能与开放、设置，亮暗双主题，手机可用。
 - **成员落地页**（`/`）：实时上游状态、注册名额、三步接入教程、输入 Key 查额度（Key 只在浏览器里使用，不保存）。
 - **告警**：上游 Token 失效 / 限流 / 故障、V5 额度低、磁盘快满、有人刷无效 Key，通过 Discord 私信、频道或 Webhook 通知站长，同类事件有冷却不刷屏。
@@ -59,7 +59,7 @@ curl http://127.0.0.1:3003/healthz        # {"ok":true,"upstream":true}
 ## Discord 自助领取（可选）
 
 1. 在 [Discord 开发者后台](https://discord.com/developers/applications) 新建应用：
-   - **OAuth2 → Redirects** 添加 `https://你的域名/self-register/callback`；
+   - （可选，网页「用 Discord 登录」）**OAuth2 → Redirects** 添加 `https://你的域名/login/callback`；
    - **Bot** 页：复制 Token，**关闭 Public Bot**，三个 Privileged Intent 全部**关闭**（本机器人只用斜杠命令，不需要）。
 2. 邀请机器人进服务器（scope：`bot`、`applications.commands`）。机器人**日常只需要**：查看频道、发送消息、嵌入链接、阅读消息历史；若启用“领到 Key 自动挂身份组”，再加**管理身份组**，并把机器人的角色排在 King 之下、目标身份组之上。
 3. 在 `.env` 里配置（完整说明见 [.env.example](.env.example)）：
@@ -78,7 +78,7 @@ curl http://127.0.0.1:3003/healthz        # {"ok":true,"upstream":true}
 
 | 命令 | 谁能用 | 作用 |
 | --- | --- | --- |
-| `/register` | 所有人 | 领取 Key（授权后私信发送） |
+| `/register` | 所有人 | 领取 Key（只有本人可见的回复） |
 | `/quota` | 已领取者 | 今日额度、模型范围、已开通功能、剩余有效期，以及上游服务状态 / 限流冷却 |
 | `/resetkey` | 已领取者 | 重置 Key，旧 Key 立即失效 |
 | `/help` | 所有人 | 简短使用说明（含记录声明）；完整教程在领取 Key 的私信和网站首页 |

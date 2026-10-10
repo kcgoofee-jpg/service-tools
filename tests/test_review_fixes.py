@@ -33,7 +33,7 @@ async def db():
 def bridge_app(db, admin_ids=("42",)):
     failures = []
     service = RegistrationService(db, None, client_id="c", client_secret="s", bot_token="b",
-                                  bridge_secret="x" * 40, redirect_uri="https://x/cb", admin_ids=admin_ids)
+                                  bridge_secret="x" * 40, admin_ids=admin_ids)
     app = FastAPI()
     app.include_router(bridge_router)
     app.state.registrar = service
@@ -182,7 +182,7 @@ async def test_owner_can_change_admin_password_from_the_panel(tmp_path, db):
 async def test_deleting_a_discord_member_clears_registration_and_can_ban_and_members_show_profile(tmp_path, db):
     settings = Settings(admin_password="a-strong-password-123", secret_key="s", data_dir=tmp_path, admin_cookie_secure=False)
     service = RegistrationService(db, None, client_id="c", client_secret="s", bot_token="b",
-                                  bridge_secret="x" * 40, redirect_uri="https://x/cb")
+                                  bridge_secret="x" * 40)
 
     async def member(uid, name):
         k = await db.create_key(dict(name=name, token="t" + uid, daily_images=5, monthly_anlas=0, daily_text_tokens=0, rpm=5))

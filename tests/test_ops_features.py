@@ -171,7 +171,7 @@ async def test_registration_runtime_settings_override_env_defaults(db):
     from app import ops
     from app.registration import RegistrationService
     service = RegistrationService(db, None, client_id="c", client_secret="s", bot_token="b", bridge_secret="x",
-                                  redirect_uri="https://x/cb", key_daily_images=30, key_daily_v5=0, max_users=10)
+                                  key_daily_images=30, key_daily_v5=0, max_users=10)
     cfg = await ops.registration_settings(db, service)
     assert (cfg["open"], cfg["max_users"], cfg["daily_images"]) == (False, 10, 30)    # closed until the owner opens it
     await ops.set_registration(db, {"open": True})
@@ -180,7 +180,7 @@ async def test_registration_runtime_settings_override_env_defaults(db):
     cfg = await ops.registration_settings(db, service)
     assert (cfg["open"], cfg["max_users"], cfg["daily_v5"], cfg["features"]) == (False, 3, 15, ["image", "text"])
     with pytest.raises(Exception):
-        await service.begin("1", service.command_guild)                  # closed -> refuses
+        await service.issue_direct("1", service.command_guild)           # closed -> refuses
     with pytest.raises(ValueError):
         await ops.set_registration(db, {"max_users": 5000})
 
