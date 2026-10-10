@@ -1309,6 +1309,7 @@ async def members(request: Request):
             "first_image_at": milestones.get(row["id"], {}).get("first_image_at"),
             "last_image_at": milestones.get(row["id"], {}).get("last_image_at"),
             "rejected_24h": milestones.get(row["id"], {}).get("rejected_24h", 0),
+            "rejected_why": milestones.get(row["id"], {}).get("rejected_why", []),
             "sources_24h": len(sources.get(row["id"], [])),
             "share": share_map.get(row["id"]),
             "reset_today": reset_map.get(row["id"]),

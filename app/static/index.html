@@ -278,6 +278,53 @@ td .tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
 .search svg{position:absolute;left:12px;top:10px;color:var(--muted)}
 .search input{padding-left:38px}
 .member-grid{display:block}
+/* 成员页 v2：结论 → 要处理 → 今天 / 设置 / 资料 → 操作 */
+.fchip.hot:not(.active){border-color:color-mix(in srgb,var(--warn) 45%,transparent);color:var(--warn);background:var(--warn-soft)}
+.fsel{width:auto;min-height:28px;padding:3px 28px 3px 10px;font-size:12.5px;border-radius:999px;color:var(--text-2)}
+.fsel.active{border-color:var(--accent);color:var(--accent-text);background-color:var(--accent-soft)}
+.msub{font-size:12px;color:var(--muted);display:flex;gap:6px;align-items:center;min-height:18px}
+.mtable td.mtoday{width:250px}
+.mtable td.mstat{width:110px}
+.tb{display:grid;grid-template-columns:34px 90px auto;gap:8px;align-items:center;font-size:12px;line-height:1.7}
+.tb-l{color:var(--muted)}
+.tb-b{height:5px;border-radius:3px;background:var(--surface-3);overflow:hidden}
+.tb-b i{display:block;height:100%;background:var(--accent);border-radius:3px}
+.tb.v5 .tb-b i{background:var(--v5)}
+.mx2{display:flex;flex-direction:column;gap:16px;max-width:1100px}
+.mx-vt{margin:0;font-size:16px;font-weight:600;line-height:1.4}
+.mx-vs{margin:4px 0 0;font-size:13px;color:var(--text-2)}
+.mx-sec{border-top:1px solid var(--border);padding-top:14px}
+.mx-sec h4,.mx-cols h4{font-size:12px;font-weight:600;color:var(--muted);margin:0 0 10px;letter-spacing:.02em;display:flex;gap:6px;align-items:baseline}
+.h4-note{font-weight:500;color:var(--text-2)}
+.issues{display:flex;flex-direction:column;gap:8px}
+.issue{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:10px 12px;border-radius:var(--radius-sm);border:1px solid}
+.issue.warn{background:var(--warn-soft);border-color:color-mix(in srgb,var(--warn) 30%,transparent)}
+.issue.bad{background:var(--bad-soft);border-color:color-mix(in srgb,var(--bad) 30%,transparent)}
+.issue.info{background:var(--surface);border-color:var(--border)}
+.is-t{display:flex;flex-direction:column;min-width:0;flex:1 1 260px;font-size:13px}
+.issue.warn .is-t b{color:var(--warn)}.issue.bad .is-t b{color:var(--bad)}
+.is-t b{font-weight:600}.is-t span{color:var(--text-2);font-size:12.5px}
+.is-a{display:flex;gap:6px;flex-wrap:wrap}
+.mx-cols{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px 28px}
+@media (max-width:1000px){.mx-cols{grid-template-columns:1fr 1fr}}
+@media (max-width:640px){.mx-cols{grid-template-columns:1fr}}
+.meters{display:flex;flex-direction:column;gap:10px}
+.mt-l{display:flex;justify-content:space-between;font-size:12.5px;color:var(--text-2);margin-bottom:4px}
+.mt-l .num{color:var(--text);font-weight:600}
+.mt-b{height:6px;border-radius:3px;background:var(--surface-3);overflow:hidden}
+.mt-b i{display:block;height:100%;background:var(--accent);border-radius:3px}
+.meter.v5 .mt-b i{background:var(--v5)}.meter.an .mt-b i{background:var(--warn)}
+.mx-adj{margin-top:10px}.mx-adj>summary,.tag-new>summary{list-style:none;display:inline-flex}
+.mx-adj>summary::-webkit-details-marker,.tag-new>summary::-webkit-details-marker{display:none}
+.mx-adj-in{margin-top:10px;padding:12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);display:flex;flex-direction:column;gap:8px;align-items:flex-start}
+.mx-adj-in .mx-perm{width:100%;margin:0}
+.keyline{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+.tag-new{display:inline-block}.tag-new[open]{display:block;width:100%}
+.mx-foot{display:flex;gap:8px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--border);padding-top:14px}
+.mx-foot .sp{flex:1}
+.danger-text{color:var(--bad)}
+.mx-more .menu-pop{right:0;left:auto;bottom:calc(100% + 6px);top:auto}
+.mx-more .chev,.mx-more summary .ic{transform:rotate(90deg);width:14px;height:14px}
 .mtable td{vertical-align:middle;padding-top:10px;padding-bottom:10px}
 .mtable tr.dim>td:not(.mact){opacity:.55}
 .mtable td,.mtable th{padding-left:12px;padding-right:12px}
@@ -775,7 +822,6 @@ td.note{min-width:220px}
             <div class="search"><span data-ic="search"></span><input id="memberSearch" type="search" placeholder="搜索名称或 Discord ID" aria-label="搜索成员"></div>
             <div class="chips-filter" id="memberFilter" role="group" aria-label="筛选成员"></div>
           </div>
-          <div class="hint" style="margin:-6px 0 12px">今日进度条：主色 = V4.5，青色 = V5</div>
           <div class="member-grid" id="memberGrid"></div>
         </section>
 
@@ -1067,6 +1113,7 @@ const ICONS = {
   zoom:'<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5M11 8v6M8 11h6"/>',
   copy:'<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 012-2h9"/>',
   check:'<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  edit:'<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
   alert:'<path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18h0"/>',
   info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h0"/>',
   chev:'<path d="M9 6l6 6-6 6"/>',
@@ -1762,22 +1809,6 @@ const isManual = m => !m.is_admin && !m.is_test && !m.discord && !m.discord_id;
 /* 标签：手动（站长 / 运维打的，带备注）+ 自动（近 24 小时因成员自己能改的原因被拒）；都只在后台显示 */
 const tagNames = m => [...(m.tags||[]).map(t => t.tag), ...(m.auto_tags||[]).map(t => t.tag)];
 const hasTags = m => tagNames(m).length > 0;
-function memberFilters(now){
-  const idleDays = memberMeta.inactivity_days || 3, nets = memberMeta.share_alert_nets || 3;
-  return [
-    ['all', '全部', () => true],
-    ['new', '新加入', m => m.registered_at && now - m.registered_at < D],
-    ['today', '今日活跃', m => m.today.requests > 0],
-    ['never', '未出图', m => !m.first_image_at && !m.is_admin],
-    ['reclaim', '快回收', m => !m.is_admin && m.enabled && now - activityAt(m) > (idleDays - 1) * D],
-    ['rejected', '被拒', m => m.rejected_24h > 0],
-    ['shared', '疑似分享', m => shareHot(m)],
-    ['disabled', '已停用', m => !m.enabled],
-    ['manual', '手动', isManual],
-    ['tagged', '已标记', hasTags],
-    ['staff', '站长 / 测试', m => m.is_test || m.is_admin],
-  ];
-}
 function ago(sec){ return sec < H ? Math.max(1, Math.round(sec/60)) + ' 分钟' : sec < D ? Math.round(sec/H) + ' 小时' : Math.round(sec/D) + ' 天'; }
 /* 快捷权限：额度方式、Anlas 方式。改动立即生效，并由机器人私信成员 */
 const ANLAS_PRESETS = [30, 90, 150];
@@ -1843,6 +1874,12 @@ async function addMemberTag(id){
   try{ await api(`/admin/api/keys/${id}/tags`, {method:'PUT', body: JSON.stringify({tag, note})}); toast('已标记：' + tag, 'ok'); membersCache = null; await loadMembers(); }
   catch(e){ toastErr(e); }
 }
+async function markMemberOk(id){
+  const m = (membersCache||[]).find(x => x.k && x.k.id === id) || findMember(id);
+  const note = m ? memberIssues(m, Date.now()/1000).filter(x => x.need).map(x => x.t).join('；') : '';
+  try{ await api(`/admin/api/keys/${id}/tags`, {method:'PUT', body: JSON.stringify({tag: ACK_TAG, note: '看过：' + note})}); toast('好，24 小时内不再提醒', 'ok'); membersCache = null; await loadMembers(); }
+  catch(e){ toastErr(e); }
+}
 async function delMemberTag(id, tag){
   try{ await api(`/admin/api/keys/${id}/tags/${encodeURIComponent(tag)}`, {method:'DELETE'}); toast('已移除：' + tag, 'ok'); membersCache = null; await loadMembers(); }
   catch(e){ toastErr(e); }
@@ -1851,141 +1888,189 @@ async function clearShare(id){
   try{ await api(`/admin/api/keys/${id}/share-clear`, {method:'POST'}); toast('已清除风险分并解除暂停', 'ok'); loadMembers(); }
   catch(e){ toastErr(e); }
 }
+/* 成员页的流程：先看「需要处理」→ 展开看一句话结论 → 要处理的事（带证据和按钮）→ 今天 / 设置 / 资料 → 日常操作；危险操作收在「更多」里 */
+const ACK_TAG = '已查看';          // 「没问题」：24 小时内不再进「需要处理」（各种信号都是按 24 小时算的）
+const acked = (m, now) => (m.tags||[]).some(t => t.tag === ACK_TAG && now - (t.ts||0) < D);
+const userTags = m => (m.tags||[]).filter(t => t.tag !== ACK_TAG);
+function memberIssues(m, now){
+  const out = [], k = m.k, nets = memberMeta.share_alert_nets || 3, id = k ? k.id : m.id;
+  const btn = (act, label, extra='') => `<button class="btn mini" type="button" data-act="${act}" data-id="${id}"${extra}>${label}</button>`;
+  const okBtn = btn('mark-ok', '没问题');
+  if(m.share && m.share.paused_until > now)
+    out.push({lv:'bad', t:'防分享暂停中', d:`到 ${shortTime(m.share.paused_until)} 自动恢复 · 违规 ${m.share.strikes} 次`, a: btn('share-view','查看证据') + btn('share-clear','误判，解除')});
+  else if(shareHot(m))
+    out.push({lv:'bad', t:`疑似分享 Key · 风险 ${Math.round(m.share.score)}`, d:`违规 ${m.share.strikes} 次。先看来源，确认是一个人换网络就点误判`, a: btn('share-view','查看证据') + btn('share-clear','误判，清除')});
+  else if(k && !m.is_admin && (k.sources_24h||[]).length >= nets){
+    // 只看网段数误伤多（手机流量、代理切换）：≥ 阈值 + 2 才进「需要处理」，否则只在详情里提一句
+    const many = k.sources_24h.length >= nets + 2;
+    out.push({lv: many ? 'warn' : 'info', t:`24 小时内从 ${k.sources_24h.length} 个网段使用`, d:'手机加电脑通常是 2 个；更多可能是分享，也可能只是开了代理或用手机流量', a: btn('share-view','查看来源') + (many ? okBtn : ''), need: many});
+  }
+  if(m.expires_at && m.expires_at < now) out.push({lv:'bad', t:'Key 已过期', d:'成员现在用不了', a: btn('edit-key','改到期时间')});
+  else if(m.expires_at && m.expires_at - now < 3*D) out.push({lv:'warn', t:`${Math.max(1, Math.ceil((m.expires_at-now)/D))} 天后到期`, d:shortTime(m.expires_at), a: btn('edit-key','改到期时间') + okBtn, need:true});
+  // 自动标签是成员客户端设置的问题（开着 Vibe、传了底图……），本人改设置就好；被拒很多次（像死循环）或疑似同一人才要站长看
+  (m.auto_tags||[]).forEach(t => { const loud = !!t.note || t.count >= 20;
+    out.push({lv: loud ? 'warn' : 'info', t: t.tag, d: t.note || `近 24 小时因此被拒 ${t.count} 次。是客户端设置的问题，本人改了就好${loud ? '；次数多，可能是客户端在自动重试' : ''}`, a: loud ? okBtn : '', need: loud}); });
+  userTags(m).filter(t => /疑似|待查|观察/.test(t.tag)).forEach(t => out.push({lv:'warn', t:'站长标记：' + t.tag, d: (t.note || '') + (t.ts ? ` · ${rel(t.ts)}` : ''), a: `<button class="btn mini" type="button" data-act="tag-del" data-id="${id}" data-tag="${esc(t.tag)}">查完了，移除标记</button>`, need:true}));
+  if(m.reset_today && m.reset_today.count >= 2) out.push({lv:'warn', t:`今天被手动重置额度 ${m.reset_today.count} 次`, d:'操作日志里能看到是谁重置的', a: okBtn, need:true});
+  return out;
+}
+const needsAttention = (m, now) => m.enabled && !m.is_admin && memberIssues(m, now).some(x => x.lv === 'bad' || (x.need && !acked(m, now)));
+function memberFilters(now){
+  const idleDays = memberMeta.inactivity_days || 3;
+  return {
+    main: [
+      ['attention', '需要处理', m => needsAttention(m, now)],
+      ['today', '今日活跃', m => m.today.requests > 0],
+      ['never', '还没出过图', m => !m.first_image_at && !m.is_admin],
+      ['disabled', '已停用', m => !m.enabled],
+      ['all', '全部', () => true],
+    ],
+    more: [
+      ['new', '24 小时内新加入', m => m.registered_at && now - m.registered_at < D],
+      ['reclaim', '快被回收（不活跃）', m => !m.is_admin && m.enabled && now - activityAt(m) > (idleDays - 1) * D],
+      ['rejected', '24 小时被拒过', m => m.rejected_24h > 0],
+      ['shared', '疑似分享', m => shareHot(m)],
+      ['manual', '后台手动建的 Key', isManual],
+      ['tagged', '有标签', m => userTags(m).length + (m.auto_tags||[]).length > 0],
+      ['staff', '站长 / 测试', m => m.is_test || m.is_admin],
+    ],
+  };
+}
+function memberVerdict(m, now){
+  const issues = memberIssues(m, now), cap = m.daily_images, used = m.today.images;
+  let t;
+  if(!m.enabled) t = '已停用，Key 现在不能用';
+  else if(issues.some(x => x.lv === 'bad')) t = issues.find(x => x.lv === 'bad').t;
+  else if(issues.some(x => x.need) && !acked(m, now)) t = `有 ${issues.filter(x => x.need).length} 件事要看一眼`;
+  else if(!m.first_image_at && !m.is_admin) t = `领了 Key ${m.registered_at ? ago(now - m.registered_at) : ''}，还没出过图`;
+  else if(cap > 0 && used >= cap) t = `今天的额度用完了（${used} 张）`;
+  else if(used > 0) t = `正常使用，今天出了 ${used} 张`;
+  else t = `今天还没用${m.last_used_at ? '，上次是 ' + rel(m.last_used_at) : ''}`;
+  const why = (m.rejected_why||[]).map(([r, n]) => `${r} ${n}`).join('、');
+  const sub = [
+    m.rejected_24h ? `24 小时被拒 ${m.rejected_24h} 次${why ? '：' + why : ''}` : '',
+    m.reset_today && m.reset_today.count ? `站长今天重置过 ${m.reset_today.count} 次额度` : '',
+    acked(m, now) ? `${rel((m.tags.find(t => t.tag === ACK_TAG)||{}).ts)}点过「没问题」` : '',
+  ].filter(Boolean).join(' · ');
+  return {t, sub};
+}
+/* 列表里每行只放一个最重要的状态 */
+function memberStatus(m, now){
+  const f = (cls, text, title='') => `<span class="mf ${cls}"${title?` title="${esc(title)}"`:''}>${esc(text)}</span>`;
+  if(!m.enabled) return f('bad', '已停用');
+  if(m.share && m.share.paused_until > now) return f('bad', '防分享暂停');
+  if(shareHot(m)) return f('bad', '疑似分享');
+  if(m.expires_at && m.expires_at < now) return f('bad', '已过期');
+  if(needsAttention(m, now)) return f('warn', '要处理', memberIssues(m, now).map(x => x.t).join('、'));
+  if(m.is_admin) return f('', '站长');
+  if(m.is_test) return f('', '测试');
+  if(m.daily_images > 0 && m.today.images >= m.daily_images) return f('', '额度用完');
+  if(m.registered_at && now - m.registered_at < D) return f('info', '新加入');
+  if(!m.first_image_at) return f('', '还没出过图');
+  return '';
+}
+function meter(label, used, cap, cls=''){
+  const pct = cap > 0 ? Math.min(100, used / cap * 100) : 0;
+  return `<div class="meter ${cls}"><div class="mt-l"><span>${label}</span><span class="num">${fmt(used)}${cap > 0 ? ' / ' + fmt(cap) : ''}</span></div>${cap > 0 ? `<div class="mt-b"><i style="width:${pct}%"></i></div>` : ''}</div>`;
+}
 function memberPanel(m, now){
-  const k = m.k, dc = m.discord || null;
+  const k = m.k, dc = m.discord || null, v = memberVerdict(m, now), issues = memberIssues(m, now);
   const prof = dc ? safeUrl(dc.profile_url, DC_SITE) : '';
   const dcId = dc ? String(dc.id) : (m.discord_id ? String(m.discord_id) : '');
-  const inf = n => n > 0 ? n : '∞';
-  let keyGrp, quotaGrp;
-  if(!k){
-    keyGrp = '<div class="muted sm">Key 信息读取失败，点右上角刷新重试</div>';
-    quotaGrp = '';
-  }else{
-    const exp = k.expires_at ? new Date(k.expires_at*1000).toLocaleDateString('zh-CN') : '永久';
-    const expTag = k.expires_at && k.expires_at < now ? ' <span class="mf bad">已过期</span>' : k.expires_at && k.expires_at - now < 3*D ? ' <span class="mf warn">快到期</span>' : '';
-    keyGrp = `<div class="keyline" data-kid="${k.id}"><span class="mono" data-tok="${esc(k.token)}">${esc(mask(k.token))}</span>
-        <button class="btn mini" type="button" data-act="copy-key">${ic('copy')}复制</button>
-        <button class="btn mini danger" type="button" data-act="regen-key" data-id="${k.id}">重新生成</button></div>
-      <dl class="kv"><dt>到期</dt><dd>${esc(exp)}${expTag}</dd>
-        <dt>24 小时来源</dt><dd>${srcBadge(k, memberMeta.share_alert_nets)}</dd>
-        <dt>防分享</dt><dd>${m.share ? `风险 ${Math.round(m.share.score)} · 违规 ${m.share.strikes} 次${m.share.paused_until > now ? ' · <span class="mf bad">暂停中</span>' : ''}` : '无记录'}
-          <button class="btn mini" type="button" data-act="share-view" data-id="${k.id}">查看来源</button>
-          ${m.share ? `<button class="btn mini" type="button" data-act="share-clear" data-id="${k.id}">清除风险分（误判）</button>` : ''}</dd>
-        <dt>${m.discord_id ? '领取' : '创建'}</dt><dd title="${esc(fullTime(m.registered_at))}">${m.registered_at ? esc(rel(m.registered_at)) : '—'}</dd>
-        <dt>最近使用</dt><dd>${k.last_used_at ? esc(fullTime(k.last_used_at)) : '从未使用'}</dd>
-        <dt>标记</dt><dd><div class="tag-row">${(m.tags||[]).map(t => `<span class="mf tag" title="${esc((t.note ? t.note + ' · ' : '') + (t.by||'') + ' · ' + fullTime(t.ts))}">${esc(t.tag)}<button type="button" data-act="tag-del" data-id="${k.id}" data-tag="${esc(t.tag)}" aria-label="移除标签 ${esc(t.tag)}">×</button></span>`).join('')}${(m.auto_tags||[]).map(t => t.note ? `<span class="mf warn" title="${esc(t.note)}">${esc(t.tag)}</span><span class="muted sm">${esc(t.note)}</span>` : `<span class="mf warn" title="近 24 小时因此被拒 ${t.count} 次（自动标记，原因消失后自动去掉）">${esc(t.tag)} ×${t.count}</span>`).join('')}${hasTags(m) ? '' : '<span class="muted sm">无</span>'}</div>
-          <div class="tag-add"><input id="tagIn${k.id}" maxlength="12" placeholder="标签（如：站长熟人）" aria-label="新标签"><input id="tagNote${k.id}" maxlength="200" placeholder="备注（可选，只有后台能看到）" aria-label="标签备注"><button class="btn mini" type="button" data-act="tag-add" data-id="${k.id}">添加</button></div></dd></dl>`;
-    const u = k.used;
-    const quota = k.is_admin
-      ? `<dt>配额</dt><dd>单 Key 不限 · 仍受全站保护 · RPM ${k.rpm}</dd>`
-      : `<dt>图片</dt><dd>免费 ${inf(k.daily_images)}/日${k.image_model_scope==='all' ? ` · V5 ${inf(k.daily_v5)}/日` : ' · 仅 V4.5↓'}</dd>
-         <dt>Anlas</dt><dd>${k.allow_anlas ? `${inf(k.daily_anlas)}/日 · ${inf(k.monthly_anlas)}/月` : '未开'}</dd>
-         <dt>文本</dt><dd>${fmt(k.daily_text_tokens)}/日 · RPM ${k.rpm}</dd>`;
-    const extra = [k.allow_img2img ? 'img2img' : '', k.exclude_global_v5 ? '独立 V5' : ''].filter(Boolean).join(' · ');
-    quotaGrp = `${m.is_admin ? '' : `<div class="mx-perm">${permControls(m)}</div>`}
-      <dl class="kv"><dt>今日用量</dt><dd>免费 ${u.legacy_free_images||0} · V5 ${u.v5||0} · Anlas ${u.anlas} · 文本 ${fmt(u.text_tokens)}</dd>
-        ${m.reset_today ? `<dt>今日重置</dt><dd><span class="mf ${m.reset_today.count>=2?'warn':'info'}">站长重置 ×${m.reset_today.count}</span> 最近 ${esc(new Date(m.reset_today.last_ts*1000).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}))}<span class="muted sm"> · 操作日志可查</span></dd>` : ''}
-        ${quota}
+  const inf = n => n > 0 ? n : '不限';
+  const head = `<div class="mx-v"><p class="mx-vt">${esc(v.t)}</p>${v.sub ? `<p class="mx-vs">${esc(v.sub)}</p>` : ''}</div>`;
+  const todo = issues.length ? `<div class="mx-sec"><h4>${issues.some(x => x.lv !== 'info') ? '要处理' : '注意到'}</h4><div class="issues">${issues.map(x => `<div class="issue ${x.lv}"><div class="is-t"><b>${esc(x.t)}</b><span>${esc(x.d)}</span></div><div class="is-a">${x.a}</div></div>`).join('')}</div></div>` : '';
+  if(!k) return `<tr class="mx" data-mx="${m.id}"><td colspan="5">${head}<p class="muted sm">Key 信息读取失败，点右上角刷新重试</p></td></tr>`;
+  const u = k.used, exp = k.expires_at ? new Date(k.expires_at*1000).toLocaleDateString('zh-CN') : '永久';
+  const today = `<div><h4>今天</h4><div class="meters">
+      ${m.is_admin ? `<p class="muted sm">站长 Key 不限额度，仍受全站保护</p>` : meter('V4.5', Math.max(0, m.today.images - (m.today.v5||0)), k.daily_images) + (k.image_model_scope === 'all' ? meter('V5', u.v5||0, k.daily_v5, 'v5') : '')}
+      ${k.allow_anlas ? meter('Anlas', Math.round(u.anlas||0), Math.round(k.daily_anlas||0), 'an') : ''}
+      ${u.text_tokens ? meter('文本 tokens', u.text_tokens, k.daily_text_tokens) : ''}</div>
+      <p class="muted sm" style="margin:8px 0 0">近 7 天 ${m.week.images} 张 · 累计 ${m.total_images} 张</p></div>`;
+  const mode = m.is_admin ? '' : (m.quota_auto ? '算法自动' : '手动');
+  const anl = !k.allow_anlas ? '关闭' : m.anlas_auto ? `算法分配 · 今日 ${Math.round(k.daily_anlas||0)}` : `手动 · ${inf(Math.round(k.daily_anlas||0))}/天`;
+  const settings = `<div><h4>额度与权限${mode ? ` <span class="h4-note">${mode}</span>` : ''}</h4>
+      <dl class="kv">${m.is_admin ? '' : `<dt>每天</dt><dd>V4.5 ${inf(k.daily_images)}${k.image_model_scope==='all' ? ` · V5 ${inf(k.daily_v5)}` : ' · 不能用 V5'}</dd>`}
+        <dt>Anlas</dt><dd>${esc(anl)}</dd>
         <dt>功能</dt><dd><div class="chips">${featChips(k.features)}</div></dd>
-        ${extra ? `<dt>其他</dt><dd>${esc(extra)}</dd>` : ''}</dl>
-      <div style="margin-top:10px"><button class="btn mini" type="button" data-act="edit-key" data-id="${k.id}">编辑 Key…</button></div>`;
-  }
-  return `<tr class="mx" data-mx="${m.id}"><td colspan="5"><div class="mx-grid">
-    <div class="mx-g"><h4>Key</h4>${keyGrp}</div>
-    <div class="mx-g"><h4>额度与权限</h4>${quotaGrp}</div>
-    ${k ? `<div class="mx-g mx-wide share-ev" id="sev-${k.id}"></div>` : ''}
-    <div class="mx-g ops"><h4>操作</h4><div class="mx-acts">
-      ${k ? `<button class="btn mini" type="button" data-act="reset-quota" data-id="${m.id}">重置今日额度</button>` : ''}
-      <button class="btn mini" type="button" data-act="member-toggle" data-id="${m.id}" data-on="${m.enabled?0:1}">${m.enabled?'停用':'启用'}</button>
-      <button class="btn mini" type="button" data-act="view-audit" data-id="${m.id}">生成记录</button>
-      ${prof?`<a class="btn mini" href="${esc(prof)}" target="_blank" rel="noopener noreferrer">在 Discord 打开</a>`:''}
-      ${dcId?`<button class="btn mini" type="button" data-act="copy-dc" data-dcid="${esc(dcId)}">复制 Discord ID</button>`:''}</div>
-      ${m.is_admin ? '' : `<div class="mx-acts danger-row">
-        <button class="btn mini danger" type="button" data-act="member-del" data-id="${m.id}">${dcId?'删除（可重新领取）':'删除'}</button>
-        ${dcId?`<button class="btn mini danger" type="button" data-act="member-ban" data-id="${m.id}">删除并禁领</button>`:''}</div>`}
-    </div></div></td></tr>`;
+        <dt>到期</dt><dd>${esc(exp)}</dd>
+        ${k.allow_img2img || k.exclude_global_v5 ? `<dt>其他</dt><dd>${[k.allow_img2img ? '可以图生图' : '', k.exclude_global_v5 ? 'V5 不占全站额度' : ''].filter(Boolean).join(' · ')}</dd>` : ''}</dl>
+      <details class="mx-adj"><summary class="btn mini">${ic('edit')}调整</summary><div class="mx-adj-in">
+        ${m.is_admin ? '' : `<div class="mx-perm">${permControls(m)}</div><p class="muted sm" style="margin:0">改了立即生效，奶妹会私信通知本人。</p>`}
+        <button class="btn mini" type="button" data-act="edit-key" data-id="${k.id}">全部设置…</button></div></details></div>`;
+  const tags = userTags(m);
+  const info = `<div><h4>资料</h4><dl class="kv">
+      <dt>Key</dt><dd class="keyline" data-kid="${k.id}"><span class="mono" data-tok="${esc(k.token)}">${esc(mask(k.token))}</span><button class="btn mini ghost" type="button" data-act="copy-key">${ic('copy')}复制</button></dd>
+      ${dcId ? `<dt>Discord</dt><dd>${dc && dc.username ? '@' + esc(dc.username) : esc(dcId)} ${prof ? `<a class="btn mini ghost" href="${esc(prof)}" target="_blank" rel="noopener noreferrer">打开</a>` : ''}<button class="btn mini ghost" type="button" data-act="copy-dc" data-dcid="${esc(dcId)}">复制 ID</button></dd>` : ''}
+      <dt>${m.discord_id ? '领取' : '创建'}</dt><dd title="${esc(fullTime(m.registered_at))}">${m.registered_at ? esc(rel(m.registered_at)) : '—'}</dd>
+      <dt>最近使用</dt><dd title="${esc(fullTime(k.last_used_at))}">${k.last_used_at ? esc(rel(k.last_used_at)) : '从未使用'}</dd>
+      <dt>标签</dt><dd><div class="tag-row">${tags.map(t => `<span class="mf tag" title="${esc((t.note ? t.note + ' · ' : '') + (t.by||'') + ' · ' + fullTime(t.ts))}">${esc(t.tag)}<button type="button" data-act="tag-del" data-id="${k.id}" data-tag="${esc(t.tag)}" aria-label="移除标签 ${esc(t.tag)}">×</button></span>`).join('')}
+        <details class="tag-new"><summary class="btn mini ghost">${ic('plus')}标签</summary><div class="tag-add"><input id="tagIn${k.id}" maxlength="12" placeholder="站长熟人" aria-label="标签名"><input id="tagNote${k.id}" maxlength="200" placeholder="备注，只有后台能看到" aria-label="标签备注"><button class="btn mini" type="button" data-act="tag-add" data-id="${k.id}">添加</button></div></details></div></dd></dl></div>`;
+  const more = `<details class="menu mx-more"><summary class="btn mini danger-text">更多 ${ic('chev')}</summary><div class="menu-pop">
+      <button type="button" data-act="regen-key" data-id="${k.id}">重新生成 Key（旧的立即失效）</button>
+      <button type="button" data-act="member-toggle" data-id="${m.id}" data-on="${m.enabled?0:1}">${m.enabled?'停用':'启用'}</button>
+      ${m.is_admin ? '' : `<button type="button" class="danger" data-act="member-del" data-id="${m.id}">${dcId?'删除（可以重新领取）':'删除'}</button>`}
+      ${m.is_admin || !dcId ? '' : `<button type="button" class="danger" data-act="member-ban" data-id="${m.id}">删除并永久禁止领取</button>`}</div></details>`;
+  return `<tr class="mx" data-mx="${m.id}"><td colspan="5"><div class="mx2">${head}${todo}
+    <div class="mx-sec mx-cols">${today}${settings}${info}</div>
+    <div class="share-ev" id="sev-${k.id}"></div>
+    <div class="mx-foot">${k ? `<button class="btn mini" type="button" data-act="reset-quota" data-id="${m.id}">重置今日额度</button>` : ''}
+      <button class="btn mini" type="button" data-act="view-audit" data-id="${m.id}">生成记录</button><span class="sp"></span>${more}</div></div></td></tr>`;
 }
+let memberFilterAuto = true;          // 第一次打开：有要处理的人就直接显示「需要处理」
 function renderMembers(){
   const everyone = membersCache || [];
   const now = Date.now()/1000;
   const isStaff = m => m.is_test || m.is_admin;
-  const tagSet = [...new Set(everyone.flatMap(tagNames))];
-  const filters = [...memberFilters(now), ...tagSet.map(t => ['tag:' + t, '# ' + t, m => tagNames(m).includes(t)])];
-  const testView = memberFilter === 'staff';
-  const tagView = memberFilter === 'tagged' || memberFilter.startsWith('tag:');      // 标签筛选也显示站长 / 测试账号（站长自己也可能被标记）
-  const all = everyone.filter(m => tagView || (testView ? isStaff(m) : !isStaff(m)));      // 站长 / 测试账号只在「站长 / 测试」里出现，不混进成员统计
   const members = everyone.filter(m => !isStaff(m));
-  const topWeek = new Set(members.length>3 ? members.filter(m=>m.week.images>0).sort((a,b)=>b.week.images-a.week.images).slice(0,3).map(m=>m.id) : []);
-  const cnt = fn => members.filter(fn).length;
-  $('#memberFilter').innerHTML = filters.map(([id, label, fn]) => {
-    const n = id === 'staff' ? everyone.filter(isStaff).length : (id === 'tagged' || id.startsWith('tag:')) ? everyone.filter(fn).length : cnt(fn);
-    if(!n && id !== 'all' && memberFilter !== id) return '';
-    return `<button class="fchip${memberFilter===id?' active':''}" data-mfilter="${id}">${esc(label)} <span class="num">${n}</span></button>`;
-  }).join('');
-  const activeFilter = testView ? (() => true) : (filters.find(f => f[0] === memberFilter) || filters[0])[2];
+  const fs = memberFilters(now);
+  const tagSet = [...new Set(everyone.flatMap(m => [...userTags(m).map(t => t.tag), ...(m.auto_tags||[]).map(t => t.tag)]))];
+  const tagFilters = tagSet.map(t => ['tag:' + t, '# ' + t, m => userTags(m).some(x => x.tag === t) || (m.auto_tags||[]).some(x => x.tag === t)]);
+  const all = [...fs.main, ...fs.more, ...tagFilters];
+  const staffish = id => id === 'staff' || id === 'tagged' || id.startsWith('tag:');      // 这几个筛选也算站长 / 测试账号
+  const count = ([id, , fn]) => (staffish(id) ? everyone : members).filter(fn).length;
+  if(memberFilterAuto && everyone.length){ memberFilterAuto = false; if(!fs.main[0][2] || !count(fs.main[0])) memberFilter = 'all'; else memberFilter = 'attention'; }
+  if(!all.some(f => f[0] === memberFilter)) memberFilter = 'all';
+  const inMore = !fs.main.some(f => f[0] === memberFilter);
+  $('#memberFilter').innerHTML = fs.main.map(f => {
+    const n = count(f);
+    if(!n && f[0] === 'disabled') return '';
+    return `<button class="fchip${memberFilter===f[0]?' active':''}${f[0]==='attention'&&n?' hot':''}" data-mfilter="${f[0]}">${esc(f[1])} <span class="num">${n}</span></button>`;
+  }).join('') + `<select class="fsel${inMore?' active':''}" id="memberMore" aria-label="更多筛选"><option value="">更多筛选…</option>${
+    [...fs.more, ...tagFilters].map(f => { const n = count(f); return n || memberFilter === f[0] ? `<option value="${esc(f[0])}"${memberFilter===f[0]?' selected':''}>${esc(f[1])}（${n}）</option>` : ''; }).join('')}</select>`;
+  const active = all.find(f => f[0] === memberFilter);
+  const pool = staffish(memberFilter) ? everyone : members;
   const q = memberQuery.trim().toLowerCase();
-  let list = all.filter(activeFilter).filter(m=>!q || m.name.toLowerCase().includes(q) || String(m.discord_id||'').includes(q)
+  let list = pool.filter(active[2]).filter(m=>!q || m.name.toLowerCase().includes(q) || String(m.discord_id||'').includes(q)
     || (m.discord && [m.discord.username, m.discord.display_name].some(v=>String(v||'').toLowerCase().includes(q))));
-  const keyf = {today:m=>m.today.images, week:m=>m.week.images, total:m=>m.total_images, recent:m=>m.last_used_at||0}[memberSort];
+  const keyf = {today:m=>m.today.images, week:m=>m.week.images, total:m=>m.total_images, recent:m=>m.last_used_at||0}[memberSort] || (m=>m.today.images);
   list = list.slice().sort((a,b)=>keyf(b)-keyf(a) || a.name.localeCompare(b.name));
   if(!list.length){
-    $('#memberGrid').innerHTML = `<div class="empty card"><div class="ico">${ic('users')}</div><h3>${everyone.length?'没有匹配的成员':'还没有成员'}</h3><p>${everyone.length?'换个筛选或关键词试试。':'成员在 Discord 领取 Key 后会出现在这里。'}</p></div>`;
+    const calm = memberFilter === 'attention';
+    $('#memberGrid').innerHTML = `<div class="empty card"><div class="ico">${ic(calm ? 'check' : 'users')}</div><h3>${calm ? '没有要处理的成员' : everyone.length ? '没有匹配的成员' : '还没有成员'}</h3><p>${calm ? '风险信号、到期、被拒过多的成员会出现在这里。' : everyone.length ? '换个筛选或关键词试试。' : '成员在 Discord 领取 Key 后会出现在这里。'}</p></div>`;
     return;
   }
-  const nets = memberMeta.share_alert_nets || 3;
-  const flag = (cls, text, title) => `<span class="mf ${cls}"${title?` title="${esc(title)}"`:''}>${esc(text)}</span>`;
   const rows = list.map(m=>{
     const dc = m.discord || null;
     const title = (dc && (dc.display_name || dc.username)) || m.name;
     const handle = dc && dc.username && dc.username !== title ? '@' + dc.username : '';
     const av = dc ? safeUrl(dc.avatar_url, DC_CDN) : '';
-    const prof = dc ? safeUrl(dc.profile_url, DC_SITE) : '';
-    const dcId = dc ? String(dc.id) : (m.discord_id ? String(m.discord_id) : '');
-    const cap = m.daily_images > 0 ? m.daily_images : 0;
-    const v45 = Math.max(0, m.today.images - (m.today.v5||0)), v5 = m.today.v5 || 0;
-    const pct = x => cap ? Math.min(100, x / cap * 100) : 0;
-    const full = cap && m.today.images >= cap;
-    // 状态标签按优先级取前 3 个：停用 / 过期 / 疑似分享最先
-    const flags = [
-      ...(m.tags||[]).map(t => flag('tag', t.tag, (t.note ? t.note + ' · ' : '') + (t.by || '') + ' 标记')),
-      !m.enabled ? flag('bad', '已停用') : '',
-      ...(m.auto_tags||[]).map(t => flag('warn', t.tag, t.note || `近 24 小时因此被拒 ${t.count} 次（自动标记）`)),
-      m.expires_at && m.expires_at < now ? flag('bad', '已过期') : '',
-      m.share && m.share.paused_until > now ? flag('bad', '已暂停', '防分享暂停中') : shareHot(m) ? flag('bad', '风险 ' + Math.round(m.share.score), `防分享风险分（违规 ${m.share.strikes} 次）`) : '',
-      full ? flag('bad', '已达日限') : '',
-      m.expires_at && m.expires_at >= now && m.expires_at - now < 3*D ? flag('warn', '快到期') : '',
-      m.rejected_24h > 0 ? flag('warn', '被拒 ' + m.rejected_24h, '近 24 小时被拒次数') : '',
-      m.reset_today && m.reset_today.count > 0 ? flag('info', '今日重置 ×' + m.reset_today.count, '今日被站长手动重置额度的次数') : '',
-      m.is_admin ? flag('info', '站长') : '', m.is_test ? flag('info', '测试') : '', isManual(m) ? flag('info', '手动', '后台手动创建的 Key') : '',
-      m.registered_at && now - m.registered_at < D ? flag('new', '新加入') : '',
-      !m.first_image_at && !isStaff(m) ? flag('warn', m.registered_at && now - m.registered_at > H ? '还没出过图' : '未出图') : '',
-      topWeek.has(m.id) ? flag('', '高频') : '',
-    ].filter(Boolean);
-    const flagsHtml = flags.slice(0, 3).join('') + (flags.length > 3 ? `<span class="mf" title="还有 ${flags.length - 3} 个标签，展开成员查看详情">+${flags.length - 3}</span>` : '');
+    const cap = m.daily_images > 0 ? m.daily_images : 0, v5 = m.today.v5 || 0, v45 = Math.max(0, m.today.images - v5);
+    const bar = (label, used, max, cls) => `<div class="tb ${cls}"><span class="tb-l">${label}</span><span class="tb-b"><i style="width:${max > 0 ? Math.min(100, used / max * 100) : 0}%"></i></span><span class="num">${used}${max > 0 ? '<span class="muted"> / ' + max + '</span>' : ''}</span></div>`;
+    const status = memberStatus(m, now), tag = userTags(m)[0];
     const open = memberOpen.has(m.id);
     return `<tr class="mr${m.enabled?'':' dim'}${open?' open':''}" data-mid="${m.id}">
       <td class="mcell" data-label="成员"><div class="mrow">
         <div class="avatar sm ${dc?'dc':''}">${esc([...String(title||'?')][0]||'?')}${av?`<img class="av" src="${esc(av)}" alt="" width="28" height="28" referrerpolicy="no-referrer" loading="lazy">`:''}</div>
-        <div style="min-width:0"><div class="mn">${esc(title)} ${handle?`<span class="muted">${esc(handle)}</span>`:''}</div>${flagsHtml?`<div class="mflags">${flagsHtml}</div>`:''}</div></div></td>
-      <td class="mtoday" data-label="今日"><div class="mq"><div class="mbar${full?' full':''}" title="V4.5 ${v45} · V5 ${v5}${cap?' / 上限 '+cap:''}"><i style="width:${pct(v45)}%"></i><i class="v5" style="width:${pct(v5)}%"></i></div>
-        <span class="num"><b>${m.today.images}</b>${cap?' / '+cap:''}${v5||m.daily_v5?` <span class="muted">· V5 ${v5}${m.daily_v5>0?' / '+m.daily_v5:''}</span>`:''}</span></div></td>
-      <td class="num mweek" data-label="7 天 / 累计">${m.week.images}<span class="muted"> / ${m.total_images}</span></td>
+        <div style="min-width:0"><div class="mn">${esc(title)}</div><div class="msub">${esc(handle || (m.discord_id ? '' : '后台建的 Key'))}${tag ? ` <span class="mf tag" title="${esc(tag.note||'')}">${esc(tag.tag)}</span>` : ''}</div></div></div></td>
+      <td class="mtoday" data-label="今日">${m.is_admin ? `<span class="muted sm">不限 · 今天 ${m.today.images} 张</span>` : bar('V4.5', v45, cap, '') + (m.daily_v5 > 0 || v5 ? bar('V5', v5, m.daily_v5, 'v5') : '')}</td>
+      <td class="mstat" data-label="状态">${status}</td>
       <td class="mtime" data-label="最近使用" title="${esc(m.last_used_at ? '最近使用 ' + fullTime(m.last_used_at) : '从未使用')}">${esc(rel(m.last_used_at))}</td>
-      <td class="mact">
-        <button class="btn mini ghost icon mx-arrow" type="button" data-act="mx-toggle" data-id="${m.id}" aria-expanded="${open}" aria-label="展开 Key 与操作：${esc(title)}">${ic('chev')}</button>
-        <details class="menu"><summary class="btn mini ghost icon" aria-label="更多操作：${esc(title)}">${ic('more')}</summary>
-          <div class="menu-pop">
-            <button type="button" data-act="view-audit" data-id="${m.id}">生成记录</button>
-            ${prof?`<a href="${esc(prof)}" target="_blank" rel="noopener noreferrer">在 Discord 打开</a>`:''}
-            ${dcId?`<button type="button" data-act="copy-dc" data-dcid="${esc(dcId)}">复制 Discord ID</button>`:''}
-            <button type="button" data-act="member-toggle" data-id="${m.id}" data-on="${m.enabled?0:1}">${m.enabled?'停用':'启用'}</button>
-            ${m.is_admin?'':`<button type="button" class="danger" data-act="member-del" data-id="${m.id}">${dcId?'删除（可重新领取）':'删除'}</button>`}
-            ${m.is_admin||!dcId?'':`<button type="button" class="danger" data-act="member-ban" data-id="${m.id}">删除并永久禁止领取</button>`}
-          </div></details></td>
+      <td class="mact"><button class="btn mini ghost icon mx-arrow" type="button" data-act="mx-toggle" data-id="${m.id}" aria-expanded="${open}" aria-label="展开：${esc(title)}">${ic('chev')}</button></td>
     </tr>${open ? memberPanel(m, now) : ''}`;
   }).join('');
   $('#memberGrid').innerHTML = `<div class="card panel mpanel" style="padding:0"><div class="table-wrap mwrap"><table class="rt mtable">
-    <thead><tr><th>成员</th>${sortTh('today','今日')}${sortTh('week','7 天 / 累计','num')}${sortTh('recent','最近使用')}<th class="act"><span class="sr">操作</span></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+    <thead><tr><th>成员</th>${sortTh('today','今天用量')}<th>状态</th>${sortTh('recent','最近使用')}<th class="act"><span class="sr">展开</span></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
 function toggleMemberPanel(id){
   if(memberOpen.has(id)) memberOpen.delete(id); else memberOpen.add(id);
@@ -2781,6 +2866,7 @@ document.addEventListener('click', ev=>{
     case 'share-view': loadShare(id); break;
     case 'share-clear': clearShare(id); break;
     case 'tag-add': addMemberTag(id); break;
+    case 'mark-ok': markMemberOk(id); break;
     case 'tag-del': delMemberTag(id, el.dataset.tag); break;
     case 'reset-quota': resetDailyImageQuota(id); break;
     case 'copy-key': copyKey(el); break;
@@ -2818,6 +2904,7 @@ $('#auditView').addEventListener('change', e=>{ auditView=e.target.value; loadAu
 $('#auditPer').addEventListener('change', e=>{ auditPer=Number(e.target.value); auditPage=1; loadAudit(); });
 document.addEventListener('change', e=>{ if(e.target.id==='actionActor'||e.target.id==='actionKind'){ actionPage=1; loadActions(); return; } const a=e.target.dataset&&e.target.dataset.act; if(a&&a.endsWith('-jump')){ const kind=a.slice(0,-5); const v=Math.max(1,Number(e.target.value)||1); if(kind==='audit'){auditPage=v;loadAudit();}else if(kind==='log'){logPage=v;loadLogs();}else if(kind==='action'){actionPage=v;loadActions();} } });
 $('#memberSearch').addEventListener('input', e=>{ memberQuery = e.target.value; renderMembers(); });
+$('#memberFilter').addEventListener('change', e=>{ if(e.target.id !== 'memberMore') return; memberFilter = e.target.value || 'all'; renderMembers(); });
 $('#memberFilter').addEventListener('click', e=>{
   const b = e.target.closest('[data-mfilter]'); if(!b || b.disabled) return;
   memberFilter = b.dataset.mfilter; renderMembers();
