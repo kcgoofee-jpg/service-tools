@@ -637,3 +637,15 @@ async def test_economy_trims_steps_for_auto_anlas_keys_but_not_manual(state):
     key.update(anlas_auto=-1)
     assert (await post("/ai/generate-image", image_body(width=1216, height=832, steps=28))).status_code == 200
     assert state.db.logs[-1][1]["detail"].startswith("1216x832/28step")
+
+
+@pytest.mark.asyncio
+async def test_status_code_distribution_counts_member_api(state):
+    # 后台「状态码分布」：成员接口每个响应按状态码计数（Key 错误 401、成功 200），后台路径不算
+    from app import status_stats
+    status_stats._PENDING.clear()
+    assert (await post("/ai/generate-image", image_body(), token="nai-wrong")).status_code == 401
+    assert (await post("/ai/generate-image", image_body())).status_code == 200
+    codes = {c for (_h, c) in status_stats._PENDING}
+    assert {200, 401} <= codes
+    assert status_stats.MEANING[401].startswith("Key")
