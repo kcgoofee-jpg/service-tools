@@ -75,3 +75,39 @@ async def test_run_applies_same_quota_to_auto_members_only(tmp_path):
         assert len(json.loads(await db.get_setting(quota_algo.HISTORY_KEY, "[]"))) == 1
     finally:
         await db.close()
+
+
+@pytest.mark.asyncio
+async def test_economy_mode_doubles_v5_and_reverts(tmp_path):
+    # 节约模式下免费档 14 步，每张只扣约一半额度：V5 每人 / 全站额度 ×2；关掉后回到基础值；账号剩余低时不放大
+    from app import ops, site_flags
+    db = Database(str(tmp_path / "e.sqlite"))
+    await db.connect()
+    try:
+        k = await db.create_key({"name": "m", "token": "nai-m", "daily_images": 150, "daily_anlas": 0, "daily_v5": 0,
+                                 "monthly_anlas": 0, "daily_text_tokens": 0, "rpm": 10, "allow_anlas": False,
+                                 "allow_img2img": False, "exclude_global_v5": False, "image_model_scope": "all"})
+        pct = {"v": 98}
+
+        class Allow:
+            async def snapshot(self, pool):
+                return {"accounts": [{"percent": pct["v"], "recharge_per_day": 11.0}]}
+        st = SimpleNamespace(db=db, guard=Guard(db), announcer=None,
+                             nai=SimpleNamespace(pool=[SimpleNamespace(usable=True)], allowance=Allow()))
+        base = (await quota_algo.run(st))["v5"]
+        assert not base.get("economy")
+        assert await ops.set_economy(db, True, st)                      # 开启时立刻重算
+        on = json.loads(await db.get_setting(quota_algo.STATE_KEY, "{}"))["v5"]
+        assert on["economy"] == 2 and on["each"] == base["each"] * 2 and on["global"] == base["global"] * 2
+        assert (await db.get_key(k["id"]))["daily_v5"] == on["each"]
+        assert int(await db.get_setting("global_daily_v5", 0)) == on["global"]
+        assert "节约模式 ×2" in await db.get_setting(quota_algo.NOTICE_KEY, "")
+        pct["v"] = 30                                                   # 账号剩余跌破 40%：安全优先，不放大
+        assert not (await quota_algo.run(st))["v5"].get("economy")
+        pct["v"] = 98
+        await ops.set_economy(db, False, st)                            # 关掉：回到当天的基础方案（上面收紧过就是收紧后的值）
+        day_plan = json.loads(await db.get_setting(quota_algo.V5_DAY_KEY, "{}"))["plan"]
+        assert (await db.get_key(k["id"]))["daily_v5"] == day_plan["each"] and not day_plan.get("economy")
+        assert await site_flags.get(db, site_flags.ECONOMY) is False
+    finally:
+        await db.close()

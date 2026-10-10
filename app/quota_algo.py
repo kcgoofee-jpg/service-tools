@@ -173,6 +173,17 @@ async def _members(db) -> list[int]:
     return [r[0] for r in rows]
 
 
+async def economy_multiplier(db, pct: Optional[float]) -> float:
+    """节约模式开着时 V5 额度的放大倍数 = 正常步数 ÷ 节约步数（28 ÷ 14 = 2）；剩余低于收紧线或未开时为 1。"""
+    from . import site_flags
+    from .policy import ECONOMY_STEPS
+    if not await site_flags.get(db, site_flags.ECONOMY):
+        return 1.0
+    if pct is not None and pct < P("allocation.v5_tighten_below", 40):
+        return 1.0
+    return round(P("allocation.v5_normal_steps", 28) / ECONOMY_STEPS, 2)
+
+
 async def _active_v5(db, days: int, now: float) -> int:
     """最近 days 天用过 V5 的成员数（不含测试 / 站长 Key）。"""
     since = [(datetime.fromtimestamp(now) - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(days)]
@@ -258,6 +269,16 @@ async def run(state, now: Optional[float] = None) -> dict[str, Any]:
         v5 = fresh
         await db.set_setting(V5_DAY_KEY, json.dumps({"day": today, "plan": v5}, ensure_ascii=False))
 
+    # ---- 节约模式：免费档统一 14 步，每张图只扣约一半额度 → 同样的额度能出约 2 倍的图 ----
+    # 当天的基础方案（按 28 步计价）不变，只在下发时放大；关掉节约模式后下一次重算自动回到基础值。
+    # 账号剩余跌破收紧线时不放大（安全优先）。
+    v5 = dict(v5)
+    mult = await economy_multiplier(db, pct)
+    if mult > 1:
+        v5.update(base_each=v5["each"], base_global=v5["global"], economy=mult,
+                  each=min(int(cfg["quota_v5_max"] * mult), int(v5["each"] * mult)),
+                  **{"global": int(v5["global"] * mult)})
+
     # ---- 应用：所有由算法管理的成员同一套额度 ----
     cur = await db._db.execute_fetchall(
         "SELECT COUNT(*) FROM api_keys WHERE quota_auto=1 AND enabled=1 AND is_admin=0 AND is_test=0 "
@@ -274,7 +295,8 @@ async def run(state, now: Optional[float] = None) -> dict[str, Any]:
         await guard.save({"base_daily_images": b})
     await db.set_settings_bulk(settings)
     # 首页提醒（站长要求：算法调整只在网站首页提示，不发 Discord）
-    note = f"今日额度（算法自动分配）：V4.5 每人 {a} 张、保底 {b} 张 · V5 每人 {v5['each']} 张"
+    note = f"今日额度（算法自动分配）：V4.5 每人 {a} 张、保底 {b} 张 · V5 每人 {v5['each']} 张" + (
+        f"（节约模式 ×{v5['economy']:g}）" if v5.get("economy") else "")
     if review and review["from"] != review["to"]:
         note = f"{today[5:].replace('-', '月')}日 算法调整：" + "；".join(review["reasons"]) + "。" + note
     await db.set_setting(NOTICE_KEY, note)
