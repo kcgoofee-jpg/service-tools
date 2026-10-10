@@ -73,7 +73,8 @@ def welcome_dm(key: str, site: str, quota: str, expires_days: int, idle_days: in
     return text[:1990]
 
 
-WAITLIST_HOLD = 24 * 3600     # 候补被邀请后保留名额的时长
+WAITLIST_HOLD = 24 * 3600     # 候补被邀请后保留名额的时长（私信通知时）
+WAITLIST_HOLD_NO_DM = 6 * 3600   # 不私信、只在公告频道通知时：很多人看不到，保留太久名额会空占（2026-10-10 实测 21 个名额空占半天）
 
 
 class RegistrationService:
@@ -276,7 +277,8 @@ class RegistrationService:
         now = time.time()
         rows = await self.db._db.execute_fetchall(
             "SELECT discord_id, invited_at FROM waitlist ORDER BY joined_at")
-        invited = {r[0] for r in rows if r[1] and now - r[1] < WAITLIST_HOLD}
+        hold = await self._hold_seconds()
+        invited = {r[0] for r in rows if r[1] and now - r[1] < hold}
         waiting = [r[0] for r in rows if not r[1]]
         free = cfg["max_users"] - await self.count_active() - len(invited - {user_id})
         if user_id in invited and free > 0:
@@ -295,9 +297,15 @@ class RegistrationService:
             await self.db._db.commit()
             waiting.append(user_id)
             ahead = waiting[:-1]
+        how = ("有名额时机器人会私信你" if await site_flags.get(self.db, site_flags.WAITLIST_DM)
+               else "有名额时会在 📢｜公告 频道通知（不私信），请留意")
         raise RegistrationError(
             f"名额已满（上限 {cfg['max_users']} 人）。已把你加入候补，目前排第 {len(ahead) + 1} 位；"
-            "有名额时机器人会私信你，届时 24 小时内再用 /register 领取。")
+            f"{how}，届时 {hold // 3600} 小时内再用 /register 领取。")
+
+    async def _hold_seconds(self) -> int:
+        """候补被邀请后保留名额多久：私信通知 24 小时；只发公告时 6 小时。"""
+        return WAITLIST_HOLD if await site_flags.get(self.db, site_flags.WAITLIST_DM) else WAITLIST_HOLD_NO_DM
 
     async def waitlist(self) -> list[dict]:
         rows = await self.db._db.execute_fetchall(
@@ -311,15 +319,16 @@ class RegistrationService:
         （Discord 应用审核期间用 0：批量私信正是 2026-10-10 被标记的信号之一）。announce 是发公告频道的函数。"""
         now = time.time() if now is None else now
         use_dm = await site_flags.get(self.db, site_flags.WAITLIST_DM)     # 默认不私信（fail-closed）
+        hold = await self._hold_seconds()
         cfg = await self.settings()
         expired = await self.db._db.execute_fetchall(
-            "SELECT discord_id FROM waitlist WHERE invited_at IS NOT NULL AND invited_at <= ?", (now - WAITLIST_HOLD,))
+            "SELECT discord_id FROM waitlist WHERE invited_at IS NOT NULL AND invited_at <= ?", (now - hold,))
         if expired:
             await self.db._db.execute("DELETE FROM waitlist WHERE invited_at IS NOT NULL AND invited_at <= ?",
-                                      (now - WAITLIST_HOLD,))
+                                      (now - hold,))
             await self.db._db.commit()
             from .action_log import log_action
-            await log_action(self.db, "系统", "候补邀请过期", f"{len(expired)} 人", "24 小时内未领取，名额让给下一位")
+            await log_action(self.db, "系统", "候补邀请过期", f"{len(expired)} 人", f"{hold // 3600} 小时内未领取，名额让给下一位")
         if not cfg["open"] or not cfg["max_users"]:
             return 0
         held = (await self.db._db.execute_fetchall(
@@ -335,7 +344,7 @@ class RegistrationService:
             await self.db._db.commit()
             if not use_dm:
                 await log_action(self.db, "系统", "邀请候补", name or f"Discord {discord_id}",
-                                 "已保留 24 小时（不私信，已在公告频道统一通知）")
+                                 f"已保留 {hold // 3600} 小时（不私信，已在公告频道统一通知）")
                 continue
             sent = await self.send_dm(discord_id,
                 "🦉 猫头鹰公益站有空位了！为你保留 24 小时：请在 🔑｜领取key 输入 /register 领取。"
@@ -343,8 +352,8 @@ class RegistrationService:
             await log_action(self.db, "系统", "邀请候补", name or f"Discord {discord_id}",
                              "已私信" if sent else "私信失败（对方可能关闭了私信），名额仍保留 24 小时", ok=sent)
         if rows and not use_dm and announce is not None:
-            announce(f"🦉 **候补有空位了**：已为候补前 {len(rows)} 位保留名额 24 小时。"
-                     "在候补里的朋友请到 🔑｜领取key 输入 `/register` 领取；24 小时内没领，名额会顺延给下一位。")
+            announce(f"🦉 **候补有空位了**：已为候补前 {len(rows)} 位保留名额 {hold // 3600} 小时。"
+                     f"在候补里的朋友请到 🔑｜领取key 输入 `/register` 领取；{hold // 3600} 小时内没领，名额会顺延给下一位。")
         return len(rows)
 
     async def registration_profile(self, discord_id: str) -> Optional[dict]:
