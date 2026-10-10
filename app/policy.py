@@ -524,6 +524,69 @@ def economy_trim(payload: dict) -> Tuple[dict, list[str]]:
     return out, notes
 
 
+# ------------------------------------------------------------ V5 Medium ----
+# 官方 2026-10-08 给 V5 Full 加了 Medium 档（蒸馏模型，锁 14 步 / Euler-a / Heavy 负面预设，不支持自定义负面词和
+# rescale；官方公告：比 23 步 High 省约 42%，盲测画质大致相当）。模型名与固定设置取自官方前端代码（2026-10-10 核对）。
+V5_MEDIUM_OF = {"nai-diffusion-5-full": "nai-diffusion-5-full-medium",
+                "nai-diffusion-5-full-inpainting": "nai-diffusion-5-full-medium-inpainting"}
+V5_MEDIUM_STEPS = 14
+V5_MEDIUM_SAMPLER = "k_euler_ancestral"
+V5_MEDIUM_UC_PRESET = 0                 # V5 的预设列表里 heavy 排第 0
+V5_MEDIUM_UC = ("lowres, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, "
+                "very displeasing, chromatic aberration, dithering, halftone, screentone, multiple views, logo, "
+                "too many watermarks, negative space, blank page")
+# 一张 Medium 记多少张 V5 额度。官方只说「比 23 步 High 省约 42%」，我们成员多用 28 步，真实比例未实测：
+# 先取保守的 0.6，等安静时段快照实测后再调（见 owl-verify-numbers）。
+V5_MEDIUM_WEIGHT = 0.6
+
+
+def is_v5_medium(model: str) -> bool:
+    return (model or "").strip().lower() in V5_MEDIUM_OF.values()
+
+
+def medium_normalize(payload: dict) -> Tuple[dict, list[str]]:
+    """按官方前端对 Medium 的做法整理参数：步数 / 采样器 / 负面预设固定，自定义负面词清空，rescale 归零。
+    不整理的话，客户端照 High 的习惯带自定义负面词或 rescale，上游可能拒绝。"""
+    out = dict(payload)
+    p = dict(out["parameters"]) if isinstance(out.get("parameters"), dict) else {}
+    out["parameters"] = p
+    notes: list[str] = []
+    if p.get("steps") != V5_MEDIUM_STEPS:
+        p["steps"] = V5_MEDIUM_STEPS
+    if p.get("sampler") != V5_MEDIUM_SAMPLER:
+        p["sampler"] = V5_MEDIUM_SAMPLER
+    if (p.get("cfg_rescale") or 0) != 0:
+        p["cfg_rescale"] = 0
+        notes.append("Medium 不支持 rescale，已设为 0")
+    user_uc = str(p.get("negative_prompt") or "").strip()
+    if user_uc and user_uc != V5_MEDIUM_UC:
+        notes.append("Medium 不支持自定义负面词，已换成官方 Heavy 预设（可在正面提示词里用 -2::xx:: 排除）")
+    p["negative_prompt"] = V5_MEDIUM_UC
+    p["ucPreset"] = V5_MEDIUM_UC_PRESET
+    neg = p.get("v4_negative_prompt")
+    if isinstance(neg, dict):
+        neg = dict(neg)
+        cap = dict(neg["caption"]) if isinstance(neg.get("caption"), dict) else {}
+        cap["base_caption"] = V5_MEDIUM_UC
+        if isinstance(cap.get("char_captions"), list):
+            cap["char_captions"] = [{**c, "char_caption": ""} if isinstance(c, dict) else c
+                                    for c in cap["char_captions"]]
+        neg["caption"] = cap
+        p["v4_negative_prompt"] = neg
+    if isinstance(p.get("characterPrompts"), list):
+        p["characterPrompts"] = [{**c, "uc": ""} if isinstance(c, dict) else c for c in p["characterPrompts"]]
+    return out, notes
+
+
+def to_medium(payload: dict) -> Tuple[dict, list[str]]:
+    """V5 Full（High）→ Medium：节约模式用。省的用量和「High 压到 14 步」差不多，但 Medium 是专为 14 步训练的，画质好得多。"""
+    model = str(payload.get("model", "")).strip().lower()
+    if model not in V5_MEDIUM_OF:
+        return payload, []
+    out, notes = medium_normalize({**payload, "model": V5_MEDIUM_OF[model]})
+    return out, ["节约模式：V5 Full 已切到官方 Medium 档（14 步，画质接近 High）"] + notes
+
+
 # ------------------------------------------------------------ 文本钳制 ----
 
 def clamp_text_params(payload: dict, *, max_output_tokens: int,

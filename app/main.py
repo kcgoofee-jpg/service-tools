@@ -44,6 +44,10 @@ from .policy import (
     clamp_text_params,
     estimate_image_cost,
     image_model_tier,
+    is_v5_medium,
+    medium_normalize,
+    to_medium,
+    V5_MEDIUM_WEIGHT,
     legacy_normal_free_eligible,
     validate_image_references,
     validate_vibe_encoding,
@@ -174,7 +178,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "2.15.35"
+__version__ = "2.15.36"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -908,6 +912,8 @@ def record(key, kind: str, model: str, status: str, *, images: int = 0,
     """写日志；成功请求额外计入每日配额。"""
     _REQUEST_LOGGED.set(True); request_timing.mark_logged()
     live.note(status)
+    if status == "ok" and v5 and is_v5_medium(model):
+        v5 = _medium_v5_units(key["id"], v5)
     timing = request_timing.snapshot()
     async def _go():
         if status == "ok":
@@ -924,6 +930,17 @@ def record(key, kind: str, model: str, status: str, *, images: int = 0,
     task = asyncio.create_task(_go())
     task.add_done_callback(_log_task_failure)
     return task
+
+
+_MEDIUM_CARRY: dict[int, float] = {}
+
+
+def _medium_v5_units(key_id: int, images: int) -> int:
+    """Medium 一张按 V5_MEDIUM_WEIGHT 张计：小数部分按 Key 累计（只在内存里，重启最多少记不到 1 张）。"""
+    carry = _MEDIUM_CARRY.get(key_id, 0.0) + images * V5_MEDIUM_WEIGHT
+    whole = int(carry + 1e-9)
+    _MEDIUM_CARRY[key_id] = carry - whole
+    return whole
 
 
 def _log_task_failure(task: asyncio.Task) -> None:
@@ -1230,6 +1247,15 @@ async def _generate_image(request: Request, *, streaming: bool):
         body, notes = economy_trim(body)      # 算法分到的 Anlas 不应让人在节约模式下还按 28 步出图
     else:
         notes = []
+    if model_tier == "v5":
+        # 节约模式下 V5 Full 改走官方 Medium 档（不再是「High 压到 14 步」：用量差不多，但画质差很多，10/10 修正）
+        if not key["is_admin"] and await site_flags.get(STATE.db, site_flags.ECONOMY):
+            body, more = to_medium(body)
+            notes = list(notes) + more
+        if is_v5_medium(str(body.get("model", ""))):
+            body, more = medium_normalize(body)     # 成员自己选 Medium 时也按官方规则整理，免得上游拒绝
+            notes = list(notes) + more
+        model = body["model"]
 
     p = body.get("parameters", {})
     try:
