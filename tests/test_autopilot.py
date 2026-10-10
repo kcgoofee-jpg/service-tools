@@ -1,4 +1,4 @@
-"""自动驾驶规则（纯函数）：闲置回收天数、名额、熔断、单个 Key 守护。"""
+"""自动驾驶规则（纯函数）：名额、熔断、单个 Key 守护、节约模式。"""
 import time
 from types import SimpleNamespace
 
@@ -8,11 +8,8 @@ from app import autopilot
 from app.database import Database
 
 
-def test_idle_and_slots_rules():
-    assert autopilot.idle_days_rule(50, 50, 0)[0] == 2
-    assert autopilot.idle_days_rule(30, 50, 3)[0] == 2
-    assert autopilot.idle_days_rule(20, 50, 0)[0] == 5
-    assert autopilot.idle_days_rule(40, 50, 0)[0] == 3
+def test_slots_rules_and_no_suggestion_only_rules():
+    assert not hasattr(autopilot, "idle_days_rule")             # 只给建议、从不执行的规则已删除
     assert autopilot.slots_rule(50, 50, 3, 0.3, 0)[0] == 55       # 满员 + 候补 + 有余量
     assert autopilot.slots_rule(50, 48, 0, 0.3, 0)[0] == 55       # 快满（空位 ≤ 2）
     assert autopilot.slots_rule(50, 30, 0, 0.3, 0)[0] == 50       # 空位多，不加

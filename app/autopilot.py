@@ -4,25 +4,21 @@
 ━━ 模式 ━━
 每条规则独立设置 autopilot_<规则> = observe（只记录「如果是我会怎么做」）/ enforce（真的执行）/ off。
 没设过的默认 observe。下面每条都写明「能不能执行」——有的规则只给建议，设成 enforce 也不会动。
-（2026-10-10 线上：slots、breaker、key_guard 为 enforce；economy、idle_days 为 observe。）
+（2026-10-10 线上：slots、breaker、key_guard 为 enforce；economy 为 observe。
+  「闲置回收天数」「每日重置时间」两条只给建议、从不执行，已删除——回收天数固定为 KEY_INACTIVITY_DELETE_DAYS，每日重置是北京时间 0 点。）
 
 ━━ 规则 ━━
-1. idle_days 闲置回收天数 —— 仅建议，没有执行路径
-   名额满了或有人在候补 → 2 天；空位超过 30% → 5 天；其余 3 天。
-   真正的回收天数仍是固定的 KEY_INACTIVITY_DELETE_DAYS（state.py），这里算出的值只供站长参考。
-2. slots 名额上限 —— 可执行
+1. slots 名额上限 —— 可执行
    名额快满（空位 ≤ 2）或有人在候补，且昨天日用量 < 60%、被每小时上限拦的小时 < 3 → +5（最多 100），
    每天最多一次，且昨天数据要覆盖 ≥ 20 小时（数据不足时不动）。只加不减。
-3. reset_hour 每日重置时间 —— 仅建议，没有执行路径
-   取最近 7 天出图最少的整点。改日期边界会影响当天计数，要单独做迁移，所以 mode 固定显示 observe。
-4. breaker 全站临时暂停 —— 可执行
+2. breaker 全站临时暂停 —— 可执行
    最近 15 分钟上游失败（5xx / 超时）≥ 5 次且占比 ≥ 30% → guard.trip_breaker 暂停出图 5 分钟，到点自动恢复。
-5. key_guard 单个 Key —— 只有「1 小时内被拒 ≥ 60 次 → 暂停 1 小时」这一条可执行
+3. key_guard 单个 Key —— 只有「1 小时内被拒 ≥ 60 次 → 暂停 1 小时」这一条可执行
    （客户端死循环重试；经 share_guard.pause_key，不私信）。
    另两条只观察、不执行：24 小时内「10 分钟内网段来回切换」≥ 2 次（建议暂停 24 小时）；
    「≥ 3 种客户端」且「近 24 小时 ≥ 20 个小时在用」（建议重置 Key）。重置会私信本人，申诉期内不接。
    没有逐级加重，也不私信——暂停原因在成员请求被拒时直接显示。
-6. economy 节约模式 —— 可执行
+4. economy 节约模式 —— 可执行
    最近 15 分钟「排队的人太多」≥ 8 次 → 开（全站免费档 14 步 + Euler-a）；30 分钟 ≤ 1 次 → 关。
    两次切换至少隔 1 小时；开关都经 ops.set_economy 在公告频道通知成员。
 """
@@ -48,14 +44,6 @@ async def _mode(db, rule: str) -> str:
 
 async def _q(db, sql: str, *args):
     return await db._db.execute_fetchall(sql, args)
-
-
-def idle_days_rule(active: int, cap: int, waitlist: int) -> tuple[int, str]:
-    if cap and (active >= cap or waitlist > 0):
-        return 2, f"名额 {active}/{cap}、候补 {waitlist} 人：缩短到 2 天，让名额流转"
-    if cap and active < cap * 0.7:
-        return 5, f"名额 {active}/{cap}，空位较多：放宽到 5 天"
-    return 3, f"名额 {active}/{cap}：保持 3 天"
 
 
 SLOTS_MAX = 100
@@ -117,13 +105,11 @@ async def run(state, registrar=None, now: Optional[float] = None) -> dict[str, A
     now = time.time() if now is None else now
     out: dict[str, Any] = {"at": now, "rules": {}}
 
-    # 1/2 名额与回收
+    # 名额
     cfg = await registrar.settings() if registrar is not None else {"max_users": 0}
     active = await registrar.count_active() if registrar is not None else 0
     # 候补只算还没被邀请的人（已邀请的有 24 小时保留名额，不算在等）
     waitlist = sum(1 for w in await registrar.waitlist() if not w.get("invited_at")) if registrar is not None else 0
-    days, why = idle_days_rule(active, cfg.get("max_users") or 0, waitlist)
-    out["rules"]["idle_days"] = {"mode": await _mode(db, "idle_days"), "value": days, "why": why}
 
     # 用动态额度每天 0 点的复盘（昨天的用量 / 被拦小时数，已排除测试号和站长号）
     from . import quota_algo
@@ -145,15 +131,6 @@ async def run(state, registrar=None, now: Optional[float] = None) -> dict[str, A
             await db.set_setting("autopilot_slots_at", now)
             await log_action(db, "系统", "自动驾驶：名额", "", f"{cap_now} → {slots}：{why}")
             out["rules"]["slots"]["applied"] = True
-
-    # 3 重置时间：最近 7 天每个北京时间整点的出图量，取最少的
-    by_hour = {h: 0 for h in range(24)}
-    for (h, n) in await _q(db, "SELECT CAST(strftime('%H', ts, 'unixepoch', '+8 hours') AS INT), COUNT(*) FROM usage_log "
-                                "WHERE ts>=? AND status='ok' AND kind LIKE 'image%' GROUP BY 1", now - 7 * 86400):
-        by_hour[int(h)] = n
-    quiet = min(by_hour, key=lambda h: (by_hour[h], abs(h - 6)))
-    out["rules"]["reset_hour"] = {"mode": "observe", "value": quiet,
-                                  "why": f"最近 7 天 {quiet}:00 出图最少（{by_hour[quiet]} 张）；现在是 0 点重置（0 点 {by_hour[0]} 张）"}
 
     # 4 熔断：只算真正打到上游的失败——5xx，或 200 开头后流中途断开（up_status 2xx 但 status=error）。
     # 本地拦截（冷却 / 上限 / 排队超时，up_status=0）、上游 429（另有冷却和 AIMD 减半）、成员参数错误（4xx）都不算。

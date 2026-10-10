@@ -159,3 +159,20 @@ async def test_daily_account_cap_counts_compute_units(tmp_path):
         assert "已达上限" in (await guard.token_block_reason(db, "tok", "2026-10-10") or "")
     finally:
         await db.close()
+
+
+@pytest.mark.asyncio
+async def test_yesterday_usage_uses_compute_units(tmp_path):
+    # 节约模式的一天：成员出了 1000 张、折算 500 份——每日微调要按 500 判断拥挤，不能把大家的上限砍掉
+    db = Database(str(tmp_path / "y.sqlite"))
+    await db.connect()
+    try:
+        k = await db.create_key({"name": "m", "token": "nai-y", "daily_images": 150, "daily_anlas": 0, "daily_v5": 0,
+                                 "monthly_anlas": 0, "daily_text_tokens": 0, "rpm": 10, "allow_anlas": False,
+                                 "allow_img2img": False, "exclude_global_v5": False, "image_model_scope": "all"})
+        await db.bump_counters(k["id"], "2026-10-09", images=1000)
+        await db.bump_upstream_image_counter("tok", "2026-10-09", 1000, 0.5)
+        stats = await quota_algo._yesterday(db, "2026-10-09", [k["id"]])
+        assert stats["used"] == 500
+    finally:
+        await db.close()
