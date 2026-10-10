@@ -287,6 +287,7 @@ td .tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
 .pv[data-tone=bad]{color:var(--bad)}.pv[data-tone=warn]{color:var(--warn)}
 .mod-params{margin-top:10px}.mod-params>summary{list-style:none;display:inline-flex}.mod-params>summary::-webkit-details-marker{display:none}
 .mod-params[open]>summary .ic{transform:rotate(90deg)}.mod-params .table-wrap{margin-top:8px}
+.warn-text{color:var(--warn)}
 /* 总览：结论卡 */
 .ovv{display:flex;flex-direction:column;gap:14px;margin-bottom:20px}
 .ovv-h{display:flex;gap:12px;align-items:flex-start}
@@ -2778,6 +2779,14 @@ async function loadGuard(){
 const ANLAS_LABELS = {anlas_auto_enabled:['开启自动分配（1 开 / 0 关）',0,1], anlas_reserve:['保留不分的 Anlas',0,10000],
   anlas_member_daily_cap:['每人每天最多',0,1000], anlas_min_images_7d:['近 7 天至少出图张数',0,10000], anlas_min_key_age_days:['领取满几天',0,365]};
 let qaLast = null, apLast = null;
+/* 把 V5 全站额度的推算过程摆出来，让人一眼能用常识检查（10/10 就是看到「每天恢复 11%」才发现读数错了） */
+function v5Derivation(v){
+  if(!v || v.global == null) return '';
+  const rc = v.rate_check || v.rate_info || {}, f = x => x == null ? '—' : (+x).toFixed(1);
+  const cls = rc.status === '对不上' ? 'bad-text' : rc.status === '未核对' ? 'warn-text' : 'muted';
+  return `<div class="notice-box" style="margin:10px 0 0;font-size:13px">全站 V5 = 恢复 <b>${f(v.rate)}%/天</b> × 14.2 张/1% × 系数 ${esc(v.k)}${v.economy ? ` × 节约 ${esc(v.economy)}` : ''} = <b>${esc(v.global)} 张</b>
+    <div class="${cls}" style="margin-top:4px">恢复速度：接口读数 ${f(rc.api)} · 实测 ${f(rc.measured)} · 采用 ${f(rc.used)}（${esc(rc.status || '—')}）${(rc.notes||[]).length ? ' · ' + esc(rc.notes.join('；')) : ''}${rc.used != null && Math.abs(rc.used - v.rate) > 0.05 ? `<br>今天的方案是 0 点按 ${f(v.rate)}%/天定的（一天只定一次，不在当天降额），明天 0 点起按 ${f(rc.used)}%/天` : ''}</div></div>`;
+}
 function limitsVerdict(){
   const v = guardData && guardData.values, q = qaLast || {}, w = q.v5 || {};
   const parts = [];
@@ -2885,6 +2894,7 @@ async function loadQuotaAlgo(){
         <div><div class="muted sm">V5 每人每天 / 全站</div><div class="num" style="font-size:22px;font-weight:700">${esc(v.each ?? '—')} <span class="muted" style="font-size:13px">/ ${esc(v.global ?? '—')}</span></div></div>
         <div><div class="muted sm">账号 V5 剩余 · 恢复</div><div class="num" style="font-size:22px;font-weight:700">${v.percent==null?'—':esc(Math.round(v.percent))+'%'} <span class="muted" style="font-size:13px">${esc(v.rate ?? '—')}%/天 · 系数 ${esc(v.k ?? '—')}</span></div></div>
       </div>
+      ${v5Derivation(v)}
       <div class="muted sm" style="margin:8px 0">由算法管理 ${esc(l.members ?? 0)} 人 · V5 按 ${esc(v.people ?? '—')} 人分 · 更新于 ${l.updated_at?esc(fullTime(l.updated_at)):'—'}</div>
       ${rows?`<div class="table-wrap"><table class="rt"><thead><tr><th class="t">日期</th><th class="num">用量 / 账号日上限</th><th class="num" title="每天 0 点记一次账号 V5 剩余；括号里是和前一天比的净变化（恢复 − 用掉）">次日 0 点 V5 剩余</th><th class="num">每小时拦截</th><th class="num">顶格人数</th><th class="num">上限 · 保底（昨 → 今）</th><th>理由</th></tr></thead><tbody>${rows}</tbody></table></div>`:'<div class="muted sm">每日微调记录会在明天出现</div>'}`;
   }catch(e){ $('#qaBody').innerHTML = '<div class="muted">读取失败</div>'; }

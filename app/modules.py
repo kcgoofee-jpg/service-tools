@@ -269,7 +269,21 @@ def observation(state) -> Module:
         if not audited:
             return [Check("生成记录 ↔ 用量日志", True, "生成记录未开启或今天还没有记录")]
         tol = max(2, logged * 0.005)
-        return [Check("生成记录 ↔ 用量日志", abs(audited - logged) <= tol, f"生成记录 {audited} 条，日志 {logged} 张")]
+        return [Check("生成记录 ↔ 用量日志", abs(audited - logged) <= tol, f"生成记录 {audited} 条，日志 {logged} 张"),
+                await _v5_rate_check()]
+
+    async def _v5_rate_check() -> Check:
+        """V5 恢复速度：接口读数和「每天余量变化 + 用掉的量」反推的实测值核对（2026-10-10 单次读数错了一倍）。"""
+        try:
+            last = json.loads(await state.db.get_setting("quota_algo_last", "{}") or "{}")
+        except (TypeError, ValueError):
+            last = {}
+        rc = ((last.get("v5") or {}).get("rate_check")) or {}
+        if not rc:
+            return Check("V5 恢复速度：接口 ↔ 实测", True, "还没有数据")
+        fmt = lambda v: "—" if v is None else f"{v:.1f}%/天"
+        detail = f"接口 {fmt(rc.get('api'))} · 实测 {fmt(rc.get('measured'))} · 采用 {fmt(rc.get('used'))}（{rc.get('status')}）"
+        return Check("V5 恢复速度：接口 ↔ 实测", rc.get("status") != "对不上", detail)
 
     return Module(
         name="observation", title="⑥ 观测", question="实际发生了什么？各处的数字对得上吗？",
