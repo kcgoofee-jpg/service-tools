@@ -307,12 +307,17 @@ class Database:
             "ALTER TABLE discord_registrations ADD COLUMN member_checked_at REAL NOT NULL DEFAULT 0",
             # 站长手动定的 V5 每日张数（基础值）；实际 daily_v5 = max(它 × 节约倍数, 算法给普通成员的值)，见 quota_algo
             "ALTER TABLE api_keys ADD COLUMN v5_pinned INTEGER",
+            # 按算力折算的张数（节约模式 14 步的图算 0.5 张）；账号每日上限按它判断。老数据回填见下
+            "ALTER TABLE upstream_token_counters ADD COLUMN units REAL",
         ):
             try:
                 await self._db.execute(ddl)
                 await self._db.commit()
             except aiosqlite.OperationalError:
                 pass  # 列已存在
+        # units 列刚加上时为 NULL：老数据按 1 张 = 1 份回填（偏保守，不会让升级当天突然多出额度）
+        await self._db.execute("UPDATE upstream_token_counters SET units=images WHERE units IS NULL")
+        await self._db.commit()
         # 原因码上线前的拒绝只有中文 detail：一次性回填最近 2 天（自动驾驶 / AIMD 最长看 24 小时），之后只按 reason 数
         from .reasons import BACKFILL
         cols = {r["name"] for r in await (await self._db.execute("PRAGMA table_info(usage_log)")).fetchall()}
@@ -391,13 +396,15 @@ class Database:
     # ---------- upstream token counters ----------
     async def get_upstream_counter(self, token_id: str, day: str) -> dict[str, int]:
         cur = await self._db.execute(
-            "SELECT images, v5 FROM upstream_token_counters WHERE token_id=? AND day=?",
+            "SELECT images, v5, units FROM upstream_token_counters WHERE token_id=? AND day=?",
             (token_id, day),
         )
         row = await cur.fetchone()
         if not row:
-            return {"images": 0, "v5": 0}
-        return {"images": int(row["images"]), "v5": int(row["v5"])}
+            return {"images": 0, "v5": 0, "units": 0.0}
+        units = row["units"]
+        return {"images": int(row["images"]), "v5": int(row["v5"]),
+                "units": float(row["images"] if units is None else units)}
 
     async def migrate_upstream_token_ids(self, token_ids: list[str]) -> None:
         """Merge old position-based counters into stable hashed token identities."""
@@ -476,13 +483,15 @@ class Database:
         return (await self.get_upstream_counter(token_id, day))["v5"]
 
     async def bump_upstream_image_counter(self, token_id: str, day: str,
-                                           images: int) -> None:
+                                           images: int, weight: float = 1.0) -> None:
         if images < 1:
             return
+        units = images * max(0.0, float(weight))
         await self._db.execute(
-            """INSERT INTO upstream_token_counters(token_id, day, images) VALUES (?,?,?)
-               ON CONFLICT(token_id, day) DO UPDATE SET images=images+excluded.images""",
-            (token_id, day, images),
+            """INSERT INTO upstream_token_counters(token_id, day, images, units) VALUES (?,?,?,?)
+               ON CONFLICT(token_id, day) DO UPDATE SET images=images+excluded.images,
+               units=COALESCE(units, images)+excluded.units""",
+            (token_id, day, images, units),
         )
         await self._db.commit()
 

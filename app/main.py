@@ -36,7 +36,7 @@ from . import reasons
 from .image_streaming import ImageStreamResponse
 from .image_tools import prepare_tool, validate_result, MAX_RESPONSE_BYTES
 from .image_payload import read_image_body
-from .nai import UpstreamError, _wait_cleanup
+from .nai import IMAGE_COST_WEIGHT, UpstreamError, _wait_cleanup
 from .policy import (
     normalize_image_request,
     upstream_parameter_problem,
@@ -54,7 +54,7 @@ from .policy import (
 )
 from .state import GateState
 from . import features
-from .policy import REFERENCE_FIELDS
+from .policy import ECONOMY_STEPS, REFERENCE_FIELDS
 from .key_sources import RETENTION_SECONDS as KEY_SOURCE_RETENTION
 from .action_log import RETENTION_DAYS as ADMIN_ACTION_RETENTION_DAYS, log_action
 from .audit import audit_flags, audit_disclosure, audit_image_days, capture_prompts, full_image
@@ -173,7 +173,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "2.15.13"
+__version__ = "2.15.14"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -1225,6 +1225,11 @@ async def _generate_image(request: Request, *, streaming: bool):
     ) if part) or "免费"
     # 尺寸 / 步数 / 费用始终在前：节约模式等钳制说明只追加在后面，不能顶掉记账信息
     detail = "; ".join([f"{p.get('width')}x{p.get('height')}/{p.get('steps')}step {cost}", *notes])
+    # 账号每日上限按算力折算：最终步数 ≤ 14（节约模式）的图约是 28 步的一半，计 0.5 张
+    try:
+        IMAGE_COST_WEIGHT.set(0.5 if 0 < int(p.get("steps") or 0) <= ECONOMY_STEPS else 1.0)
+    except (TypeError, ValueError):
+        IMAGE_COST_WEIGHT.set(1.0)
 
     reservation = None
 
