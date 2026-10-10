@@ -18,6 +18,9 @@ class Intent(BaseModel):
     discord_id: str
     guild_id: str
     name: str = ""          # Discord 用户名，仅用于候补名单展示
+    username: str = ""      # 直发 Key 用：机器人从 interaction 带来的用户名 / 显示名 / 头像
+    global_name: str = ""
+    avatar: str = ""
 
 
 def _service(request: Request):
@@ -226,6 +229,27 @@ async def intent(request: Request, body: Intent):
         await _log_bot(request, body.discord_id, "领取 Key 失败（/register）", "", str(exc)[:200])
         raise HTTPException(403, str(exc)) from exc
     return JSONResponse({"url": url}, headers={"Cache-Control": "no-store"})
+
+
+@router.post("/issue")
+async def issue(request: Request, body: Intent):
+    """/register 直发 Key：斜杠命令已验明身份，直接发 Key（不走 OAuth、不私信），
+    临时消息里回给本人。鉴权同 /intent（桥接密钥）。"""
+    service = getattr(request.app.state, "registrar", None)
+    if service is None:
+        raise HTTPException(503, "自助领 Key 尚未配置")
+    given = request.headers.get("Authorization", "")
+    if not hmac.compare_digest(given.encode("utf-8", "ignore"), ("Bearer " + service.bridge_secret).encode("utf-8")):
+        raise HTTPException(401, "未授权")
+    try:
+        result = await service.issue_direct(
+            body.discord_id, body.guild_id, username=body.username[:80],
+            global_name=body.global_name[:80], avatar=body.avatar[:120], name=body.name[:80])
+    except RegistrationError as exc:
+        await _log_bot(request, body.discord_id, "领取 Key 失败（/register）", "", str(exc)[:200])
+        raise HTTPException(403, str(exc)) from exc
+    await _log_bot(request, body.discord_id, "领取 Key（/register 直发）", "")
+    return JSONResponse(result, headers={"Cache-Control": "no-store"})
 
 
 @router.get("/callback")

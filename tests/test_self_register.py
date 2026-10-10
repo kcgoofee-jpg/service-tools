@@ -110,6 +110,22 @@ class RegistrationTests(unittest.IsolatedAsyncioTestCase):
             await self.service.finish("auth-code", state)
         self.assertEqual((await self.db._db.execute_fetchall("SELECT count(*) FROM api_keys"))[0][0], 0)
 
+    async def test_issue_direct_mints_key_without_oauth_or_dm(self):
+        # 生产同款：无身份组门槛 → /register 直发 Key，不走 OAuth、不私信
+        self.service.membership_role = ""
+        result = await self.service.issue_direct("777", "1480185480048808009", username="neo", global_name="Neo")
+        self.assertIn("nai-", result["key"])
+        self.assertIn(result["key"], result["message"])
+        self.assertIn("猫头鹰", result["message"])
+        self.assertEqual((await self.db._db.execute_fetchall("SELECT count(*) FROM api_keys"))[0][0], 1)
+        self.assertEqual(tuple((await self.db._db.execute_fetchall(
+            "SELECT discord_id,display_name FROM discord_registrations"))[0]), ("777", "Neo"))
+        self.assertNotIn(("POST", "/api/channels/dm-1/messages"), self.calls)   # 不私信
+        with self.assertRaises(RegistrationError):                              # 已领过会被去重拦下
+            await self.service.issue_direct("777", "1480185480048808009")
+        with self.assertRaises(RegistrationError):                              # 非指定服务器拒绝
+            await self.service.issue_direct("888", "1134557553011998840")
+
     async def test_http_intent_requires_bridge_secret_and_callback_only_reports_status(self):
         app = FastAPI()
         app.include_router(router)

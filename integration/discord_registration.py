@@ -21,15 +21,20 @@ async def handle_register(interaction):
         await interaction.response.send_message("领 Key 功能尚未配置完成。", ephemeral=True)
         return
     await interaction.response.defer(ephemeral=True)
+    user = interaction.user
     try:
         backend = os.getenv("REGISTRATION_BACKEND_URL", "http://127.0.0.1:3003").rstrip("/")
-        async with httpx.AsyncClient(timeout=8) as client:
-            response = await client.post(backend + "/self-register/intent",
+        # 直发：斜杠命令已由 Discord 验明身份，不再走 OAuth 授权，Key 只在本人可见的临时消息里给。
+        async with httpx.AsyncClient(timeout=12) as client:
+            response = await client.post(backend + "/self-register/issue",
                 headers={"Authorization": "Bearer " + secret},
-                json={"discord_id": str(interaction.user.id), "guild_id": str(interaction.guild_id),
-                      "name": str(getattr(interaction.user, "name", "") or "")[:80]})
+                json={"discord_id": str(user.id), "guild_id": str(interaction.guild_id),
+                      "name": str(getattr(user, "name", "") or "")[:80],
+                      "username": str(getattr(user, "name", "") or "")[:80],
+                      "global_name": str(getattr(user, "global_name", "") or getattr(user, "display_name", "") or "")[:80],
+                      "avatar": str(getattr(getattr(user, "avatar", None), "key", "") or "")[:120]})
         if response.status_code == 200:
-            message = "点击以下链接授权核验身份组（10 分钟内有效）：\n" + response.json()["url"]
+            message = response.json().get("message") or "领取成功。"
         elif response.status_code == 403:
             message = response.json().get("detail", "未通过资格检查。")
         else:
