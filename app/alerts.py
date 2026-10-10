@@ -12,6 +12,15 @@ import httpx
 
 DISCORD_API = "https://discord.com/api"
 
+# 只写日志、不私信站长的事件（站长 10/10：「没啥大问题就没必要私信我，这个更像日志」）。
+# 重启通知、上游短时波动 / 恢复、耗时变化、每小时上限自动下调都属于这类；监控照样能从日志看到。
+QUIET_KINDS = {"startup", "upstream_degraded", "upstream_recovered", "guard_hourly_down"}
+QUIET_PREFIXES = ("perf_",)
+
+
+def is_quiet(kind: str) -> bool:
+    return kind in QUIET_KINDS or kind.startswith(QUIET_PREFIXES)
+
 
 class Alerter:
     def __init__(self, *, bot_token: str = "", user_id: str = "", channel_id: str = "",
@@ -30,6 +39,9 @@ class Alerter:
 
     def notify(self, kind: str, message: str, *, cooldown: float = 900) -> None:
         """Fire-and-forget；可从同步或异步代码调用。同一 kind 在冷却期内只发一次。"""
+        if is_quiet(kind):
+            print(f"[alert-quiet] {kind}: {message}", flush=True)
+            return
         if not self.configured:
             return
         now = time.monotonic()
