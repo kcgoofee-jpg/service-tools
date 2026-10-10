@@ -38,7 +38,8 @@ async def set_economy(db, on: bool, state=None, *, by: str = "站长") -> bool:
     if announcer is not None:
         if on:
             announcer.post("⚙️ **节约模式已开启**：当前使用人较多，为了让更多人都能出到图，暂时统一用 14 步快速出图"
-                           "（质量略降、出图更快、更省额度）。空闲后会恢复正常高质量模式。")
+                           "（更快、更省额度）。V5 Full 会自动换成官方 Medium 档，画质接近正常，但自定义负面词暂时不生效"
+                           "（可在正面提示词里写 -2::xx:: 排除）。空闲后会恢复正常高质量模式。")
         else:
             announcer.post("✅ **节约模式已关闭**：已恢复正常步数和采样器，高质量出图。")
     return True
