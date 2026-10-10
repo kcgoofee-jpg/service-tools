@@ -173,7 +173,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "2.15.8"
+__version__ = "2.15.9"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -1349,7 +1349,8 @@ async def _generate_image(request: Request, *, streaming: bool):
                 status = exc.status if isinstance(exc, UpstreamError) else 502
                 message = exc.message if isinstance(exc, UpstreamError) else (
                     str(exc) if isinstance(exc, ImageStreamProtocolError) else "图片流连接中断或超时")
-                failure = message
+                # 上游 error 事件的原话只进日志，不转发给客户端（可能含上游内部信息）
+                failure = message + (f"（上游：{tracker.error_detail}）" if tracker.error_detail else "")
                 await response.error(status, message)
             except GateError:
                 # 还没发到上游就被本地拒绝（冷却 / V5 用完等）：由 run_stream 记一条「拒绝」，
