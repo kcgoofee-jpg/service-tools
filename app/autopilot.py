@@ -33,6 +33,7 @@ import time
 from datetime import datetime
 from typing import Any, Optional
 
+from . import site_flags
 from .action_log import log_action
 from . import reasons
 
@@ -194,7 +195,7 @@ async def run(state, registrar=None, now: Optional[float] = None) -> dict[str, A
                     d["applied"] = True
 
     # 6 节约模式：拥挤（排队被拒多）时统一 14 步让更多人出到图，空闲时恢复高质量。切换都会公告。
-    econ_now = (await db.get_setting("economy_mode", "off")) == "on"
+    econ_now = await site_flags.get(db, site_flags.ECONOMY)
     qr15 = int((await _q(db, "SELECT COUNT(*) FROM usage_log WHERE ts>=? AND status='rejected' "
                              f"AND reason='{reasons.QUEUE_FULL}'", now - 900))[0][0] or 0)
     qr30 = int((await _q(db, "SELECT COUNT(*) FROM usage_log WHERE ts>=? AND status='rejected' "

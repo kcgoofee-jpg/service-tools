@@ -21,6 +21,7 @@ from typing import Any, Optional
 
 import httpx
 
+from . import site_flags
 from .action_log import log_action
 
 V5_PAID_PRICE = 30          # 一张免费规格 V5（832×1216 / 1024²，28 步）在没有额度时扣的 Anlas：policy.py 实测系数 20 × V5 1.5 倍；低于它的分配没有意义
@@ -98,7 +99,7 @@ async def rebalance(state, now: Optional[float] = None, account: Optional[dict] 
         members = await eligible_keys(db, now, await _setting(db, "anlas_min_images_7d"),
                                       await _setting(db, "anlas_min_key_age_days"), state.day)
         try:
-            budget = float(await db.get_setting("global_monthly_anlas", state.settings.global_monthly_anlas) or 0)
+            budget = await site_flags.get(db, site_flags.GLOBAL_MONTHLY_ANLAS, state.settings)
         except (TypeError, ValueError):
             budget = 0.0
         budget_left = budget - await db.month_anlas_all(state.month()) if budget > 0 else None

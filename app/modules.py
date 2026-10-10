@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import time
 
+from . import site_flags
 from .kernel import Check, Kernel, Module, Param
 from .params import P
 
@@ -195,7 +196,7 @@ def integrity(state) -> Module:
 
     async def set_enabled(k: Kernel, on: bool):
         # 重新打开只回到 observe（校准前不处罚）；要真的处罚需在后台单独切 enforce
-        await state.db.set_setting(sg.MODE_SETTING, "observe" if on else "off")
+        await site_flags.put(state.db, site_flags.SHARE_MODE, "observe" if on else "off")
 
     async def checks(k: Kernel):
         now = time.time()
@@ -231,10 +232,10 @@ def integrity(state) -> Module:
 # ---------------- 领 Key ----------------
 def registration(state) -> Module:
     async def get_enabled(k: Kernel):
-        return str(await state.db.get_setting("register_open", "0")) in ("1", "true", "True")
+        return await site_flags.get(state.db, site_flags.REGISTER_OPEN)
 
     async def set_enabled(k: Kernel, on: bool):
-        await state.db.set_setting("register_open", "1" if on else "0")
+        await site_flags.put(state.db, site_flags.REGISTER_OPEN, on)
 
     async def checks(k: Kernel):
         reg = k.extra.get("registrar")

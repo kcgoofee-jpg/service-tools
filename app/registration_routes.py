@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel
 
+from . import site_flags
 from .action_log import log_action
 from .audit import audit_disclosure, audit_image_days
 from .policy import gen_key
@@ -341,7 +342,7 @@ def _set_cookie(response, name: str, value: str, max_age: int) -> None:
 async def _web_login_paused(request: Request) -> bool:
     """网页 Discord 登录是否暂停（默认暂停，设置 web_login_paused=0 才开放）：Discord 应用审核期间不发起任何 OAuth。"""
     db = request.app.state.gate.db
-    return str(await db.get_setting("web_login_paused", "1")).strip() != "0"
+    return await site_flags.get(db, site_flags.WEB_LOGIN_PAUSED)
 
 
 @member_router.get("/login")

@@ -103,3 +103,23 @@
 
 `usage_log.reason` 记录被拒请求的原因码（定义在 `app/reasons.py`）：`queue_full` 全站排队满、`key_busy` 本 Key 上一张没出完、`hourly_cap` / `quiet_cap` / `cap_3h` / `daily_cap` 账号上限、`breaker` 全站熔断、`key_paused` Key 被暂停。
 节约模式数 `queue_full`，Key 限流排除 `key_paused`，AIMD 加窗看 `hourly_cap`——都按码数，不再 `LIKE` 中文说明。升级时一次性回填最近 2 天的旧记录。
+
+
+## 共用站点设置（v2.14.3 起，`python -m app.site_flags` 生成）
+
+读写只走 `site_flags.get / put`；缺失或格式不对一律回到默认值（默认值按 fail-closed 选）。`tests/test_site_flags.py` 禁止别处直接 `get_setting` 这些键。各模块自己的参数组（`guard_*`、`runtime_*`、`bot_*`、quota_algo / anlas_pool DEFAULTS、`module_*`）不在此表。
+
+| 键 | 类型 | 默认 | 范围 | 归属 | 说明 |
+|---|---|---|---|---|---|
+| `web_login_paused` | flag | True |  | registration_routes | 网页 Discord OAuth 登录暂停（申诉期间）。Key 登录不受影响 |
+| `economy_mode` | onoff | False |  | ops / autopilot | 节约模式：免费档统一 14 步 + Euler-a |
+| `dm_enabled` | flag | False |  | registration | 私信总闸门（关 = 任何私信都不发） |
+| `waitlist_dm` | flag | False |  | registration | 有名额时私信候补成员（关 = 只在公告频道发一条汇总） |
+| `issue_hourly_cap` | int | 12 | 0–500 | registration | 每小时最多发放的新 Key |
+| `register_open` | flag | False |  | modules / registration | 开放 /register 领取 |
+| `global_daily_v5` | int | `.env global_daily_v5` | 0–100000 | 额度 / 首页 / 客户端 | 全站每日 V5 张数（0 = 不限） |
+| `global_monthly_anlas` | float | `.env global_monthly_anlas` | 0–1e+06 | 额度 / Anlas 池 | 全站每月 Anlas 预算（0 = 不限） |
+| `guard_base_daily_images` | int | 100 | 0–100000 | guard（注册私信也读） | V4.5 每人每天保底张数 |
+| `algo_notice` | str | '' |  | quota_algo → 首页 | 首页显示的今日额度说明 |
+| `audit_image_retention_days` | int | 3 | 0–365 | audit | 原图保留天数（0 = 不保存原图） |
+| `share_guard_mode` | choice | 'observe' | enforce / observe / off | share_guard | 防分享：enforce 处罚 / observe 只记录 / off |

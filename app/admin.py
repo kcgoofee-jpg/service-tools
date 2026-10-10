@@ -19,6 +19,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from starlette.concurrency import run_in_threadpool
 from fastapi.routing import APIRoute
 
+from . import site_flags
 from .action_log import ADMIN_ACTIONS, log_action, summarize
 
 from . import features as feature_defs
@@ -945,10 +946,8 @@ async def overview(request: Request):
     data = await st.db.overview(st.day(), st.week_days(7))
     data["pool"] = await st.nai.status()
     data["pool_configured"] = st.nai.configured
-    budget = await st.db.get_setting("global_monthly_anlas", st.settings.global_monthly_anlas)
-    data["anlas_budget"] = float(budget or 0)
-    v5lim = await st.db.get_setting("global_daily_v5", st.settings.global_daily_v5)
-    data["v5_limit"] = int(float(v5lim or 0))
+    data["anlas_budget"] = float(await site_flags.get(st.db, site_flags.GLOBAL_MONTHLY_ANLAS, st.settings))
+    data["v5_limit"] = await site_flags.get(st.db, site_flags.GLOBAL_DAILY_V5, st.settings)
     data["feature_usage"] = await _feature_usage(st)
     data["economy"] = await ops.economy_enabled(st.db)
     return data
@@ -985,9 +984,8 @@ async def _feature_usage(st) -> list[dict]:
 async def get_settings(request: Request):
     require_admin(request)
     st = request.app.state.gate
-    v = await st.db.get_setting("global_monthly_anlas", st.settings.global_monthly_anlas)
-    v5 = await st.db.get_setting("global_daily_v5", st.settings.global_daily_v5)
-    return {"global_monthly_anlas": float(v or 0), "global_daily_v5": int(float(v5 or 0)),
+    return {"global_monthly_anlas": float(await site_flags.get(st.db, site_flags.GLOBAL_MONTHLY_ANLAS, st.settings)),
+            "global_daily_v5": await site_flags.get(st.db, site_flags.GLOBAL_DAILY_V5, st.settings),
             SETTING: await read_alert_threshold(st.db),
             "v5_capacity": await ops.v5_capacity(st.db, st.settings, getattr(request.app.state, "registrar", None))}
 
@@ -1126,12 +1124,12 @@ async def put_settings(request: Request):
     if type(threshold) is not int or not 1 <= threshold <= 100:
         raise HTTPException(422, "V5 告警阈值必须为 1～100 的整数百分比")
     # 缺省字段保持原值（以前缺省会被写成 0 = 不限）。
-    v = _num(body.get("global_monthly_anlas", await st.db.get_setting(
-        "global_monthly_anlas", st.settings.global_monthly_anlas)), float, 0.0, 1000000.0, "global_monthly_anlas")
-    g5 = _num(body.get("global_daily_v5", await st.db.get_setting(
-        "global_daily_v5", st.settings.global_daily_v5)), int, 0, 100000, "global_daily_v5")
-    await st.db.set_setting("global_monthly_anlas", v)
-    await st.db.set_setting("global_daily_v5", g5)
+    v = _num(body.get("global_monthly_anlas", await site_flags.get(st.db, site_flags.GLOBAL_MONTHLY_ANLAS, st.settings)),
+             float, 0.0, 1000000.0, "global_monthly_anlas")
+    g5 = _num(body.get("global_daily_v5", await site_flags.get(st.db, site_flags.GLOBAL_DAILY_V5, st.settings)),
+              int, 0, 100000, "global_daily_v5")
+    await site_flags.put(st.db, site_flags.GLOBAL_MONTHLY_ANLAS, v)
+    await site_flags.put(st.db, site_flags.GLOBAL_DAILY_V5, g5)
     await st.db.set_setting(SETTING, threshold)
     return {"ok": True, "global_monthly_anlas": v, "global_daily_v5": g5, SETTING: threshold,
             "v5_capacity": await ops.v5_capacity(st.db, st.settings, getattr(request.app.state, "registrar", None))}
