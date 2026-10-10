@@ -173,7 +173,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "2.15.7"
+__version__ = "2.15.8"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -1223,8 +1223,8 @@ async def _generate_image(request: Request, *, streaming: bool):
         f"est={est['anlas']}A" if est["anlas"] else "",
         f"V5额度+{est['v5']}" if est["v5"] else "",
     ) if part) or "免费"
-    detail = "; ".join(notes) if notes else (
-        f"{p.get('width')}x{p.get('height')}/{p.get('steps')}step {cost}")
+    # 尺寸 / 步数 / 费用始终在前：节约模式等钳制说明只追加在后面，不能顶掉记账信息
+    detail = "; ".join([f"{p.get('width')}x{p.get('height')}/{p.get('steps')}step {cost}", *notes])
 
     reservation = None
 
