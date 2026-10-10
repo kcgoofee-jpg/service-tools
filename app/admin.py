@@ -1497,6 +1497,24 @@ async def logs_export(request: Request, days: int = 30):
                              "Cache-Control": "no-store"})
 
 
+@router.get("/feedback")
+async def feedback_list(request: Request):
+    """成员 /反馈 提交的问卷，最新在前。"""
+    require_admin(request)
+    from . import feedback
+    return {"questions": feedback.QUESTIONS, "items": await feedback.listing(request.app.state.gate.db, 500)}
+
+
+@router.get("/feedback/export")
+async def feedback_export(request: Request):
+    require_admin(request)
+    from . import feedback
+    blob = feedback.to_csv(await feedback.listing(request.app.state.gate.db, 100000))
+    return Response(blob, media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f"attachment; filename=\"owl-feedback-{time.strftime('%Y%m%d-%H%M')}.csv\"",
+                             "Cache-Control": "no-store"})
+
+
 @router.get("/status")
 async def server_status(request: Request):
     """告警与记录功能的当前状态（不含任何密钥）。"""

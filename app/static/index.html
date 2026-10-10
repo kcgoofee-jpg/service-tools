@@ -971,6 +971,12 @@ td.note{min-width:220px}
 
         <!-- 设置 -->
         <!-- 额度与保护 -->
+        <section id="tab-feedback" hidden>
+          <div class="page-head"><div class="ttl"><h1>成员反馈</h1><p class="pv" id="pv-feedback"></p></div>
+            <div class="tools"><button class="btn" data-act="feedback-export" title="下载全部反馈（CSV）">导出 CSV</button>
+              <button class="btn rf" data-act="refresh-feedback" aria-label="刷新" title="刷新"><span data-ic="refresh"></span><span class="lbl">刷新</span></button></div></div>
+          <div class="card panel tight"><div class="table-wrap"><table class="rt"><thead id="fbHead"></thead><tbody id="fbBody"><tr><td class="empty">加载中…</td></tr></tbody></table></div></div>
+        </section>
         <section id="tab-limits" hidden>
           <div class="page-head"><div class="ttl"><h1>额度与保护</h1><p class="pv" id="pv-limits"></p></div></div>
           <div class="card panel" id="quotaAlgo">
@@ -1435,9 +1441,9 @@ async function boot(){
 }
 
 /* ---------- tabs ---------- */
-const TABS = ['ov','members','ops','audit','up','risk','bugs','logs','actions','modules','limits','discord','set'];
+const TABS = ['ov','members','ops','audit','up','risk','bugs','logs','actions','feedback','modules','limits','discord','set'];
 // 生成记录 / 用量日志 / 操作日志 / Bug 追踪 合并成边栏一项「日志」，页内用标签切换（10/10 站长：边栏太多）
-const LOG_TABS = [['audit','生成记录'],['logs','用量日志'],['actions','操作日志'],['bugs','Bug 追踪']];
+const LOG_TABS = [['audit','生成记录'],['logs','用量日志'],['actions','操作日志'],['bugs','Bug 追踪'],['feedback','成员反馈']];
 function logSubtabs(){
   LOG_TABS.forEach(([t])=>{
     const sec = $('#tab-'+t); if(!sec || sec.querySelector('.subtabs')) return;
@@ -1464,6 +1470,7 @@ function tab(name){
   if(name==='up'){ loadOverview(); loadReconciliation(); loadPerf(); loadShadow(); }
   if(name==='risk') loadRisk();
   if(name==='bugs') loadBugs();
+  if(name==='feedback') loadFeedback();
   if(name==='discord') loadBot();
   if(name==='modules') loadModules();
 }
@@ -1622,6 +1629,17 @@ document.addEventListener('click', e => { const b = e.target.closest('[data-char
 const BUG_SRC = {request:'接口异常', upstream:'上游故障', gate:'网关故障', accounting:'记账写入', disconnect:'客户端提前断开',
   audit:'生成记录', key_sources:'来源统计', anlas_pool:'Anlas 分配', cleanup:'闲置回收', registration_reset:'定时清空'};
 function bugSource(s){ return BUG_SRC[s] || (s.startsWith('maintenance:') ? '维护任务 · ' + s.slice(12) : s.startsWith('web:') ? '网页脚本 · ' + (s.slice(4)==='admin'?'后台':'首页') : s); }
+async function loadFeedback(){
+  try{
+    const d = await api('/admin/api/feedback');
+    const qs = d.questions || [];
+    $('#fbHead').innerHTML = `<tr><th>时间</th><th>成员</th>${qs.map(q=>`<th>${esc(q.label)}</th>`).join('')}</tr>`;
+    setPV('feedback', d.items.length ? 'ok' : 'warn', d.items.length ? `共 ${d.items.length} 份。成员在 Discord 输入 /反馈 填写，不私信任何人` : '还没有人提交。成员在 Discord 输入 /反馈 填写');
+    $('#fbBody').innerHTML = d.items.length ? d.items.map(it=>`<tr><td class="mono" style="white-space:nowrap">${new Date(it.ts*1000).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}</td>
+      <td>${esc(it.key_name || it.username || it.discord_id)}</td>${qs.map(q=>`<td style="white-space:pre-wrap;min-width:140px">${esc(it.answers[q.id]||'')}</td>`).join('')}</tr>`).join('')
+      : `<tr><td class="empty" colspan="${qs.length+2}">还没有反馈</td></tr>`;
+  }catch(e){ toastErr(e); }
+}
 async function loadBugs(){
   try{
     const d = await api('/admin/api/errors' + ($('#bugAll').checked ? '?all=true' : ''));
@@ -3081,6 +3099,8 @@ document.addEventListener('click', ev=>{
         case 'copy-pos': { const m = auditPrompts.get(Number(el.dataset.id)); if(m) copyText(m.p, '已复制正面提示词'); break; }
     case 'copy-neg': { const m = auditPrompts.get(Number(el.dataset.id)); if(m) copyText(m.n, '已复制负面提示词'); break; }
     case 'copy-chars': { const m = auditPrompts.get(Number(el.dataset.id)); if(m) copyText((m.chars||[]).map((c,i)=>`角色${i+1}: ${c}`).join('\n'), '已复制角色提示词'); break; }
+    case 'feedback-export': window.open('/admin/api/feedback/export', '_blank'); break;
+    case 'refresh-feedback': loadFeedback(); break;
     case 'logs-export': window.open('/admin/api/logs/export?days=30', '_blank'); break;
     case 'audit-export': { const kf = $('#auditFilter').value; if(kf) window.open('/admin/api/audit/export?key_id=' + encodeURIComponent(kf), '_blank'); break; }
     case 'audit-page': auditPage = Math.max(1, auditPage + Number(el.dataset.d)); loadAudit(); break;

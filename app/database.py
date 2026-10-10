@@ -147,6 +147,15 @@ CREATE TABLE IF NOT EXISTS status_hourly (  -- 成员接口每小时各 HTTP 状
     n INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (hour, code)
 );
+CREATE TABLE IF NOT EXISTS feedback (      -- 成员用 /反馈 提交的问卷（Discord 弹窗表单，不私信任何人）
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts REAL NOT NULL,
+    discord_id TEXT NOT NULL,
+    username TEXT NOT NULL DEFAULT '',
+    key_id INTEGER,
+    answers TEXT NOT NULL                  -- JSON：{问题 id: 回答}
+);
+CREATE INDEX IF NOT EXISTS idx_feedback_ts ON feedback (ts);
 CREATE TABLE IF NOT EXISTS coupons (       -- 成员的券（现在只有「重置券」：在首页自己点一下，重置当天的 V5 / Anlas 额度）
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     key_id INTEGER NOT NULL,

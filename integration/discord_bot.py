@@ -1,6 +1,6 @@
 """Standalone Discord bot.
 
-成员：/register /quota /resetkey /help。管理员：/open /limit /slots /ban /unban /revoke。
+成员：/register /quota /resetkey /help /反馈。管理员：/open /limit /slots /ban /unban /revoke。
 功能授权和生成记录开关只在网页后台操作。
 """
 from __future__ import annotations
@@ -124,6 +124,39 @@ def build_client() -> tuple[discord.Client, app_commands.CommandTree, discord.Ob
                 lines.append(f"⏳ 上游限流冷却中，约 {up['image_cooldown_seconds']} 秒后恢复生图")
         await interaction.followup.send("\n".join(lines), ephemeral=True)
 
+    @tree.command(name="反馈", description="给站长提意见：填一份小问卷（只有你能看到，不会私信你）", guild=guild)
+    async def feedback_cmd(interaction: discord.Interaction):
+        """弹出 Discord 自带表单。成员自己发起，不私信、不群发（680009 申诉期规则）。"""
+        status, data = await backend("/self-register/feedback/questions", interaction)
+        if status != 200 or not data.get("questions"):
+            await interaction.response.send_message("问卷暂时打不开，请稍后再试。", ephemeral=True)
+            return
+        qs = data["questions"][:5]
+
+        class FeedbackModal(discord.ui.Modal, title="猫头鹰公益站 · 反馈问卷"):
+            pass
+
+        modal = FeedbackModal(timeout=900)
+        inputs = []
+        for q in qs:
+            field = discord.ui.TextInput(
+                label=str(q["label"])[:45], required=bool(q.get("required")), max_length=int(q.get("max", 1000)),
+                style=discord.TextStyle.paragraph if q.get("style") == "long" else discord.TextStyle.short)
+            modal.add_item(field)
+            inputs.append((q["id"], field))
+
+        async def on_submit(modal_interaction: discord.Interaction):
+            await modal_interaction.response.defer(ephemeral=True)
+            answers = {qid: str(field.value or "") for qid, field in inputs}
+            code, result = await backend("/self-register/feedback", modal_interaction,
+                                         extra={"answers": answers,
+                                                "username": str(getattr(modal_interaction.user, "name", "") or "")[:80]})
+            text = result.get("message", "收到啦～") if code == 200 and isinstance(result, dict) else str(result)
+            await modal_interaction.followup.send(text, ephemeral=True)
+
+        modal.on_submit = on_submit
+        await interaction.response.send_modal(modal)
+
     @tree.command(name="resetkey", description="Key 丢了或泄露了？换一把新的（旧的立即失效）", guild=guild)
     async def resetkey(interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
@@ -138,7 +171,7 @@ def build_client() -> tuple[discord.Client, app_commands.CommandTree, discord.Ob
     async def help_(interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         status, data = await backend("/self-register/info", interaction)
-        lines = [f"`/register` 领取 Key（私信发送，含配置教程）· `/quota` 额度和服务状态 · `/resetkey` 换新 Key",
+        lines = [f"`/register` 领取 Key（私信发送，含配置教程）· `/quota` 额度和服务状态 · `/resetkey` 换新 Key · `/反馈` 给站长提意见",
                  f"客户端接口地址填 `{SITE}`（不加 /v1），Key 填 `nai-` 开头的整串。详细说明：{SITE}"]
         if status == 200:
             if not data["open"]:
