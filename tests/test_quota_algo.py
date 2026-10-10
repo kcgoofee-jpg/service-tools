@@ -124,7 +124,7 @@ async def test_pinned_manual_v5_never_below_members_and_scales_with_economy(tmp_
         low = await db.create_key({"name": "熟人-低", "token": "nai-low", **base})
         high = await db.create_key({"name": "熟人-高", "token": "nai-high", **base})
         await db._db.execute("UPDATE api_keys SET quota_auto=-1, v5_pinned=5 WHERE id=?", (low["id"],))
-        await db._db.execute("UPDATE api_keys SET quota_auto=-1, v5_pinned=50 WHERE id=?", (high["id"],))
+        await db._db.execute("UPDATE api_keys SET quota_auto=-1, v5_pinned=50, is_test=1 WHERE id=?", (high["id"],))   # 测试 Key 也要生效
         await db._db.commit()
 
         class Allow:
