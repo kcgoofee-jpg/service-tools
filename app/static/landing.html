@@ -105,6 +105,9 @@ svg.ic{width:18px;height:18px;flex:none;stroke:currentColor;fill:none;stroke-wid
   -webkit-backdrop-filter:saturate(1.4) blur(10px);border-bottom:1px solid var(--border)}
 .topbar-in{max-width:960px;margin:0 auto;padding:8px 16px;display:flex;align-items:center;gap:12px;min-height:56px}
 .brand{display:flex;align-items:center;gap:12px;font-weight:700;font-size:16px;letter-spacing:.2px;flex:1}
+.brand-link{display:inline-flex;align-items:center;gap:12px;color:inherit;text-decoration:none;border-radius:var(--radius-sm)}
+.brand-link:hover .brand-mark{filter:brightness(1.08)}
+.brand-link:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 .brand-mark{width:32px;height:32px;border-radius:var(--radius-sm);font-size:20px;background:var(--accent);color:var(--on-accent);display:grid;place-items:center}
 .top-link{color:var(--text-2);text-decoration:none;font-size:13.5px;padding:6px 8px;border-radius:6px;display:none;transition:color .15s,background .15s}
 .top-link:hover{color:var(--text);background:var(--surface-3)}
@@ -379,10 +382,10 @@ body.authed #board{margin-top:22px}
 <body>
 <header class="topbar">
   <div class="topbar-in">
-    <div class="brand"><span class="brand-mark" aria-hidden="true" style="font-size:20px">🦉</span>猫头鹰公益站</div>
+    <div class="brand"><a class="brand-link" href="/" aria-label="猫头鹰公益站 · 回到首页"><span class="brand-mark" aria-hidden="true" style="font-size:20px">🦉</span>猫头鹰公益站</a></div>
     <a class="top-link" href="#live" id="navLive">查额度</a>
     <a class="top-link guest-only" href="#start">上手</a>
-    <a class="top-link" href="#rules">须知</a>
+    <a class="top-link guest-only" href="#rules">须知</a>
     <a class="top-link" href="#board">看板</a>
     <a class="top-link" href="#algo">算法</a>
     <div class="spacer"></div>
@@ -445,7 +448,7 @@ body.authed #board{margin-top:22px}
     </div>
   </section>
 
-  <section id="rules">
+  <section id="rules" class="guest-only">
     <div class="sec-head"><h2>使用须知</h2><p>现在的正确用法，按这几条来基本不会报错。</p></div>
     <ul class="rules card">
       <li><span class="ri" data-ic="code"></span><span><b>客户端怎么填</b>：生图客户端（柏宝绘 / 智绘姬 / SillyTavern 等）的 NovelAI 接口地址填 <code class="mono" id="siteTxt3">—</code>（不加 /v1），API Key 填你的 Key。</span></li>

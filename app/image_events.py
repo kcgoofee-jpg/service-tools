@@ -64,6 +64,7 @@ class ImageEventTracker:
         self.wire_format = wire_format
         self.failed = False
         self._completed: set[int] = set()
+        self.first_image: bytes | None = None      # 第一张完整的最终图，供生成记录保存原图（否则流式出图永远没有图）
         self._sse = SSEDecoder(MAX_EVENT_BYTES, MAX_STREAM_BYTES)
         self._binary = bytearray()
         self._total_bytes = 0
@@ -154,6 +155,8 @@ class ImageEventTracker:
         if not _image_envelope(decoded):
             self._reject()
         self._completed.add(sample)
+        if self.first_image is None:
+            self.first_image = bytes(decoded)
 
     def finish(self) -> None:
         """Discard unframed data without counting it; already counted finals remain."""

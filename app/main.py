@@ -55,7 +55,7 @@ from . import features
 from .policy import REFERENCE_FIELDS
 from .key_sources import RETENTION_SECONDS as KEY_SOURCE_RETENTION
 from .action_log import RETENTION_DAYS as ADMIN_ACTION_RETENTION_DAYS
-from .audit import (audit_flags, audit_disclosure, audit_image_days, make_thumbnail, prompt_texts,
+from .audit import (audit_flags, audit_disclosure, audit_image_days, prompt_texts,
                     capture_prompts, full_image)
 from .upstream_errors import upstream_error_message, text_stream_events
 from .sse import encode_sse
@@ -186,7 +186,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "2.12.2"
+__version__ = "2.12.3"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -450,7 +450,7 @@ def schedule_audit(*args) -> None:
 
 
 async def audit_generation(key, kind: str, model: str, status: str, body: dict, content: bytes | None = None) -> None:
-    """按配置记录提示词和缩略图；任何失败都不得影响生图结果。"""
+    """按配置记录提示词和原图（不再另存缩略图，后台需要小图时从原图现场缩小）；任何失败都不得影响生图结果。"""
     cfg = STATE.settings
     try:
         want_prompts, want_thumbs, _days = await audit_flags(STATE.db, cfg)
@@ -461,10 +461,8 @@ async def audit_generation(key, kind: str, model: str, status: str, body: dict, 
     try:
         prompt, negative, extra = capture_prompts(body) if want_prompts else ("", "", "")
         thumb, image, image_type = None, None, ""
-        if want_thumbs and content and status == "ok":
-            thumb = await anyio.to_thread.run_sync(make_thumbnail, content)
-            if await audit_image_days(STATE.db) > 0:          # 原图保留天数设为 0 = 只留缩略图、不存原图
-                image, image_type = await anyio.to_thread.run_sync(full_image, content)
+        if want_thumbs and content and status == "ok" and await audit_image_days(STATE.db) > 0:
+            image, image_type = await anyio.to_thread.run_sync(full_image, content)
         await STATE.db.add_audit(key["id"], key["name"], kind, model, status, prompt, negative, thumb,
                                  extra=extra, image=image, image_type=image_type)
     except Exception as exc:
@@ -1337,7 +1335,8 @@ async def _generate_image(request: Request, *, streaming: bool):
                         legacy_free_images=legacy_free_images,
                         detail=detail + (f"; 完成 {completed}/{image_count}" if completed < image_count else ""),
                     )
-                await audit_generation(key, "image_stream", model, "ok" if completed and not failure else "error", body)
+                await audit_generation(key, "image_stream", model, "ok" if completed and not failure else "error", body,
+                                       tracker.first_image if completed else None)
                 upstream_outcome(bool(completed) and not failure)
                 if failure or not completed:
                     # 未结算部分单独记为待核对费用。
