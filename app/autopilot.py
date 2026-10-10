@@ -145,9 +145,12 @@ async def run(state, registrar=None, now: Optional[float] = None) -> dict[str, A
         cov = last.get("coverage_hours")
         slots, why = cap_now, (f"昨天只有 {cov} 小时数据，名额不变" if cov is not None
                                else f"{last.get('day', '昨天')} 的数据不完整（系统从那天中途开始记录），名额不变")
+    if not cap_now:
+        # 名额不限（站长 10/10：进服务器的人都能领 Key）：没有上限可调，否则 0 → +5 会把「不限」改成 5
+        slots, why = 0, "名额不限（站长设定），不调整；人多了由动态额度缩小每人份额"
     mode = await _mode(db, "slots")
     out["rules"]["slots"] = {"mode": mode, "value": slots, "why": why}
-    if mode == "enforce" and slots > cap_now and registrar is not None:
+    if mode == "enforce" and cap_now and slots > cap_now and registrar is not None:
         last_at = float(await db.get_setting("autopilot_slots_at", 0) or 0)
         if now - last_at >= SLOTS_COOLDOWN:
             from . import ops
