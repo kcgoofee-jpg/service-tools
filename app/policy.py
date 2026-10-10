@@ -560,9 +560,7 @@ V5_MEDIUM_UC_PRESET = 0                 # V5 的预设列表里 heavy 排第 0
 V5_MEDIUM_UC = ("lowres, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, "
                 "very displeasing, chromatic aberration, dithering, halftone, screentone, multiple views, logo, "
                 "too many watermarks, negative space, blank page")
-# 一张 Medium 记多少张 V5 额度。官方只说「比 23 步 High 省约 42%」，我们成员多用 28 步，真实比例未实测：
-# 先取保守的 0.6，等安静时段快照实测后再调（见 owl-verify-numbers）。
-V5_MEDIUM_WEIGHT = 0.6
+# Medium 和 High 一样每张记 1 张 V5（10/10 站长：不再打折——折算会让 V5 用量 / 恢复速度的统计口径失真）。
 
 
 def is_v5_medium(model: str) -> bool:

@@ -47,7 +47,6 @@ from .policy import (
     is_v5_medium,
     medium_normalize,
     to_medium,
-    V5_MEDIUM_WEIGHT,
     legacy_normal_free_eligible,
     validate_image_references,
     validate_vibe_encoding,
@@ -178,7 +177,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "2.15.37"
+__version__ = "2.15.38"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -912,8 +911,6 @@ def record(key, kind: str, model: str, status: str, *, images: int = 0,
     """写日志；成功请求额外计入每日配额。"""
     _REQUEST_LOGGED.set(True); request_timing.mark_logged()
     live.note(status)
-    if status == "ok" and v5 and is_v5_medium(model):
-        v5 = _medium_v5_units(key["id"], v5)
     timing = request_timing.snapshot()
     async def _go():
         if status == "ok":
@@ -930,17 +927,6 @@ def record(key, kind: str, model: str, status: str, *, images: int = 0,
     task = asyncio.create_task(_go())
     task.add_done_callback(_log_task_failure)
     return task
-
-
-_MEDIUM_CARRY: dict[int, float] = {}
-
-
-def _medium_v5_units(key_id: int, images: int) -> int:
-    """Medium 一张按 V5_MEDIUM_WEIGHT 张计：小数部分按 Key 累计（只在内存里，重启最多少记不到 1 张）。"""
-    carry = _MEDIUM_CARRY.get(key_id, 0.0) + images * V5_MEDIUM_WEIGHT
-    whole = int(carry + 1e-9)
-    _MEDIUM_CARRY[key_id] = carry - whole
-    return whole
 
 
 def _log_task_failure(task: asyncio.Task) -> None:
