@@ -78,8 +78,8 @@ async def test_run_applies_same_quota_to_auto_members_only(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_economy_mode_doubles_v5_and_reverts(tmp_path):
-    # 节约模式下免费档 14 步，每张只扣约一半额度：V5 每人 / 全站额度 ×2；关掉后回到基础值；账号剩余低时不放大
+async def test_economy_mode_does_not_change_v5(tmp_path):
+    # 站长 10/10：「打折以后不搞了」——节约模式的 V5 走 Medium 每张计 1，额度不放大
     from app import ops, site_flags
     db = Database(str(tmp_path / "e.sqlite"))
     await db.connect()
@@ -98,10 +98,10 @@ async def test_economy_mode_doubles_v5_and_reverts(tmp_path):
         assert not base.get("economy")
         assert await ops.set_economy(db, True, st)                      # 开启时立刻重算
         on = json.loads(await db.get_setting(quota_algo.STATE_KEY, "{}"))["v5"]
-        assert on["economy"] == 2 and on["each"] == base["each"] * 2 and on["global"] == base["global"] * 2
+        assert not on.get("economy") and on["each"] == base["each"] and on["global"] == base["global"]
         assert (await db.get_key(k["id"]))["daily_v5"] == on["each"]
         assert int(await db.get_setting("global_daily_v5", 0)) == on["global"]
-        assert "节约模式 ×2" in await db.get_setting(quota_algo.NOTICE_KEY, "")
+        assert "节约模式 ×" not in await db.get_setting(quota_algo.NOTICE_KEY, "")
         pct["v"] = 30                                                   # 账号剩余跌破 40%：安全优先，不放大
         assert not (await quota_algo.run(st))["v5"].get("economy")
         pct["v"] = 98
@@ -114,7 +114,7 @@ async def test_economy_mode_doubles_v5_and_reverts(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_pinned_manual_v5_never_below_members_and_scales_with_economy(tmp_path):
+async def test_pinned_manual_v5_never_below_members_and_ignores_economy(tmp_path):
     from app import ops
     db = Database(str(tmp_path / "p.sqlite"))
     await db.connect()
@@ -136,8 +136,8 @@ async def test_pinned_manual_v5_never_below_members_and_scales_with_economy(tmp_
         assert (await db.get_key(low["id"]))["daily_v5"] == each          # 手动定得比大家少：抬到普通成员的值
         assert (await db.get_key(high["id"]))["daily_v5"] == 50
         await ops.set_economy(db, True, st)
-        assert (await db.get_key(low["id"]))["daily_v5"] == each * 2
-        assert (await db.get_key(high["id"]))["daily_v5"] == 100          # 节约模式一样翻倍
+        assert (await db.get_key(low["id"]))["daily_v5"] == each
+        assert (await db.get_key(high["id"]))["daily_v5"] == 50           # 节约模式不放大
         assert (await db.get_key(high["id"]))["v5_pinned"] == 50          # 基础值不被改写
     finally:
         await db.close()

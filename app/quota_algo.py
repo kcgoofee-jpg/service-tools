@@ -254,14 +254,11 @@ async def _members(db) -> list[int]:
 
 
 async def economy_multiplier(db, pct: Optional[float]) -> float:
-    """节约模式开着时 V5 额度的放大倍数 = 正常步数 ÷ 节约步数（28 ÷ 14 = 2）；剩余低于收紧线或未开时为 1。"""
-    from . import site_flags
-    from .policy import ECONOMY_STEPS
-    if not await site_flags.get(db, site_flags.ECONOMY):
-        return 1.0
-    if pct is not None and pct < P("allocation.v5_tighten_below", 40):
-        return 1.0
-    return round(P("allocation.v5_normal_steps", 28) / ECONOMY_STEPS, 2)
+    """节约模式不再放大 V5 额度，固定为 1。
+
+    原来节约模式下 V5 额度 ×2（28 ÷ 14 步）。站长 10/10 定了「打折以后不搞了，影响参数」：
+    节约模式的 V5 走 Medium，每张按 1 张计。×2 是遗留，22:58 实际触发过一次（18 → 36），这里移除。"""
+    return 1.0
 
 
 async def _active_v5(db, days: int, now: float) -> int:
