@@ -1232,8 +1232,11 @@ async def audit_list(request: Request, key_id: Optional[int] = None, page: int =
     per_page = per_page if per_page in (24, 48, 96) else 24
     page = max(1, min(int(page), 1_000_000))
     rows, total = await st.db.list_audit(per_page, (page - 1) * per_page, key_id)
-    return {"items": [dict(r) for r in rows], "page": page, "per_page": per_page, "total": total,
-            "pages": max(1, (total + per_page - 1) // per_page)}
+    pages = max(1, (total + per_page - 1) // per_page)
+    if page > pages:      # 页码超出（跳页太大、或保留期清掉了记录）：回到最后一页，和用量日志 / 操作日志一致
+        page = pages
+        rows, total = await st.db.list_audit(per_page, (page - 1) * per_page, key_id)
+    return {"items": [dict(r) for r in rows], "page": page, "per_page": per_page, "total": total, "pages": pages}
 
 
 @router.get("/audit/{audit_id}/thumb")

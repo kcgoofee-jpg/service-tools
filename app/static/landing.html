@@ -85,7 +85,6 @@ a{color:var(--accent-text);text-underline-offset:2px}
 svg.ic{width:18px;height:18px;flex:none;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 [data-ic]{display:inline-flex;align-items:center;justify-content:center}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 
 /* buttons */
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:40px;padding:8px 16px;border-radius:var(--radius-sm);
@@ -123,13 +122,9 @@ section{margin-top:40px;scroll-margin-top:72px}
 .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-sm);padding:20px;transition:border-color .2s,box-shadow .2s,transform .2s}
 .card.step{transition:border-color .2s,box-shadow .2s,transform .2s}
 .card.step:hover{border-color:var(--border-strong);box-shadow:var(--shadow);transform:translateY(-2px)}
-
-.statusbar{padding:20px 0 4px}
 .pills{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
 .step-act{margin-top:4px}
 .step-act .btn{min-height:44px;padding:8px 18px}
-.remember{display:flex;gap:8px;align-items:center;margin-top:12px;font-size:13.5px;color:var(--text-2);cursor:pointer}
-.remember input{width:18px;height:18px;accent-color:var(--accent)}
 .pill{display:inline-flex;align-items:center;gap:8px;padding:4px 12px;border-radius:999px;font-size:13.5px;font-weight:500;
   background:var(--surface);border:1px solid var(--border);color:var(--text-2);box-shadow:var(--shadow-sm);min-height:32px;
   transition:background .2s,border-color .2s,color .2s}
@@ -229,7 +224,6 @@ section{margin-top:40px;scroll-margin-top:72px}
 .mcard svg text:not([fill]){fill:var(--muted)}
 .mcard svg .ax{stroke:var(--border-strong);stroke-width:1}
 .mcard svg .gd{stroke:var(--surface-3);stroke-width:1}
-.m-foot{margin-top:16px;color:var(--muted);font-size:12.5px}
 @media (max-width:759px){.m-flow{grid-template-columns:repeat(2,minmax(0,1fr))}.m-flow a{border-bottom:1px solid var(--border)}.m-flow a:nth-child(2n){border-right:0}.m-flow a:nth-last-child(-n+2){border-bottom:0}}
 @media (min-width:640px){.mcard>div{padding:22px 24px}.eq{font-size:14.5px}}
 @media (min-width:860px){.mcard{grid-template-columns:minmax(0,5fr) minmax(0,6fr)}.mcard .math{border-bottom:0;border-right:1px solid var(--border)}}
@@ -240,9 +234,8 @@ section{margin-top:40px;scroll-margin-top:72px}
 .step .n{width:28px;height:28px;border-radius:50%;background:var(--accent-soft);color:var(--accent-text);display:grid;place-items:center;font-weight:700;font-size:14px}
 .step h3{font-size:15.5px;line-height:1.45;display:flex;align-items:center;gap:10px}
 .step .n{flex:none}
-.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .step p{color:var(--text-2);font-size:14px}
-code,.kbd{font-family:var(--mono);font-size:12.5px;background:var(--surface-3);border:1px solid var(--border);border-radius:6px;padding:1px 6px;overflow-wrap:anywhere}
+code{font-family:var(--mono);font-size:12.5px;background:var(--surface-3);border:1px solid var(--border);border-radius:6px;padding:1px 6px;overflow-wrap:anywhere}
 .copyline{display:flex;align-items:center;gap:8px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:4px 4px 4px 12px;margin-top:4px;transition:border-color .15s,background .15s}
 .copyline:hover{border-color:var(--border-strong);background:var(--surface-3)}
 .copyline .mono{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;user-select:all}
@@ -252,53 +245,21 @@ code,.kbd{font-family:var(--mono);font-size:12.5px;background:var(--surface-3);b
 .guide ol li{counter-increment:s;padding-left:28px;position:relative}
 .guide ol li::before{content:counter(s);position:absolute;left:0;top:2px;width:20px;height:20px;border-radius:50%;background:var(--surface-3);color:var(--text-2);font-size:12px;display:grid;place-items:center;font-weight:600}
 .guide p{font-size:13.5px;color:var(--muted);margin-top:8px}
-
-/* checker */
-.chk-form{display:flex;gap:8px;flex-wrap:wrap}
-.chk-form .inwrap{position:relative;flex:1 1 240px;min-width:0}
-label.lb{display:block;font-size:13px;font-weight:500;color:var(--text-2);margin:0 0 6px}
-input[type=password],input[type=text].keyin{width:100%;background:var(--surface);border:1px solid var(--border-strong);border-radius:var(--radius-sm);
+input[type=password]{width:100%;background:var(--surface);border:1px solid var(--border-strong);border-radius:var(--radius-sm);
   padding:8px 44px 8px 12px;min-height:44px;outline:none;transition:border-color .15s,box-shadow .15s;font-family:var(--mono);font-size:14px}
 input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 .eye{position:absolute;right:4px;top:4px;width:36px;height:36px;border:0;background:none;border-radius:6px;display:grid;place-items:center;cursor:pointer;color:var(--muted)}
 .eye:hover{background:var(--surface-3);color:var(--text)}
-.chk-form .btn.primary{min-height:44px;padding:8px 24px}
 #result{margin-top:16px}
 .alert{display:flex;gap:12px;align-items:flex-start;padding:12px 16px;border-radius:var(--radius-sm);font-size:14px;border:1px solid transparent}
 .alert .ic{margin-top:3px}
 .alert.bad{background:var(--bad-soft);color:var(--bad);border-color:color-mix(in srgb,var(--bad) 28%,transparent)}
 .alert.warn{background:var(--warn-soft);color:var(--warn);border-color:color-mix(in srgb,var(--warn) 30%,transparent)}
 .alert.info{background:var(--info-soft);color:var(--text-2)}
-.res{border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-2);padding:20px;display:flex;flex-direction:column;gap:20px}
-.res-top{display:flex;gap:12px;align-items:center}
 .avatar{width:44px;height:44px;border-radius:12px;background:var(--accent-soft);color:var(--accent-text);display:grid;place-items:center;font-weight:700;font-size:18px;flex:none}
-.res-top .nm{font-weight:600;font-size:17px;overflow-wrap:anywhere;line-height:1.3}
-.res-top .sb{color:var(--muted);font-size:13px}
-.q .row{display:flex;justify-content:space-between;gap:12px;font-size:13.5px;margin-bottom:8px;color:var(--text-2)}
-.q .row b{color:var(--text);font-weight:600}
-.bar{height:8px;border-radius:99px;background:var(--surface-3);overflow:hidden}
-.bar.stack{display:flex;position:relative;overflow:visible}
-.bar.stack i{height:100%;background:var(--accent);border-radius:0}
-.bar.stack i:first-child{border-radius:99px 0 0 99px}
-.bar.stack i.v5{background:var(--v5)}
-.bar.stack .mark{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--text-2);border-radius:1px}
-.qlegend{font-size:12.5px;color:var(--muted);margin-top:6px}
-.qlegend .sw{display:inline-block;width:9px;height:9px;border-radius:2px;background:var(--accent);margin-right:4px;vertical-align:-1px}
-.qlegend .sw.v5{background:var(--v5)}
-.bar>i{display:block;height:100%;border-radius:99px;background:var(--accent);transition:width .5s}
-.bar.warn>i{background:var(--warn)} .bar.bad>i{background:var(--bad)}
-.kv{display:grid;grid-template-columns:1fr;gap:12px}
-.kv>div{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 16px}
-.kv .k{font-size:12.5px;color:var(--muted)}
-.kv .v{font-weight:600;margin-top:2px;overflow-wrap:anywhere}
-.kv .v small{font-weight:400;color:var(--muted);margin-left:4px}
 .chips{display:flex;gap:8px;flex-wrap:wrap}
 .chip{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:999px;font-size:13px;font-weight:500;background:var(--accent-soft);color:var(--accent-text);min-height:30px}
-.chip.off{background:var(--surface-3);color:var(--muted);cursor:help}
 .chip .ic{width:14px;height:14px}
-.res h3{font-size:13.5px;color:var(--text-2);margin-bottom:8px;font-weight:600}
-.loadrow{display:flex;flex-direction:column;gap:12px}
-.loadrow i{display:block;height:20px;border-radius:6px;background:linear-gradient(90deg,var(--surface-3),var(--surface-2),var(--surface-3));background-size:200% 100%;animation:sh 1.4s infinite linear}
 
 /* notes */
 details.more{margin-top:4px;border-top:1px solid var(--border);padding-top:12px}
@@ -308,10 +269,6 @@ details.more summary::after{content:"";width:7px;height:7px;border-right:1.5px s
 details.more[open] summary::after{transform:rotate(-135deg);margin-top:3px}
 details.more p{font-size:13.5px;color:var(--muted);margin:4px 0 8px}
 .step small{display:block;color:var(--muted);font-size:12.5px;margin-top:2px}
-.res-go{font-size:13px;color:var(--muted)}
-.res-go a{text-decoration:none}
-.res-go a:hover{text-decoration:underline}
-#live .chk-hint{font-size:13px;color:var(--muted);margin:0 0 12px}
 .rules{display:grid;gap:10px 24px;grid-template-columns:1fr;padding:16px 20px}
 .rules li{display:flex;gap:10px;align-items:flex-start;color:var(--text-2);font-size:13.5px;line-height:1.6}
 .rules .ri{width:22px;height:22px;color:var(--muted);display:grid;place-items:center;flex:none}
@@ -332,7 +289,6 @@ footer{max-width:960px;margin:0 auto;padding:24px 16px 40px;text-align:center;co
   .top-link{display:inline-block}
   .steps{grid-template-columns:repeat(3,1fr)}
   .guide{grid-template-columns:1fr 1fr}
-  .kv{grid-template-columns:repeat(3,1fr)}
   .rules{grid-template-columns:1fr 1fr}
   .card{padding:24px}
 }
@@ -344,8 +300,6 @@ footer{max-width:960px;margin:0 auto;padding:24px 16px 40px;text-align:center;co
 .btn.dc:hover{background:#4752c4;border-color:#4752c4;color:#fff;box-shadow:0 2px 4px rgba(20,28,50,.14),0 8px 22px -6px rgba(88,101,242,.7)}
 .muted.sm{color:var(--text-2);font-size:12.5px}
 .me{margin:4px 0 0;padding:14px 16px;border:1px solid var(--border);border-radius:12px;background:var(--surface-2)}
-.me-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
-.me-head b{font-size:16px}
 .me .tag.ok{font-size:11.5px;padding:2px 8px;border-radius:999px;background:var(--ok-soft);color:var(--ok)}
 .me .link{background:none;border:0;color:var(--text-2);cursor:pointer;font-size:13px;margin-left:auto;text-decoration:underline;text-underline-offset:2px;transition:color .15s}
 .me .link:hover{color:var(--text)}
@@ -411,7 +365,7 @@ body.authed #board{margin-top:22px}
       <p class="econ-note" id="econNote" hidden><span data-ic="info"></span>节约模式已开启：现在人多，全站统一用 14 步快速出图（质量略降、更快更省）。空闲后恢复，开关都会在公告频道通知。</p>
       <div class="me" id="meCard" hidden></div>
       <div class="loginrow" id="loginRow" hidden>
-        <a class="btn primary dc" id="loginBtn" href="/login"><span data-ic="discord"></span>用 Discord 登录</a>
+        <a class="btn primary dc" id="loginBtn" href="/login" hidden><span data-ic="discord"></span>用 Discord 登录</a>
         <p class="muted sm" id="loginPaused" hidden>网页登录暂时不可用（Discord 正在审核本站的应用）。领 Key 用 <code>/register</code>，查额度用 <code>/quota</code>，都在 Discord 里输入即可。</p>
       </div>
       <p class="cooldown" id="cooldown" hidden><span data-ic="clock"></span><span id="cooldownTxt"></span></p>
@@ -474,9 +428,9 @@ body.authed #board{margin-top:22px}
         <div class="dgrid">
           <div class="dtile dme" id="dMe"><div class="dk" id="dMeK">现在</div><div class="dbig" id="dMeV">—</div><div class="dsub" id="dMeS"></div></div>
           <div class="dtile"><div class="dk">排队</div><div class="dnum"><b id="dQ">0</b><span id="dQs"></span></div><div class="dseg" id="dQbar"></div><div class="dnote" id="dQn"></div></div>
-          <div class="dtile"><div class="dk">本小时出图</div><div class="dnum"><b id="dP">0</b><span id="dPs"></span></div><div class="dbar"><i id="dPbar"></i></div><div class="dnote" id="dPn"></div></div>
+          <div class="dtile"><div class="dk">近 60 分钟出图</div><div class="dnum"><b id="dP">0</b><span id="dPs"></span></div><div class="dbar"><i id="dPbar"></i></div><div class="dnote" id="dPn"></div></div>
           <div class="dtile"><div class="dk">全站今日额度</div>
-            <div class="drow"><span>V4.5</span><span><b id="d45">0</b> / <span id="d45c">0</span></span></div><div class="dbar"><i id="d45bar"></i></div>
+            <div class="drow"><span>全部出图</span><span><b id="d45">0</b> / <span id="d45c">0</span></span></div><div class="dbar"><i id="d45bar"></i></div>
             <div class="drow"><span>V5</span><span><b id="d5">0</b> / <span id="d5c">0</span></span></div><div class="dbar v5"><i id="d5bar"></i></div>
             <div class="dnote" id="dAn"></div></div>
         </div>
@@ -489,8 +443,8 @@ body.authed #board{margin-top:22px}
     <p class="m-live" id="mLive"><i></i><span id="mLiveT">示例值 · 正在读取线上参数</span></p>
     <div class="m-snap" id="mSnap"></div>
     <nav class="m-flow" aria-label="算法流水线">
-      <a href="#m-v5"><div class="n">① 每 10 分钟</div><div class="t">V5 电池</div><div class="f">G = r·14.2·k(P)</div></a>
-      <a href="#m-split"><div class="n">② 每 10 分钟</div><div class="t">人均分配</div><div class="f">⌊G/N⌋ ∈ [3,30]</div></a>
+      <a href="#m-v5"><div class="n">① 每天一次</div><div class="t">V5 电池</div><div class="f">G = r·14.2·k(P)</div></a>
+      <a href="#m-split"><div class="n">② 每天一次</div><div class="t">人均分配</div><div class="f">⌊G/N⌋ ∈ [3,30]</div></a>
       <a href="#m-aimd"><div class="n">③ 每天 0 点</div><div class="t">V4.5 微调</div><div class="f">A ± 25，B ± 10</div></a>
       <a href="#m-hour"><div class="n">④ 每次请求</div><div class="t">每小时闸门</div><div class="f">n<sub>h</sub> &lt; C(h)</div></a>
       <a href="#m-queue"><div class="n">⑤ 每次请求</div><div class="t">排队</div><div class="f">W = ρS / 2(1−ρ)</div></a>
@@ -504,7 +458,7 @@ body.authed #board{margin-top:22px}
         <div class="eq"><i>P</i><sub>t+1</sub> = min(100, <i>P</i><sub>t</sub> + <i>r</i> − <i>u</i><sub>t</sub> / 14.2)</div>
         <div class="eq"><i>G</i> = <i>r</i> × 14.2 × <span class="hl"><i>k</i>(<i>P</i>)</span></div>
         <p class="m-note"><i>P</i> 是账号 V5 剩余百分比，<i>r</i> 是每天恢复的百分点，<i>u</i> 是当天出的 V5 张数；14.2 = 官方「1% ≈ 17.3 张（23 步）」按 28 步折算。剩得多就多发（顶到 100% 会白白浪费），剩得少就收紧回血，让 <i>P</i> 稳在 60%～80%。</p>
-        <div class="m-ctrl"><label for="sP">账号剩余 P</label><input id="sP" type="range" min="0" max="100" value="98"><output id="oP" for="sP">98%</output></div>
+        <div class="m-ctrl"><label for="sP">账号剩余 P</label><input id="sP" type="range" min="0" max="100" value="97"><output id="oP" for="sP">97%</output></div>
         <div class="m-read"><div><span>系数 k</span><b id="rK">1.3</b></div><div><span>全站 G（张/天）</span><b id="rG">203</b></div><div><span>相当于恢复量</span><b id="rPct">130%</b></div></div>
         <p class="m-prior">同类做法：<b>P 控制器</b>，按偏差比例调节。</p>
       </div>
@@ -516,7 +470,7 @@ body.authed #board{margin-top:22px}
         <div class="m-k">② 公平分配 · 截断均分</div>
         <h3>全站额度按活跃人数切开</h3>
         <div class="eq"><i>D</i><sub>5</sub> = clamp(⌊ <i>G</i> / max(10, <i>N</i>) ⌋, 3, 30)</div>
-        <p class="m-note"><i>N</i> 是最近 3 天出过图的人数。人少时按 10 人算，给新来的人留位置；上限 30 防止一个人用光，下限 3 保证人再多也有几张。<i>D</i><sub>5</sub> × <i>N</i> ≤ <i>G</i>，所有人用满也不超过全站额度。</p>
+        <p class="m-note"><i>N</i> 是最近 3 天出过图的人数。人少时按 10 人算，给新来的人留位置；上限 30 防止一个人用光，下限 3 保证人再多也有几张。<i>D</i><sub>5</sub> × <i>N</i> ≤ <i>G</i>，人数不太多时所有人用满也不超过全站额度（人很多时下限 3 张会让总量略超 G）。</p>
         <p class="m-now" id="mSplitNow" hidden></p>
         <div class="m-ctrl"><label for="sN">活跃人数 N</label><input id="sN" type="range" min="1" max="80" value="17"><output id="oN" for="sN">17 人</output></div>
         <div class="m-read"><div><span>每人 V5</span><b id="rD">11</b></div><div><span>N 人全用满</span><b id="rUse">187</b></div><div><span>剩余给新人</span><b id="rLeft">16</b></div></div>
@@ -531,6 +485,7 @@ body.authed #board{margin-top:22px}
         <h3>V4.5 上限 A 和保底 B 看昨天挤不挤</h3>
         <div class="eq">拥挤：<i>U</i> ≥ 0.85 ∨ <i>H</i> ≥ 3 ⇒ <i>A</i>−25，<i>B</i>−10</div>
         <div class="eq">余量：<i>U</i> &lt; 0.6 ∧ 有人顶到 <i>A</i> ⇒ <i>A</i>+25</div>
+        <div class="eq">余量：<i>U</i> &lt; 0.6 ∧ 有人超过保底时被「全站不空闲」拦下 ⇒ <i>B</i>+10</div>
         <p class="m-note"><i>U</i> = 昨天出图总量 ÷ 日上限 <span id="mDaily">1000</span>；<i>H</i> = 昨天有几个<b>不同的小时</b>出现每小时上限拦截（只算成员）。中间区不动，避免来回抖；范围 50 ≤ <i>B</i> ≤ <i>A</i> ≤ 300。</p>
         <div class="m-read"><div><span>现在的上限 A</span><b id="rA">150</b></div><div><span>现在的保底 B</span><b id="rB">100</b></div><div><span>今天至今 U</span><b id="rU">—</b></div></div>
         <p class="m-prior">同类做法：<b>AIMD</b>，TCP 拥塞控制的加性增、乘性减。</p>
@@ -540,13 +495,13 @@ body.authed #board{margin-top:22px}
 
     <article class="mcard" id="m-hour">
       <div class="math">
-        <div class="m-k">④ 速率闸门 · 固定窗口计数</div>
+        <div class="m-k">④ 速率闸门 · 滑动窗口（近 60 分钟）</div>
         <h3 id="mHourT">每小时最多 150 张</h3>
         <div class="eq" id="mHourEq">放行 ⇔ <i>n</i><sub>h</sub> &lt; <i>C</i>，<i>C</i> = <span class="hl">150</span></div>
         <div class="eq">借用 ⇔ 无人排队 ∧ <i>n</i><sub>h</sub> &lt; 0.6 · <i>C</i></div>
         <p class="m-note" id="mHourN">超过个人保底 B 以后，只有全站空闲（第二行）才能继续用到上限 A。</p>
         <p class="m-now" id="mHourNow" hidden></p>
-        <p class="m-prior">同类做法：<b>固定窗口限流</b>。</p>
+        <p class="m-prior">同类做法：<b>滑动窗口限流</b>（不是整点清零，最早一张滑出 60 分钟就空出一个位置）。</p>
       </div>
       <div class="plot"><svg id="gH" role="img" aria-label="24 小时每小时出图上限"></svg></div>
     </article>
@@ -568,10 +523,10 @@ body.authed #board{margin-top:22px}
     <article class="mcard" id="m-guard">
       <div class="math">
         <div class="m-k">⑥ 熔断 · 阈值规则</div>
-        <h3>上游连续出错就先停 5 分钟</h3>
+        <h3>上游 15 分钟内失败成簇就先停 5 分钟</h3>
         <div class="eq">熔断 ⇔ <i>f</i><sub>15m</sub> ≥ 5 ∧ <i>f</i> / <i>n</i> ≥ 0.3</div>
         <div class="eq">暂停 1 小时 ⇔ 拒绝<sub>1h</sub> ≥ 60</div>
-        <p class="m-note">两个条件同时满足才触发：只看次数会被少量请求误伤，只看比例会被一两次偶发错误误伤。右图是 15 分钟里「请求数 × 失败数」的平面，红色区域会熔断：全站暂停出图 5 分钟，首页显示原因，到点自动恢复。</p>
+        <p class="m-note">两个条件同时满足才触发：只看次数会被少量请求误伤，只看比例会被一两次偶发错误误伤。右图是 15 分钟里「请求数 × 失败数」的平面，红色区域会熔断：全站暂停出图 5 分钟，出图请求会直接返回原因，到点自动恢复。</p>
         <p class="m-prior">同类做法：Netflix Hystrix <b>熔断器</b>与 Google SRE <b>自适应限流</b>。</p>
       </div>
       <div class="plot"><svg id="gB" role="img" aria-label="熔断触发区域"></svg></div>
@@ -582,8 +537,8 @@ body.authed #board{margin-top:22px}
         <div class="m-k">⑦ 节约模式 · 成本与步数成正比</div>
         <h3>人多时统一 14 步，同样的额度多出约 70% 的图</h3>
         <div class="eq">成本 ∝ <i>a</i> + <i>b</i>·<i>s</i>，　<i>c</i>(14) / <i>c</i>(28) = <span class="hl">0.58</span></div>
-        <div class="eq">开 ⇔ 排队满<sub>15m</sub> ≥ 8；关 ⇔ 排队满<sub>30m</sub> ≤ 1；两次切换 ≥ 1 小时</div>
-        <p class="m-note">每张图的成本 = 固定部分 + 每一步的部分。步数从 28 降到 14，成本降到约 58%（省约 42%，和 NovelAI 官方节约模式的数字一致），同样的额度能出约 1.7 倍的图。采样器换成低步数下更稳的 Euler Ancestral，负面词保留。无论算法还是站长开关，都会在公告频道通知。</p>
+        <div class="eq">建议开 ⇔ 排队满<sub>15m</sub> ≥ 8；建议关 ⇔ 排队满<sub>30m</sub> ≤ 1；两次切换 ≥ 1 小时</div>
+        <p class="m-note">每张图的成本 = 固定部分 + 每一步的部分。步数从 28 降到 14，成本降到约 58%（省约 42%，按本站计价公式算，与 NovelAI 官方公布的「约少 42%」相符），同样的额度能出约 1.7 倍的图。采样器换成低步数下更稳的 Euler Ancestral，负面词保留。目前算法只给建议，由站长手动开关；开关都会在公告频道通知。</p>
         <p class="m-now" id="mEconNow" hidden></p>
         <p class="m-prior">同类做法：NovelAI 官方「节约模式」（Medium，14 步）。</p>
       </div>
@@ -720,7 +675,7 @@ function renderStatus(d){
   $('algoNote').hidden = !al; $('algoNote').textContent = al;
   var an = (d.audit_notice || '').trim();
   $('audit').hidden = !an; $('auditTxt').textContent = an;
-  var paused = d.web_login === false;
+  var paused = d.web_login !== true;          // 只有服务端明确说开放才显示登录按钮
   if($('loginBtn')) $('loginBtn').hidden = paused;
   if($('loginPaused')) $('loginPaused').hidden = !paused;
   if($('econNote')) $('econNote').hidden = !d.economy;
@@ -774,17 +729,15 @@ function renderMe(d){
   // 登录且已有 Key 时，隐藏「全站算法分配」那句——它和下面你自己的额度数字会打架
   document.body.classList.toggle('haskey', !!(authed && d && d.has_key));
   renderChip(d);
-  $('liveTitle').innerHTML = icon('key') + (authed && d.has_key ? '我的额度' : '登录');
-  var nv = $('navLive'); if(nv) nv.textContent = (authed && d.has_key) ? '我的额度' : '登录';
+  $('liveTitle').innerHTML = icon('key') + (authed ? '我的额度' : '查额度');
+  var nv = $('navLive'); if(nv) nv.textContent = authed ? '我的额度' : '查额度';
   var hk = $('headKey');
   if(hk){ hk.hidden = true; hk.innerHTML = ''; }
   if(!authed){ me.hidden = true; lr.hidden = false; return; }
   lr.hidden = true; me.hidden = false;
   var dc = d.discord || {}, nm = esc(dc.display_name || dc.username || '成员');
   if(!d.has_key){
-    var tip = d.in_server ? (d.has_role ? '在 🔑｜领取key 频道输入 <code>/register</code> 即可领取。'
-                : '需要先获得「' + esc(d.role_note || '指定') + '」身份组才能领取。')
-              : '请先加入社区服务器，再领取 Key。';
+    var tip = '在 🔑｜领取key 频道输入 <code>/register</code> 即可领取。';
     me.innerHTML = '<p class="muted sm" style="font-size:14px;margin:4px 0">你好，' + nm + '。你还没有领取 Key。' + tip + '</p>';
   }else{
     var t = d.today || {}, q = d.queue || [];
@@ -806,8 +759,10 @@ function renderMe(d){
   }
   hydrate(me);
 }
-function loadMe(){ fetch('/public/me', {cache:'no-store', credentials:'include'}).then(function(r){ return r.ok ? r.json() : null; }).then(renderMe, function(){}); }
+function loadMe(){ fetch('/public/me', {cache:'no-store', credentials:'include'}).then(function(r){ return r.ok ? r.json() : null; }).then(renderMe, function(){ renderMe(null); }); }
 loadMe();
+setInterval(function(){ if(!document.hidden) loadMe(); }, 60000);      // Key 被 /resetkey 换掉、今日用量变化时跟着更新
+document.addEventListener('visibilitychange', function(){ if(!document.hidden) loadMe(); });
 document.addEventListener('click', function(e){
   var chip = $('userChip'); if(!chip || chip.hidden) return;
   var btn = $('chipBtn'), menu = $('chipMenu');
@@ -862,7 +817,7 @@ function fmtDate(sec){
     $id('dPs').textContent = '/ ' + (g.hour_cap || 0) + ' 张';
     setBar('dPbar', g.hour || 0, g.hour_cap || 0);
     var nx = Number(g.next_in) || 0;
-    $id('dPn').textContent = g.hour_cap && (g.hour || 0) >= g.hour_cap ? '本小时已满，下个整点恢复' : (nx > 0 ? '下一张约 ' + Math.ceil(nx) + ' 秒后可以发' : '上游空着，随时可以发');
+    $id('dPn').textContent = g.hour_cap && (g.hour || 0) >= g.hour_cap ? '近 60 分钟已满，最早那张满 60 分钟后就有空位' : (nx > 0 ? '下一张约 ' + Math.ceil(nx) + ' 秒后可以发' : '上游空着，随时可以发');
     /* 额度 */
     $id('d45').textContent = q.images_today || 0; $id('d45c').textContent = q.images_cap || 0; setBar('d45bar', q.images_today || 0, q.images_cap || 0);
     $id('d5').textContent = q.v5_today || 0; $id('d5c').textContent = q.v5_cap || 0; setBar('d5bar', q.v5_today || 0, q.v5_cap || 0);
@@ -896,7 +851,7 @@ function fmtDate(sec){
   function num(v){ var n = Number(v); return v != null && v !== '' && isFinite(n) ? n : null; }
   function mk(svg, tag, attrs, text){ var e = document.createElementNS(NS, tag); for(var k in attrs) e.setAttribute(k, attrs[k]); if(text != null) e.textContent = text; svg.appendChild(e); return e; }
   /* 示例值（2026-10-10 线上快照）：只在读不到实时数据时显示 */
-  var SNAP = {percent:98, rate:11, global:203, each:null, ceiling:150, base:100, hourly:150, quietCap:20, qs:0, qe:0,
+  var SNAP = {percent:97, rate:11, global:203, each:null, ceiling:150, base:100, hourly:150, quietCap:20, qs:0, qe:0,
               daily:1000, interval:17.5, keyQueue:null, queueCap:null, usable:1, hour:null, imagesToday:null};
   var V = {}, isLive = false, touched = {sP:false, sL:false}, lastSig = '';
   for(var k0 in SNAP) V[k0] = SNAP[k0];
@@ -1047,7 +1002,7 @@ function fmtDate(sec){
       (V.daily && V.daily < day ? '，再被日上限 ' + V.daily + ' 截住' : '') + '。超过个人保底 B 以后，只有全站空闲（第二行）才能继续用到上限 A。';
     var now = $m('mHourNow');
     now.hidden = V.hour == null;
-    if(V.hour != null) now.textContent = '现在北京时间 ' + bjHour() + ' 点，本小时已出 ' + V.hour + ' / ' + capAt(bjHour()) + ' 张。';
+    if(V.hour != null) now.textContent = '现在近 60 分钟已出 ' + V.hour + ' / ' + capAt(bjHour()) + ' 张。';
   }
 
   /* ⑤ M/D/1（按单个上游账号算） */
@@ -1134,17 +1089,17 @@ function fmtDate(sec){
     var acc = Array.isArray(d.accounts) ? d.accounts.filter(function(a){ return a && a.usable; }).length : 0;
     var set = function(key, v){ if(v != null) V[key] = v; };
     set('percent', num(q.v5_percent)); set('rate', num(q.v5_rate)); set('global', num(q.v5_global)); set('each', num(q.v5_each));
-    set('base', num(r.base) || null); set('ceiling', num(q.ceiling) || num(r.base) || null);
+    set('base', num(r.base) || null); set('ceiling', num(q.ceiling) || null);
     set('hourly', num(r.hourly_cap) || null); set('quietCap', num(r.quiet_cap));
     set('qs', num(r.quiet_start)); set('qe', num(r.quiet_end));
     set('daily', num(r.daily_cap) || null); set('interval', num(d.interval) || null);
     set('keyQueue', num(r.key_queue)); set('queueCap', num(r.queue_cap) || null);
     set('hour', num(g.hour)); set('imagesToday', num(qq.images_today));
     V.usable = Math.max(1, acc || 1);
-    isLive = true;
+    isLive = q.v5_percent != null;            // 拿到线上额度数据才算「实时」，否则仍显示示例值
     if(!touched.sP && V.percent != null) sP.value = Math.round(V.percent);
-    if(!touched.sL && V.hour != null && bjMinute() >= 10){
-      var lam = Math.round(V.hour / V.usable * 60 / bjMinute());
+    if(!touched.sL && V.hour != null){
+      var lam = Math.round(V.hour / V.usable);          // V.hour 是近 60 分钟的总数，本身就是每小时请求量
       sL.value = Math.max(0, Math.min(+sL.max, lam));
     }
     var sig = JSON.stringify([V, sP.value, sL.value]);
