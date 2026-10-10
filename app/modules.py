@@ -312,7 +312,7 @@ def scheduling(state) -> Module:
                       "少于此数等于 FIFO；达到才按公平挑人", key="scheduling.engage_min_waiters"),
                 Param("防饥饿（秒）", lambda: P("scheduling.starvation_seconds", 60), "A", "",
                       "一张图等满这么久强制插最前", key="scheduling.starvation_seconds"),
-                Param("模式", lambda: "observe（影子，不改顺序）", "A", "", "闲时=FIFO、挤时=公平，自动切换；冻结后切 enforce")])
+                Param("模式", lambda: "observe（影子，不改顺序）", "A", "", "只观察：真实顺序仍是 FIFO，DRR 重排尚未接入派发路径")])
 
 
 def build(state, bug) -> Kernel:

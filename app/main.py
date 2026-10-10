@@ -55,7 +55,8 @@ from . import features
 from .policy import REFERENCE_FIELDS
 from .key_sources import RETENTION_SECONDS as KEY_SOURCE_RETENTION
 from .action_log import RETENTION_DAYS as ADMIN_ACTION_RETENTION_DAYS
-from .audit import audit_flags, audit_notice, make_thumbnail, prompt_texts, capture_prompts, full_image
+from .audit import (audit_flags, audit_disclosure, audit_image_days, make_thumbnail, prompt_texts,
+                    capture_prompts, full_image)
 from .upstream_errors import upstream_error_message, text_stream_events
 from .sse import encode_sse
 
@@ -185,7 +186,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "2.11.1"
+__version__ = "2.12.0"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -462,7 +463,8 @@ async def audit_generation(key, kind: str, model: str, status: str, body: dict, 
         thumb, image, image_type = None, None, ""
         if want_thumbs and content and status == "ok":
             thumb = await anyio.to_thread.run_sync(make_thumbnail, content)
-            image, image_type = await anyio.to_thread.run_sync(full_image, content)
+            if await audit_image_days(STATE.db) > 0:          # 原图保留天数设为 0 = 只留缩略图、不存原图
+                image, image_type = await anyio.to_thread.run_sync(full_image, content)
         await STATE.db.add_audit(key["id"], key["name"], kind, model, status, prompt, negative, thumb,
                                  extra=extra, image=image, image_type=image_type)
     except Exception as exc:
@@ -485,7 +487,7 @@ async def check_upstream_perf() -> None:
 async def maintenance_loop() -> None:
     """每 5 分钟：清理过期生成记录；磁盘与告警自检。"""
     async def purge():
-        # 0 = 长期保留：测试期已向成员声明保留数据，用于防滥用、回测和优化算法（见 audit.audit_notice）
+        # 0 = 长期保留：已向成员披露保留范围，用于防滥用、回测和优化算法（见 audit.audit_disclosure）
         days = (await audit_flags(STATE.db, STATE.settings))[2]
         if days > 0:
             await STATE.db.purge_audit(time.time() - days * 86400)
@@ -498,7 +500,7 @@ async def maintenance_loop() -> None:
             await STATE.bugs.purge(time.time() - 30 * 86400)
         # 原图只保留最近几天（缩略图、提示词、参数长期留）；天数可在设置里调
         try:
-            days = int(float(await STATE.db.get_setting("audit_image_retention_days", 3) or 3))
+            days = await audit_image_days(STATE.db)
             if days > 0:
                 await STATE.db.purge_audit_images(time.time() - days * 86400)
         except Exception as exc:
@@ -1875,7 +1877,6 @@ async def _image_stability() -> dict:
 
 async def _public_status_body(request: Request) -> dict:
     from . import features as feature_defs
-    from .audit import audit_flags, audit_notice
     service = getattr(request.app.state, "registrar", None)
     flags = await feature_defs.global_flags(STATE.db)
     reg = {"open": False, "slots_left": None}
@@ -1894,7 +1895,10 @@ async def _public_status_body(request: Request) -> dict:
         "upstream": {k: v for k, v in STATE.upstream_health().items() if k in ("status", "image_cooldown_seconds")},
         "registration": reg,
         "default_features": [{"id": n, "label": feature_defs.FEATURES[n]} for n in defaults],
-        "audit_notice": audit_notice(*(await audit_flags(STATE.db, SETTINGS))),
+        "audit_notice": await audit_disclosure(STATE.db, SETTINGS),
+        # 网页 Discord 登录：Discord 应用审核期间 OAuth 被封，暂停时首页改为提示用 /register、/quota（站长可随时改回 0）
+        "web_login": str(await STATE.db.get_setting("web_login_paused", "0")).strip() != "1",
+        "economy": (await STATE.db.get_setting("economy_mode", "off")) == "on",
         "algo_notice": str(await STATE.db.get_setting("algo_notice", "") or "")[:300],
         "discord_invite": SETTINGS.discord_invite_url,
         "key_inactivity_delete_days": SETTINGS.key_inactivity_delete_days,

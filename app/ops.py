@@ -154,27 +154,29 @@ async def set_global_features(db, flags: dict) -> dict[str, bool]:
 
 
 async def set_audit(state, body: dict) -> dict:
-    """保存记录开关；notify 为真时向成员公告频道发出说明（测试期声明）。"""
+    """保存记录开关与保留天数；记录范围变化且 notify 为真时，在成员公告频道说明（文案与首页同源）。"""
+    from .audit import IMAGE_RETENTION_KEY, audit_image_days, audit_notice
     prompts, thumbs, days = await audit_flags(state.db, state.settings)
-    before = (prompts, thumbs)
+    image_days = await audit_image_days(state.db)
+    before = (prompts, thumbs, days, image_days)
     if "prompts" in body:
         prompts = bool(body["prompts"])
     if "thumbs" in body:
         thumbs = bool(body["thumbs"])
     if "retention_days" in body:
         days = max(0, min(int(body["retention_days"]), 3650))      # 0 = 长期保留
+    if "image_retention_days" in body:
+        image_days = max(0, min(int(body["image_retention_days"]), 365))   # 0 = 不保存原图
     await state.db.set_settings_bulk({"audit_prompts": "1" if prompts else "0",
                                       "audit_thumbs": "1" if thumbs else "0",
-                                      "audit_retention_days": days})
-    if body.get("notify", True) and (prompts, thumbs) != before:
+                                      "audit_retention_days": days,
+                                      IMAGE_RETENTION_KEY: image_days})
+    if body.get("notify", True) and (prompts, thumbs, days, image_days) != before:
         announcer = getattr(state, "announcer", None)
         if announcer is not None:
             if prompts or thumbs:
-                what = "、".join(x for x, on in (("图片提示词", prompts), ("生成结果的小缩略图", thumbs)) if on)
-                keep = f"{days} 天后自动删除" if days > 0 else "长期保存，用于防止滥用和优化调度算法"
-                text = (f"📢 **测试期公告**：站长已开启生成记录。本站处于测试阶段，会保留成员的{what}，"
-                        f"{keep}，仅站长可见。")
+                text = "📢 **数据记录说明**：" + audit_notice(prompts, thumbs, days, image_days)
             else:
-                text = "📢 **测试期公告**：站长已关闭生成记录，不再保存新的提示词和缩略图（已有记录到期自动删除）。"
+                text = "📢 **数据记录说明**：站长已关闭生成记录，不再保存新的提示词、缩略图和原图（已有记录到期自动删除）。"
             announcer.post(text)
-    return {"prompts": prompts, "thumbs": thumbs, "retention_days": days}
+    return {"prompts": prompts, "thumbs": thumbs, "retention_days": days, "image_retention_days": image_days}

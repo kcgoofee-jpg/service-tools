@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel
 
 from .action_log import log_action
+from .audit import audit_disclosure, audit_image_days
 from .policy import gen_key
 from .registration import RegistrationError
 
@@ -68,7 +69,6 @@ async def info(request: Request, body: Who):
     _checked(service, body)
     gate = request.app.state.gate
     from . import features as feature_defs
-    from .audit import audit_flags, audit_notice
     cfg = await service.settings()
     flags = await feature_defs.global_flags(gate.db)
     defaults = cfg["features"] if cfg["features"] is not None else [n for n in feature_defs.FEATURES if flags[n]]
@@ -76,7 +76,7 @@ async def info(request: Request, body: Who):
         "open": cfg["open"], "active": await service.count_active(), "max": cfg["max_users"],
         "default_features": [{"id": n, "label": feature_defs.FEATURES[n], "on": flags[n]} for n in defaults],
         "daily_images": cfg["daily_images"], "daily_v5": cfg["daily_v5"],
-        "notice": audit_notice(*(await audit_flags(gate.db, gate.settings))),
+        "notice": await audit_disclosure(gate.db, gate.settings),
         "upstream": gate.upstream_health(),
     }, headers={"Cache-Control": "no-store"})
 
@@ -392,7 +392,7 @@ async def public_me(request: Request):
         guard = getattr(gate, "guard", None)
         qv = guard.queue_view(key["id"]) if guard is not None else {}
         try:
-            img_days = int(float(await gate.db.get_setting("audit_image_retention_days", 3) or 3))
+            img_days = await audit_image_days(gate.db)
         except (TypeError, ValueError):
             img_days = 3
         out.update(has_key=True, key=key["token"], name=key["name"],

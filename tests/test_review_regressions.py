@@ -852,6 +852,19 @@ def test_perf_family_split_and_capacity():
     assert r["flags"] == []
 
 
+def test_perf_capacity_capped_by_hourly_cap_and_actual_moves():
+    """产能上限要受全站每小时上限封顶（否则常年显示 3600/15=240 不动）；实际每小时出图随负载变化。"""
+    from app import perf
+    now = 1_000_000.0
+    rows = [_perf_row(now - 60 * i) for i in range(10)]
+    capped = perf.analyze(rows, now, slots=1, site_interval=15, key_interval=15, hourly_cap=150)["families"]["V4.5"]
+    assert capped["h1"]["capacity_per_hour"] == 150 and capped["h1"]["member_capacity_per_hour"] == 150
+    assert capped["h1"]["actual_per_hour"] == 10          # 最近 1 小时出了 10 张
+    assert capped["d1"]["actual_per_hour"] == round(10 / 24, 1)
+    more = perf.analyze(rows + [_perf_row(now - 5 - i) for i in range(20)], now, hourly_cap=150)["families"]["V4.5"]
+    assert more["h1"]["actual_per_hour"] == 30            # 负载上来，实际数字跟着动
+
+
 def test_perf_flags_slowdown_throttle_failures_and_account():
     from app import perf
     now = 2_000_000.0
@@ -1381,3 +1394,38 @@ def test_resale_signals_alternation_clients_and_all_day():
     for h in range(20):
         out = t3.signals(key, None, "", now + h * 3600)
     assert any(k == "allday" for k, _ in out)
+
+
+@pytest.mark.asyncio
+async def test_source_signals_reach_autopilot_without_alerter():
+    """没配告警渠道（alerter=None）时，网段信号也必须记进 events，否则自动驾驶 key_guard 收不到。"""
+    from app.key_sources import SourceTracker
+    with tempfile.TemporaryDirectory() as tmp:
+        db = Database(str(Path(tmp) / "g.sqlite"))
+        await db.connect()
+        key = await db.create_key({"name": "m", "token": "nai-x", "daily_images": 10, "monthly_anlas": 0,
+                                   "daily_text_tokens": 0, "rpm": 5})
+        tracker = SourceTracker(db, None)
+        now = 1_800_000_000.0
+        for i, ip in enumerate(("1.1.1.1", "2.2.2.2", "1.1.1.9", "2.2.2.9", "1.1.1.7")):
+            await tracker.observe(key, ip, now + i * 30)
+        assert any(k == "alternate" for _, kid, k in tracker.events if kid == key["id"])
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_audit_disclosure_covers_full_images_and_zero_means_none():
+    """披露要写明原图及其保留天数；原图保留天数 0 = 不保存原图（不能被 `or 3` 吞掉变回 3）。"""
+    from types import SimpleNamespace
+    from app.audit import audit_disclosure, audit_image_days
+    with tempfile.TemporaryDirectory() as tmp:
+        db = Database(str(Path(tmp) / "g.sqlite"))
+        await db.connect()
+        cfg = SimpleNamespace(audit_prompts=True, audit_thumbs=True, audit_retention_days=14)
+        assert await audit_image_days(db) == 3                       # 未设置：默认 3
+        text = await audit_disclosure(db, cfg)
+        assert "原图（3 天后自动删除" in text and "缩略图（14 天后自动删除）" in text and "测试" not in text
+        await db.set_setting("audit_image_retention_days", 0)
+        assert await audit_image_days(db) == 0
+        assert "原图" not in await audit_disclosure(db, cfg)
+        await db.close()

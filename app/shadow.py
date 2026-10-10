@@ -136,7 +136,8 @@ def borrowing(day_images: dict, names: dict, *, accounts: int, base: int = BASE_
 
 
 def analyze(rows: Iterable[tuple], *, slots: int = 1, interval: float = 15, key_interval: float = 15,
-            accounts: int = 1, base: int = BASE_QUOTA, account_cap: int = ACCOUNT_DAILY_CAP) -> dict:
+            accounts: int = 1, base: int = BASE_QUOTA, account_cap: int = ACCOUNT_DAILY_CAP,
+            ceil: int = CEIL_QUOTA) -> dict:
     rows = list(rows)
     reqs = _requests(rows)
     day_images: dict = defaultdict(int)
@@ -155,8 +156,8 @@ def analyze(rows: Iterable[tuple], *, slots: int = 1, interval: float = 15, key_
         "drr": replay(reqs, "drr", slots=slots, interval=interval, key_interval=key_interval) if reqs else None,
         "contention": contention(reqs),
         "load": busy_windows(reqs, slots=slots, interval=interval),
-        "quota": borrowing(day_images, names, accounts=accounts, base=base, account_cap=account_cap),
-        "params": {"base": base, "ceil": CEIL_QUOTA, "account_cap": account_cap,
+        "quota": borrowing(day_images, names, accounts=accounts, base=base, ceil=ceil, account_cap=account_cap),
+        "params": {"base": base, "ceil": ceil, "account_cap": account_cap,
                    "busy_util": BUSY_UTIL, "idle_util": IDLE_UTIL, "slots": slots, "interval": interval},
     }
 
@@ -168,5 +169,11 @@ async def collect(state, since: float) -> dict:
     slots = sum(t.image_slots.limit for t in usable) or 1
     guard = getattr(state, "guard", None)
     extra = {"base": guard.values["base_daily_images"], "account_cap": guard.values["account_daily_cap"]} if guard else {}
+    try:   # 借用上限跟随动态额度算法当前的 quota_ceiling（100～300 浮动），不再固定 300，否则影子回放和真实规则对不上
+        live_ceil = await state.db.get_setting("quota_ceiling", None)
+        if live_ceil is not None:
+            extra["ceil"] = int(float(live_ceil))
+    except (TypeError, ValueError):
+        pass
     return analyze(rows, slots=slots, interval=float(state.settings.image_min_interval),
                    key_interval=float(state.settings.key_image_min_interval), accounts=max(1, len(usable)), **extra)

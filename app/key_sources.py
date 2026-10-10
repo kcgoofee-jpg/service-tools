@@ -57,8 +57,10 @@ class SourceTracker:
         self._trail: dict[int, deque] = {}
         self._clients: dict[int, dict[str, float]] = {}
         self._hours: dict[int, set] = {}
-        self.events: deque = deque(maxlen=2000)
-        self.notify_owner = False     # (时间, key_id, 信号类型)：给自动驾驶（autopilot.py）判断用
+        self.events: deque = deque(maxlen=2000)   # (时间, key_id, 信号类型)：给自动驾驶 key_guard 判断用
+        # 私信站长的网段告警：2026-10-10 起关闭（只看网段会误伤 VPN 用户，提醒和处罚交给 share_guard.py）。
+        # 代码保留：防分享校准后可重新打开，作为「单 Key 24h 网段数」的廉价告警。
+        self.notify_owner = False
 
     async def _get_salt(self) -> str:
         if self._salt is None:
@@ -102,10 +104,11 @@ class SourceTracker:
             return
         now = time.time() if now is None else now
         found = network_of(ip)
-        if self.alerter is not None and not _is_test(key):
+        if not _is_test(key):
+            # 信号总要记下来喂给自动驾驶——不能因为没配告警渠道（alerter 为空）就让 key_guard 收不到事件
             for kind, text in self.signals(key, found[1] if found else None, client, now):
                 self.events.append((now, int(key["id"]), kind))
-                if not self.notify_owner:      # 2026-10-10 起由 share_guard.py 负责提醒和处罚（这里只看网段，会误伤 VPN 用户）
+                if not (self.notify_owner and self.alerter is not None):
                     continue
                 self.alerter.notify(f"resale_{kind}_{key['id']}",
                                     f"Key「{key['name']}」{text}。可能被转卖或共享，建议先问一下本人。", cooldown=ALERT_COOLDOWN)

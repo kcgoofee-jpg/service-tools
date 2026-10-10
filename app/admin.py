@@ -23,6 +23,7 @@ from .action_log import ADMIN_ACTIONS, log_action, summarize
 from . import features as feature_defs
 from . import token_store
 from . import ops
+from .audit import audit_image_days
 from .policy import gen_key
 from .body import read_json_body
 from .allowance import SETTING, read_alert_threshold
@@ -1276,7 +1277,8 @@ async def server_status(request: Request):
     usage = shutil.disk_usage(cfg.data_dir)
     return {
         "alerts": {"configured": st.alerter.configured, "sent": st.alerter.sent},
-        "audit": dict(zip(("prompts", "thumbs", "retention_days"), await ops.audit_flags(st.db, cfg))),
+        "audit": {**dict(zip(("prompts", "thumbs", "retention_days"), await ops.audit_flags(st.db, cfg))),
+                  "image_retention_days": await audit_image_days(st.db)},
         "upstream": st.upstream_health(),
         "protection": {"auth_fail_max": cfg.auth_fail_max, "auth_fail_window": cfg.auth_fail_window,
                        "auth_block_seconds": cfg.auth_block_seconds,
@@ -1312,6 +1314,7 @@ async def _ops_snapshot(request: Request) -> dict:
                      # 后台“新建 Key”弹窗的默认功能，与服务端缺省逻辑一致
                      "new_key": feature_defs.parse_list(await _new_key_features(request, {}))},
         "audit": {"prompts": prompts, "thumbs": thumbs, "retention_days": days,
+                  "image_retention_days": await audit_image_days(st.db),
                   "announce_configured": st.announcer.configured},
         "upstream": st.upstream_health(),
     }
@@ -1364,7 +1367,7 @@ async def ops_set_economy(request: Request):
 
 @router.put("/ops/audit")
 async def ops_set_audit(request: Request):
-    """开关生成记录。notify（默认 true）会向成员公告频道发出测试期声明。"""
+    """开关生成记录。记录范围变化且 notify（默认 true）时，在成员公告频道发布数据记录说明。"""
     require_admin(request)
     body = await read_json_body(request)
     try:
