@@ -49,6 +49,8 @@ class Guard:
         self.image_inflight: dict[int, int] = {}
         self.entries: list[dict] = []        # 进行中的出图：排队 / 生成，按进入时间排序
         self._seq = 0
+        self.breaker_until = 0.0             # 全站熔断到期时间（自动驾驶 breaker 触发；内存态，重启即清）
+        self._breaker_reason = ""
 
     # ---------- 设置 ----------
     async def load(self) -> None:
@@ -194,8 +196,17 @@ class Guard:
         span = self.values["interval_jitter"]
         return random.uniform(0, span) if span else 0.0
 
+    def trip_breaker(self, seconds: float, reason: str = "", now: Optional[float] = None) -> None:
+        """全站熔断：在 seconds 秒内，所有上游账号都拒接新的出图任务（自动驾驶 breaker 用）。到点自动恢复。"""
+        now = time.time() if now is None else now
+        self.breaker_until = now + max(0.0, seconds)
+        self._breaker_reason = reason or f"上游连续出错，已暂停出图 {int(seconds)} 秒，到点自动恢复"
+
     async def token_block_reason(self, db, token_id: str, day: str, now: Optional[float] = None) -> Optional[str]:
         """这个上游账号现在不能再接新的出图任务时，返回给成员看的原因。"""
+        now = time.time() if now is None else now
+        if self.breaker_until > now:
+            return self._breaker_reason or f"上游连续出错，已暂停出图，约 {int(self.breaker_until - now)} 秒后自动恢复"
         daily = self.values["account_daily_cap"]
         if daily:
             used = (await db.get_upstream_counter(token_id, day))["images"]

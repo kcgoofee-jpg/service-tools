@@ -126,6 +126,18 @@ class RegistrationTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(RegistrationError):                              # 非指定服务器拒绝
             await self.service.issue_direct("888", "1134557553011998840")
 
+    async def test_issue_direct_hourly_rate_limit(self):
+        # 每小时领取总数硬上限：抹平授权突增（曾触发 Discord 680009）；0 = 关闭
+        self.service.membership_role = ""
+        await self.db.set_setting("issue_hourly_cap", "2")
+        await self.service.issue_direct("777", "1480185480048808009")
+        await self.service.issue_direct("778", "1480185480048808009")
+        with self.assertRaises(RegistrationError) as cm:
+            await self.service.issue_direct("779", "1480185480048808009")
+        self.assertIn("限流", str(cm.exception))
+        await self.db.set_setting("issue_hourly_cap", "0")                       # 关闭后恢复
+        self.assertIn("nai-", (await self.service.issue_direct("779", "1480185480048808009"))["key"])
+
     async def test_http_intent_requires_bridge_secret_and_callback_only_reports_status(self):
         app = FastAPI()
         app.include_router(router)

@@ -368,6 +368,20 @@ class RegistrationService:
             "response_type": "code", "scope": self._oauth_scope(), "state": state,
         })
 
+    async def _issue_rate_blocked(self, now: float | None = None) -> bool:
+        """每小时领取 Key 总数的硬上限：把短时间的授权/领取突增抹平（2026-10-10 Discord 应用因「增长异常」被标记，
+        就是网页登录上线后一小时内 ~43 人集中授权触发的）。0 = 关闭。默认 12/小时，远高于自然速率、远低于会触发风控的突增。"""
+        try:
+            cap = int(float(await self.db.get_setting("issue_hourly_cap", 12) or 12))
+        except (TypeError, ValueError):
+            cap = 12
+        if cap <= 0:
+            return False
+        now = time.time() if now is None else now
+        rows = await self.db._db.execute_fetchall(
+            "SELECT COUNT(*) FROM discord_registrations WHERE created_at>=?", (now - 3600,))
+        return bool(rows) and int(rows[0][0]) >= cap
+
     async def issue_direct(self, user_id: str, guild_id: str, *, username: str = "",
                            global_name: str = "", avatar: str = "", name: str = "") -> dict:
         """/register 直接发 Key：斜杠命令的 interaction 已被 Discord 签名验明发起人身份，
@@ -388,6 +402,8 @@ class RegistrationService:
             if (await self.db._db.execute_fetchall(
                     "SELECT 1 FROM discord_registrations WHERE discord_id=?", (user_id,))):
                 raise RegistrationError("这个 Discord 账号已经领取过 Key，可用 /quota 查看、/resetkey 重置。")
+            if await self._issue_rate_blocked():
+                raise RegistrationError("本小时领取人数较多，为保护服务稳定已暂时限流，请过几分钟再用 /register 领取。")
             cfg = await self._check_capacity(user_id, name)
             # 身份组门槛（后台「领 Key」可配，可跨服）：用机器人 Token 查，不需要用户 OAuth
             role_guild = cfg.get("role_guild") or (self.membership_guild if self.membership_role else "")
@@ -530,6 +546,8 @@ class RegistrationService:
                     bearer="Bot " + self.bot_token, json={"recipient_id": expected_id})
                 if await self.is_banned(expected_id):      # 网络等待期间可能刚被封禁
                     raise RegistrationError("这个 Discord 账号已被站长停用，无法领取 Key。")
+                if await self._issue_rate_blocked():
+                    raise RegistrationError("本小时领取人数较多，为保护服务稳定已暂时限流，请过几分钟再重试。")
                 key = gen_key("nai")
                 row = await self.db.create_key({
                     "name": "Discord:" + expected_id, "token": key,

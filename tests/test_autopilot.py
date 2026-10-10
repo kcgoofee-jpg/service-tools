@@ -47,3 +47,55 @@ async def test_run_observes_without_changing_keys(tmp_path):
         assert (await db.list_admin_actions())[0]["action"] == "自动驾驶（观察）"
     finally:
         await db.close()
+
+
+@pytest.mark.asyncio
+async def test_breaker_enforce_trips_site_pause(tmp_path):
+    """breaker=enforce 且最近 15 分钟上游失败成簇 → guard 全站熔断，token_block_reason 给出暂停原因。"""
+    from app.guard import Guard
+    db = Database(str(tmp_path / "b.sqlite"))
+    await db.connect()
+    try:
+        await db.set_setting("autopilot_breaker", "enforce")
+        for _ in range(6):
+            await db.add_log(None, "m", "image", "nai-diffusion-5-full", "error")
+        guard = Guard(db)
+        st = SimpleNamespace(db=db, guard=guard, share=None, sources=SimpleNamespace(events=[]))
+        now = time.time()
+        out = await autopilot.run(st, None, now=now)
+        assert out["rules"]["breaker"]["value"] and out["rules"]["breaker"].get("applied")
+        assert guard.breaker_until > now
+        reason = await guard.token_block_reason(db, "tok", "2026-10-10", now)
+        assert reason and "暂停出图" in reason
+        assert (await db.list_admin_actions())[0]["action"] == "自动驾驶：熔断"
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_key_guard_enforce_pauses_only_rejects_branch(tmp_path):
+    """key_guard=enforce 只执行「1 小时内被拒 ≥60 次」(pause 3600)；换网段 (pause 86400) 仍只观察。"""
+    from app.share_guard import ShareGuard
+    db = Database(str(tmp_path / "kg.sqlite"))
+    await db.connect()
+    try:
+        await db.set_setting("autopilot_key_guard", "enforce")
+        base = {"daily_images": 150, "daily_anlas": 0, "daily_v5": 0, "monthly_anlas": 0,
+                "daily_text_tokens": 0, "rpm": 10, "allow_anlas": False, "allow_img2img": False,
+                "exclude_global_v5": False, "image_model_scope": "all"}
+        loop_key = await db.create_key({"name": "死循环", "token": "nai-loop", **base})
+        alt_key = await db.create_key({"name": "换网段", "token": "nai-alt", **base})
+        for _ in range(61):
+            await db.add_log(loop_key["id"], "死循环", "image", "x", "rejected")
+        now = time.time()
+        src = SimpleNamespace(events=[(now - 60, alt_key["id"], "alternate"), (now - 30, alt_key["id"], "alternate")])
+        share = ShareGuard(db)
+        st = SimpleNamespace(db=db, guard=None, share=share, sources=src)
+        out = await autopilot.run(st, None, now=now)
+        applied = {d["key"]: d for d in out["rules"]["key_guard"]["value"]}
+        assert applied[loop_key["id"]].get("applied") and share.paused_until(loop_key["id"], now)
+        assert "反复重试" in share.pause_reasons.get(loop_key["id"], "")
+        # 换网段那把只观察，不暂停
+        assert not applied[alt_key["id"]].get("applied") and not share.paused_until(alt_key["id"], now)
+    finally:
+        await db.close()

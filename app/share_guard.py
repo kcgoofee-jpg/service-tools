@@ -164,6 +164,7 @@ class ShareGuard:
         self._hours: dict[int, set] = {}
         self._last: dict[tuple[int, str], float] = {}
         self.paused: dict[int, float] = {}
+        self.pause_reasons: dict[int, str] = {}    # key_id → 给成员看的暂停原因（非防分享的暂停，如自动驾驶限流）
         self._habits: dict[int, deque] = {}        # key_id → 暂停到期时间（启动时从库里读）
 
     async def load(self) -> None:
@@ -178,6 +179,20 @@ class ShareGuard:
     async def mode(self) -> str:
         v = await self.db.get_setting(MODE_SETTING, "enforce")
         return v if v in ("enforce", "observe", "off") else "enforce"
+
+    async def pause_key(self, key_id: int, seconds: float, reason: str, now: Optional[float] = None) -> bool:
+        """非防分享的 Key 暂停（如自动驾驶对死循环重试限流）。复用 paused_until 闸门和 main.py 的拦截，
+        但不动风险分 / 违规次数 / paused_ts，所以不影响防分享计分。已在暂停中则不重复，返回是否新暂停。"""
+        now = time.time() if now is None else now
+        kid = int(key_id)
+        if self.paused.get(kid, 0.0) > now:
+            return False
+        s = await self._state(kid)
+        s["paused_until"] = now + max(0.0, seconds)
+        await self._save(kid, s)
+        self.paused[kid] = s["paused_until"]
+        self.pause_reasons[kid] = reason
+        return True
 
     # ---------- 信号 ----------
     def signals(self, key_id: int, label: str, family: int, ua: str, now: float, busy: bool = False) -> list[tuple[str, str]]:
