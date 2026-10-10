@@ -34,10 +34,11 @@ def capacity(state) -> Module:
         now = time.time()
         last = await _q1(state.db, "SELECT MAX(ts) FROM upstream_snapshots")
         if not last or now - float(last) >= 3600:          # 每小时记一次上游真实状态
+            fresh = await quota_algo.refresh_allowance(state)    # 主动读一次，夜里没人用 V5 时也是真实值
             pct, rate = await quota_algo._allowance(state)
             anl = (await _setting_json(state.db, "anlas_pool_last")).get("anlas")
-            await state.db._db.execute("INSERT INTO upstream_snapshots(ts, v5_percent, v5_rate, anlas) VALUES (?,?,?,?)",
-                                       (now, pct, rate, anl))
+            await state.db._db.execute("INSERT INTO upstream_snapshots(ts, v5_percent, v5_rate, anlas, fresh) VALUES (?,?,?,?,?)",
+                                       (now, pct, rate, anl, 1 if fresh else 0))
             await state.db._db.commit()
         changed = await g.adapt_daily()
         if changed:

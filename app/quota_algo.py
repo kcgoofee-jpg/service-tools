@@ -239,6 +239,44 @@ async def _active_v5(db, days: int, now: float) -> int:
     return int(r[0][0])
 
 
+async def refresh_allowance(state) -> bool:
+    """主动读一次账号 V5 剩余（只读订阅信息，不生成图片；缓存 5 分钟内不会重复读）。成功返回 True。
+    以前只有成员出 V5 时才刷新：夜里没人用 V5，每小时快照记的都是旧缓存，算不出恢复速度（2026-10-10）。"""
+    nai = getattr(state, "nai", None)
+    allowance = getattr(nai, "allowance", None)
+    if allowance is None or getattr(nai, "_client", None) is None:
+        return False
+    ok = False
+    for t in getattr(nai, "pool", []):
+        if getattr(t, "usable", False):
+            try:
+                await allowance.resolve(nai._client, nai.image_host, t.token_id, t.token)
+                ok = True
+            except Exception:
+                pass
+    return ok
+
+
+async def quiet_recovery(db, now: float, window: float = 72 * 3600) -> Optional[dict[str, Any]]:
+    """独立测量恢复速度：相邻两次「主动读」的快照之间一张 V5 都没出 → 剩余的上涨就是纯恢复。
+    累计 ≥ 4 个安静小时才给结果（剩余只精确到 1%，时间太短看不出来）。"""
+    snaps = await db._db.execute_fetchall(
+        "SELECT ts, v5_percent FROM upstream_snapshots WHERE ts>? AND fresh=1 AND v5_percent IS NOT NULL ORDER BY ts",
+        (now - window,))
+    hours = gain = 0.0
+    for (t0, p0), (t1, p1) in zip(snaps, snaps[1:]):
+        if t1 - t0 > 3 * 3600:
+            continue
+        (n,), = await db._db.execute_fetchall(
+            "SELECT COUNT(*) FROM usage_log WHERE ts>? AND ts<=? AND status='ok' AND model LIKE '%diffusion-5%'", (t0, t1))
+        if n == 0:
+            hours += (t1 - t0) / 3600
+            gain += p1 - p0
+    if hours < 4:
+        return None
+    return {"rate": round(gain / hours * 24, 2), "hours": round(hours, 1), "gain": gain}
+
+
 async def _allowance(state) -> tuple[Optional[float], Optional[float]]:
     """账号 V5 剩余 % 与实测恢复 %/天（多个账号时取平均）。"""
     nai = getattr(state, "nai", None)
@@ -318,7 +356,12 @@ async def run(state, now: Optional[float] = None) -> dict[str, Any]:
             hist[-1] = review
             await db.set_setting(HISTORY_KEY, json.dumps(hist, ensure_ascii=False))
     measured = next((h["v5_rate_measured"] for h in reversed(hist) if h.get("v5_rate_measured") is not None), None)
+    quiet = await quiet_recovery(db, now)
+    if quiet is not None:              # 安静时段直接量到的恢复速度最可靠：优先用它
+        measured = quiet["rate"]
     rate, rate_info = choose_rate(rate, measured)
+    if quiet is not None:
+        rate_info["quiet"] = quiet
     stored = json.loads(await db.get_setting(V5_DAY_KEY, "{}") or "{}")
     fresh = v5_plan(pct, rate, await _active_v5(db, 3, now), lo=cfg["quota_v5_min"], hi=cfg["quota_v5_max"])
     fresh["rate_info"] = rate_info

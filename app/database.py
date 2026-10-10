@@ -138,7 +138,8 @@ CREATE TABLE IF NOT EXISTS upstream_snapshots (   -- 每小时记一次上游真
     ts REAL NOT NULL,
     v5_percent REAL,              -- 账号 V5 剩余 %（订阅接口）
     v5_rate REAL,                 -- 实测恢复 %/天（拿不到时为空）
-    anlas REAL                    -- 账号 Anlas 余额
+    anlas REAL,                   -- 账号 Anlas 余额
+    fresh INTEGER NOT NULL DEFAULT 0   -- 1 = 这次是主动刚读的（不是出图时留下的旧缓存），才能拿来算恢复速度
 );
 CREATE TABLE IF NOT EXISTS req_features (      -- 出图请求的特征（只存哈希），给防分享回测用；长期保留
     ts REAL NOT NULL,
@@ -340,6 +341,7 @@ class Database:
             "ALTER TABLE generation_audit ADD COLUMN image BLOB",
             "ALTER TABLE generation_audit ADD COLUMN image_type TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE usage_log ADD COLUMN reason TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE upstream_snapshots ADD COLUMN fresh INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE discord_registrations ADD COLUMN member_checked_at REAL NOT NULL DEFAULT 0",
             # 站长手动定的 V5 每日张数（基础值）；实际 daily_v5 = max(它 × 节约倍数, 算法给普通成员的值)，见 quota_algo
             "ALTER TABLE api_keys ADD COLUMN v5_pinned INTEGER",
