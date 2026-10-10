@@ -437,8 +437,28 @@ async def public_me(request: Request):
                    today={"images": c["images"], "v5": c["v5"],
                           "daily_images": key["daily_images"], "daily_v5": key["daily_v5"]},
                    queue=qv.get("mine", []),
+                   coupons=await gate.db.list_coupons(key["id"]),
                    images_stored=await gate.db.audit_image_count(key["id"]), image_retention_days=img_days)
     return JSONResponse(out, headers={"Cache-Control": "no-store"})
+
+
+@member_router.post("/public/me/coupons/{coupon_id}/use")
+async def use_my_coupon(request: Request, coupon_id: int):
+    """成员在首页用掉一张重置券：重置今天的 V5 与 Anlas 额度（和站长后台「重置今日额度」一样）。"""
+    discord_id = await _member_session(request)
+    if discord_id is None:
+        raise HTTPException(401, "请先登录")
+    service = getattr(request.app.state, "registrar", None)
+    key = await service.key_row_for(discord_id) if service is not None else None
+    if key is None or not key["enabled"]:
+        raise HTTPException(404, "你还没有可用的 Key")
+    gate = request.app.state.gate
+    c = await gate.db.use_coupon(coupon_id, key["id"])
+    if c is None:
+        raise HTTPException(409, "这张券已经用过或过期了")
+    await gate.db.reset_daily_image_quota(key["id"], gate.day())
+    await log_action(gate.db, f"Discord:{discord_id}", "成员使用重置券", key["name"], f"券 #{coupon_id}" + (f"（{c['note']}）" if c.get("note") else ""))
+    return JSONResponse({"ok": True}, headers={"Cache-Control": "no-store"})
 
 
 _EXPORT_AT: dict[str, float] = {}      # 每人上次打包时间（内存）：打包较重，限 1 次 / 60 秒

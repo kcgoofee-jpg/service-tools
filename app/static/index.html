@@ -1993,6 +1993,11 @@ async function addMemberTag(id){
   try{ await api(`/admin/api/keys/${id}/tags`, {method:'PUT', body: JSON.stringify({tag, note})}); toast('已标记：' + tag, 'ok'); membersCache = null; await loadMembers(); }
   catch(e){ toastErr(e); }
 }
+async function giveCoupon(id, btn){
+  btn.disabled = true;
+  try{ await api(`/admin/api/keys/${id}/coupons`, {method:'POST', body: JSON.stringify({kind:'reset', days:7, note:'站长送的'})}); toast('已发一张重置券，7 天内有效，成员在首页就能看到', 'ok'); }
+  catch(e){ toastErr(e); } finally{ btn.disabled = false; }
+}
 async function markMemberOk(id){
   const m = (membersCache||[]).find(x => x.k && x.k.id === id) || findMember(id);
   const note = m ? memberIssues(m, Date.now()/1000).filter(x => x.need).map(x => x.t).join('；') : '';
@@ -2134,7 +2139,8 @@ function memberPanel(m, now){
     <div class="mx-sec mx-cols">${today}${settings}${info}</div>
     <div class="share-ev" id="sev-${k.id}"></div>
     <div class="mx-foot">${k ? `<button class="btn mini" type="button" data-act="reset-quota" data-id="${m.id}">重置今日额度</button>` : ''}
-      <button class="btn mini" type="button" data-act="view-audit" data-id="${m.id}">生成记录</button><span class="sp"></span>${more}</div></div></td></tr>`;
+      <button class="btn mini" type="button" data-act="view-audit" data-id="${m.id}">生成记录</button>
+      <button class="btn mini" type="button" data-act="give-coupon" data-id="${k.id}" title="成员在首页自己点一下，重置当天的 V5 额度；7 天内有效">🎟️ 发重置券</button><span class="sp"></span>${more}</div></div></td></tr>`;
 }
 let memberFilterAuto = true;          // 第一次打开：有要处理的人就直接显示「需要处理」
 function renderMembers(){
@@ -3050,6 +3056,7 @@ document.addEventListener('click', ev=>{
     case 'share-clear': clearShare(id); break;
     case 'tag-add': addMemberTag(id); break;
     case 'mark-ok': markMemberOk(id); break;
+    case 'give-coupon': giveCoupon(id, el); break;
     case 'tag-del': delMemberTag(id, el.dataset.tag); break;
     case 'reset-quota': resetDailyImageQuota(id); break;
     case 'copy-key': copyKey(el); break;
