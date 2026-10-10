@@ -308,6 +308,23 @@ class OpenRegistrationTests(RegistrationTests):
             await self.service.begin("902", "1480185480048808009")                       # 名额为 901 保留
         self.assertIn("state=", await self.service.begin("901", "1480185480048808009"))
 
+    async def test_web_login_paused_by_default_never_starts_oauth(self):
+        # 默认暂停：GET /login 必须跳回首页，不能把人送进 Discord 授权（应用审核期间）；设 0 才开放
+        from types import SimpleNamespace
+        from app.registration_routes import member_router
+        app = FastAPI()
+        app.include_router(member_router)
+        app.state.registrar = self.service
+        app.state.gate = SimpleNamespace(db=self.db)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="https://fixture.invalid") as client:
+            paused = await client.get("/login", follow_redirects=False)
+            self.assertIn(paused.status_code, (302, 307))
+            self.assertIn("login=paused", paused.headers["location"])
+            self.assertNotIn("discord.com", paused.headers["location"])
+            await self.db.set_setting("web_login_paused", "0")
+            opened = await client.get("/login", follow_redirects=False)
+            self.assertIn("discord.com", opened.headers["location"])
+
     async def test_registration_and_ban_leave_the_waitlist(self):
         self.service.max_users = 1
         await self.db._db.execute("INSERT INTO waitlist(discord_id, name, joined_at) VALUES ('777','',0), ('999','',1)")

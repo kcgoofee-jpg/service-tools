@@ -338,13 +338,13 @@ def _set_cookie(response, name: str, value: str, max_age: int) -> None:
                         samesite="lax", path="/")
 
 
-@member_router.get("/login")
 async def _web_login_paused(request: Request) -> bool:
     """网页 Discord 登录是否暂停（默认暂停，设置 web_login_paused=0 才开放）：Discord 应用审核期间不发起任何 OAuth。"""
     db = request.app.state.gate.db
     return str(await db.get_setting("web_login_paused", "1")).strip() != "0"
 
 
+@member_router.get("/login")
 async def login_start(request: Request):
     service = getattr(request.app.state, "registrar", None)
     if service is None:
