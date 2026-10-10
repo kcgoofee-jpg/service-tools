@@ -18,6 +18,10 @@ async def test_incident_lifecycle_banner_bars_and_history(tmp_path):
         await sp.add_update(db, a, "identified", "已定位：快照锁库", now - 3000)
         await sp.add_update(db, a, "resolved", "已修复", now - 1800)
         b = await sp.create_incident(db, "V5 额度口径偏差", "minor", ["api"], "monitoring", "已上线修复，观察 0 点复盘", now - 600)
+        from app import status_stats
+        status_stats._PENDING.clear()
+        status_stats.record(200, now - 60); status_stats.record(500, now - 60)   # 和线上一样经 status_stats 写入（hour = 整点秒数）
+        await status_stats.flush(db)
         snap = await sp.snapshot(db, now)
         api = next(c for c in snap["components"] if c["key"] == "api")
         assert [i["id"] for i in snap["active"]] == [b] and api["status"] == "性能下降"
