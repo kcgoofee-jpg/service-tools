@@ -697,11 +697,17 @@ async def test_extreme_bracket_and_weight_preflight_blocks_without_dispatch(stat
     # Abnormal numeric weight is blocked before dispatch on both standard and streaming routes
     for path in ("/ai/generate-image", "/ai/generate-image-stream"):
         body = image_body()
-        body["input"] = "1girl, artist:bm94199::, best quality"
+        body["input"] = "1girl, 94199::artist::, best quality"          # 独立的超大权重：拦
         resp = await post(path, body)
         assert resp.status_code == 400
         assert "检测到异常权重 94199::" in resp.text
         assert not state.nai.calls and not state.db.charges
+
+    # 画师名结尾的数字紧挨 ::：自动补空格后正常出图，不再拒绝
+    body = image_body()
+    body["input"] = "1girl, artist:bm94199::, best quality"
+    resp = await post("/ai/generate-image", body)
+    assert resp.status_code == 200
 
     # Legitimate artist downweighting with 8 square brackets passes preflight and generates
     body = image_body()
