@@ -690,3 +690,22 @@ async def test_v5_borrow_lets_capped_member_continue_only_when_open(state):
         await main.quota_image_check(key, {"v5": 1, "anlas": 0})
     finally:
         quota_algo.BORROW.clear(); quota_algo.BORROW.update({"open": False})
+
+
+@pytest.mark.asyncio
+async def test_extreme_bracket_and_weight_preflight_blocks_without_dispatch(state):
+    # Abnormal numeric weight is blocked before dispatch on both standard and streaming routes
+    for path in ("/ai/generate-image", "/ai/generate-image-stream"):
+        body = image_body()
+        body["input"] = "1girl, artist:bm94199::, best quality"
+        resp = await post(path, body)
+        assert resp.status_code == 400
+        assert "检测到异常权重 94199::" in resp.text
+        assert not state.nai.calls and not state.db.charges
+
+    # Legitimate artist downweighting with 8 square brackets passes preflight and generates
+    body = image_body()
+    body["input"] = "1girl, [[[[[[[[artist:xxx]]]]]]]], best quality"
+    resp = await post("/ai/generate-image", body)
+    assert resp.status_code == 200
+
