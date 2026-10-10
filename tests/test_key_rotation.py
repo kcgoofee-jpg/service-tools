@@ -182,3 +182,19 @@ async def test_collision_does_not_destroy_existing_credentials(env):
     assert (await state.db.get_key(key['id']))['token'] == key['token']
     assert (await state.db.get_key(other['id']))['token'] == other['token']
     await state.db._db.rollback()
+
+
+@pytest.mark.asyncio
+async def test_noop_scope_patch_keeps_algorithm_and_pin_goes_manual(env):
+    # 2026-10-10：提交一个没变的「模型 = 全部」就把 Key 转成手动、V5 冻结在 18；只有值真的变了才转手动
+    state, client, key = env
+    await login(client)
+    r = await client.patch(f"/admin/api/keys/{key['id']}", json={'image_model_scope': 'all', 'notify': False})
+    assert r.status_code == 200
+    assert (await state.db.get_key(key['id']))['quota_auto'] == 1
+    r = await client.patch(f"/admin/api/keys/{key['id']}", json={'v5_pinned': 30, 'notify': False})
+    row = await state.db.get_key(key['id'])
+    assert r.status_code == 200 and row['quota_auto'] == -1 and row['v5_pinned'] == 30 and row['image_model_scope'] == 'all'
+    r = await client.patch(f"/admin/api/keys/{key['id']}", json={'quota_mode': 'auto', 'notify': False})
+    row = await state.db.get_key(key['id'])
+    assert row['quota_auto'] == 1 and row['v5_pinned'] is None            # 交回算法：清掉手动基础值

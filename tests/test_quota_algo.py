@@ -111,3 +111,33 @@ async def test_economy_mode_doubles_v5_and_reverts(tmp_path):
         assert await site_flags.get(db, site_flags.ECONOMY) is False
     finally:
         await db.close()
+
+
+@pytest.mark.asyncio
+async def test_pinned_manual_v5_never_below_members_and_scales_with_economy(tmp_path):
+    from app import ops
+    db = Database(str(tmp_path / "p.sqlite"))
+    await db.connect()
+    try:
+        base = {"daily_images": 150, "daily_anlas": 0, "daily_v5": 0, "monthly_anlas": 0, "daily_text_tokens": 0,
+                "rpm": 10, "allow_anlas": True, "allow_img2img": False, "exclude_global_v5": True, "image_model_scope": "all"}
+        low = await db.create_key({"name": "熟人-低", "token": "nai-low", **base})
+        high = await db.create_key({"name": "熟人-高", "token": "nai-high", **base})
+        await db._db.execute("UPDATE api_keys SET quota_auto=-1, v5_pinned=5 WHERE id=?", (low["id"],))
+        await db._db.execute("UPDATE api_keys SET quota_auto=-1, v5_pinned=50 WHERE id=?", (high["id"],))
+        await db._db.commit()
+
+        class Allow:
+            async def snapshot(self, pool):
+                return {"accounts": [{"percent": 98, "recharge_per_day": 11.0}]}
+        st = SimpleNamespace(db=db, guard=Guard(db), announcer=None,
+                             nai=SimpleNamespace(pool=[SimpleNamespace(usable=True)], allowance=Allow()))
+        each = (await quota_algo.run(st))["v5"]["each"]
+        assert (await db.get_key(low["id"]))["daily_v5"] == each          # 手动定得比大家少：抬到普通成员的值
+        assert (await db.get_key(high["id"]))["daily_v5"] == 50
+        await ops.set_economy(db, True, st)
+        assert (await db.get_key(low["id"]))["daily_v5"] == each * 2
+        assert (await db.get_key(high["id"]))["daily_v5"] == 100          # 节约模式一样翻倍
+        assert (await db.get_key(high["id"]))["v5_pinned"] == 50          # 基础值不被改写
+    finally:
+        await db.close()

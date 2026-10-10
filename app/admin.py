@@ -577,7 +577,11 @@ async def patch_key(request: Request, key_id: int):
             fields.update(allow_anlas=False, daily_anlas=0.0)
         else:
             raise HTTPException(422, "anlas_mode 只能是 off / auto / manual")
-    if body.get("image_model_scope") == "all" and "daily_v5" not in body:
+    if "v5_pinned" in body:
+        # 成员页「手动 · V5 N/天」：站长定的基础值，算法按它算实际额度（不低于普通成员，节约模式同样放大）
+        fields["v5_pinned"] = _num(body["v5_pinned"], int, 1, 1000, "v5_pinned")
+        fields["image_model_scope"] = "all"
+    if body.get("image_model_scope") == "all" and "daily_v5" not in body and "v5_pinned" not in fields:
         before_v5 = await st.db.get_key(key_id)
         if before_v5 and not before_v5["daily_v5"]:
             fields["daily_v5"] = QUICK_V5_DAILY     # 从「仅 V4.5」开到 V5 时给一个默认日额度，和早期成员一致
@@ -585,13 +589,19 @@ async def patch_key(request: Request, key_id: int):
         d = _num(body["expires_days"], int, 0, 3650, "expires_days")
         fields["expires_at"] = (time.time() + d * 86400) if d > 0 else None
     before = await st.db.get_key(key_id)
+    if "daily_v5" in fields and "v5_pinned" not in fields and fields["daily_v5"] != before["daily_v5"]:
+        fields["v5_pinned"] = fields["daily_v5"] or None      # 编辑窗口里手填的 V5 张数也作为手动基础值
     await st.db.update_key(key_id, fields)
     quota_mode = body.get("quota_mode")
-    if quota_mode == "auto" or any(k in fields for k in ("daily_images", "daily_v5", "image_model_scope")):
+    # 只有额度 / 模型的值真的变了才转为手动（2026-10-10：提交了一个没变的「模型 = 全部」就被冻结在 18 张）
+    quota_changed = any(k in fields and fields[k] != before[k] for k in ("daily_images", "daily_v5", "image_model_scope")) \
+        or ("v5_pinned" in fields and fields["v5_pinned"] != before["v5_pinned"])
+    if quota_mode == "auto" or quota_changed:
         # 手动改了额度或模型 → 这把 Key 由站长管理（-1），动态额度算法不再覆盖；选「交给算法」恢复为 1 并立即重算
-        await st.db._db.execute("UPDATE api_keys SET quota_auto=? WHERE id=?", (1 if quota_mode == "auto" else -1, key_id))
+        await st.db._db.execute("UPDATE api_keys SET quota_auto=?, v5_pinned=CASE WHEN ?=1 THEN NULL ELSE v5_pinned END "
+                                "WHERE id=?", (1 if quota_mode == "auto" else -1, 1 if quota_mode == "auto" else 0, key_id))
         await st.db._db.commit()
-        if quota_mode == "auto":
+        if quota_mode == "auto" or "v5_pinned" in fields:
             try:
                 from . import quota_algo
                 await quota_algo.run(st)
@@ -1214,7 +1224,7 @@ async def members(request: Request):
             "allow_anlas": bool(row["allow_anlas"]), "anlas_auto": row["anlas_auto"] == 1,
             "anlas_mode": "manual" if row["anlas_auto"] == -1 and row["allow_anlas"] else "off" if row["anlas_auto"] == -1 else "auto",
             "daily_anlas": row["daily_anlas"], "image_model_scope": row["image_model_scope"],
-            "quota_auto": row["quota_auto"] == 1,
+            "quota_auto": row["quota_auto"] == 1, "v5_pinned": row["v5_pinned"],
             "today": {"images": counter["images"], "v5": counter["v5"], "anlas": round(float(counter["anlas"]), 2),
                       "text_tokens": counter["text_tokens"], "requests": counter["requests"]},
             "week": {"images": int(w.get("images", 0)), "v5": int(w.get("v5", 0)),

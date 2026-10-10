@@ -1769,17 +1769,22 @@ function memberFilters(now){
 }
 function ago(sec){ return sec < H ? Math.max(1, Math.round(sec/60)) + ' 分钟' : sec < D ? Math.round(sec/H) + ' 小时' : Math.round(sec/D) + ' 天'; }
 /* 快捷权限：额度方式、Anlas 方式。改动立即生效，并由机器人私信成员 */
-const ANLAS_PRESETS = [30, 90, 150];          // 一张 V5 续杯 30 Anlas（anlas_pool.V5_PAID_PRICE）
+const ANLAS_PRESETS = [30, 90, 150];
+const V5_PIN_PRESETS = [18, 30, 50, 80];      // 手动 V5 基础值（28 步计）；节约模式下实际 ×2          // 一张 V5 续杯 30 Anlas（anlas_pool.V5_PAID_PRICE）
 function permControls(m){
   const scope = m.image_model_scope === 'all' ? 'all' : 'legacy';
   const mode = m.anlas_mode || 'auto', daily = Math.round(m.daily_anlas || 0);
   const manual = ANLAS_PRESETS.includes(daily) ? ANLAS_PRESETS : [...ANLAS_PRESETS, daily].filter(Boolean).sort((a,b)=>a-b);
   const autoLabel = m.anlas_auto ? `算法 · 今日 ${daily}` : '交给算法';
-  const qa = m.quota_auto !== false;
-  return `<select class="psel" data-perm="scope" data-id="${m.id}" aria-label="额度" title="额度：改动立即生效并私信通知">
+  const qa = m.quota_auto !== false, pin = Number(m.v5_pinned) || 0;
+  // 手动 V5 选的是「基础值」：实际 = max(基础值 × 节约倍数, 普通成员的值)，括号里是现在实际生效的张数
+  const pins = [...new Set([...V5_PIN_PRESETS, pin].filter(Boolean))].sort((a,b)=>a-b);
+  const legacyManualAll = !qa && scope==='all' && !pin;     // 老数据：手动但没定基础值
+  return `<select class="psel" data-perm="scope" data-id="${m.id}" aria-label="额度" title="额度：改动立即生效并私信通知。手动 V5 不会低于普通成员，节约模式同样翻倍">
       <option value="auto"${qa?' selected':''}>额度：算法 · ${m.daily_images}${m.daily_v5?' + V5 '+m.daily_v5:''}</option>
       <option value="legacy"${!qa&&scope==='legacy'?' selected':''}>额度：手动 · 仅 V4.5</option>
-      <option value="all"${!qa&&scope==='all'?' selected':''}>额度：手动 · V4.5 + V5</option></select>
+      ${legacyManualAll?`<option value="all" selected>额度：手动 · V5 ${m.daily_v5}/天（未定基础值）</option>`:''}
+      ${pins.map(n=>`<option value="pin:${n}"${!qa&&scope==='all'&&pin===n?' selected':''}>额度：手动 · V5 ${n}/天${!qa&&pin===n&&m.daily_v5!==n?`（现 ${m.daily_v5}）`:''}</option>`).join('')}</select>
     <select class="psel" data-perm="anlas" data-id="${m.id}" aria-label="Anlas 权限" title="Anlas：改动立即生效并私信通知">
       <option value="off"${mode==='off'?' selected':''}>Anlas 关闭</option>
       <option value="auto"${mode==='auto'?' selected':''}>Anlas：${esc(autoLabel)}</option>
@@ -1790,7 +1795,10 @@ document.addEventListener('change', async e => {
   const sel = e.target.closest('select[data-perm]'); if(!sel) return;
   const m = findMember(+sel.dataset.id); if(!m) return;
   const v = sel.value, body = {};
-  if(sel.dataset.perm === 'scope'){ if(v === 'auto') body.quota_mode = 'auto'; else body.image_model_scope = v; }
+  if(sel.dataset.perm === 'scope'){
+    if(v === 'auto') body.quota_mode = 'auto';
+    else if(v.startsWith('pin:')) body.v5_pinned = +v.slice(4);
+    else body.image_model_scope = v; }
   else if(v.startsWith('manual:')){ body.anlas_mode = 'manual'; body.daily_anlas = +v.slice(7); }
   else body.anlas_mode = v;
   sel.disabled = true;
