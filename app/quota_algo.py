@@ -279,6 +279,10 @@ async def run(state, now: Optional[float] = None) -> dict[str, Any]:
     # 当天的基础方案（按 28 步计价）不变，只在下发时放大；关掉节约模式后下一次重算自动回到基础值。
     # 账号剩余跌破收紧线时不放大（安全优先）。
     v5 = dict(v5)
+    # 当天的方案（每人额度）一天只定一次，但显示用的剩余要用实时值：原来一直显示早上定方案时的 97%，
+    # 实际下午已经是 92%（2026-10-10）。决策（收紧、节约放大）本来就用的实时 pct。
+    if pct is not None:
+        v5["percent"] = pct
     mult = await economy_multiplier(db, pct)
     if mult > 1:
         v5.update(base_each=v5["each"], base_global=v5["global"], economy=mult,
