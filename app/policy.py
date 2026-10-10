@@ -262,6 +262,9 @@ def upstream_parameter_problem(body: dict) -> Optional[str]:
             size = len(text.encode("utf-8"))
             if size >= MAX_PROMPT_BYTES:
                 return f"提示词过长：{path} 有 {size} 字节（中文每字 3 字节），上游上限 {MAX_PROMPT_BYTES} 字节"
+            # 权重括号嵌套过深（>=8层），会导致上游 Attention FP16 计算溢出报错 NaN
+            if re.search(r"\{{8,}|\}{8,}|\({8,}|\){8,}", text):
+                return "提示词中权重括号嵌套过深（超过 7 层），会导致上游显卡浮点溢出（NaN）；请减少花括号或圆括号数量"
     p = body.get("parameters") if isinstance(body.get("parameters"), dict) else {}
     if body.get("action", "generate") == "generate":
         for key in ("width", "height"):

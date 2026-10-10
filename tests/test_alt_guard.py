@@ -60,3 +60,41 @@ async def test_same_network_alone_is_not_flagged(tmp_path):
         assert await alt_guard.scan(db, now) == []
     finally:
         await db.close()
+
+
+@pytest.mark.asyncio
+async def test_sybil_rapid_switch_and_same_sig_flagged(tmp_path):
+    # 一人双开多号：同一出口、同一出图习惯参数签名、两两短时交替出图
+    db = Database(str(tmp_path / "c.sqlite"))
+    await db.connect()
+    try:
+        k1, k2, third = await _keys(db, "sybil-1", "sybil-2", "innocent-third")
+        now = time.time()
+        # 写入出图习惯签名到 req_features
+        shared_sig = "sig_custom_preset_123"
+        for kid in (k1, k2):
+            await db._db.execute(
+                "INSERT INTO req_features(ts, key_id, src, fp, os, sig, toks, busy) VALUES (?,?,?,?,?,?,?,?)",
+                (now - 1000, kid, "154.64.*.*", "fp123", "Windows", shared_sig, "toks", 0))
+
+        # 模拟两把 Key 相互交替出图，同时有第三个人并发插队
+        t0 = now - 500
+        for i in range(4):
+            await _log(db, k1, t0 + i * 80, src="154.64.*.*")
+            # 第三个人并发插队，测试两两交替是否依然能准确识别
+            await _log(db, third, t0 + i * 80 + 10, src="99.99.*.*", client="Third/1.0")
+            await _log(db, k2, t0 + i * 80 + 25, src="154.64.*.*")
+
+        await db._db.commit()
+        links = await alt_guard.scan(db, now)
+        assert len(links) == 1
+        link = links[0]
+        assert link["keys"] == sorted([k1, k2])
+        assert link["signals"]["same_sig"] is True
+        assert link["signals"]["switch"] >= 4
+        desc = alt_guard.describe(link["signals"])
+        assert "出图习惯完全相同" in desc
+        assert "来回交替" in desc
+    finally:
+        await db.close()
+
