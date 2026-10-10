@@ -208,8 +208,9 @@
 </div>
 
 <!-- ============ 3. Medium ============ -->
-<h2><span class="n">3</span>Medium / 节约模式：放入计划，算法择机开</h2>
-<p class="lead">NovelAI 的「节约模式」没有独立 API 字段——就是 <b>14 步 + Euler Ancestral + 关 SMEA</b>，省的 ~42% 全来自步数。我们 <code>policy.py</code> 的计价常量与官方一致，所以<b>现在用户自己设 14 步就已按便宜 42% 扣费</b>，不需要改上游。我们要做的是「便利 + 算法择机」。</p>
+<h2><span class="n">3</span>Medium / 节约模式 <span class="tag have" style="font-size:12px;vertical-align:middle">已上线 v2.11.0</span></h2>
+<div class="callout ok"><h3>已交付（默认关，不改现状）</h3><p>全站免费档可一键钳制到 <b>14 步 + Euler-a</b>（保留负面词），Anlas 约省 40%、出图更快。<b>总览页「节约模式」按钮</b>站长手动开关；<b>autopilot 规则</b>（默认 observe）在排队拥挤时可自动开、空闲时关。<b>无论算法还是手动切换，都会在公告频道通知成员</b>（带 1 小时防抖）。默认关闭、autopilot_economy 默认 observe，所以上线不改任何成员可见行为。</p></div>
+<p class="lead">原理：NovelAI 的「节约模式」没有独立 API 字段——就是 <b>14 步 + Euler Ancestral + 关 SMEA</b>，省的 ~42% 全来自步数。我们 <code>policy.py</code> 的计价常量与官方一致，所以<b>钳到 14 步就已按便宜 ~42% 扣费</b>，V5 周额度按 <code>(A+B·14)/(A+B·23)</code> 自动少扣，不需要改上游。</p>
 
 <div class="card">
   <h3>要做的适配</h3>
@@ -236,7 +237,10 @@
     <li><b>L9 后台 24h 小时级曲线</b>（前端加图，数据已有）。</li>
     <li><b>L7 重置点迁到最闲整点</b>（审核 autopilot 建议后单独迁移）。</li>
     <li><b>L6 空闲放行计次防刷</b>核对/补齐。</li>
-    <li><b>Medium 适配</b>（前端档位 + 后端钳制 + autopilot observe 规则）。</li>
+    <li><b>N1 请求体积上限</b>（入口拒超大请求，防上游 400 噪音 + CF 1015 连坐）。</li>
+    <li><b>N2 WebP 输出格式</b>（默认 WebP 省流量/加速，可「尊重请求」回退）。</li>
+    <li><b>N3 报错文案更清晰</b>（含「最接近合法值」提示 + 公开错误码对照）。</li>
+    <li><s>Medium 适配</s> <span class="tag have">已上线 v2.11.0</span></li>
   </ul>
   <p style="margin-top:14px"><span class="tag freeze">申诉通过后再评估</span></p>
   <ul>
@@ -247,8 +251,32 @@
 
 <div class="callout warn"><p><b>冻结纪律</b>：申诉期间不改成员可见行为、不碰任何群发/自动互动。P1 都是观测/告警层；P2 的 Medium/24h 图可做但默认 observe、上线前本地验证 + 全量测试。</p></div>
 
+<!-- ============ 5. 本轮新增经验 ============ -->
+<h2><span class="n">5</span>本轮新增经验（penguinsama / minijiu / NAI 风控）</h2>
+
+<div class="callout bad">
+  <h3>N5 · NAI 正在大力封号（最重要的背景）</h3>
+  <p>社区情报：东亚/东南亚区转美元 + 信用卡购买被无条件拒绝；美国本土卡的账号也在 3 天内被无理由封禁清点；NAI 频繁扫用户 IP 属地，<b>梯子换几个节点就封号</b>；独享/共享号「绝迹」。minijiu 站出了 29 万图后<b>「没号了」被迫暂停</b>。</p>
+  <p><b>对我们的意义</b>：我们这<b>一个共享账号是极其珍贵且脆弱</b>的资产。① 继续压低检测信号（间隔抖动、好公民限速、不群发）；② Discord 申诉务必推进；③ <b>L3 多号池要重新评估</b>——捐来的号本身也会被 NAI 封，多号池不等于安全，且接收他人账号在当前风控下风险更高。宁可慢、稳、少踩信号。</p>
+</div>
+
+<div class="callout ok">
+  <h3>N1 · 「一个坏请求封掉账号」——我们已经安全</h3>
+  <p>minijiu 踩过：有人发 2.5MB 超大请求 → NAI 返回 400 → 他们「按错误码自动处理」<b>误把 3 个上游账号自动禁用了</b>。我们核查过代码：<b>只有 401 会自动停用账号</b>；402/403 只提醒站长、明确不停用（注释写着「只有一把 Token 时自动停用会导致全站不可用」）；<b>400 只透传、不停用</b>。我们没有这个雷。<br><b>仍可补</b>：入口加<b>请求体积上限</b>（N1，P2），把 2.5MB 这种超大请求在到上游/CF 之前就挡掉，避免 400 噪音和 CF 1015 连坐封站。</p>
+</div>
+
+<div class="card">
+  <h3>其余可借鉴（penguinsama 智绘姬站）</h3>
+  <ul>
+    <li><b>N2 图片输出格式可选（默认 WebP）</b>：WebP 体积小、加载快，省用户和服务器流量；不兼容的客户端可在领 Key 页改「尊重请求」回退 PNG。我们也存图 + 返图，值得做（P2）。</li>
+    <li><b>N3 报错文案更清晰</b>：他们的错误表很用户友好，例如「width 786 不是 64 的整数倍，最接近的合法值是 768」。我们已有不错的拒绝文案，可再补「最接近合法值」提示 + 一张公开的 HTTP 错误码对照表（P2）。</li>
+    <li><b>N4 「无限额度 + 全站排队」模型</b>：penguinsama 不设每日次数、纯靠排队限流。是另一种取舍（体验上「不卡额度但要排队」）。我们单号 + 动态电池更适合保护稀缺算力，记为备选思路，不改。</li>
+    <li><b>N6 CF CDN 100s 硬约束再确认</b>：必须 100s 内返回、不能发心跳（否则生图插件不兼容）。→ <b>节约模式（14 步）直接降低超时概率</b>，和这条正相关。</li>
+  </ul>
+</div>
+
 <div class="foot">
-  数据来源：线上 <code>data/nai_gate.db</code>（usage_log ~17h）、<code>app/perf.py</code>、<code>app/guard.py</code>、<code>app/shadow.py</code>、<code>app/policy.py</code>。对照：minijiu 多号池站公开 Discord 运营记录。本文件为内部运营计划，随算法进展更新。
+  数据来源：线上 <code>data/nai_gate.db</code>（usage_log ~17h）、<code>app/perf.py</code>、<code>app/guard.py</code>、<code>app/shadow.py</code>、<code>app/policy.py</code>、<code>app/nai.py</code>。对照：minijiu 多号池站、penguinsama / 智绘姬站公开 Discord 运营记录与错误码文档，及 NAI 风控社区情报。本文件为内部运营计划，随算法进展更新。更新：2026-10-10 · 节约模式已上线 v2.11.0。
 </div>
 
 </div>
