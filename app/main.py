@@ -31,6 +31,7 @@ from .body import read_json_body
 from .config import load_settings
 from .client_views import subscription_payload
 from .image_events import ImageEventTracker, ImageStreamProtocolError, STREAM_MEDIA_TYPES
+from . import reasons
 from .image_streaming import ImageStreamResponse
 from .image_tools import prepare_tool, validate_result, MAX_RESPONSE_BYTES
 from .image_payload import read_image_body
@@ -65,15 +66,16 @@ STATE: Optional[GateState] = None
 
 
 class GateError(Exception):
-    def __init__(self, status: int, message: str, *, billing_uncertain: bool = False):
+    def __init__(self, status: int, message: str, *, billing_uncertain: bool = False, code: str = ""):
         super().__init__(message)
         self.status = status
-        self.message = message
+        self.message = str(message)
         self.billing_uncertain = billing_uncertain
+        self.code = code or reasons.code_of(message)      # 拒绝原因码：guard 返回的 Reason 自带
 
 
-def err(status: int, message: str) -> GateError:
-    return GateError(status, message)
+def err(status: int, message: str, code: str = "") -> GateError:
+    return GateError(status, message, code=code)
 
 
 class QuerylessAccessFilter(logging.Filter):
@@ -166,7 +168,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "2.14.1"
+__version__ = "2.14.2"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -280,7 +282,8 @@ async def gate_error_handler(request: Request, exc: GateError):
     if key is not None and 400 <= exc.status < 500 and not (_REQUEST_LOGGED.get() or request_timing.logged()):
         # 鉴权之后被拒（Key 停用 / 过期、功能未开通、额度用完、限流、排队超时……）统一记一条，方便排查成员问题
         try:
-            record(key, _kind_for_path(request.url.path), request_timing.model(), "rejected", detail=f"{exc.status} {exc.message}"[:160])
+            record(key, _kind_for_path(request.url.path), request_timing.model(), "rejected",
+                   detail=f"{exc.status} {exc.message}"[:160], reason=exc.code)
         except Exception as log_exc:
             bug("log:rejected", log_exc, path=request.url.path)
     if exc.status >= 500:          # 上游失败 / 网关故障：按消息归并，方便看出哪类问题在变多
@@ -343,8 +346,9 @@ async def authenticate(request: Request, *, passive: bool = False):
         until = time.strftime("%m-%d %H:%M", time.localtime(share.paused_until(row["id"])))
         reason = getattr(share, "pause_reasons", {}).get(row["id"])
         if reason:
-            raise err(403, f"{reason}，{until} 自动恢复。如有疑问请联系站长。")
-        raise err(403, f"你的 Key 因检测到多人共用已暂停，{until} 自动恢复。Key 仅限本人使用；如果是误判，请联系站长。")
+            raise err(403, f"{reason}，{until} 自动恢复。如有疑问请联系站长。", reasons.KEY_PAUSED)
+        raise err(403, f"你的 Key 因检测到多人共用已暂停，{until} 自动恢复。Key 仅限本人使用；如果是误判，请联系站长。",
+                  reasons.KEY_PAUSED)
     # 只要 Key 实际通过鉴权即视为使用，避免 Launcher 登录/上游暂时失败时被误删。
     await STATE.db.touch_key(row["id"])
     sources = getattr(STATE, "sources", None)
@@ -859,7 +863,7 @@ async def reserve_image_budget(key, est, *, legacy_free_images=0):
 def record(key, kind: str, model: str, status: str, *, images: int = 0,
            anlas: float = 0.0, tokens: int = 0, v5: int = 0,
            legacy_free_images: int = 0, detail: str = "",
-           unconfirmed_anlas: float = 0.0) -> asyncio.Task:
+           unconfirmed_anlas: float = 0.0, reason: str = "") -> asyncio.Task:
     """写日志；成功请求额外计入每日配额。"""
     _REQUEST_LOGGED.set(True); request_timing.mark_logged()
     live.note(status)
@@ -875,7 +879,7 @@ def record(key, kind: str, model: str, status: str, *, images: int = 0,
         else:
             await STATE.db.add_log(key["id"], key["name"], kind, model, status,
                                    images=images, anlas=anlas, tokens=tokens, detail=detail,
-                                   unconfirmed_anlas=unconfirmed_anlas, **timing)
+                                   unconfirmed_anlas=unconfirmed_anlas, reason=reason, **timing)
     task = asyncio.create_task(_go())
     task.add_done_callback(_log_task_failure)
     return task
@@ -1368,7 +1372,7 @@ async def _generate_image(request: Request, *, streaming: bool):
                         await complete_image_operation(perform_stream(response), can_cancel=lambda: not dispatched)
             except GateError as exc:
                 # 和非流式一样记「拒绝」：自动驾驶（节约模式 / Key 限流）、AIMD、每日微调都靠这些记录感知拥挤
-                record(key, "image_stream", model, "rejected", detail=f"{exc.status} {exc.message}"[:160])
+                record(key, "image_stream", model, "rejected", detail=f"{exc.status} {exc.message}"[:160], reason=exc.code)
                 await response.error(exc.status, exc.message)
 
         return ImageStreamResponse(run_stream, wire_format)

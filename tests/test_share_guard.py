@@ -220,8 +220,9 @@ async def test_hourly_cap_aimd_and_3h_window(guard):
     g.values["account_hourly_cap"] = 100
     assert await g.adapt_daily(now + 3600) is None               # 24 小时内有过限流：不加
     assert await g.adapt_daily(now + 86401) is None              # 没顶到过上限：没信息，不加
-    await db._db.execute("INSERT INTO usage_log(ts, key_id, key_name, kind, status, detail) VALUES (?,?,?,?,?,?)",
-                         (now + 2 * 86400 + 3600, 1, "m", "image", "rejected", "429 本小时出图量已达上限（每小时 100 张）"))
+    await db._db.execute("INSERT INTO usage_log(ts, key_id, key_name, kind, status, detail, reason) VALUES (?,?,?,?,?,?,?)",
+                         (now + 2 * 86400 + 3600, 1, "m", "image", "rejected", "429 本小时出图量已达上限（每小时 100 张）",
+                          "hourly_cap"))
     await db._db.commit()
     assert await g.adapt_daily(now + 2 * 86400 + 86401) == (100, 110)   # 顶到过上限且平稳一天 +10
     assert await g.adapt_daily(now + 2 * 86400 + 86500) is None   # 一天最多一次

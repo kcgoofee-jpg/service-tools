@@ -1143,6 +1143,7 @@ def test_guard_image_queue_per_key_and_site():
     g.values["queue_per_account"] = 3
     assert g.admit_image(2, accounts=1) is None
     assert "排队的人太多" in g.admit_image(3, accounts=1)
+    assert g.admit_image(3, accounts=1).code == "queue_full"          # 原因码随拒绝说明一起返回，统计按码数
     for _ in range(3):
         g.release_image(1)
     assert 1 not in g.image_inflight
