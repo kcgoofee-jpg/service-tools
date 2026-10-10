@@ -479,7 +479,7 @@ body.authed #board{margin-top:22px}
   </section>
 
   <section id="algo" aria-labelledby="algoTitle">
-    <div class="sec-head"><h2 id="algoTitle">调度的数学</h2><p>所有成员共用上游账号，一张图要过六道算法。每张卡是一条公式和它的函数图，拖动滑块看结果怎么变。</p></div>
+    <div class="sec-head"><h2 id="algoTitle">调度的数学</h2><p>所有成员共用上游账号，一张图要过七道算法。每张卡是一条公式和它的函数图，拖动滑块看结果怎么变。</p></div>
     <p class="m-live" id="mLive"><i></i><span id="mLiveT">示例值 · 正在读取线上参数</span></p>
     <div class="m-snap" id="mSnap"></div>
     <nav class="m-flow" aria-label="算法流水线">
@@ -535,8 +535,8 @@ body.authed #board{margin-top:22px}
     <article class="mcard" id="m-hour">
       <div class="math">
         <div class="m-k">④ 速率闸门 · 固定窗口计数</div>
-        <h3 id="mHourT">每小时最多 80 张</h3>
-        <div class="eq" id="mHourEq">放行 ⇔ <i>n</i><sub>h</sub> &lt; <i>C</i>，<i>C</i> = <span class="hl">80</span></div>
+        <h3 id="mHourT">每小时最多 150 张</h3>
+        <div class="eq" id="mHourEq">放行 ⇔ <i>n</i><sub>h</sub> &lt; <i>C</i>，<i>C</i> = <span class="hl">150</span></div>
         <div class="eq">借用 ⇔ 无人排队 ∧ <i>n</i><sub>h</sub> &lt; 0.6 · <i>C</i></div>
         <p class="m-note" id="mHourN">超过个人保底 B 以后，只有全站空闲（第二行）才能继续用到上限 A。</p>
         <p class="m-now" id="mHourNow" hidden></p>
@@ -550,7 +550,7 @@ body.authed #board{margin-top:22px}
         <div class="m-k">⑤ 排队论 · M/D/1</div>
         <h3>单线程出图，平均等多久</h3>
         <div class="eq"><i>ρ</i> = <i>λ</i> · <i>S</i>，　<i>W</i><sub>q</sub> = <i>ρ</i> · <i>S</i> / 2(1 − <i>ρ</i>)</div>
-        <p class="m-note" id="mQueueN">每个上游账号一次只画一张。请求随机到达（每小时 <i>λ</i> 张），每张占用 <i>S</i> ≈ 17.5 秒。<i>ρ</i> 越接近 1，等待越陡；每小时 80 张的闸门让 <i>ρ</i> ≤ 0.39。</p>
+        <p class="m-note" id="mQueueN">每个上游账号一次只画一张。请求随机到达（每小时 <i>λ</i> 张），每张占用 <i>S</i> ≈ 17.5 秒。<i>ρ</i> 越接近 1，等待越陡；每小时 150 张的闸门让 <i>ρ</i> ≤ 0.73。</p>
         <p class="m-note" id="mQueueRule" hidden></p>
         <div class="m-ctrl"><label for="sL">每小时请求 λ</label><input id="sL" type="range" min="0" max="190" value="54"><output id="oL" for="sL">54 张</output></div>
         <div class="m-read two"><div><span>利用率 ρ</span><b id="rR">0.26</b></div><div><span>模型平均等待</span><b id="rW">3.1s</b></div></div>
@@ -570,11 +570,24 @@ body.authed #board{margin-top:22px}
       </div>
       <div class="plot"><svg id="gB" role="img" aria-label="熔断触发区域"></svg></div>
     </article>
+
+    <article class="mcard" id="m-econ">
+      <div class="math">
+        <div class="m-k">⑦ 节约模式 · 成本与步数成正比</div>
+        <h3>人多时统一 14 步，同样的额度多出约 70% 的图</h3>
+        <div class="eq">成本 ∝ <i>a</i> + <i>b</i>·<i>s</i>，　<i>c</i>(14) / <i>c</i>(28) = <span class="hl">0.58</span></div>
+        <div class="eq">开 ⇔ 排队满<sub>15m</sub> ≥ 8；关 ⇔ 排队满<sub>30m</sub> ≤ 1；两次切换 ≥ 1 小时</div>
+        <p class="m-note">每张图的成本 = 固定部分 + 每一步的部分。步数从 28 降到 14，成本降到约 58%（省约 42%，和 NovelAI 官方节约模式的数字一致），同样的额度能出约 1.7 倍的图。采样器换成低步数下更稳的 Euler Ancestral，负面词保留。无论算法还是站长开关，都会在公告频道通知。</p>
+        <p class="m-now" id="mEconNow" hidden></p>
+        <p class="m-prior">同类做法：NovelAI 官方「节约模式」（Medium，14 步）。</p>
+      </div>
+      <div class="plot"><svg id="gE" role="img" aria-label="单张成本随步数变化"></svg></div>
+    </article>
   </section>
 
 </main>
 
-<footer>猫头鹰公益站 · 公益测试服务，不保证可用性</footer>
+<footer>猫头鹰公益站 · 非商业公益服务，不保证可用性</footer>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script>
@@ -877,7 +890,7 @@ function fmtDate(sec){
   function num(v){ var n = Number(v); return v != null && v !== '' && isFinite(n) ? n : null; }
   function mk(svg, tag, attrs, text){ var e = document.createElementNS(NS, tag); for(var k in attrs) e.setAttribute(k, attrs[k]); if(text != null) e.textContent = text; svg.appendChild(e); return e; }
   /* 示例值（2026-10-10 线上快照）：只在读不到实时数据时显示 */
-  var SNAP = {percent:98, rate:11, global:203, each:null, ceiling:150, base:100, hourly:80, quietCap:20, qs:0, qe:0,
+  var SNAP = {percent:98, rate:11, global:203, each:null, ceiling:150, base:100, hourly:150, quietCap:20, qs:0, qe:0,
               daily:1000, interval:17.5, keyQueue:null, queueCap:null, usable:1, hour:null, imagesToday:null};
   var V = {}, isLive = false, touched = {sP:false, sL:false}, lastSig = '';
   for(var k0 in SNAP) V[k0] = SNAP[k0];
@@ -1076,6 +1089,17 @@ function fmtDate(sec){
     mk(svg, 'text', {x:f.sx(26), y:f.sy(2.2), 'text-anchor':'middle', fill:css('--ok'), 'font-weight':600}, '正常：不触发');
   }
 
+  function drawE(){
+    var svg = $m('gE'), A = 2.951823174884865e-6, B = 5.753298233447344e-7;
+    var c = function(s){ return (A + B * s) / (A + B * 28); };
+    var f = frame(svg, {x0:1, x1:28, y0:0, y1:1.05, xt:[1,7,14,21,28], yt:[0,0.25,0.5,0.75,1], xl:'步数 s', yl:'单张成本（28 步 = 100%）', yf:function(v){ return Math.round(v * 100) + '%'; }});
+    var p = '';
+    for(var s = 1; s <= 28; s++) p += (s === 1 ? 'M' : 'L') + f.sx(s).toFixed(1) + ' ' + f.sy(c(s)).toFixed(1) + ' ';
+    mk(svg, 'path', {d:p, fill:'none', stroke:css('--accent'), 'stroke-width':2});
+    dot(svg, f, f.sx(14), f.sy(c(14)), '14 步 ≈ ' + Math.round(c(14) * 100) + '%', false);
+    dot(svg, f, f.sx(28), f.sy(1), '28 步 = 100%', true);
+  }
+
   /* 快照 chips + A/B/U 读数 */
   function chip(label, val){ var c = document.createElement('span'); c.className = 'm-chip'; c.appendChild(document.createTextNode(label + ' ')); var b = document.createElement('b'); b.textContent = val; c.appendChild(b); return c; }
   function renderSnap(){
@@ -1097,7 +1121,7 @@ function fmtDate(sec){
     if(!sn.hidden) sn.textContent = '今天线上：全站 ' + V.global + ' 张，每人 ' + V.each + ' 张。';
   }
 
-  function all(){ renderSnap(); updV5(); drawA(); drawH(); updHourText(); updQ(); updQueueText(); drawB(); }
+  function all(){ renderSnap(); updV5(); drawA(); drawH(); updHourText(); updQ(); updQueueText(); drawB(); drawE(); }
 
   function apply(d){
     var r = d.rules || {}, q = r.quota || {}, g = d.guard || {}, qq = d.quota || {};
@@ -1122,6 +1146,12 @@ function fmtDate(sec){
     lastSig = sig; all();
   }
   document.addEventListener('owl-live', function(e){ try{ apply(e.detail || {}); }catch(err){ if(window.__owlReport) window.__owlReport(err, 'math'); } });
+  /* 节约模式当前状态（来自 /public/status） */
+  document.addEventListener('owl-status', function(e){
+    var n = $m('mEconNow'); if(!n) return;
+    n.hidden = false;
+    n.textContent = (e.detail || {}).economy ? '现在：节约模式已开启（14 步）。' : '现在：节约模式关闭，正常 28 步。';
+  });
   /* /public/status 里的保底和安静时段：实时数据到之前先用它 */
   document.addEventListener('owl-status', function(e){
     if(isLive) return;
