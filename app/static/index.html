@@ -2874,7 +2874,11 @@ async function loadQuotaAlgo(){
   try{
     const d = await api('/admin/api/quota-algo'), l = d.last || {}, v = l.v5 || {};
     qaLast = l; limitsVerdict();
-    const rows = (d.history || []).slice(-7).reverse().map(h => `<tr><td class="t" data-label="日期">${esc(h.day)}</td><td class="num" data-label="用量 / 账号日上限">${esc(h.used)} / ${esc(h.cap)}</td><td class="num" data-label="每小时拦截">${esc(h.hourly_blocks)}</td><td class="num" data-label="顶格人数">${esc(h.ceiling_hits)}</td><td class="num" data-label="上限 · 保底（昨 → 今）">${esc(h.from[0])}→${esc(h.to[0])} · ${esc(h.from[1])}→${esc(h.to[1])}</td><td class="muted" data-label="理由">${esc((h.reasons||[]).join('；'))}</td></tr>`).join('');
+    const hs = d.history || [];
+    // V5 剩余：每天 0 点记一次；和前一天比的净变化 = 恢复 − 用掉
+    const v5cell = (h, i) => { if(h.v5_pct == null) return '—'; const prev = hs[i-1]; const dlt = prev && prev.v5_pct != null ? h.v5_pct - prev.v5_pct : null;
+      return `${Math.round(h.v5_pct)}%${dlt != null ? ` <span class="${dlt < 0 ? 'bad-text' : 'muted'}">${dlt >= 0 ? '+' : ''}${dlt.toFixed(1)}</span>` : ''}${h.v5_rate ? `<div class="muted sm">恢复 ${h.v5_rate}%/天</div>` : ''}`; };
+    const rows = hs.map((h, i) => [h, i]).slice(-7).reverse().map(([h, i]) => `<tr><td class="t" data-label="日期">${esc(h.day)}</td><td class="num" data-label="用量 / 账号日上限">${esc(h.used)} / ${esc(h.cap)}</td><td class="num" data-label="次日 0 点 V5 剩余">${v5cell(h, i)}</td><td class="num" data-label="每小时拦截">${esc(h.hourly_blocks)}</td><td class="num" data-label="顶格人数">${esc(h.ceiling_hits)}</td><td class="num" data-label="上限 · 保底（昨 → 今）">${esc(h.from[0])}→${esc(h.to[0])} · ${esc(h.from[1])}→${esc(h.to[1])}</td><td class="muted" data-label="理由">${esc((h.reasons||[]).join('；'))}</td></tr>`).join('');
     $('#qaBody').innerHTML = l.enabled === false ? '<div class="muted">动态额度已关闭</div>' : `
       <div class="cols-3">
         <div><div class="muted sm">V4.5 每人每天</div><div class="num" style="font-size:22px;font-weight:700">${esc(l.ceiling ?? '—')} <span class="muted" style="font-size:13px">保底 ${esc(l.base ?? '—')}</span></div></div>
@@ -2882,7 +2886,7 @@ async function loadQuotaAlgo(){
         <div><div class="muted sm">账号 V5 剩余 · 恢复</div><div class="num" style="font-size:22px;font-weight:700">${v.percent==null?'—':esc(Math.round(v.percent))+'%'} <span class="muted" style="font-size:13px">${esc(v.rate ?? '—')}%/天 · 系数 ${esc(v.k ?? '—')}</span></div></div>
       </div>
       <div class="muted sm" style="margin:8px 0">由算法管理 ${esc(l.members ?? 0)} 人 · V5 按 ${esc(v.people ?? '—')} 人分 · 更新于 ${l.updated_at?esc(fullTime(l.updated_at)):'—'}</div>
-      ${rows?`<div class="table-wrap"><table class="rt"><thead><tr><th class="t">日期</th><th class="num">用量 / 账号日上限</th><th class="num">每小时拦截</th><th class="num">顶格人数</th><th class="num">上限 · 保底（昨 → 今）</th><th>理由</th></tr></thead><tbody>${rows}</tbody></table></div>`:'<div class="muted sm">每日微调记录会在明天出现</div>'}`;
+      ${rows?`<div class="table-wrap"><table class="rt"><thead><tr><th class="t">日期</th><th class="num">用量 / 账号日上限</th><th class="num" title="每天 0 点记一次账号 V5 剩余；括号里是和前一天比的净变化（恢复 − 用掉）">次日 0 点 V5 剩余</th><th class="num">每小时拦截</th><th class="num">顶格人数</th><th class="num">上限 · 保底（昨 → 今）</th><th>理由</th></tr></thead><tbody>${rows}</tbody></table></div>`:'<div class="muted sm">每日微调记录会在明天出现</div>'}`;
   }catch(e){ $('#qaBody').innerHTML = '<div class="muted">读取失败</div>'; }
 }
 async function loadAnlasPool(){

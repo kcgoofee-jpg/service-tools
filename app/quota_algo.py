@@ -264,6 +264,13 @@ async def run(state, now: Optional[float] = None) -> dict[str, Any]:
     # 先用的人用到 11 张后额度被降到 9 而被拦）。分母按最近 3 天真正用过 V5 的人数（原来按出过任何图的人，
     # 23 人里只有 10 人用 V5，额度长期浪费在 97%）。只有账号剩余跌破 40% 才在当天收紧（安全优先）。
     pct, rate = await _allowance(state)
+    if review is not None and pct is not None:
+        # 每天记一笔账号 V5 剩余和官方给的恢复速度：复盘表里能看出「一天恢复多少、用掉多少、净变化」
+        review.update(v5_pct=round(pct, 1), v5_rate=round(rate, 1) if rate else None)
+        hist = json.loads(await db.get_setting(HISTORY_KEY, "[]") or "[]")
+        if hist and hist[-1].get("day") == review["day"]:
+            hist[-1] = review
+            await db.set_setting(HISTORY_KEY, json.dumps(hist, ensure_ascii=False))
     stored = json.loads(await db.get_setting(V5_DAY_KEY, "{}") or "{}")
     fresh = v5_plan(pct, rate, await _active_v5(db, 3, now), lo=cfg["quota_v5_min"], hi=cfg["quota_v5_max"])
     if stored.get("day") == today and stored.get("plan"):
