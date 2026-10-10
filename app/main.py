@@ -186,7 +186,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "2.12.0"
+__version__ = "2.12.1"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -511,7 +511,11 @@ async def maintenance_loop() -> None:
         if registrar is not None:
             for name in ("sync_roles", "backfill_profiles", "invite_waitlist"):
                 try:
-                    await getattr(registrar, name)()
+                    if name == "invite_waitlist":
+                        ann = getattr(STATE, "announcer", None)
+                        await registrar.invite_waitlist(announce=ann.post if ann is not None else None)
+                    else:
+                        await getattr(registrar, name)()
                 except Exception as exc:
                     bug(f"maintenance:{name}", exc)
 

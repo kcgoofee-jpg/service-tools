@@ -257,9 +257,13 @@ class RegistrationService:
             "SELECT discord_id, name, joined_at, invited_at FROM waitlist ORDER BY joined_at")
         return [{"discord_id": r[0], "name": r[1], "joined_at": r[2], "invited_at": r[3]} for r in rows]
 
-    async def invite_waitlist(self, now: float | None = None) -> int:
-        """维护循环调用：过期的邀请让给下一位；有空位就按顺序私信候补。返回本次发出的邀请数。"""
+    async def invite_waitlist(self, now: float | None = None, announce=None) -> int:
+        """维护循环调用：过期的邀请让给下一位；有空位就按顺序为候补保留 24 小时名额并通知。返回本次邀请数。
+
+        通知方式由设置 waitlist_dm 决定：1（默认）逐个私信；0 = 不私信，只在公告频道发一条汇总
+        （Discord 应用审核期间用 0：批量私信正是 2026-10-10 被标记的信号之一）。announce 是发公告频道的函数。"""
         now = time.time() if now is None else now
+        use_dm = str(await self.db.get_setting("waitlist_dm", "1")).strip() != "0"
         cfg = await self.settings()
         expired = await self.db._db.execute_fetchall(
             "SELECT discord_id FROM waitlist WHERE invited_at IS NOT NULL AND invited_at <= ?", (now - WAITLIST_HOLD,))
@@ -282,11 +286,18 @@ class RegistrationService:
         for discord_id, name in rows:
             await self.db._db.execute("UPDATE waitlist SET invited_at=? WHERE discord_id=?", (now, discord_id))
             await self.db._db.commit()
+            if not use_dm:
+                await log_action(self.db, "系统", "邀请候补", name or f"Discord {discord_id}",
+                                 "已保留 24 小时（不私信，已在公告频道统一通知）")
+                continue
             sent = await self.send_dm(discord_id,
                 "🦉 猫头鹰公益站有空位了！为你保留 24 小时：请在 🔑｜领取key 输入 /register 领取。"
                 "超过 24 小时未领取，名额会让给下一位候补。")
             await log_action(self.db, "系统", "邀请候补", name or f"Discord {discord_id}",
                              "已私信" if sent else "私信失败（对方可能关闭了私信），名额仍保留 24 小时", ok=sent)
+        if rows and not use_dm and announce is not None:
+            announce(f"🦉 **候补有空位了**：已为候补前 {len(rows)} 位保留名额 24 小时。"
+                     "在候补里的朋友请到 🔑｜领取key 输入 `/register` 领取；24 小时内没领，名额会顺延给下一位。")
         return len(rows)
 
     async def registration_profile(self, discord_id: str) -> Optional[dict]:
