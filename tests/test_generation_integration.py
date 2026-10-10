@@ -606,3 +606,21 @@ async def test_economy_log_detail_keeps_size_steps_and_cost(state):
     assert ok.status_code == 200
     detail = state.db.logs[-1][1]["detail"]
     assert detail.startswith("832x1216/14step 免费") and "钳制到 14" in detail and "k_euler_ancestral" in detail
+
+
+@pytest.mark.asyncio
+async def test_economy_images_carry_half_cost_weight_to_upstream(state):
+    # 账号每日上限按算力折算：节约模式钳到 14 步的图计 0.5 张，正常 28 步计 1 张
+    from app.nai import IMAGE_COST_WEIGHT
+    seen = []
+    orig = state.nai.request
+
+    async def spy(*a, **kw):
+        seen.append(IMAGE_COST_WEIGHT.get())
+        return await orig(*a, **kw)
+    state.nai.request = spy
+    state.db.keys["fixture-1"]["allow_anlas"] = False
+    assert (await post("/ai/generate-image", image_body())).status_code == 200
+    state.db.kv = {"economy_mode": "on"}
+    assert (await post("/ai/generate-image", image_body())).status_code == 200
+    assert seen == [1.0, 0.5]

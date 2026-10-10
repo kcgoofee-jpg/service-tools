@@ -889,7 +889,10 @@ function fmtDate(sec){
     var nx = Number(g.next_in) || 0;
     $id('dPn').textContent = g.hour_cap && (g.hour || 0) >= g.hour_cap ? '近 60 分钟已满，最早那张满 60 分钟后就有空位' : (nx > 0 ? '下一张约 ' + Math.ceil(nx) + ' 秒后可以发' : '上游空着，随时可以发');
     /* 额度 */
-    $id('d45').textContent = q.images_today || 0; $id('d45c').textContent = q.images_cap || 0; setBar('d45bar', q.images_today || 0, q.images_cap || 0);
+    // 每日上限按算力折算（节约模式 14 步的图算半张），进度条和数字用折算值；悬停可看实际张数
+    const used45 = q.units_today ?? q.images_today ?? 0;
+    $id('d45').textContent = Math.round(used45); $id('d45').title = `实际出图 ${q.images_today || 0} 张（节约模式的图按半张计入额度）`;
+    $id('d45c').textContent = q.images_cap || 0; setBar('d45bar', used45, q.images_cap || 0);
     $id('d5').textContent = q.v5_today || 0; $id('d5c').textContent = q.v5_cap || 0; setBar('d5bar', q.v5_today || 0, q.v5_cap || 0);
     $id('dAn').textContent = r.borrow_open ? '全站空闲：用完保底后也能继续出图' : '全站较忙：用完保底后要等空闲才能继续';
   }

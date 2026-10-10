@@ -141,3 +141,21 @@ async def test_pinned_manual_v5_never_below_members_and_scales_with_economy(tmp_
         assert (await db.get_key(high["id"]))["v5_pinned"] == 50          # 基础值不被改写
     finally:
         await db.close()
+
+
+@pytest.mark.asyncio
+async def test_daily_account_cap_counts_compute_units(tmp_path):
+    # 节约模式的图算半张：1000 张上限下，2 张 14 步的图只占 1 份
+    db = Database(str(tmp_path / "u.sqlite"))
+    await db.connect()
+    try:
+        guard = Guard(db)
+        await guard.save({"account_daily_cap": 2})
+        await db.bump_upstream_image_counter("tok", "2026-10-10", 2, 0.5)
+        c = await db.get_upstream_counter("tok", "2026-10-10")
+        assert c["images"] == 2 and c["units"] == 1.0
+        assert await guard.token_block_reason(db, "tok", "2026-10-10") is None
+        await db.bump_upstream_image_counter("tok", "2026-10-10", 1)
+        assert "已达上限" in (await guard.token_block_reason(db, "tok", "2026-10-10") or "")
+    finally:
+        await db.close()

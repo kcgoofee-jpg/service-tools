@@ -868,8 +868,9 @@ async def guard_get(request: Request):
     data = st.guard.describe()
     accounts = []
     for t in st.nai.pool:
-        used = (await st.db.get_upstream_counter(t.token_id, st.day()))["images"]
-        accounts.append({"position": t.position, "usable": t.usable, "today": used,
+        c = await st.db.get_upstream_counter(t.token_id, st.day())
+        accounts.append({"position": t.position, "usable": t.usable, "today": c["images"],
+                         "today_units": round(c.get("units", c["images"]), 1),
                          "this_hour": st.guard.hour_count(t.token_id)})
     data["accounts"] = accounts
     data["queued_images"] = sum(st.guard.image_inflight.values())

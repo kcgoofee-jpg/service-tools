@@ -42,10 +42,11 @@ async def build(state, registrar, now: Optional[float] = None) -> dict[str, Any]
     day = state.day()
     mono = time.monotonic()
     accounts = []
-    images_today = 0
+    images_today = units_today = 0
     for t in pool:
-        used = (await state.db.get_upstream_counter(t.token_id, day))["images"]
-        images_today += used
+        c = await state.db.get_upstream_counter(t.token_id, day)
+        images_today += c["images"]
+        units_today += c.get("units", c["images"])     # 和每日上限比较用折算值（节约模式的图算半张）
         accounts.append({
             "usable": t.usable,
             "cooling": max(0, int(t.blocked_until - now)) if not t.disabled and t.admin_enabled else 0,
@@ -62,7 +63,7 @@ async def build(state, registrar, now: Optional[float] = None) -> dict[str, Any]
         "t": now,
         "mode": "fifo",                         # 启用轮流出图后为 "drr"
         "auth": recent(now),
-        "quota": {"images_today": images_today,
+        "quota": {"images_today": images_today, "units_today": round(units_today, 1),
                   "images_cap": (gv.get("account_daily_cap") or 0) * usable,
                   "v5_today": await state.db.day_v5_total(day), "v5_cap": v5_cap},
         "queue": guard.queue_view() if guard else {"waiting": 0, "running": 0},

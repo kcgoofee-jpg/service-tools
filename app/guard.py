@@ -212,9 +212,10 @@ class Guard:
                           BREAKER)
         daily = self.values["account_daily_cap"]
         if daily:
-            used = (await db.get_upstream_counter(token_id, day))["images"]
+            c = await db.get_upstream_counter(token_id, day)
+            used = c.get("units", c["images"])          # 按算力折算：节约模式 14 步的图算半张
             if used >= daily:
-                return Reason(f"本站今天的出图总量已达上限（每个账号 {daily} 张/天，用来保护上游账号），明天 0 点恢复", DAILY_CAP)
+                return Reason(f"本站今天的出图总量已达上限（每个账号 {daily} 张/天，按算力折算，用来保护上游账号），明天 0 点恢复", DAILY_CAP)
         cap = self.hourly_cap(now)
         if cap and self.hour_count(token_id, now) >= cap:
             wait = self.minutes_until_free(token_id, now)
