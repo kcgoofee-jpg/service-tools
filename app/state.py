@@ -60,6 +60,7 @@ class GateState:
             post_jitter_min=settings.post_request_jitter_min,
             post_jitter_max=settings.post_request_jitter_max,
             single_slot_enforced=settings.single_image_slot_enforced,
+            tls_impersonate=settings.upstream_tls_impersonate,
         )
         self.nai.managed_path = self.token_store_path
         from .guard import Guard

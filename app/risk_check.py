@@ -11,7 +11,8 @@
   查额度、对账、查 Anlas 也用同一套。
 - HTTP/2：装了 h2 就启用；请求后 1~3 秒随机间隔；连续 3 次 403 冷却 5 分钟。
 - 代理：支持 UPSTREAM_PROXY，未配置时直连。
-- TLS(JA3/JA4) 指纹没有改，仍是 Python/OpenSSL 的原生指纹（页面如实标出这一不一致）。
+- TLS(JA3/JA4) 指纹：默认没有改，仍是 Python/OpenSSL 的原生指纹（页面如实标出这一不一致）；
+  配置 UPSTREAM_TLS_IMPERSONATE 后改走 curl_cffi 模拟 Chrome，页面显示目标与请求头版本是否对齐。
 - 浏览器端指标（Canvas / WebGL 等）对纯服务端进程不适用。
 
 全部只读：不写数据库、不发上游请求（出口 IP 回显除外且默认关闭）、不发 Discord 消息。
@@ -82,7 +83,7 @@ def _outbound_headers_item(state) -> dict:
                  "生图、查额度、对账、查 Anlas 都发同一套 Chrome 浏览器请求头（站长 10/10 批准）。", evidence)
 
 
-def _tls_stack_item() -> dict:
+def _tls_stack_item(state=None) -> dict:
     try:
         import httpx
         httpx_ver = httpx.__version__
@@ -91,11 +92,40 @@ def _tls_stack_item() -> dict:
     evidence = [f"Python {sys.version.split()[0]} + httpx {httpx_ver}",
                 f"TLS 栈：{ssl.OPENSSL_VERSION}",
                 "TLS 握手特征随 Python/OpenSSL 版本与配置变化；升级依赖后指纹会变，属正常现象。"]
+    target = getattr(getattr(state, "nai", None), "tls_target", None)
+    if target:
+        evidence.append(f"上游 NovelAI 请求不走上面的 OpenSSL：已改用 curl_cffi（BoringSSL）模拟 {target}")
     return _item("tls_stack", "TLS 栈自述", OK,
                  "本机出站 TLS 使用的软件版本。只报告，不测量、不伪装。", evidence)
 
 
-def _tls_fingerprint_item() -> dict:
+def _tls_fingerprint_item(state=None) -> dict:
+    nai = getattr(state, "nai", None)
+    target = getattr(nai, "tls_target", None)
+    if target:
+        import re
+        from .nai import BROWSER_PROFILES
+        from .tls_impersonate import chrome_major
+        try:
+            from curl_cffi import __version__ as cc_ver
+        except Exception:
+            cc_ver = "未知"
+        major = chrome_major(target)
+        uas = sorted({getattr(ts, "browser_profile", {}).get("user_agent", "") for ts in getattr(nai, "pool", []) or []}
+                     or {p["user_agent"] for p in BROWSER_PROFILES})
+        ua_majors = {m.group(1) for ua in uas for m in [re.search(r"Chrome/(\d+)", ua)] if m}
+        aligned = major is not None and ua_majors == {str(major)}
+        evidence = [f"curl_cffi {cc_ver}，impersonate={target}",
+                    "请求头 UA 自称：" + ("、".join(f"Chrome {v}" for v in sorted(ua_majors)) or "非 Chrome")]
+        if not aligned:
+            evidence.append("请求头里的 Chrome 版本与 TLS 目标不一致（自定义了 UPSTREAM_USER_AGENT，或目标不是桌面 Chrome）")
+        return _item("tls_fingerprint", "TLS 指纹（JA3/JA4）", OK if aligned else WARN,
+                     f"已开启：上游请求经 curl_cffi 发出，TLS 与 HTTP/2 握手模拟 {target}。", evidence)
+    error = getattr(nai, "tls_error", None)
+    if error:
+        return _item("tls_fingerprint", "TLS 指纹（JA3/JA4）", WARN,
+                     f"配置了 UPSTREAM_TLS_IMPERSONATE={getattr(nai, 'tls_requested', '')}，但没有生效，"
+                     "已回退 httpx：TLS 握手仍是 Python/OpenSSL 的原生指纹，和请求头里自称的 Chrome 不一致。", [error])
     return _item("tls_fingerprint", "TLS 指纹（JA3/JA4）", WARN,
                  "没有改：TLS 握手仍是 Python/OpenSSL 的原生指纹，和请求头里自称的 Chrome 不一致。"
                  "实测要向第三方回显服务发请求，默认不做。是否改 TLS 指纹（如 curl_cffi）由站长决定。")
@@ -272,8 +302,8 @@ async def collect(state, now: Optional[float] = None) -> dict:
     now = time.time() if now is None else now
     items = [
         _outbound_headers_item(state),
-        _tls_stack_item(),
-        _tls_fingerprint_item(),
+        _tls_stack_item(state),
+        _tls_fingerprint_item(state),
         _egress_ip_item(),
         await _egress_ip_echo_item(),
         _browser_fingerprint_item(),

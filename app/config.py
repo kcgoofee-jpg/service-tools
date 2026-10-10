@@ -55,6 +55,8 @@ class Settings:
     upstream_proxy: str = os.environ.get("UPSTREAM_PROXY", "").strip()
     upstream_user_agent: str = os.environ.get("UPSTREAM_USER_AGENT", "").strip()
     upstream_http2: bool = field(default_factory=lambda: _bool("UPSTREAM_HTTP2", True))
+    # TLS(JA3/JA4) 指纹模拟：留空关闭（默认）；填 chrome 或具体 curl_cffi 目标（如 chrome131）后上游改走 curl_cffi
+    upstream_tls_impersonate: str = os.environ.get("UPSTREAM_TLS_IMPERSONATE", "").strip()
     post_request_jitter_min: float = field(default_factory=lambda: _float("POST_REQUEST_JITTER_MIN", 1.0))
     post_request_jitter_max: float = field(default_factory=lambda: _float("POST_REQUEST_JITTER_MAX", 3.0))
     single_image_slot_enforced: bool = field(default_factory=lambda: _bool("SINGLE_IMAGE_SLOT_ENFORCED", False))
