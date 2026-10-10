@@ -278,6 +278,31 @@ td .tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
 .search svg{position:absolute;left:12px;top:10px;color:var(--muted)}
 .search input{padding-left:38px}
 .member-grid{display:block}
+@keyframes pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--ok) 50%,transparent)}70%,100%{box-shadow:0 0 0 7px transparent}}
+/* 每页标题下的一句话状态：圆点颜色 = 好 / 注意 / 要处理 */
+.pv{display:flex;align-items:center;gap:8px;margin:6px 0 0;font-size:14px;color:var(--text-2)}
+.pv:empty{display:none}
+.pv::before{content:"";width:9px;height:9px;border-radius:50%;background:var(--muted);flex:none}
+.pv[data-tone=ok]::before{background:var(--ok)}.pv[data-tone=warn]::before{background:var(--warn)}.pv[data-tone=bad]::before{background:var(--bad)}
+.pv[data-tone=bad]{color:var(--bad)}.pv[data-tone=warn]{color:var(--warn)}
+.mod-params{margin-top:10px}.mod-params>summary{list-style:none;display:inline-flex}.mod-params>summary::-webkit-details-marker{display:none}
+.mod-params[open]>summary .ic{transform:rotate(90deg)}.mod-params .table-wrap{margin-top:8px}
+/* 总览：结论卡 */
+.ovv{display:flex;flex-direction:column;gap:14px;margin-bottom:20px}
+.ovv-h{display:flex;gap:12px;align-items:flex-start}
+.ovv-h i{width:12px;height:12px;border-radius:50%;background:var(--muted);flex:none;margin-top:8px}
+.ovv[data-tone=ok] .ovv-h i{background:var(--ok);animation:pulse 2.4s infinite}
+.ovv[data-tone=warn] .ovv-h i{background:var(--warn)}.ovv[data-tone=bad] .ovv-h i{background:var(--bad)}
+.ovv h2{font-size:20px;letter-spacing:-.01em;margin:0}
+.ovv p{margin:2px 0 0;color:var(--text-2);font-size:13.5px}
+.stat.hot .v{color:var(--warn)}
+#ovCards{grid-template-columns:repeat(4,minmax(0,1fr))}
+@media (max-width:900px){#ovCards{grid-template-columns:repeat(2,minmax(0,1fr))}}
+details.fold>summary{list-style:none;cursor:pointer;margin:0}
+details.fold>summary::-webkit-details-marker{display:none}
+details.fold>summary h2::before{content:"›";display:inline-block;margin-right:8px;transition:transform .15s;color:var(--muted)}
+details.fold[open]>summary h2::before{transform:rotate(90deg)}
+details.fold[open]>summary{margin-bottom:14px}
 /* 成员页 v2：结论 → 要处理 → 今天 / 设置 / 资料 → 操作 */
 .fchip.hot:not(.active){border-color:color-mix(in srgb,var(--warn) 45%,transparent);color:var(--warn);background:var(--warn-soft)}
 .fsel{width:auto;min-height:28px;padding:3px 28px 3px 10px;font-size:12.5px;border-radius:999px;color:var(--text-2)}
@@ -689,19 +714,19 @@ td.note{min-width:220px}
     <div class="brand"><span class="brand-mark" aria-hidden="true">🦉</span>猫头鹰公益站</div>
     <nav class="nav" aria-label="主导航">
       <button data-tab="ov" class="active"><span data-ic="home"></span>总览</button>
-      <div class="nav-label">用户与生成</div>
+      <div class="nav-label">日常</div>
       <button data-tab="members"><span data-ic="users"></span>成员</button>
-      <button data-tab="ops"><span data-ic="key"></span>领 Key 与功能</button>
       <button data-tab="audit"><span data-ic="image"></span>生成记录</button>
+      <button data-tab="bugs"><span data-ic="alert"></span>Bug 追踪<span class="nav-badge" id="navBugs" hidden></span></button>
       <div class="nav-label">监控</div>
       <button data-tab="up"><span data-ic="pulse"></span>上游</button>
-      <button data-tab="risk"><span data-ic="pulse"></span>风险检查</button>
-      <button data-tab="bugs"><span data-ic="alert"></span>Bug 追踪<span class="nav-badge" id="navBugs" hidden></span></button>
+      <button data-tab="risk"><span data-ic="shield"></span>风险检查</button>
       <button data-tab="logs"><span data-ic="list"></span>用量日志</button>
       <button data-tab="actions"><span data-ic="clock"></span>操作日志</button>
       <div class="nav-label">设置</div>
+      <button data-tab="ops"><span data-ic="key"></span>领 Key 与功能</button>
+      <button data-tab="limits"><span data-ic="sliders"></span>额度与保护</button>
       <button data-tab="modules"><span data-ic="toggle"></span>模块<span class="nav-badge" id="navMods" hidden></span></button>
-      <button data-tab="limits"><span data-ic="shield"></span>额度与保护</button>
       <button data-tab="discord"><span data-ic="chat"></span>Discord<span class="nav-badge" id="navBot" hidden>!</span></button>
       <button data-tab="set"><span data-ic="disk"></span>系统</button>
     </nav>
@@ -727,9 +752,9 @@ td.note{min-width:220px}
         <section id="tab-ov">
           <div class="page-head"><div class="ttl"><h1>总览</h1></div>
             <div class="tools"><button class="btn" id="econBtn" data-act="toggle-economy" title="节约模式：全站免费档统一 14 步 + Euler-a，省约 42% 额度、出图更快；开 / 关都会在公告频道通知成员">节约模式</button><button class="btn rf" data-act="refresh-ov" aria-label="刷新" title="刷新"><span data-ic="refresh"></span><span class="lbl">刷新</span></button></div></div>
+          <div class="card panel ovv" id="ovVerdict"><div class="skel" style="height:64px"></div></div>
           <div class="stats" id="ovCards"></div>
-          <div class="two-col">
-            <div class="card panel"><div class="panel-head"><div><h2 id="chartLabel">今日生成图片</h2>
+          <div class="card panel"><div class="panel-head"><div><h2 id="chartLabel">今日生成图片</h2>
               <div class="v num" id="chartToday" style="font-size:26px;font-weight:600">—</div><div class="hint" id="chartSub" style="margin:0"></div></div>
               <div class="seg-ic" role="group" aria-label="指标">
                 <button class="btn mini on" data-chart="images" aria-label="图片">图片</button>
@@ -738,16 +763,15 @@ td.note{min-width:220px}
                 <button class="btn mini" data-chart="anlas" aria-label="Anlas">Anlas</button>
                 <button class="btn mini" data-chart="text_tokens" aria-label="文本 tokens">文本</button></div></div>
             <div class="chart" id="chart"></div></div>
-            <div class="card panel"><div class="panel-head"><h2>状态与防护</h2></div><div class="status-list" id="statusPanel"></div></div>
-          </div>
           <div class="card panel">
             <div class="panel-head"><h2>各功能用量</h2><div class="desc">点功能名查看日志</div></div>
             <div class="table-wrap"><table class="rt"><thead><tr><th>功能</th><th class="num">今日<br><span class="sm">成功 / 失败 / 拒绝</span></th><th>今日产出</th><th class="num">近 7 天<br><span class="sm">成功 / 失败 / 拒绝</span></th><th>近 7 天产出</th></tr></thead><tbody id="featUsage"></tbody></table></div>
           </div>
+          <details class="card panel fold"><summary class="panel-head"><h2>系统状态</h2><span class="desc" id="statusSum"></span></summary><div class="status-list" id="statusPanel"></div></details>
         </section>
         <!-- 上游 -->
         <section id="tab-up" hidden>
-          <div class="page-head"><div class="ttl"><h1>上游</h1></div><div class="tools"><button class="btn rf" data-act="refresh-up" aria-label="刷新" title="刷新"><span data-ic="refresh"></span><span class="lbl">刷新</span></button></div></div>
+          <div class="page-head"><div class="ttl"><h1>上游</h1><p class="pv" id="pv-up"></p></div><div class="tools"><button class="btn rf" data-act="refresh-up" aria-label="刷新" title="刷新"><span data-ic="refresh"></span><span class="lbl">刷新</span></button></div></div>
           <div class="card panel">
             <div class="panel-head"><h2>上游 NovelAI 令牌池</h2><button class="btn primary" type="button" id="tokAddBtn" data-act="tok-add"><span data-ic="plus"></span>添加 Token</button></div>
             <div id="pool"></div>
@@ -761,11 +785,11 @@ td.note{min-width:220px}
             <div class="chart24" id="perfHourly"></div>
             <div class="table-wrap"><table class="rt"><thead><tr><th>模型</th><th class="nw">时段</th><th class="num">请求 / 成功率</th><th class="num" title="上游返回 429 的次数">限流</th><th class="num" title="上游返回 401/402/403/5xx 或连接失败">其他失败</th><th class="num" title="P50 = 中位数：一半的图比这快，代表典型速度">生成 P50</th><th class="num" title="P90：90% 的图比这快，代表较慢那 10% 有多慢（看卡顿）">生成 P90</th><th class="num" title="收到请求到发往上游：排队 + 冷却">平均排队</th><th class="num" title="实际：这一时段平均每小时出图张数（随负载变化）；上限：min(生成速度/请求间隔, 全站每小时上限)，只在设置或 AIMD 调整时变化">实际 / 上限（张/时）</th></tr></thead><tbody id="perfBody"></tbody></table></div>
           </div>
-          <div class="card panel">
-            <div class="panel-head"><h2>调度影子模式</h2><div class="desc" title="用真实请求回放「保底 + 空闲借用 + 成员间轮流 + 账号每日上限」">只回放计算，不改变实际出图顺序</div>
-              <select id="shadowRange" aria-label="回放范围" style="width:120px"><option value="24">最近 24 小时</option><option value="168">最近 7 天</option></select></div>
+          <details class="card panel fold">
+            <summary class="panel-head"><h2>调度影子模式</h2><span class="desc" title="用真实请求回放「保底 + 空闲借用 + 成员间轮流 + 账号每日上限」">只回放计算，不改变实际出图顺序（分析用）</span></summary>
+            <select id="shadowRange" aria-label="回放范围" style="width:140px;margin-bottom:12px"><option value="24">最近 24 小时</option><option value="168">最近 7 天</option></select>
             <div id="shadowBody"><div class="hint">正在回放…</div></div>
-          </div>
+          </details>
           <div class="card panel">
             <div class="panel-head"><h2>Anlas 消耗核对</h2>
               <button class="btn" id="reconReload" data-act="recon-reload">刷新记录</button>
@@ -781,7 +805,7 @@ td.note{min-width:220px}
         </section>
         <!-- 风险检查 -->
         <section id="tab-risk" hidden>
-          <div class="page-head"><div class="ttl"><h1>风险检查</h1></div><div class="tools"><button class="btn rf" data-act="refresh-risk" aria-label="刷新" title="刷新"><span data-ic="refresh"></span><span class="lbl">刷新</span></button></div></div>
+          <div class="page-head"><div class="ttl"><h1>风险检查</h1><p class="pv" id="pv-risk"></p></div><div class="tools"><button class="btn rf" data-act="refresh-risk" aria-label="刷新" title="刷新"><span data-ic="refresh"></span><span class="lbl">刷新</span></button></div></div>
           <div id="riskSummary"></div>
           <div class="card panel">
             <div class="panel-head"><h2>检查项</h2><div class="desc" title="只读盘点与行为分析；伪装类指标（TLS 指纹伪装、浏览器指纹、代理换出口）留空并说明原因">只读盘点，不伪造任何一项</div></div>
@@ -790,7 +814,7 @@ td.note{min-width:220px}
         </section>
         <!-- Bug 追踪 -->
         <section id="tab-bugs" hidden>
-          <div class="page-head"><div class="ttl"><h1>Bug 追踪</h1></div><div class="tools"><span class="tag" id="bugCount"></span>
+          <div class="page-head"><div class="ttl"><h1>Bug 追踪</h1><p class="pv" id="pv-bugs"></p></div><div class="tools"><span class="tag" id="bugCount"></span>
               <label class="check" style="white-space:nowrap;margin:0;padding:7px 10px"><input type="checkbox" id="bugAll"><span>含已处理</span></label>
               <button class="btn rf" data-act="refresh-bugs" aria-label="刷新" title="刷新"><span data-ic="refresh"></span><span class="lbl">刷新</span></button></div></div>
           <div class="card panel tight" id="bugPanel">
@@ -800,13 +824,13 @@ td.note{min-width:220px}
 
         <!-- 模块 -->
         <section id="tab-modules" hidden>
-          <div class="page-head"><div class="ttl"><h1>模块</h1></div><div class="tools"><button class="btn" data-act="refresh-mods" aria-label="刷新"><span data-ic="refresh"></span>刷新</button></div></div>
+          <div class="page-head"><div class="ttl"><h1>模块</h1><p class="pv" id="pv-modules"></p></div><div class="tools"><button class="btn" data-act="refresh-mods" aria-label="刷新"><span data-ic="refresh"></span>刷新</button></div></div>
           <div id="modList"><div class="skel" style="height:300px"></div></div>
         </section>
 
         <!-- Discord 机器人 -->
         <section id="tab-discord" hidden>
-          <div class="page-head"><div class="ttl"><h1>Discord</h1></div><div class="tools"><button class="btn rf" data-act="refresh-bot" aria-label="刷新" title="刷新"><span data-ic="refresh"></span><span class="lbl">刷新</span></button></div></div>
+          <div class="page-head"><div class="ttl"><h1>Discord</h1><p class="pv" id="pv-discord"></p></div><div class="tools"><button class="btn rf" data-act="refresh-bot" aria-label="刷新" title="刷新"><span data-ic="refresh"></span><span class="lbl">刷新</span></button></div></div>
           <div class="card panel"><div class="panel-head"><h2>机器人</h2></div><div id="botStatus"><div class="skel" style="height:60px"></div></div></div>
           <div class="card panel"><div class="panel-head"><h2>跑图分享</h2><div class="desc">新帖自动点赞、看图写评论；露骨图片只发「捂眼睛跑开」</div></div>
             <div id="botCfg"><div class="skel" style="height:200px"></div></div></div>
@@ -842,7 +866,7 @@ td.note{min-width:220px}
 
         <!-- 领 Key 与功能 -->
         <section id="tab-ops" hidden>
-          <div class="page-head"><div class="ttl"><h1>领 Key 与功能</h1></div>
+          <div class="page-head"><div class="ttl"><h1>领 Key 与功能</h1><p class="pv" id="pv-ops"></p></div>
             <div class="tools"><button class="btn rf" data-act="refresh-ops" aria-label="刷新" title="刷新"><span data-ic="refresh"></span><span class="lbl">刷新</span></button></div></div>
           <div class="card panel"><div class="panel-head"><h2>功能开关</h2><div class="desc">关闭后管理员 Key 仍可使用</div></div><div id="opsFeatures"><div class="skel" style="height:200px"></div></div></div>
           <div class="card panel"><div class="panel-head"><h2>领 Key</h2><div class="desc">成员在 Discord 用 /register 自助领取</div></div><div id="opsReg"><div class="skel" style="height:260px"></div></div></div>
@@ -891,9 +915,39 @@ td.note{min-width:220px}
         <!-- 设置 -->
         <!-- 额度与保护 -->
         <section id="tab-limits" hidden>
-          <div class="page-head"><div class="ttl"><h1>额度与保护</h1></div></div>
-          <div class="card panel">
-            <div class="panel-head"><h2>Anlas 与 V5 预算</h2></div>
+          <div class="page-head"><div class="ttl"><h1>额度与保护</h1><p class="pv" id="pv-limits"></p></div></div>
+          <div class="card panel" id="quotaAlgo">
+            <div class="panel-head"><h2>动态额度</h2><div class="desc">交给算法的成员共用一套额度，每 10 分钟重算，每天按拥挤程度微调</div></div>
+            <div id="qaBody"><div class="skel" style="height:80px"></div></div>
+          </div>
+          <div class="card panel" id="autopilot">
+            <div class="panel-head"><h2>自动驾驶</h2><div class="desc">「观察」只记录会怎么做，不执行</div></div>
+            <div id="apBody"><div class="skel" style="height:80px"></div></div>
+          </div>
+          <details class="card panel fold">
+            <summary class="panel-head"><h2>账号保护与排队</h2><span class="desc" id="fs-guard">0 = 关闭该项，保存后立即生效</span></summary>
+            <div id="guardLive" class="hint" style="margin-bottom:12px">正在读取…</div>
+            <div class="form-grid" id="guardFields"></div>
+            <button class="btn primary" data-act="save-guard">保存账号保护</button>
+          </details>
+          <details class="card panel fold">
+            <summary class="panel-head"><h2>Anlas 自动分配</h2><span class="desc" id="fs-anlas">每 10 分钟重算，供活跃成员在 V5 用完后续杯</span></summary>
+            <div id="anlasLive" class="hint" style="margin-bottom:12px;white-space:pre-line">正在读取…</div>
+            <div class="form-grid" id="anlasFields"></div>
+            <button class="btn primary" data-act="save-anlas">保存并重算</button>
+          </details>
+          <details class="card panel fold">
+            <summary class="panel-head"><h2>图片排队与冷却</h2><span class="desc" id="fs-runtime"></span></summary>
+            <div class="form-grid">
+              <div class="field"><label for="r_queue_timeout">单阶段排队等待上限（秒）</label><input id="r_queue_timeout" type="number" min="15" max="300" step="1"><div class="hint">范围 15～300</div></div>
+              <div class="field"><label for="r_key_image_min_interval">用户 Key 图片任务间隔（秒）</label><input id="r_key_image_min_interval" type="number" min="15" max="120" step="1"><div class="hint">范围 15～120</div></div>
+              <div class="field"><label for="r_image_min_interval">每把上游 Key 图片请求间隔（秒）</label><input id="r_image_min_interval" type="number" min="15" max="120" step="1"><div class="hint">范围 15～120</div></div>
+              <div class="field"><label for="r_image_429_cooldown_seconds">上游 429 最短冷却（秒）</label><input id="r_image_429_cooldown_seconds" type="number" min="60" max="3600" step="1"><div class="hint">范围 60～3600</div></div>
+            </div>
+            <button class="btn primary" data-act="save-runtime">保存运行限制</button>
+          </details>
+          <details class="card panel fold">
+            <summary class="panel-head"><h2>Anlas 与 V5 预算</h2><span class="desc" id="fs-budget"></span></summary>
             <div class="form-grid">
               <div class="field">
                 <label for="s_budget">全站月度 Anlas 预算</label>
@@ -913,47 +967,21 @@ td.note{min-width:220px}
               </div>
             </div>
             <button class="btn primary" data-act="save-budget">保存预算</button>
-          </div>
-          <div class="card panel">
-            <div class="panel-head"><h2>图片排队与冷却</h2></div>
-            <div class="form-grid">
-              <div class="field"><label for="r_queue_timeout">单阶段排队等待上限（秒）</label><input id="r_queue_timeout" type="number" min="15" max="300" step="1"><div class="hint">范围 15～300</div></div>
-              <div class="field"><label for="r_key_image_min_interval">用户 Key 图片任务间隔（秒）</label><input id="r_key_image_min_interval" type="number" min="15" max="120" step="1"><div class="hint">范围 15～120</div></div>
-              <div class="field"><label for="r_image_min_interval">每把上游 Key 图片请求间隔（秒）</label><input id="r_image_min_interval" type="number" min="15" max="120" step="1"><div class="hint">范围 15～120</div></div>
-              <div class="field"><label for="r_image_429_cooldown_seconds">上游 429 最短冷却（秒）</label><input id="r_image_429_cooldown_seconds" type="number" min="60" max="3600" step="1"><div class="hint">范围 60～3600</div></div>
-            </div>
-            <button class="btn primary" data-act="save-runtime">保存运行限制</button>
-          </div>
-          <div class="card panel">
-            <div class="panel-head"><h2>账号保护与排队</h2><div class="desc">0 = 关闭该项，保存后立即生效</div></div>
-            <div id="guardLive" class="hint" style="margin-bottom:12px">正在读取…</div>
-            <div class="form-grid" id="guardFields"></div>
-            <button class="btn primary" data-act="save-guard">保存账号保护</button>
-          </div>
-          <div class="card panel" id="autopilot">
-            <div class="panel-head"><h2>自动驾驶</h2><div class="desc">「观察」只记录会怎么做，不执行</div></div>
-            <div id="apBody"><div class="skel" style="height:80px"></div></div>
-          </div>
-          <div class="card panel" id="quotaAlgo">
-            <div class="panel-head"><h2>动态额度</h2><div class="desc">交给算法的成员共用一套额度，每 10 分钟重算，每天按拥挤程度微调</div></div>
-            <div id="qaBody"><div class="skel" style="height:80px"></div></div>
-          </div>
-          <div class="card panel">
-            <div class="panel-head"><h2>Anlas 自动分配</h2><div class="desc" title="每日池 = (剩余 − 保留) ÷ 距续费天数，平均分给近 7 天活跃、能用 V5 的成员；手动设置过 Anlas 的 Key 不受影响">每 10 分钟重算，供活跃成员在 V5 用完后续杯</div></div>
-            <div id="anlasLive" class="hint" style="margin-bottom:12px;white-space:pre-line">正在读取…</div>
-            <div class="form-grid" id="anlasFields"></div>
-            <button class="btn primary" data-act="save-anlas">保存并重算</button>
-          </div>
+          </details>
         </section>
         <section id="tab-set" hidden>
           <div class="page-head"><div class="ttl"><h1>系统</h1></div></div>
+          <div class="card panel">
+            <div class="panel-head"><h2>服务端概况</h2><div class="desc">只读摘要；上游 Token 在「上游」页管理，其余敏感配置在 .env</div></div>
+            <dl id="cfgInfo" class="kv"></dl>
+          </div>
           <div class="card panel">
             <div class="panel-head"><h2>站点公告</h2><div class="desc">用户访问首页看到的内容，支持 HTML</div></div>
             <textarea id="announce" rows="10" placeholder="&lt;h2&gt;欢迎&lt;/h2&gt;&lt;p&gt;申请 Key 请联系……&lt;/p&gt;" aria-label="站点公告"></textarea>
             <div style="margin-top:16px"><button class="btn primary" data-act="save-announce">保存公告</button></div>
           </div>
-          <div class="card panel">
-            <div class="panel-head"><h2>后台密码</h2><div class="desc">修改后所有已登录的会话（包括当前）都会失效，需要用新密码重新登录</div></div>
+          <details class="card panel fold">
+            <summary class="panel-head"><h2>后台密码</h2><span class="desc">修改后所有已登录的会话（包括当前）都会失效，需要用新密码重新登录</span></summary>
             <form id="pwForm" autocomplete="off" onsubmit="return false" style="max-width:420px">
               <div class="field"><label for="pw_cur">当前密码</label><div class="pwbox"><input id="pw_cur" type="password" autocomplete="current-password"><button class="btn" type="button" data-act="toggle-pw" data-for="pw_cur">显示</button></div></div>
               <div class="field"><label for="pw_new">新密码</label><div class="pwbox"><input id="pw_new" type="password" autocomplete="new-password"><button class="btn" type="button" data-act="toggle-pw" data-for="pw_new">显示</button></div><div class="hint">至少 12 个字符，且不能与当前密码相同</div></div>
@@ -963,11 +991,7 @@ td.note{min-width:220px}
               <button class="btn primary" type="button" id="pwSave" data-act="save-pw">修改密码</button>
             </form>
             <p class="hint" style="margin-top:16px">忘记密码时，可在服务器 <code>.env</code> 中设置 <code>ADMIN_PASSWORD</code>，并删除数据库里的 <code>admin_password_hash</code> 设置来重置。</p>
-          </div>
-          <div class="card panel">
-            <div class="panel-head"><h2>服务端概况</h2><div class="desc">只读摘要；上游 Token 在「上游」页管理，其余敏感配置在 .env</div></div>
-            <dl id="cfgInfo" class="kv"></dl>
-          </div>
+          </details>
         </section>
       </div>
     </main>
@@ -1376,6 +1400,7 @@ function tab(name){
 function statCard(k, v, small, sub, cls){
   return `<div class="card stat ${cls||''}"><div class="k">${k}</div><div class="v">${v}${small?` <small>${small}</small>`:''}</div>${sub?`<div class="sub">${sub}</div>`:''}</div>`;
 }
+function setPV(id, tone, text){ const e = document.getElementById('pv-' + id); if(e){ e.dataset.tone = tone; e.textContent = text; } }
 function skeletons(n, h){ return Array.from({length:n}, ()=>`<div class="skel" style="height:${h||110}px"></div>`).join(''); }
 
 function renderPerfHourly(fams){
@@ -1395,9 +1420,21 @@ function renderPerfHourly(fams){
     return `<div class="col" title="${title}"><div class="track"><div class="stk" style="height:${tot?Math.max(3,Math.round(tot/max*100)):0}%"><div class="ok" style="height:${okH}%"></div><div class="er" style="height:${100-okH}%"></div></div></div><div class="hh">${hh%4===0?String(hh).padStart(2,'0'):''}</div></div>`;
   }).join('');
 }
+let perfFlagsCache = null;
+function upVerdict(){
+  const pool = (ovData && ovData.pool) || [], st = (statusCache && statusCache.upstream) || {};
+  const dead = pool.filter(p => p.admin_enabled && p.disabled).length, limited = pool.filter(p => p.admin_enabled && p.blocked_for > 0).length;
+  const bad = (perfFlagsCache||[]).filter(f => f.level === 'bad').length, warn = (perfFlagsCache||[]).length - bad;
+  if(ovData && !ovData.pool_configured) return setPV('up', 'bad', '还没有配置上游 Token，所有出图都会失败');
+  if(dead) return setPV('up', 'bad', `${dead} 个上游账号失效（401），需要替换 Token`);
+  if(st.image_cooldown_seconds > 0) return setPV('up', 'bad', `上游限流，全站暂停出图 ${st.image_cooldown_seconds} 秒`);
+  if(limited || bad) return setPV('up', 'warn', limited ? `${limited} 个账号限流中` : `${bad} 项表现异常，看下面的提示`);
+  setPV('up', warn ? 'warn' : 'ok', `${pool.filter(p => p.admin_enabled).length} 个账号正常${warn ? ` · ${warn} 项值得注意` : ' · 耗时、限流、成功率都正常'}${st.recent ? ` · 最近 ${st.recent} 次请求失败 ${st.failed} 次` : ''}`);
+}
 async function loadPerf(){
   try{
     const d = await api('/admin/api/perf');
+    perfFlagsCache = d.flags; upVerdict();
     renderPerfHourly(d.families);
     const sec = ms => ms==null ? '—' : (ms/1000).toFixed(1) + 's';
     const pct = r => r==null ? '—' : Math.round(r*100) + '%';
@@ -1427,11 +1464,8 @@ async function loadRisk(){
     const d = await api('/admin/api/risk-check');
     const s = d.summary || {};
     const cls = st => st==='ok' ? 'ok' : st==='warn' ? 'warn' : st==='bad' ? 'bad' : 'info';
-    $('#riskSummary').innerHTML = s.bad
-      ? `<div class="notice-box bad" style="margin-bottom:16px">${ic('alert')}有 ${s.bad} 项风险需要处理${s.warn?`，另有 ${s.warn} 项值得留意`:''}。</div>`
-      : s.warn
-        ? `<div class="notice-box warn" style="margin-bottom:16px">${ic('alert')}没有紧急风险，但有 ${s.warn} 项值得留意。</div>`
-        : `<div class="notice-box ok" style="margin-bottom:16px">${ic('check')}没有发现需要处理的风险项。</div>`;
+    setPV('risk', s.bad ? 'bad' : s.warn ? 'warn' : 'ok', s.bad ? `有 ${s.bad} 项风险要处理${s.warn ? `，另有 ${s.warn} 项值得留意` : ''}` : s.warn ? `没有紧急风险，${s.warn} 项值得留意` : '没有发现要处理的风险');
+    $('#riskSummary').innerHTML = '';      // 结论已经写在标题下面
     box.innerHTML = d.items.map(it => {
       const ev = (it.evidence || []).map(e => `<div class="hint" style="margin:3px 0;white-space:pre-wrap">${esc(e)}</div>`).join('');
       return `<div style="padding:12px 0;border-bottom:1px solid var(--border)">
@@ -1515,6 +1549,8 @@ async function loadBugs(){
   try{
     const d = await api('/admin/api/errors' + ($('#bugAll').checked ? '?all=true' : ''));
     $('#bugCount').textContent = d.open ? d.open + ' 个未处理' : '无未处理';
+    { const err = d.errors.filter(e => !e.resolved_at && e.level === 'error').length;
+      setPV('bugs', err ? 'bad' : d.open ? 'warn' : 'ok', !d.open ? '没有没处理的 Bug' : err ? `${d.open} 个没处理，其中 ${err} 个是错误级别` : `${d.open} 个没处理，都是「注意」级别（多数是客户端断开之类，不影响服务）`); }
     $('#navBugs').hidden = !d.open; $('#navBugs').textContent = d.open;
     $('#bugCount').className = 'tag ' + (d.open ? 'warn' : 'on');
     $('#bugBody').innerHTML = d.errors.map(e=>`
@@ -1539,16 +1575,11 @@ document.addEventListener('click', async e => {
 async function loadOverview(){
   loadBugs();                     // 只为更新边栏的未处理数；面板本身在「Bug 追踪」页
   loadStatus();
-  if(!$('#ovCards').children.length) $('#ovCards').innerHTML = skeletons(3, 96);
+  if(!$('#ovCards').children.length) $('#ovCards').innerHTML = skeletons(4, 96);
   try{
     const d = await api('/admin/api/overview');
     const t = d.today;
-    $('#ovCards').innerHTML =
-      statCard('本月 Anlas / 全站预算', fmtNum(d.month.anlas), '/ ' + (d.anlas_budget>0?fmtNum(d.anlas_budget):'∞')) +
-      statCard('有效 Key / 总数', d.keys_active, '/ ' + d.keys_total) +
-      `<div class="card stat" title="按今日、本月累计；查询官方余额不会清空这些记录"><div class="k">失败请求可能产生的费用</div>
-        <div class="v">${t.unconfirmed_anlas||0} <small>Anlas</small></div>
-        <div class="sub">今日预估 ${t.unconfirmed_requests||0} 笔 · 本月 ${d.month.unconfirmed_anlas||0} Anlas / ${d.month.unconfirmed_requests||0} 笔<br>仅为估算，实际扣款尚未确认。</div></div>`;
+    ovData = d; renderOverviewTop(d);
     $('#featUsage').innerHTML = (d.feature_usage||[]).map(f=>{
       const cnt = b => `<span class="tri"><span class="num">${b.ok}</span> / <span class="num ${b.error?'bad':''}">${b.error}</span> / <span class="num ${b.rejected?'warn':''}">${b.rejected}</span></span>`;
       const out = b => [b.images?`${b.images} 张`:'', b.tokens?`${fmt(b.tokens)} tokens`:'', b.anlas?`${b.anlas} Anlas`:''].filter(Boolean).join(' · ') || '—';
@@ -1575,12 +1606,14 @@ async function loadOverview(){
               : '<span class="tag on"><i class="dot"></i>正常</span>'}
             ${!p.admin_enabled && p.disabled ? '<span class="tag warn">401 失效</span>' : ''}
             <span class="sp"></span>
-            <button class="btn mini ${p.admin_enabled?'danger':''}" data-act="up-enabled" data-id="${id}" data-on="${p.admin_enabled?0:1}">${p.admin_enabled?'停用':'启用'}</button>
-            <button class="btn mini" data-act="tok-replace" data-id="${id}" data-label="#${esc(p.position)} ${esc(p.token)}">替换 Token</button>
-            <button class="btn mini danger" data-act="tok-del" data-id="${id}" data-label="#${esc(p.position)} ${esc(p.token)}" ${d.pool.length<=1?'disabled title="令牌池里只剩这一把，不能删除"':''}>删除</button>
+            <details class="menu mx-more"><summary class="btn mini">更多 ${ic('chev')}</summary><div class="menu-pop">
+              <button type="button" data-act="tok-replace" data-id="${id}" data-label="#${esc(p.position)} ${esc(p.token)}">替换 Token</button>
+              <button type="button" ${p.admin_enabled?'class="danger"':''} data-act="up-enabled" data-id="${id}" data-on="${p.admin_enabled?0:1}">${p.admin_enabled?'停用这个账号':'启用这个账号'}</button>
+              ${d.pool.length<=1 ? '' : `<button type="button" class="danger" data-act="tok-del" data-id="${id}" data-label="#${esc(p.position)} ${esc(p.token)}">删除</button>`}
+            </div></details>
           </div>
-          <div class="token-meta num">今日生成 ${p.images_today||0} 张 · 失败 ${p.fails} · Anlas ${p.allow_anlas?'允许':'禁止'} · 免费 V5 ${p.v5_used} / ${p.v5_daily_limit||'∞'}</div>
-          <div class="token-ctrls">
+          <div class="token-meta num">今日生成 ${p.images_today||0} 张 · 失败 ${p.fails} · 免费 V5 ${p.v5_used} / ${p.v5_daily_limit||'不限'} · 图片并发 ${esc(p.image_active)} / ${esc(p.image_concurrency)} · Anlas ${p.allow_anlas?'允许':'禁止'}</div>
+          <details class="mx-adj"><summary class="btn mini">${ic('edit')}调整</summary><div class="token-ctrls">
             <div class="ctrl"><label for="token-limit-${id}">V5 日限</label>
               <div class="line"><input id="token-limit-${id}" type="number" min="0" max="100000" step="1" value="${esc(p.v5_daily_limit)}" aria-label="第 ${esc(p.position)} 把上游 Token 的免费 V5 每日上限">
               <button class="btn" data-act="up-v5" data-id="${id}">保存</button></div>
@@ -1588,10 +1621,56 @@ async function loadOverview(){
             <div class="ctrl"><label for="token-concurrency-${id}">图片并发</label>
               <div class="line"><input id="token-concurrency-${id}" type="number" min="1" max="4" step="1" value="${esc(p.image_concurrency)}" aria-label="第 ${esc(p.position)} 把上游 Token 的图片并发上限">
               <button class="btn" data-act="up-conc" data-id="${id}">保存</button></div>
-              <div class="hint">当前 ${esc(p.image_active)} / ${esc(p.image_concurrency)}；默认 1，调高会增加上游限流风险</div></div>
-          </div>
+              <div class="hint">默认 1，调高会增加上游限流风险</div></div>
+          </div></details>
         </div>`; }).join('');
+    upVerdict();
   }catch(e){ toastErr(e); }
+}
+
+/* 总览：一句话结论 + 要处理的事（每条带「去看看」）+ 4 个关键数字；系统状态折叠在最下面 */
+async function renderOverviewTop(d){
+  const [live, bugs, bot, mods, ap] = await Promise.all([
+    fetch('/public/live', {cache:'no-store'}).then(r => r.ok ? r.json() : null).catch(() => null),
+    api('/admin/api/errors').catch(() => null), api('/admin/api/discord-bot').catch(() => null),
+    api('/admin/api/modules').catch(() => null), api('/admin/api/autopilot').catch(() => null),
+    membersCache ? null : loadMembers().catch(() => null)]);
+  const now = Date.now()/1000, items = [], st = statusCache || {}, up = st.upstream || {};
+  const add = (lv, t, dd, go, label='去看看') => items.push({lv, t, d: dd, go, label});
+  if(up.image_cooldown_seconds > 0) add('bad', `上游限流，全站暂停出图 ${up.image_cooldown_seconds} 秒`, '会自动恢复；频繁出现要降低每小时上限', 'up');
+  else if(up.status === 'degraded') add('bad', '上游不稳定', `最近 ${up.recent} 次请求失败 ${up.failed} 次`, 'up');
+  (d.pool||[]).forEach(p => { if(p.admin_enabled && p.disabled) add('bad', `上游账号 #${p.position} 失效（401）`, 'Token 过期或被改了密码，需要替换', 'up');
+    else if(p.admin_enabled && p.blocked_for > 0) add('warn', `上游账号 #${p.position} 限流中`, `约 ${p.blocked_for} 秒后恢复`, 'up'); });
+  if(!d.pool_configured) add('bad', '还没有配置上游 Token', '现在所有出图请求都会失败', 'up');
+  if(bot && bot.status && !bot.status.online) add('bad', '奶妹离线', bot.status.seen_at ? '最近心跳 ' + rel(bot.status.seen_at) : '还没收到心跳', 'discord');
+  if(bugs && bugs.open){ const err = bugs.errors.filter(e => !e.resolved_at && e.level === 'error').length;
+    add(err ? 'bad' : 'warn', `${bugs.open} 个 Bug 没处理`, err ? `其中 ${err} 个是错误级别` : '都是「注意」级别，多数是客户端断开之类', 'bugs'); }
+  const att = (membersCache||[]).filter(m => needsAttention(m, now));
+  if(att.length) add('warn', `${att.length} 个成员要处理`, att.slice(0, 3).map(memberLabel).join('、') + (att.length > 3 ? ' 等' : ''), 'members:attention');
+  const badMods = mods && mods.modules ? mods.modules.filter(m => m.enabled && m.last && m.last.ok === false).length : 0;
+  if(badMods) add('warn', `${badMods} 个模块自检没通过`, '数据对不上或规则没生效', 'modules');
+  const dk = st.disk; if(dk && dk.total_mb){ const free = dk.free_mb / dk.total_mb; if(free < 0.2) add(free < 0.1 ? 'bad' : 'warn', `磁盘只剩 ${Math.round(free*100)}%`, '原图和日志会越来越多', 'set'); }
+  if((d.today.unconfirmed_anlas||0) > 0) add('warn', `失败请求可能扣了 ${d.today.unconfirmed_anlas} Anlas`, `今天 ${d.today.unconfirmed_requests} 笔，去上游页对一下官方余额`, 'up');
+  if(d.anlas_budget > 0 && d.month.anlas >= d.anlas_budget * 0.8) add('warn', `本月 Anlas 用了 ${Math.round(d.month.anlas / d.anlas_budget * 100)}%`, `${fmtNum(d.month.anlas)} / ${fmtNum(d.anlas_budget)}`, 'limits');
+  const eco = ap && ap.last && ap.last.rules && ap.last.rules.economy;
+  if(eco && eco.mode === 'observe' && !!eco.value !== !!d.economy) add('info', `自动驾驶建议${eco.value ? '开启' : '关闭'}节约模式`, eco.why, 'act:toggle-economy', eco.value ? '开启' : '关闭');
+  const g = live && live.guard || {}, q = live && live.quota || {};
+  const active = (membersCache||[]).filter(m => !m.is_admin && !m.is_test && m.today.requests > 0).length;
+  const serious = items.filter(x => x.lv !== 'info').length;
+  const head = serious ? `有 ${serious} 件事要处理` : '一切正常';
+  const sub = `今天出了 ${fmtNum(d.today.images)} 张图${active ? `，${active} 个成员在用` : ''}${d.economy ? ' · 节约模式开着' : ''}${serious ? '' : '，没有要处理的事'}`;
+  const tone = items.some(x => x.lv === 'bad') ? 'bad' : serious ? 'warn' : 'ok';
+  $('#ovVerdict').dataset.tone = tone;
+  $('#ovVerdict').innerHTML = `<div class="ovv-h"><i aria-hidden="true"></i><div><h2>${esc(head)}</h2><p>${esc(sub)}</p></div></div>
+    ${items.length ? `<div class="issues">${items.map(x => `<div class="issue ${x.lv}"><div class="is-t"><b>${esc(x.t)}</b><span>${esc(x.d||'')}</span></div><div class="is-a">${
+      x.go.startsWith('act:') ? `<button class="btn mini" type="button" data-act="${esc(x.go.slice(4))}">${esc(x.label)}</button>` : `<button class="btn mini" type="button" data-act="ov-go" data-go="${esc(x.go)}">${esc(x.label)}</button>`}</div></div>`).join('')}</div>` : ''}`;
+  const reqs = (d.feature_usage||[]).reduce((a, f) => ({rej: a.rej + (f.today.rejected||0), err: a.err + (f.today.error||0)}), {rej:0, err:0});
+  const members = (membersCache||[]).filter(m => !m.is_admin && !m.is_test).length;
+  $('#ovCards').innerHTML =
+    statCard('今日出图', fmtNum(d.today.images), '张', `成员 ${fmtNum(d.today.member_images)} 张 · V5 ${fmtNum(d.today.v5)}${q.v5_cap ? ' / ' + fmtNum(q.v5_cap) : ''}`) +
+    statCard('今天在用的成员', active, members ? '/ ' + members : '', `有效 Key ${d.keys_active} / ${d.keys_total}`) +
+    statCard('近 60 分钟出图', g.hour ?? '—', g.hour_cap ? '/ ' + g.hour_cap : '', g.hour_cap && g.hour >= g.hour_cap ? '已到上限，新请求要等几分钟' : '每小时上限用来保护上游账号', g.hour_cap && g.hour >= g.hour_cap * 0.95 ? 'hot' : '') +
+    statCard('今日被拒 / 失败', fmtNum(reqs.rej), '/ ' + fmtNum(reqs.err), `本月 Anlas ${fmtNum(d.month.anlas)}${d.anlas_budget > 0 ? ' / ' + fmtNum(d.anlas_budget) : ''}`);
 }
 
 async function loadStatus(){
@@ -1626,6 +1705,7 @@ function renderStatus(s){
   const gb = mb => mb>=1024 ? (mb/1024).toFixed(1)+' GB' : mb+' MB';
   const diskCls = freePct<10 ? 'bad' : freePct<20 ? 'warn' : 'ok';
   const rec = au.prompts || au.thumbs;
+  const sumEl = $('#statusSum'); if(sumEl) sumEl.textContent = [`上游${s.upstream && s.upstream.status === 'degraded' ? '不稳定' : '正常'}`, `告警${a.configured ? '已配置' : '未配置'}`, `磁盘剩余 ${gb(dk.free_mb)}`].join(' · ');
   $('#statusPanel').innerHTML = `
     ${upstreamRow(s.upstream)}
     <div class="status-row"><div class="ico ${a.configured?'ok':'warn'}">${ic('bell')}</div><div class="body">
@@ -2250,6 +2330,8 @@ async function toggleFeature(input){
 }
 function renderOpsReg(){
   const r = opsData.registration;
+  { const full = r.max_users > 0 && r.active >= r.max_users, wl = (r.waitlist||[]).length;
+    setPV('ops', !r.open ? 'warn' : 'ok', `领 Key ${r.open ? '开着' : '关着'} · 名额 ${r.active} / ${r.max_users > 0 ? r.max_users : '不限'}${full ? '（满了）' : ''}${wl ? ` · 候补 ${wl} 人` : ''}${r.role_id ? ` · 限定身份组「${r.role_note || r.role_id}」` : ''}`); }
   const pct = r.max_users>0 ? Math.min(100, Math.round(r.active/r.max_users*100)) : 0;
   const cls = r.max_users>0 && r.active>=r.max_users ? 'bad' : pct>=80 ? 'warn' : '';
   // 动态额度开启时，这三项由算法接管：直接禁用
@@ -2556,6 +2638,8 @@ async function loadSettings(){
     for(const name of ['queue_timeout','key_image_min_interval','image_min_interval','image_429_cooldown_seconds']){
       $('#r_'+name).value = r[name];
     }
+    $('#fs-runtime').textContent = `每张间隔 ${r.image_min_interval} 秒 · 排队最多等 ${r.queue_timeout} 秒 · 429 后冷却 ${r.image_429_cooldown_seconds} 秒`;
+    $('#fs-budget').textContent = `每月 Anlas ${s.global_monthly_anlas > 0 ? s.global_monthly_anlas : '不限'} · 每天 V5 ${s.global_daily_v5 > 0 ? s.global_daily_v5 : '不限'} · 余量低于 ${s.v5_alert_threshold}% 告警`;
     $('#cfgInfo').innerHTML =
       `<dt>上游令牌池</dt><dd class="mono">${o.pool_configured ? o.pool.map(p=>esc(p.token)).join(', ') : '未配置（在「上游」页添加 Token）'}</dd>` +
       `<dt>本月 Anlas</dt><dd>${esc(o.month.anlas)} / 预算 ${o.anlas_budget>0?esc(o.anlas_budget):'∞'}</dd>` +
@@ -2622,17 +2706,30 @@ async function loadGuard(){
     $('#guardFields').innerHTML = Object.keys(f).map(k => `<div class="field"><label for="g_${k}">${esc(f[k].label)}</label>
       <input id="g_${k}" type="number" min="${f[k].min}" max="${f[k].max}" step="1" value="${esc(v[k])}"><div class="hint" title="默认 ${esc(f[k].default)}">${f[k].min}～${f[k].max}</div></div>`).join('');
     const acc = guardData.accounts.map(a => `账号 ${a.position}：今天 ${a.today}${v.account_daily_cap?' / '+v.account_daily_cap:''} 张，本小时 ${a.this_hour}${guardData.hourly_cap_now?' / '+guardData.hourly_cap_now:''} 张`).join('；');
+    $('#fs-guard').textContent = `每小时 ${v.account_hourly_cap || '不限'} · 3 小时 ${v.account_3h_cap || '不限'} · 每天 ${v.account_daily_cap || '不限'} 张（每个上游账号）`;
+    limitsVerdict();
     $('#guardLive').textContent = `${guardData.quiet_now ? '现在是安静时段' : '正常时段'} · ${acc || '没有可用账号'} · 正在生成或排队 ${guardData.queued_images} 张`;
   }catch(e){ $('#guardLive').textContent = '读取失败'; }
 }
 const ANLAS_LABELS = {anlas_auto_enabled:['开启自动分配（1 开 / 0 关）',0,1], anlas_reserve:['保留不分的 Anlas',0,10000],
   anlas_member_daily_cap:['每人每天最多',0,1000], anlas_min_images_7d:['近 7 天至少出图张数',0,10000], anlas_min_key_age_days:['领取满几天',0,365]};
+let qaLast = null, apLast = null;
+function limitsVerdict(){
+  const v = guardData && guardData.values, q = qaLast || {}, w = q.v5 || {};
+  const parts = [];
+  if(v) parts.push(`每小时最多 ${v.account_hourly_cap || '不限'} 张`);
+  if(q.enabled !== false && q.ceiling) parts.push(`每人 V4.5 ${q.ceiling}、V5 ${w.each ?? '—'}（算法自动）`);
+  if(apLast){ const on = Object.values(apLast).filter(x => x.mode === 'enforce').length; parts.push(`自动驾驶 ${on} 条规则在执行`); }
+  const low = w.percent != null && w.percent < 30;
+  setPV('limits', low ? 'warn' : 'ok', (low ? `账号 V5 只剩 ${Math.round(w.percent)}% · ` : '') + parts.join(' · '));
+}
 /* 动态额度：结果 + 每日微调历史（数据来自 /admin/api/quota-algo，算法说明见 app/quota_algo.py） */
 const AP_NAME = {alt_link:'疑似同一人（只观察）', slots:'名额上限', breaker:'全站熔断', key_guard:'单个 Key 守护', economy:'节约模式'};
 const AP_MODE = {observe:'<span class="tag warn">观察</span>', enforce:'<span class="tag on">执行</span>', off:'<span class="tag off">关闭</span>'};
 async function loadAutopilot(){
   try{
     const d = await api('/admin/api/autopilot'), r = (d.last || {}).rules || {};
+    apLast = r; limitsVerdict();
     const val = (k, v) => k === 'alt_link' ? (v.length ? v.length + ' 对' : '—') : k === 'key_guard' ? (v.length ? v.map(x => `${esc(x.name)}：${x.action==='reset'?'重置':'暂停'}`).join('；') : '—')
       : k === 'breaker' ? (v ? '暂停 5 分钟' : '正常') : k === 'economy' ? (v ? '建议开启' : '保持关闭') : esc(v);
     $('#apBody').innerHTML = Object.keys(r).length ? `<div class="table-wrap"><table class="rt"><thead><tr><th>规则</th><th>模式</th><th>判断</th><th>理由</th></tr></thead><tbody>${
@@ -2658,12 +2755,13 @@ async function loadModules(){
           ${m.hard_note ? `<dt>关闭后</dt><dd class="muted">${esc(m.hard_note)}</dd>` : ''}</dl>
         ${checks.length ? `<div class="mod-checks">${checks.map(c => `<span class="mf ${c.ok?'ok':'bad'}" title="${esc(c.detail)}">${c.ok?'✓':'✗'} ${esc(c.name)}</span>`).join('')}</div>
           ${checks.filter(c=>!c.ok).map(c => `<div class="bad-text sm">✗ ${esc(c.name)}：${esc(c.detail)}</div>`).join('')}` : ''}
-        ${m.params.length ? `<div class="table-wrap"><table class="rt"><thead><tr><th>参数</th><th class="num">当前值</th><th>依据</th><th>来源 / 说明</th></tr></thead><tbody>${
+        ${m.params.length ? `<details class="mod-params"><summary class="btn mini ghost">参数 ${m.params.length} 个 ${ic('chev')}</summary><div class="table-wrap"><table class="rt"><thead><tr><th>参数</th><th class="num">当前值</th><th>依据</th><th>来源 / 说明</th></tr></thead><tbody>${
           m.params.map(p => `<tr><td data-label="参数">${esc(p.name)}</td><td class="num" data-label="当前值">${esc(p.value)}</td><td data-label="依据"><span class="tag ${BASIS_CLS[p.basis]||''}">${esc(p.basis)} ${esc(p.basis_label)}</span>${p.private?' <span class="tag" title="值来自服务器 data/private_params.json，不在公开代码里">私密</span>':''}</td><td class="muted" data-label="来源">${esc([p.source, p.note].filter(Boolean).join(' · '))}</td></tr>`).join('')
-        }</tbody></table></div>` : ''}
+        }</tbody></table></div></details>` : ''}
       </div>`;
     }).join('');
     $('#navMods').hidden = !bad; $('#navMods').textContent = bad || '';
+    { const on = d.modules.filter(m => m.enabled).length; setPV('modules', bad ? 'warn' : 'ok', bad ? `${bad} 项自检没通过，看标红的那一条` : `${on} / ${d.modules.length} 个模块在运行，自检全部通过`); }
     $$('#modList [data-mod]').forEach(el => el.addEventListener('change', () => toggleModule(el)));
   }catch(e){ $('#modList').innerHTML = '<div class="muted">读取失败</div>'; }
 }
@@ -2680,6 +2778,7 @@ async function loadBot(){
   try{
     const d = await api('/admin/api/discord-bot'), st = d.status || {}, c = d.config;
     $('#navBot').hidden = !!st.online;
+    setPV('discord', st.online ? 'ok' : 'bad', st.online ? `奶妹在线${st.latency_ms != null ? '，延迟 ' + st.latency_ms + ' ms' : ''} · 看图评论${c.gallery_ai ? '开着' : '关着'} · 自动点赞${c.gallery_like ? '开着' : '关着'}` : `奶妹离线${st.seen_at ? '，最近心跳 ' + rel(st.seen_at) : ''}`);
     $('#botStatus').innerHTML = `<div class="cols-3">
       <div><div class="muted sm">状态</div><div style="font-size:18px;font-weight:700">${st.online ? '<span class="tag on">在线</span>' : '<span class="tag off">离线</span>'} <span class="muted" style="font-size:13px">${st.latency_ms!=null ? esc(st.latency_ms)+' ms' : ''}</span></div></div>
       <div><div class="muted sm">账号 · 服务器</div><div style="font-weight:600">${esc(st.user || '—')}<div class="muted sm">${esc(st.guild || '')}</div></div></div>
@@ -2710,6 +2809,7 @@ async function saveBot(){
 async function loadQuotaAlgo(){
   try{
     const d = await api('/admin/api/quota-algo'), l = d.last || {}, v = l.v5 || {};
+    qaLast = l; limitsVerdict();
     const rows = (d.history || []).slice(-7).reverse().map(h => `<tr><td class="t" data-label="日期">${esc(h.day)}</td><td class="num" data-label="用量 / 账号日上限">${esc(h.used)} / ${esc(h.cap)}</td><td class="num" data-label="每小时拦截">${esc(h.hourly_blocks)}</td><td class="num" data-label="顶格人数">${esc(h.ceiling_hits)}</td><td class="num" data-label="上限 · 保底（昨 → 今）">${esc(h.from[0])}→${esc(h.to[0])} · ${esc(h.from[1])}→${esc(h.to[1])}</td><td class="muted" data-label="理由">${esc((h.reasons||[]).join('；'))}</td></tr>`).join('');
     $('#qaBody').innerHTML = l.enabled === false ? '<div class="muted">动态额度已关闭</div>' : `
       <div class="cols-3">
@@ -2725,6 +2825,7 @@ async function loadAnlasPool(){
   try{
     const d = await api('/admin/api/anlas-pool'), v = d.settings, L = d.last;
     $('#anlasFields').innerHTML = Object.keys(ANLAS_LABELS).map(k => `<div class="field"><label for="a_${k}">${ANLAS_LABELS[k][0]}</label><input id="a_${k}" type="number" min="${ANLAS_LABELS[k][1]}" max="${ANLAS_LABELS[k][2]}" step="1" value="${esc(v[k])}"></div>`).join('');
+    $('#fs-anlas').textContent = !L ? '还没运行过' : L.error ? '上次运行出错' : !L.enabled ? '已关闭' : `今日池 ${L.daily_pool} · 分给 ${L.members.length} 人`;
     $('#anlasLive').textContent = !L ? '还没有运行过（每 10 分钟自动运行一次，保存后立即运行）。'
       : L.error ? '上次运行：' + L.error
       : !L.enabled ? '自动分配已关闭。'
@@ -2798,6 +2899,7 @@ document.addEventListener('click', ev=>{
   const id = Number(el.dataset.id);
   switch(el.dataset.act){
     case 'refresh-ov': loadOverview(); loadAllowance(); break;
+    case 'ov-go': { const [t, f] = el.dataset.go.split(':'); if(t === 'members' && f){ memberFilter = f; memberFilterAuto = false; } tab(t); break; }
     case 'toggle-economy': {
       const on = !(ovData && ovData.economy);
       askConfirm(on
