@@ -13,7 +13,7 @@ from PIL import Image
 
 from app.admin import router
 from app.alerts import Alerter
-from app.audit import make_thumbnail, prompt_texts
+from app.audit import THUMB_SIDE, make_thumbnail, prompt_texts
 from app.config import Settings
 from app.database import Database
 from app.state import GateState
@@ -32,7 +32,7 @@ def test_thumbnail_is_small_jpeg_from_zip_and_bad_input_is_none():
     thumb = make_thumbnail(png_zip())
     assert thumb and thumb[:2] == b"\xff\xd8" and len(thumb) < 60000
     with Image.open(io.BytesIO(thumb)) as image:
-        assert max(image.size) <= 512
+        assert max(image.size) <= THUMB_SIDE
     assert make_thumbnail(b"not an image") is None
     assert make_thumbnail(b"PK\x03\x04broken") is None
 

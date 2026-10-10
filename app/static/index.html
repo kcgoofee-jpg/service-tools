@@ -379,6 +379,30 @@ details.menu>summary::-webkit-details-marker{display:none}
 @media (hover:none){.thumb .zoom{opacity:.85}}
 .thumb.none .zoom{display:none}
 .shot-params{font-size:11.5px;color:var(--muted);margin-top:4px;word-break:break-all}
+/* 有原图的卡片：按原图比例整张显示，文字和按钮半透明叠在图片底部（图上永远是深色渐变 + 白字，与主题无关） */
+.gallery{align-items:start}
+.gallery:not(.list) .shot.ov{position:relative;background:#0b0d14}
+.gallery:not(.list) .shot.ov .thumb{aspect-ratio:auto;height:100%;position:absolute;inset:0}
+.gallery:not(.list) .shot.ov .thumb img{object-fit:contain}
+.gallery:not(.list) .shot.ov .thumb:hover img{transform:none}
+.gallery:not(.list) .shot.ov .thumb .zoom{top:8px;bottom:auto}
+.gallery:not(.list) .shot.ov .shot-body{position:absolute;left:0;right:0;bottom:0;flex:none;gap:6px;padding:40px 12px 12px;pointer-events:none;
+  max-height:100%;overflow:auto;color:#fff;background:linear-gradient(to bottom,rgba(8,10,16,0) 0,rgba(8,10,16,.55) 34px,rgba(8,10,16,.78) 100%);
+  text-shadow:0 1px 2px rgba(0,0,0,.6);transition:background .2s}
+.gallery:not(.list) .shot.ov .shot-body>*{pointer-events:auto}
+.gallery:not(.list) .shot.ov:hover .shot-body,.gallery:not(.list) .shot.ov:focus-within .shot-body{background:linear-gradient(to bottom,rgba(8,10,16,0) 0,rgba(8,10,16,.72) 34px,rgba(8,10,16,.9) 100%)}
+.gallery:not(.list) .shot.ov .shot-top .who,.gallery:not(.list) .shot.ov .prompt{color:#fff}
+.gallery:not(.list) .shot.ov .shot-meta,.gallery:not(.list) .shot.ov .shot-params,.gallery:not(.list) .shot.ov details.neg{color:rgba(255,255,255,.72)}
+.gallery:not(.list) .shot.ov details.neg div{color:rgba(255,255,255,.88)}
+.gallery:not(.list) .shot.ov .prompt{-webkit-line-clamp:2;font-size:12.5px}
+.gallery:not(.list) .shot.ov .btn.mini{background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.22);color:#fff;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+.gallery:not(.list) .shot.ov .btn.mini:hover{background:rgba(255,255,255,.26)}
+/* 能悬停的设备：默认只露名字、状态、一行提示词和按钮，尽量少挡图；悬停 / 键盘聚焦时再展开模型、负面、参数 */
+@media (hover:hover){
+  .gallery:not(.list) .shot.ov .prompt:not(.open){-webkit-line-clamp:1}
+  .gallery:not(.list) .shot.ov:not(:hover):not(:focus-within) :is(.shot-meta,details.neg,.shot-params){display:none}
+}
+.gallery.list .shot.ov{aspect-ratio:auto!important}   /* 列表视图仍是小方图 + 右侧文字 */
 .gallery.large{grid-template-columns:repeat(auto-fill,minmax(360px,1fr))}
 .gallery.list{display:flex;flex-direction:column;gap:8px}
 .gallery.list .shot{flex-direction:row;align-items:stretch}
@@ -617,6 +641,7 @@ td.note{min-width:220px}
       <button data-tab="audit"><span data-ic="image"></span>生成记录</button>
       <div class="nav-label">监控</div>
       <button data-tab="up"><span data-ic="pulse"></span>上游</button>
+      <button data-tab="risk"><span data-ic="pulse"></span>风险检查</button>
       <button data-tab="bugs"><span data-ic="alert"></span>Bug 追踪<span class="nav-badge" id="navBugs" hidden></span></button>
       <button data-tab="logs"><span data-ic="list"></span>用量日志</button>
       <button data-tab="actions"><span data-ic="clock"></span>操作日志</button>
@@ -698,6 +723,15 @@ td.note{min-width:220px}
               <p class="hint" style="margin:12px 0">充值、续费或在别处使用账号也会影响余额；核对不改用户积分。</p>
               <div class="table-wrap"><table class="rt"><thead><tr><th class="t">查询时间</th><th class="num">官方余额</th><th class="num">余额减少</th><th class="num">本站记录</th><th class="num">相差</th><th>说明</th></tr></thead><tbody id="reconHistory"></tbody></table></div>
             </details>
+          </div>
+        </section>
+        <!-- 风险检查 -->
+        <section id="tab-risk" hidden>
+          <div class="page-head"><div class="ttl"><h1>风险检查</h1></div><div class="tools"><button class="btn rf" data-act="refresh-risk" aria-label="刷新" title="刷新"><span data-ic="refresh"></span><span class="lbl">刷新</span></button></div></div>
+          <div id="riskSummary"></div>
+          <div class="card panel">
+            <div class="panel-head"><h2>检查项</h2><div class="desc" title="只读盘点与行为分析；伪装类指标（TLS 指纹伪装、浏览器指纹、代理换出口）留空并说明原因">只读盘点，不伪造任何一项</div></div>
+            <div id="riskBody"><div class="hint">正在检查…</div></div>
           </div>
         </section>
         <!-- Bug 追踪 -->
@@ -1263,7 +1297,7 @@ async function boot(){
 }
 
 /* ---------- tabs ---------- */
-const TABS = ['ov','members','ops','audit','up','bugs','logs','actions','modules','limits','discord','set'];
+const TABS = ['ov','members','ops','audit','up','risk','bugs','logs','actions','modules','limits','discord','set'];
 function tab(name){
   document.body.classList.remove('nav-open');
   $$('.nav button').forEach(b=>b.classList.toggle('active', b.dataset.tab===name));
@@ -1278,6 +1312,7 @@ function tab(name){
   if(name==='set' || name==='limits') loadSettings();
   if(name==='limits'){ loadQuotaAlgo(); loadAutopilot(); }
   if(name==='up'){ loadOverview(); loadReconciliation(); loadPerf(); loadShadow(); }
+  if(name==='risk') loadRisk();
   if(name==='bugs') loadBugs();
   if(name==='discord') loadBot();
   if(name==='modules') loadModules();
@@ -1331,6 +1366,27 @@ async function loadPerf(){
     }
     $('#perfBody').innerHTML = rows.join('') || '<tr><td colspan="9" class="empty-cell">暂无出图记录</td></tr>';
   }catch(e){ $('#perfBody').innerHTML = '<tr><td colspan="9" class="empty-cell">读取失败</td></tr>'; }
+}
+async function loadRisk(){
+  const box = $('#riskBody'); if(!box) return;
+  try{
+    const d = await api('/admin/api/risk-check');
+    const s = d.summary || {};
+    const cls = st => st==='ok' ? 'ok' : st==='warn' ? 'warn' : st==='bad' ? 'bad' : 'info';
+    $('#riskSummary').innerHTML = s.bad
+      ? `<div class="notice-box bad" style="margin-bottom:16px">${ic('alert')}有 ${s.bad} 项风险需要处理${s.warn?`，另有 ${s.warn} 项值得留意`:''}。</div>`
+      : s.warn
+        ? `<div class="notice-box warn" style="margin-bottom:16px">${ic('alert')}没有紧急风险，但有 ${s.warn} 项值得留意。</div>`
+        : `<div class="notice-box ok" style="margin-bottom:16px">${ic('check')}没有发现需要处理的风险项。</div>`;
+    box.innerHTML = d.items.map(it => {
+      const ev = (it.evidence || []).map(e => `<div class="hint" style="margin:3px 0;white-space:pre-wrap">${esc(e)}</div>`).join('');
+      return `<div style="padding:12px 0;border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b>${esc(it.title)}</b><span class="mf ${cls(it.status)}">${esc(it.label)}</span></div>
+        <div class="hint" style="margin:4px 0 2px">${esc(it.detail)}</div>${ev}</div>`;
+    }).join('') || '<div class="hint">没有检查项。</div>';
+  }catch(e){
+    box.innerHTML = `<div class="notice-box bad">${ic('alert')}读取失败：${esc(e.message || e)}</div>`;
+  }
 }
 async function loadShadow(){
   const box = $('#shadowBody');
@@ -1983,8 +2039,10 @@ async function loadAudit(){
       const id = Number(it.id);
       const sz = (pr.width&&pr.height) ? `${pr.width}×${pr.height}` : '';
       const parts = [pr.seed!=null?`种子 ${esc(pr.seed)}`:'', pr.sampler?esc(pr.sampler):'', pr.steps?esc(pr.steps)+'步':'', pr.scale!=null?'CFG '+esc(pr.scale):'', sz].filter(Boolean);
-      return `<article class="card shot">
-        ${(it.has_image||it.has_thumb) ? `<button class="thumb" data-act="zoom" data-id="${id}" aria-label="${it.has_image?'放大查看原图':'放大查看（原图已过期，仅旧缩略图）'}" title="${it.has_image?'原图':'原图已过期，仅旧缩略图'}"><img loading="lazy" decoding="async" alt="" src="/admin/api/audit/${id}/thumb"><span class="zoom">${ic('zoom')}</span></button>`
+      const hasPic = it.has_image||it.has_thumb;
+      const ratio = (Number(pr.width)>0 && Number(pr.height)>0) ? `${Number(pr.width)}/${Number(pr.height)}` : '2/3';
+      return `<article class="card shot${hasPic?' ov':''}"${hasPic?` style="aspect-ratio:${ratio}"`:''}>
+        ${hasPic ? `<button class="thumb" data-act="zoom" data-id="${id}" aria-label="${it.has_image?'放大查看原图':'放大查看（原图已过期，仅旧缩略图）'}" title="${it.has_image?'原图':'原图已过期，仅旧缩略图'}"><img loading="lazy" decoding="async" alt="" src="/admin/api/audit/${id}/thumb"><span class="zoom">${ic('zoom')}</span></button>`
           : `<div class="thumb none">${ic('image')}</div>`}
         <div class="shot-body">
           <div class="shot-top"><span class="who" title="${esc(it.key_name)}">${esc(it.key_name)}</span>${statusTag(it.status)}</div>
@@ -2637,6 +2695,7 @@ document.addEventListener('click', ev=>{
     case 'refresh-audit': loadAuditSettings(); loadAudit(); break;
     case 'refresh-logs': loadLogs(); break;
     case 'refresh-up': loadOverview(); loadReconciliation(); loadPerf(); loadShadow(); break;
+    case 'refresh-risk': loadRisk(); break;
     case 'refresh-bugs': loadBugs(); break;
     case 'refresh-bot': loadBot(); break;
     case 'refresh-mods': loadModules(); break;

@@ -10,7 +10,7 @@ from typing import Optional
 from PIL import Image
 
 Image.MAX_IMAGE_PIXELS = 25_000_000      # 超过即报错（默认只是警告），防止解压炸弹
-THUMB_SIDE = 512
+THUMB_SIDE = 768      # 画廊卡片按原图比例整张显示，高清屏上 512 会糊
 THUMB_QUALITY = 82
 MAX_IMAGE_BYTES = 15 * 1024 * 1024
 
