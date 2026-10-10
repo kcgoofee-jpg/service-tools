@@ -177,6 +177,6 @@ async def set_audit(state, body: dict) -> dict:
             if prompts or thumbs:
                 text = "📢 **数据记录说明**：" + audit_notice(prompts, thumbs, days, image_days)
             else:
-                text = "📢 **数据记录说明**：站长已关闭生成记录，不再保存新的提示词、缩略图和原图（已有记录到期自动删除）。"
+                text = "📢 **数据记录说明**：站长已关闭生成记录，不再保存新的提示词和原图（已有记录到期自动删除）。"
             announcer.post(text)
     return {"prompts": prompts, "thumbs": thumbs, "retention_days": days, "image_retention_days": image_days}

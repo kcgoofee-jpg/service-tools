@@ -1,4 +1,4 @@
-"""生成记录：提示词与小缩略图（均可单独关闭，自动过期）。"""
+"""生成记录：提示词与原图（均可单独关闭，自动过期）。画廊小图从原图现场缩小，不另存缩略图。"""
 from __future__ import annotations
 
 import io
@@ -102,22 +102,20 @@ def full_image(payload: bytes) -> tuple[Optional[bytes], str]:
         return None, ""
 
 
-IMAGE_RETENTION_KEY = "audit_image_retention_days"   # 原图保留天数；0 = 不保存原图（只留缩略图）
+IMAGE_RETENTION_KEY = "audit_image_retention_days"   # 原图保留天数；0 = 不保存原图
 
 
 def audit_notice(prompts: bool, thumbs: bool, days: int, image_days: int = 0) -> str:
-    """向成员披露记录范围（提示词 / 缩略图 / 原图各自保留多久）；未开启记录则返回空串。
-    「记录生成结果」开关同时保存缩略图和原图，原图另有更短的保留天数——两者都要说清楚。"""
-    if not (prompts or thumbs):
-        return ""
+    """向成员披露记录范围（提示词、原图各自保留多久）；未开启记录则返回空串。
+    「记录生成结果」开关只保存原图（不再另存缩略图），保留天数单独设置；0 天 = 不存图。"""
     keep = (lambda d: f"{d} 天后自动删除" if d > 0 else "长期保存")
     parts = []
     if prompts:
         parts.append(f"图片提示词（{keep(days)}）")
-    if thumbs:
-        parts.append(f"生成结果的缩略图（{keep(days)}）")
-        if image_days > 0:
-            parts.append(f"原图（{image_days} 天后自动删除，期间可在首页打包下载）")
+    if thumbs and image_days > 0:
+        parts.append(f"生成的原图（{image_days} 天后自动删除，期间可在首页打包下载）")
+    if not parts:
+        return ""
     return "为防止滥用和优化调度，本站会保留你的" + "、".join(parts) + "，仅站长可见。"
 
 
@@ -137,7 +135,8 @@ async def audit_disclosure(db, settings) -> str:
 
 
 async def audit_flags(db, settings) -> tuple[bool, bool, int]:
-    """记录开关（提示词、缩略图、保留天数）：后台保存的设置优先，其次是环境变量。"""
+    """记录开关（提示词、生成结果/原图、提示词保留天数）：后台保存的设置优先，其次是环境变量。
+    第二项沿用旧设置名 audit_thumbs，含义已变为「保存原图」。"""
     async def read(name, default):
         getter = getattr(db, "get_setting", None)
         value = await getter(name, None) if getter else None

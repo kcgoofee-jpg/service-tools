@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import anyio
+
 import base64
 import hashlib
 import hmac
@@ -1228,10 +1230,17 @@ async def audit_list(request: Request, key_id: Optional[int] = None, page: int =
 
 @router.get("/audit/{audit_id}/thumb")
 async def audit_thumb(request: Request, audit_id: int):
+    """画廊用的小图：不再另存缩略图，从原图现场缩小（浏览器缓存 1 小时）；旧记录仍有存好的缩略图就直接用。"""
     require_admin(request)
-    data = await request.app.state.gate.db.audit_thumb(audit_id)
+    db = request.app.state.gate.db
+    data = await db.audit_thumb(audit_id)
     if data is None:
-        raise HTTPException(404, "没有缩略图")
+        image, _ = await db.audit_image(audit_id)
+        if image is not None:
+            from .audit import make_thumbnail
+            data = await anyio.to_thread.run_sync(make_thumbnail, image)
+    if data is None:
+        raise HTTPException(404, "没有图片（原图已过期或未记录）")
     return Response(data, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=3600"})
 
 

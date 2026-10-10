@@ -1424,8 +1424,34 @@ async def test_audit_disclosure_covers_full_images_and_zero_means_none():
         cfg = SimpleNamespace(audit_prompts=True, audit_thumbs=True, audit_retention_days=14)
         assert await audit_image_days(db) == 3                       # 未设置：默认 3
         text = await audit_disclosure(db, cfg)
-        assert "原图（3 天后自动删除" in text and "缩略图（14 天后自动删除）" in text and "测试" not in text
+        assert "原图（3 天后自动删除" in text and "提示词（14 天后自动删除）" in text
+        assert "缩略图" not in text and "测试" not in text
         await db.set_setting("audit_image_retention_days", 0)
         assert await audit_image_days(db) == 0
         assert "原图" not in await audit_disclosure(db, cfg)
         await db.close()
+
+
+
+def test_stream_tracker_keeps_first_final_image_for_audit():
+    """流式出图以前不把图交给生成记录，后台永远是空占位；现在保留第一张完整的最终图。"""
+    import base64, io, json
+    from PIL import Image
+    from app.image_events import ImageEventTracker
+    buf = io.BytesIO(); Image.new("RGB", (8, 8), (200, 10, 10)).save(buf, "PNG"); png = buf.getvalue()
+    t = ImageEventTracker(1)
+    ev = json.dumps({"event_type": "final", "samp_ix": 0, "image": base64.b64encode(png).decode()})
+    t.feed(f"event: final\ndata: {ev}\n\n".encode())
+    assert t.completed_images == 1 and t.first_image == png
+
+
+@pytest.mark.asyncio
+async def test_admin_thumb_is_generated_from_original(tmp_path):
+    """不再另存缩略图：画廊小图从原图现场缩小。"""
+    import io
+    from PIL import Image
+    from app.audit import make_thumbnail
+    buf = io.BytesIO(); Image.new("RGB", (832, 1216), (10, 120, 200)).save(buf, "PNG")
+    thumb = make_thumbnail(buf.getvalue())
+    assert thumb and thumb[:2] == b"\xff\xd8"                    # JPEG
+    assert max(Image.open(io.BytesIO(thumb)).size) <= 512
