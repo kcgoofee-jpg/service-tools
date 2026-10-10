@@ -271,7 +271,7 @@ def upstream_parameter_problem(body: dict) -> Optional[str]:
             # 不按括号层数拦截：NAI 花括号每层只 ×1.05（8 层≈1.48 倍），圆括号不是权重语法，不会溢出；
             # 10/11 这条规则误拦了一位成员的 V5 请求，已移除。NaN 的真实原因是下面的超大数值权重。
             # 异常数值权重（如画师名带数字紧挨着 :: 导致超大权重与 NaN 计算溢出）
-            for m in re.finditer(r"([-+]?\d+(?:\.\d+)?)::", text):
+            for m in re.finditer(r"(?<![\d.])([-+]?\d+(?:\.\d+)?)::", text):   # 回看断言：长串数字不再 O(n²)（10/11 审查 P0：5 万位数字卡 23 秒）
                 try:
                     val = float(m.group(1))
                 except ValueError:
