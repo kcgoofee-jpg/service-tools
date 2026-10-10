@@ -214,6 +214,10 @@ async def test_hourly_cap_aimd_and_3h_window(guard):
     assert await g.adapt_daily(now - 10) is None                 # 第一次只开始计时，不加
     assert await g.on_upstream_429(now) == (150, 100)          # 上游限流：减半，不低于 100
     assert await g.on_upstream_429(now + 1) is None             # 已经在下限
+    g.values["account_hourly_cap"] = 60                          # 站长手动压到下限以下
+    assert await g.on_upstream_429(now + 2) is None             # 429 不能把它抬回 100
+    assert g.values["account_hourly_cap"] == 60
+    g.values["account_hourly_cap"] = 100
     assert await g.adapt_daily(now + 3600) is None               # 24 小时内有过限流：不加
     assert await g.adapt_daily(now + 86401) is None              # 没顶到过上限：没信息，不加
     await db._db.execute("INSERT INTO usage_log(ts, key_id, key_name, kind, status, detail) VALUES (?,?,?,?,?,?)",

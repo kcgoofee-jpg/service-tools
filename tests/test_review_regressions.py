@@ -138,6 +138,42 @@ async def test_inflight_requests_per_key_are_capped(state):
     assert not main._INFLIGHT
 
 
+@pytest.mark.asyncio
+async def test_streaming_responses_hold_inflight_slot_until_stream_ends():
+    # 流式出图 / 文本：处理函数立即返回响应对象，真正的上游调用在推流里；名额必须占到推流结束
+    from fastapi.responses import StreamingResponse
+    done = asyncio.Event()
+
+    async def body():
+        await done.wait()
+        yield b"x"
+
+    async def streamer(request):
+        return StreamingResponse(body())
+
+    wrapped = main.limit_inflight(streamer)
+
+    class Req:
+        headers = {"authorization": "Bearer stream"}
+
+    resps = [await wrapped(Req()) for _ in range(main.MAX_INFLIGHT_PER_KEY)]
+    with pytest.raises(main.GateError):
+        await wrapped(Req())                      # 4 个流还在推，第 5 个必须被拒
+    sent = []
+
+    async def send(msg):
+        sent.append(msg)
+
+    async def receive():
+        await asyncio.Event().wait()
+    runs = [asyncio.create_task(r({"type": "http", "asgi": {"spec_version": "2.4"}}, receive, send)) for r in resps]
+    await asyncio.sleep(0)
+    assert main._INFLIGHT["Bearer stream"] == main.MAX_INFLIGHT_PER_KEY
+    done.set()
+    await asyncio.gather(*runs)
+    assert "Bearer stream" not in main._INFLIGHT
+
+
 # ---------------------------------------------------------------- 上游
 
 def _nai(handler):

@@ -23,6 +23,9 @@ UTIL_WINDOW = 15 * 60      # 利用率按 15 分钟窗口计算
 LIGHT_USER_MAX = 10        # 当天出图 ≤10 张算轻度用户
 
 
+MAX_ROWS = 4000
+
+
 def _pct(values: list[float], q: float) -> Optional[float]:
     if not values:
         return None
@@ -175,5 +178,7 @@ async def collect(state, since: float) -> dict:
             extra["ceil"] = int(float(live_ceil))
     except (TypeError, ValueError):
         pass
-    return analyze(rows, slots=slots, interval=float(state.settings.image_min_interval),
+    # 回放是纯 CPU（contention 为 O(n²)），7 天数据可达数千行：放到线程里跑，并只取最近 MAX_ROWS 条，不能卡住出图的事件循环
+    from starlette.concurrency import run_in_threadpool
+    return await run_in_threadpool(analyze, list(rows)[-MAX_ROWS:], slots=slots, interval=float(state.settings.image_min_interval),
                    key_interval=float(state.settings.key_image_min_interval), accounts=max(1, len(usable)), **extra)
