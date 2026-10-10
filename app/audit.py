@@ -104,7 +104,7 @@ def full_image(payload: bytes) -> tuple[Optional[bytes], str]:
         return None, ""
 
 
-IMAGE_RETENTION_KEY = "audit_image_retention_days"   # 原图保留天数；0 = 不保存原图
+IMAGE_RETENTION_KEY = "audit_image_retention_days"   # 原图保留天数；0 = 不保存原图（类型 / 默认值见 site_flags.IMAGE_RETENTION）
 
 
 def audit_notice(prompts: bool, thumbs: bool, days: int, image_days: int = 0) -> str:
@@ -123,11 +123,8 @@ def audit_notice(prompts: bool, thumbs: bool, days: int, image_days: int = 0) ->
 
 async def audit_image_days(db) -> int:
     """原图保留天数（默认 3）。注意不能用 `or 3`：0 是有效值，表示不保存原图。"""
-    raw = await db.get_setting(IMAGE_RETENTION_KEY, None)
-    try:
-        return max(0, min(int(float(raw)), 365)) if raw is not None and str(raw).strip() != "" else 3
-    except (TypeError, ValueError):
-        return 3
+    from . import site_flags
+    return await site_flags.get(db, site_flags.IMAGE_RETENTION)
 
 
 async def audit_disclosure(db, settings) -> str:

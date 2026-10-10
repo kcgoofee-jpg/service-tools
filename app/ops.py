@@ -8,24 +8,24 @@ import os
 from types import SimpleNamespace
 from typing import Any
 
+from . import site_flags
 from . import features
 from .action_log import log_action
 from .audit import audit_flags
 
-ECONOMY_SETTING = "economy_mode"
 
 
 async def economy_enabled(db) -> bool:
-    return (await db.get_setting(ECONOMY_SETTING, "off")) == "on"
+    return await site_flags.get(db, site_flags.ECONOMY)
 
 
 async def set_economy(db, on: bool, state=None, *, by: str = "站长") -> bool:
     """开 / 关节约模式（全站免费档统一 14 步 + Euler-a，Anlas 约省 40%）。
     发生变化时写操作日志，并在成员公告频道通知（无论算法还是站长触发都公告）。返回是否发生变化。"""
-    cur = (await db.get_setting(ECONOMY_SETTING, "off")) == "on"
+    cur = await site_flags.get(db, site_flags.ECONOMY)
     if cur == bool(on):
         return False
-    await db.set_setting(ECONOMY_SETTING, "on" if on else "off")
+    await site_flags.put(db, site_flags.ECONOMY, bool(on))
     await log_action(db, by, "节约模式", "", "开启" if on else "关闭")
     announcer = getattr(state, "announcer", None) if state is not None else None
     if announcer is not None:
@@ -83,7 +83,7 @@ async def v5_capacity(db, settings, service) -> dict[str, Any]:
     """名额 × 每人每日 V5 是否超过全站 V5 日限；超过时后来的人当天可能用不到 V5。全站日限不随名额自动变化。"""
     reg = await registration_settings(db, service)
     try:
-        glob = max(0, int(float(await db.get_setting("global_daily_v5", settings.global_daily_v5) or 0)))
+        glob = await site_flags.get(db, site_flags.GLOBAL_DAILY_V5, settings)
     except (TypeError, ValueError):
         glob = 0
     seats, per = reg["max_users"], reg["daily_v5"]

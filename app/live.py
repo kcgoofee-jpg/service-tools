@@ -4,6 +4,8 @@
 """
 from __future__ import annotations
 
+from . import site_flags
+
 import time
 from collections import deque
 from typing import Any, Optional
@@ -53,7 +55,7 @@ async def build(state, registrar, now: Optional[float] = None) -> dict[str, Any]
     gv = guard.values if guard else {}
     usable = max(1, sum(1 for a in accounts if a["usable"]))
     try:
-        v5_cap = int(float(await state.db.get_setting("global_daily_v5", state.settings.global_daily_v5) or 0))
+        v5_cap = await site_flags.get(state.db, site_flags.GLOBAL_DAILY_V5, state.settings)
     except (TypeError, ValueError):
         v5_cap = 0
     body: dict[str, Any] = {

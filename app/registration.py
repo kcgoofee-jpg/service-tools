@@ -12,12 +12,12 @@ from urllib.parse import urlencode
 
 import httpx
 
+from . import site_flags
 from . import features
 from .policy import gen_key
 
 # 私信总闸门：所有私信（闲置提醒、候补邀请、Anlas 通知、后台操作通知、防分享处罚）都经过 send_dm。
 # 默认关（fail-closed）：新库、恢复备份、设置丢失时都不会私信。2026-10-10 Discord 应用被标记的信号之一就是批量私信。
-DM_SETTING = "dm_enabled"
 DM_BURST, DM_WINDOW, DM_DAILY = 3, 600, 20        # 开启时也限速：10 分钟最多 3 条、24 小时最多 20 条
 
 COMMAND_GUILD = "1480185480048808009"
@@ -273,7 +273,7 @@ class RegistrationService:
         通知方式由设置 waitlist_dm 决定：1 = 逐个私信（仍受私信总闸门限制）；0（默认）= 不私信，只在公告频道发一条汇总
         （Discord 应用审核期间用 0：批量私信正是 2026-10-10 被标记的信号之一）。announce 是发公告频道的函数。"""
         now = time.time() if now is None else now
-        use_dm = str(await self.db.get_setting("waitlist_dm", "0")).strip() == "1"     # 默认不私信（fail-closed）
+        use_dm = await site_flags.get(self.db, site_flags.WAITLIST_DM)     # 默认不私信（fail-closed）
         cfg = await self.settings()
         expired = await self.db._db.execute_fetchall(
             "SELECT discord_id FROM waitlist WHERE invited_at IS NOT NULL AND invited_at <= ?", (now - WAITLIST_HOLD,))
@@ -392,10 +392,7 @@ class RegistrationService:
     async def _issue_rate_blocked(self, now: float | None = None) -> bool:
         """每小时领取 Key 总数的硬上限：把短时间的授权/领取突增抹平（2026-10-10 Discord 应用因「增长异常」被标记，
         就是网页登录上线后一小时内 ~43 人集中授权触发的）。0 = 关闭。默认 12/小时，远高于自然速率、远低于会触发风控的突增。"""
-        try:
-            cap = int(float(await self.db.get_setting("issue_hourly_cap", 12) or 12))
-        except (TypeError, ValueError):
-            cap = 12
+        cap = await site_flags.get(self.db, site_flags.ISSUE_HOURLY_CAP)
         if cap <= 0:
             return False
         now = time.time() if now is None else now
@@ -467,10 +464,7 @@ class RegistrationService:
             from .audit import audit_disclosure
             from .ops import env_audit_defaults
             notice = await audit_disclosure(self.db, env_audit_defaults())
-            try:
-                base = int(float(await self.db.get_setting("guard_base_daily_images", 100) or 0))
-            except (TypeError, ValueError):
-                base = 0
+            base = await site_flags.get(self.db, site_flags.GUARD_BASE)
             legacy = (f"V4.5 及以下保底 {base} 张、全站空闲时最多 {cfg['daily_images']} 张"
                       if base and cfg["daily_images"] and base < cfg["daily_images"]
                       else f"V4.5 及以下 {cfg['daily_images']} 张")
@@ -508,7 +502,7 @@ class RegistrationService:
 
     async def dm_block_reason(self, now: float | None = None) -> str:
         """私信能不能发：返回空串表示可以，否则返回原因（总开关关闭 / 超过限速）。"""
-        if str(await self.db.get_setting(DM_SETTING, "0")).strip() != "1":
+        if not await site_flags.get(self.db, site_flags.DM_ENABLED):
             return "私信总开关已关闭"
         now = time.time() if now is None else now
         while self._dm_sent and self._dm_sent[0] < now - 86400:
@@ -608,10 +602,7 @@ class RegistrationService:
                 from .audit import audit_disclosure
                 from .ops import env_audit_defaults
                 notice = await audit_disclosure(self.db, env_audit_defaults())
-                try:
-                    base = int(float(await self.db.get_setting("guard_base_daily_images", 100) or 0))
-                except (TypeError, ValueError):
-                    base = 0
+                base = await site_flags.get(self.db, site_flags.GUARD_BASE)
                 legacy = (f"V4.5 及以下保底 {base} 张、全站空闲时最多 {cfg['daily_images']} 张"
                           if base and cfg["daily_images"] and base < cfg["daily_images"]
                           else f"V4.5 及以下 {cfg['daily_images']} 张")

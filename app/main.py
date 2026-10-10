@@ -25,6 +25,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 
+from . import site_flags
 from . import admin, live, registration_routes, request_timing
 from .registration import configured_service
 from .body import read_json_body
@@ -168,7 +169,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "2.14.2"
+__version__ = "2.14.3"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -789,8 +790,7 @@ async def quota_image_check(key, est: dict, *, legacy_free_images: int = 0,
         # V5 周额度是账户级共享资源，用全站日计数镜像（恢复量 ~190 张/天）
         if key["daily_v5"] > 0 and c["v5"] + sum(r.v5 for r in own_day) + est["v5"] > key["daily_v5"]:
             raise err(402, f"已达今日 V5 额度（{key['daily_v5']} 张/天），明天恢复后再用")
-        g = float(await STATE.db.get_setting(
-            "global_daily_v5", STATE.settings.global_daily_v5) or 0)
+        g = await site_flags.get(STATE.db, site_flags.GLOBAL_DAILY_V5, STATE.settings)
         if g > 0 and not key["exclude_global_v5"]:
             total = await STATE.db.day_v5_total(STATE.day())
             if total + sum(r.v5 for r in global_day if not r.exclude_global_v5) + est["v5"] > g:
@@ -806,8 +806,7 @@ async def quota_image_check(key, est: dict, *, legacy_free_images: int = 0,
         used = await STATE.db.month_anlas(key["id"], STATE.month())
         if key["monthly_anlas"] > 0 and used + sum(r.anlas for r in own_month) + est["anlas"] > key["monthly_anlas"]:
             raise err(402, f"本月 Anlas 额度不足（已用 {used:.0f}/{key['monthly_anlas']:.0f}）")
-        budget = float(await STATE.db.get_setting(
-            "global_monthly_anlas", STATE.settings.global_monthly_anlas) or 0)
+        budget = await site_flags.get(STATE.db, site_flags.GLOBAL_MONTHLY_ANLAS, STATE.settings)
         if budget > 0:
             all_used = await STATE.db.month_anlas_all(STATE.month())
             if all_used + sum(r.anlas for r in global_month) + est["anlas"] > budget:
@@ -1168,7 +1167,7 @@ async def _generate_image(request: Request, *, streaming: bool):
 
     # 免费档钳制：只对没有 Anlas 权限的 Key 生效；有 Anlas（含自动分配）的 Key 可以用超规格参数，按 Anlas 扣
     if STATE.settings.safe_clamp and not key["is_admin"] and not key["allow_anlas"]:
-        economy_on = (await STATE.db.get_setting("economy_mode", "off")) == "on"
+        economy_on = await site_flags.get(STATE.db, site_flags.ECONOMY)
         try:
             body, notes, problem = clamp_image_params(
                 body,
@@ -1919,9 +1918,9 @@ async def _public_status_body(request: Request) -> dict:
         "default_features": [{"id": n, "label": feature_defs.FEATURES[n]} for n in defaults],
         "audit_notice": await audit_disclosure(STATE.db, SETTINGS),
         # 网页 Discord 登录：Discord 应用审核期间 OAuth 被封，暂停时首页改为提示用 /register、/quota（站长可随时改回 0）
-        "web_login": str(await STATE.db.get_setting("web_login_paused", "1")).strip() == "0",   # 默认暂停（fail-closed）
-        "economy": (await STATE.db.get_setting("economy_mode", "off")) == "on",
-        "algo_notice": str(await STATE.db.get_setting("algo_notice", "") or "")[:300],
+        "web_login": not await site_flags.get(STATE.db, site_flags.WEB_LOGIN_PAUSED),   # 默认暂停（fail-closed）
+        "economy": await site_flags.get(STATE.db, site_flags.ECONOMY),
+        "algo_notice": (await site_flags.get(STATE.db, site_flags.ALGO_NOTICE))[:300],
         "discord_invite": SETTINGS.discord_invite_url,
         "key_inactivity_delete_days": SETTINGS.key_inactivity_delete_days,
         "limits": _public_limits(),

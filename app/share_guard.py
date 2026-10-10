@@ -58,7 +58,7 @@ DEDUPE = {"habits": 3600, "overlap": 1800, "concurrent": 1800, "alternate": 1800
 STRONG = ("habits", "overlap", "concurrent", "alternate")
 CONFIRM_WINDOW = 72 * 3600     # 辅助证据只在 72 小时内有过强证据时计分
 OVERLAP_WINDOW = 180          # 「上一张还没完」只看最近 3 分钟内的请求
-MODE_SETTING = "share_guard_mode"          # enforce（默认）/ observe / off
+MODE_SETTING = "share_guard_mode"          # enforce / observe（默认）/ off；读写走 site_flags.SHARE_MODE
 
 Notify = Callable[[int, str], Awaitable[None]]
 
@@ -178,8 +178,8 @@ class ShareGuard:
 
     async def mode(self) -> str:
         """未设置或值不对时按 observe 处理（fail-closed）：库重建 / 恢复后不会突然开始处罚成员。"""
-        v = await self.db.get_setting(MODE_SETTING, "observe")
-        return v if v in ("enforce", "observe", "off") else "observe"
+        from . import site_flags
+        return await site_flags.get(self.db, site_flags.SHARE_MODE)
 
     async def pause_key(self, key_id: int, seconds: float, reason: str, now: Optional[float] = None) -> bool:
         """非防分享的 Key 暂停（如自动驾驶对死循环重试限流）。复用 paused_until 闸门和 main.py 的拦截，
