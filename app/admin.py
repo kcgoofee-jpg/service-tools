@@ -1233,6 +1233,18 @@ async def member_tags(db, since: float) -> tuple[dict[int, list], dict[int, list
             + " END AS label, COUNT(*) FROM usage_log WHERE ts>? AND status IN ('rejected','error') "
               "AND key_id IS NOT NULL GROUP BY key_id, label HAVING label IS NOT NULL", (since,)):
         auto_tags.setdefault(kid, []).append({"tag": label, "count": n})
+    # 疑似同一人：取自动驾驶最近一次的 alt_link 结果（每 10 分钟算一次）
+    try:
+        from . import alt_guard
+        last = json.loads(await db.get_setting("autopilot_last", "{}") or "{}")
+        for p in ((last.get("rules") or {}).get("alt_link") or {}).get("value") or []:
+            a, b = p["keys"]
+            for me, other, other_name in ((a, b, p["names"][1]), (b, a, p["names"][0])):
+                auto_tags.setdefault(me, []).append({
+                    "tag": "疑似同一人", "count": p["score"],
+                    "note": f"和 #{other} {other_name}：{alt_guard.describe(p['signals'])}（{p['score']} 分，只观察）"})
+    except (TypeError, ValueError, KeyError):
+        pass
     return manual_tags, auto_tags
 
 

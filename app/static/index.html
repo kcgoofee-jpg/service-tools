@@ -1873,7 +1873,7 @@ function memberPanel(m, now){
           ${m.share ? `<button class="btn mini" type="button" data-act="share-clear" data-id="${k.id}">清除风险分（误判）</button>` : ''}</dd>
         <dt>${m.discord_id ? '领取' : '创建'}</dt><dd title="${esc(fullTime(m.registered_at))}">${m.registered_at ? esc(rel(m.registered_at)) : '—'}</dd>
         <dt>最近使用</dt><dd>${k.last_used_at ? esc(fullTime(k.last_used_at)) : '从未使用'}</dd>
-        <dt>标记</dt><dd><div class="tag-row">${(m.tags||[]).map(t => `<span class="mf tag" title="${esc((t.note ? t.note + ' · ' : '') + (t.by||'') + ' · ' + fullTime(t.ts))}">${esc(t.tag)}<button type="button" data-act="tag-del" data-id="${k.id}" data-tag="${esc(t.tag)}" aria-label="移除标签 ${esc(t.tag)}">×</button></span>`).join('')}${(m.auto_tags||[]).map(t => `<span class="mf warn" title="近 24 小时因此被拒 ${t.count} 次（自动标记，原因消失后自动去掉）">${esc(t.tag)} ×${t.count}</span>`).join('')}${hasTags(m) ? '' : '<span class="muted sm">无</span>'}</div>
+        <dt>标记</dt><dd><div class="tag-row">${(m.tags||[]).map(t => `<span class="mf tag" title="${esc((t.note ? t.note + ' · ' : '') + (t.by||'') + ' · ' + fullTime(t.ts))}">${esc(t.tag)}<button type="button" data-act="tag-del" data-id="${k.id}" data-tag="${esc(t.tag)}" aria-label="移除标签 ${esc(t.tag)}">×</button></span>`).join('')}${(m.auto_tags||[]).map(t => t.note ? `<span class="mf warn" title="${esc(t.note)}">${esc(t.tag)}</span><span class="muted sm">${esc(t.note)}</span>` : `<span class="mf warn" title="近 24 小时因此被拒 ${t.count} 次（自动标记，原因消失后自动去掉）">${esc(t.tag)} ×${t.count}</span>`).join('')}${hasTags(m) ? '' : '<span class="muted sm">无</span>'}</div>
           <div class="tag-add"><input id="tagIn${k.id}" maxlength="12" placeholder="标签（如：站长熟人）" aria-label="新标签"><input id="tagNote${k.id}" maxlength="200" placeholder="备注（可选，只有后台能看到）" aria-label="标签备注"><button class="btn mini" type="button" data-act="tag-add" data-id="${k.id}">添加</button></div></dd></dl>`;
     const u = k.used;
     const quota = k.is_admin
@@ -1949,7 +1949,7 @@ function renderMembers(){
     const flags = [
       ...(m.tags||[]).map(t => flag('tag', t.tag, (t.note ? t.note + ' · ' : '') + (t.by || '') + ' 标记')),
       !m.enabled ? flag('bad', '已停用') : '',
-      ...(m.auto_tags||[]).map(t => flag('warn', t.tag, `近 24 小时因此被拒 ${t.count} 次（自动标记）`)),
+      ...(m.auto_tags||[]).map(t => flag('warn', t.tag, t.note || `近 24 小时因此被拒 ${t.count} 次（自动标记）`)),
       m.expires_at && m.expires_at < now ? flag('bad', '已过期') : '',
       m.share && m.share.paused_until > now ? flag('bad', '已暂停', '防分享暂停中') : shareHot(m) ? flag('bad', '风险 ' + Math.round(m.share.score), `防分享风险分（违规 ${m.share.strikes} 次）`) : '',
       full ? flag('bad', '已达日限') : '',
@@ -2543,12 +2543,12 @@ async function loadGuard(){
 const ANLAS_LABELS = {anlas_auto_enabled:['开启自动分配（1 开 / 0 关）',0,1], anlas_reserve:['保留不分的 Anlas',0,10000],
   anlas_member_daily_cap:['每人每天最多',0,1000], anlas_min_images_7d:['近 7 天至少出图张数',0,10000], anlas_min_key_age_days:['领取满几天',0,365]};
 /* 动态额度：结果 + 每日微调历史（数据来自 /admin/api/quota-algo，算法说明见 app/quota_algo.py） */
-const AP_NAME = {slots:'名额上限', breaker:'全站熔断', key_guard:'单个 Key 守护', economy:'节约模式'};
+const AP_NAME = {alt_link:'疑似同一人（只观察）', slots:'名额上限', breaker:'全站熔断', key_guard:'单个 Key 守护', economy:'节约模式'};
 const AP_MODE = {observe:'<span class="tag warn">观察</span>', enforce:'<span class="tag on">执行</span>', off:'<span class="tag off">关闭</span>'};
 async function loadAutopilot(){
   try{
     const d = await api('/admin/api/autopilot'), r = (d.last || {}).rules || {};
-    const val = (k, v) => k === 'key_guard' ? (v.length ? v.map(x => `${esc(x.name)}：${x.action==='reset'?'重置':'暂停'}`).join('；') : '—')
+    const val = (k, v) => k === 'alt_link' ? (v.length ? v.length + ' 对' : '—') : k === 'key_guard' ? (v.length ? v.map(x => `${esc(x.name)}：${x.action==='reset'?'重置':'暂停'}`).join('；') : '—')
       : k === 'breaker' ? (v ? '暂停 5 分钟' : '正常') : k === 'economy' ? (v ? '建议开启' : '保持关闭') : esc(v);
     $('#apBody').innerHTML = Object.keys(r).length ? `<div class="table-wrap"><table class="rt"><thead><tr><th>规则</th><th>模式</th><th>判断</th><th>理由</th></tr></thead><tbody>${
       Object.entries(r).map(([k, v]) => `<tr><td data-label="规则">${esc(AP_NAME[k]||k)}</td><td data-label="模式">${AP_MODE[v.mode]||esc(v.mode)}</td><td data-label="判断">${val(k, v.value)}</td><td class="muted" data-label="理由">${esc(v.why)}</td></tr>`).join('')

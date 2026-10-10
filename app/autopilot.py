@@ -22,6 +22,8 @@
 4. economy 节约模式 —— 可执行
    最近 15 分钟「排队的人太多」≥ 8 次 → 开（全站免费档 14 步 + Euler-a）；30 分钟 ≤ 1 次 → 关。
    两次切换至少隔 1 小时；开关都经 ops.set_economy 在公告频道通知成员。
+5. alt_link 疑似同一人（小号）—— 只观察，没有执行路径（处罚由站长决定）
+   用完一把马上换另一把、来回交替、同网段同时出图、少见网段 / 客户端相同，打分 ≥ 50 且有行为信号才列出（alt_guard.py）。
 """
 from __future__ import annotations
 
@@ -146,6 +148,16 @@ async def run(state, registrar=None, now: Optional[float] = None) -> dict[str, A
             await db.set_setting("autopilot_slots_at", now)
             await log_action(db, "系统", "自动驾驶：名额", "", f"{cap_now} → {slots}：{why}")
             out["rules"]["slots"]["applied"] = True
+
+    # 疑似同一人（小号）：只观察，结果给后台成员页做「疑似同一人」标签（alt_guard.py）
+    try:
+        from . import alt_guard
+        links = await alt_guard.scan(db, now)
+        out["rules"]["alt_link"] = {"mode": "observe", "value": links,
+                                    "why": "；".join(f"{p['names'][0]} ↔ {p['names'][1]}（{p['score']} 分：{alt_guard.describe(p['signals'])}）"
+                                                    for p in links[:5]) or "没有发现行为相似的 Key"}
+    except Exception as exc:            # 观察规则出错不能影响其他规则
+        out["rules"]["alt_link"] = {"mode": "observe", "value": [], "why": f"计算失败：{type(exc).__name__}"}
 
     # 4 熔断：只算真正打到上游的失败——5xx，或 200 开头后流中途断开（up_status 2xx 但 status=error）。
     # 本地拦截（冷却 / 上限 / 排队超时，up_status=0）、上游 429（另有冷却和 AIMD 减半）、成员参数错误（4xx）都不算。
