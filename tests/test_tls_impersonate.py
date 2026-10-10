@@ -27,10 +27,15 @@ def _restore_profiles(monkeypatch):
 
 # ---------------- 假 curl_cffi ----------------
 
-class FakeRequestException(Exception):
-    def __init__(self, msg, code=0, response=None):
+class FakeCurlError(Exception):
+    def __init__(self, msg, code=0):
         super().__init__(msg)
         self.code = code
+
+
+class FakeRequestException(FakeCurlError):
+    def __init__(self, msg, code=0, response=None):
+        super().__init__(msg, code)
 
 
 class FakeHeaders:
@@ -71,11 +76,20 @@ class FakeAsyncSession:
         self.removed = []
         self.closed = False
         self.reply = None
+        self.pool_blocked = False
         self.acurl = SimpleNamespace(remove_handle=self.removed.append)
         FakeAsyncSession.instances.append(self)
 
+    async def pop_curl(self):
+        if self.pool_blocked:
+            await asyncio.Event().wait()
+        return object()
+
     async def request(self, method, url, **kwargs):
         self.calls.append((method, url, kwargs))
+        self.curl = await self.pop_curl()
+        if self.reply == "hang":                 # 一直等不到响应头
+            await asyncio.Event().wait()
         reply = self.reply() if callable(self.reply) else self.reply
         if isinstance(reply, Exception):
             raise reply
@@ -99,6 +113,7 @@ def fake_curl_cffi(monkeypatch):
     root = types.ModuleType("curl_cffi")
     root.__version__ = "0.16.3"
     root.Curl = FakeCurl
+    root.CurlError = FakeCurlError
     req = types.ModuleType("curl_cffi.requests")
     req.AsyncSession = FakeAsyncSession
     imp = types.ModuleType("curl_cffi.requests.impersonate")
@@ -220,11 +235,17 @@ async def test_on_maps_curl_errors_to_httpx(fake_curl_cffi):
                  (7, "Failed to connect", httpx.ConnectError),
                  (6, "Could not resolve host", httpx.ConnectError),
                  (97, "proxy", httpx.ProxyError),
+                 (28, "SSL connection timeout", httpx.ConnectTimeout),
+                 *[(c, "pre-send failure", httpx.ConnectError) for c in (1, 3, 5, 35, 58, 59, 60, 64, 66, 77)],
                  (56, "Recv failure", httpx.ReadError)]
         for code, msg, expected in cases:
             session.reply = FakeRequestException(msg, code)
             with pytest.raises(expected):
                 await client._client.get("https://image.invalid/user/subscription")
+        # 不是 RequestException 的 CurlError 也不能漏成非 httpx 异常
+        session.reply = FakeCurlError("boom", 0)
+        with pytest.raises(httpx.ReadError):
+            await client._client.get("https://image.invalid/x")
         # 流式中途出错：一律按读错误（nai.py 据此判断「可能已扣费」）
         session.reply = lambda: FakeCurlResponse(200, [], [b"x", FakeRequestException("Operation too slow", 28)])
         resp = await client._client.send(client._client.build_request("GET", "https://image.invalid/s"), stream=True)
@@ -365,3 +386,78 @@ async def test_real_curl_cffi_against_local_server():
     assert "accept-encoding: gzip, deflate, br, zstd" in head
     assert "upgrade-insecure-requests" not in head and "sec-fetch-user" not in head
     assert json.loads(got["body"]) == {"k": 1}
+
+
+@pytest.mark.asyncio
+async def test_cancel_before_headers_aborts_transfer(fake_curl_cffi):
+    client = _client("chrome")
+    await client.start()
+    try:
+        session = client._client._transport._get_session()
+        session.reply = "hang"
+        with pytest.raises(TimeoutError):
+            async with asyncio.timeout(0.05):
+                await client._client.get("https://image.invalid/user/subscription")
+        assert session.removed == [session.curl]      # 句柄被摘掉，不会占连接到读超时
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_pool_timeout_and_read_none_keeps_connect(fake_curl_cffi):
+    client = _client("chrome")
+    await client.start()
+    try:
+        session = client._client._transport._get_session()
+        session.pool_blocked = True
+        with pytest.raises(httpx.PoolTimeout):
+            await client._client.get("https://image.invalid/x", timeout=httpx.Timeout(5, pool=0.05))
+        session.pool_blocked = False
+        session.reply = lambda: FakeCurlResponse(200, [], [b"ok"])
+        resp = await client._client.get("https://image.invalid/x", timeout=httpx.Timeout(7, read=None))
+        assert resp.content == b"ok"
+        assert session.calls[-1][2]["timeout"] == (7, tls._NO_READ_LIMIT)
+    finally:
+        await client.close()
+
+
+def test_resolve_target_survives_missing_resolver(fake_curl_cffi, monkeypatch):
+    monkeypatch.delattr(sys.modules["curl_cffi.requests.impersonate"], "resolve_latest_browser_type")
+    target, error = tls.resolve_target("chrome")
+    assert target is None and "不支持" in error
+
+
+@pytest.mark.asyncio
+async def test_real_curl_cffi_cancel_before_headers_frees_handle():
+    """真 curl_cffi：对方迟迟不回响应头时取消，句柄立刻释放，之后的请求照常。"""
+    pytest.importorskip("curl_cffi")
+    target, error = tls.resolve_target("chrome")
+    if target is None:
+        pytest.skip(error)
+    hang = asyncio.Event()
+
+    async def handle(reader, writer):
+        head = await reader.readuntil(b"\r\n\r\n")
+        if b"/hang" in head:
+            await hang.wait()
+        writer.write(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+        await writer.drain()
+        writer.close()
+
+    server = await asyncio.start_server(handle, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    transport = tls.CurlCffiTransport(target, max_clients=1)
+    try:
+        async with httpx.AsyncClient(transport=transport, trust_env=False, timeout=httpx.Timeout(30)) as client:
+            with pytest.raises(TimeoutError):
+                async with asyncio.timeout(0.3):
+                    await client.get(f"http://127.0.0.1:{port}/hang")
+            await asyncio.sleep(0.05)
+            assert not transport._session.acurl._curl2future       # 没有残留的传输
+            # 池子只有 1 个句柄：若没释放，这里会等到连接池超时
+            resp = await client.get(f"http://127.0.0.1:{port}/ok", timeout=httpx.Timeout(5, pool=2))
+            assert resp.text == "ok"
+    finally:
+        hang.set()
+        server.close()
+        await server.wait_closed()
