@@ -1028,7 +1028,6 @@ function fmtDate(sec){
   function capAt(h){ return inQuiet(h) ? V.quietCap : V.hourly; }
   function quietHours(){ var n = 0; for(var h = 0; h < 24; h++) if(inQuiet(h)) n++; return n; }
   function bjHour(){ var d = new Date(); return (d.getUTCHours() + 8) % 24; }
-  function bjMinute(){ return new Date().getUTCMinutes(); }
   function perAcct(v){ return Math.round(v / Math.max(1, V.usable)); }
   function fmt(v){ return Math.round(v * 10) / 10; }
 

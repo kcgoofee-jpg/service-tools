@@ -802,7 +802,7 @@ td.note{min-width:220px}
         <!-- 总览 -->
         <section id="tab-ov">
           <div class="page-head"><div class="ttl"><h1>总览</h1></div>
-            <div class="tools"><button class="btn" id="econBtn" data-act="toggle-economy" title="节约模式：全站免费档统一 14 步 + Euler-a，省约 42% 额度、出图更快；开 / 关都会在公告频道通知成员">节约模式</button><button class="btn rf" data-act="refresh-ov" aria-label="刷新" title="刷新"><span data-ic="refresh"></span><span class="lbl">刷新</span></button></div></div>
+            <div class="tools"><button class="btn" id="econBtn" data-act="toggle-economy" title="节约模式：全站免费档统一 14 步 + Euler-a，V5 Full 改走 Medium 档（画质接近正常，省约 42% 额度、出图更快）；开 / 关都会在公告频道通知成员">节约模式</button><button class="btn rf" data-act="refresh-ov" aria-label="刷新" title="刷新"><span data-ic="refresh"></span><span class="lbl">刷新</span></button></div></div>
           <div class="card panel ovv" id="ovVerdict"><div class="skel" style="height:64px"></div></div>
           <div class="stats" id="ovCards"></div>
           <div class="card panel" id="scPanel">
@@ -1092,8 +1092,8 @@ td.note{min-width:220px}
       <label class="check"><input id="f_notify" type="checkbox" checked><span title="停用 / 恢复、额度、模型、Anlas、有效期的变化；仅限 Discord 领取的成员">保存后私信通知成员</span></label>
       <div class="sec-title">功能权限</div>
       <div class="opt-group">
-        <label class="check"><input type="radio" name="f_feat_mode" value="legacy" checked><span>全部已开放功能（含以后新开放的）</span></label>
-        <label class="check"><input type="radio" name="f_feat_mode" value="custom"><span>仅选中的功能</span></label>
+        <label class="check"><input type="radio" name="f_feat_mode" value="legacy"><span>全部已开放功能（含以后新开放的）</span></label>
+        <label class="check"><input type="radio" name="f_feat_mode" value="custom" checked><span>仅选中的功能</span></label>
       </div>
       <div class="feat-checks off" id="f_feat_list"></div>
       <div class="err" id="modalErr"></div>
@@ -1938,7 +1938,7 @@ async function deleteUpstreamToken(id, label){
 
 /* ---------- members ---------- */
 async function ensureMembers(){
-  if(!membersCache){ const d = await api('/admin/api/members'); membersCache = d.members; memberMeta = d; }
+  if(!membersCache){ await loadMembers(); }
   return membersCache;
 }
 async function loadMembers(){
@@ -1995,7 +1995,6 @@ async function memberDelete(id, ban){
     await refreshAfterMemberChange();
   }catch(e){ toastErr(e); }
 }
-function memberLimitRatio(m){ return m.daily_images>0 ? m.today.images/m.daily_images : 0; }
 /* 成员筛选：时间都按秒；“活动”= 最近一次请求（含网站查额度），“出图”= 成功生成过图片 */
 const H = 3600, D = 86400;
 const activityAt = m => m.last_used_at || m.registered_at || m.created_at || 0;
@@ -2556,15 +2555,6 @@ async function fillLogFilter(){
   sel.innerHTML = '<option value="">全部 Key</option>' + keysCache.map(k=>`<option value="${k.id}">${esc(k.name)}</option>`).join('');
   sel.value = cur;
 }
-/* 24h 来源网段数：达到阈值标黄（可能被分享，也可能只是换了网络 / 代理） */
-function srcBadge(k, limit){
-  if(k.is_admin) return '<span class="muted">—</span>';
-  const list = k.sources_24h || [], n = list.length;
-  if(!n) return '<span class="muted">—</span>';
-  const hot = limit > 0 && n >= limit;
-  const tip = '近 24 小时的来源网段：' + list.join('、') + (hot ? '\n可能被分享，也可能只是换了网络 / 代理，建议先问一下本人。' : '');
-  return `<span class="${hot?'mf warn':''}" title="${esc(tip)}">${n} 个网段${hot?' · 疑似分享':''}</span>`;
-}
 function mask(t){ return t.slice(0,8) + '····' + t.slice(-4); }
 async function copyKey(btn){
   const t = btn.closest('[data-kid]').querySelector('[data-tok]').dataset.tok;
@@ -3065,7 +3055,7 @@ document.addEventListener('click', ev=>{
     case 'toggle-economy': {
       const on = !(ovData && ovData.economy);
       askConfirm(on
-        ? '开启节约模式？全站免费档将统一用 14 步 + Euler-a（质量略降、更省额度、出图更快），并在公告频道通知成员。'
+        ? '开启节约模式？全站免费档将统一用 14 步 + Euler-a，V5 Full 改走官方 Medium 档（画质接近正常、更省额度、出图更快），并在公告频道通知成员。'
         : '关闭节约模式？恢复正常步数和采样器，并在公告频道通知成员。', on?'开启':'关闭').then(ok=>{
         if(!ok) return;
         api('/admin/api/ops/economy',{method:'PUT',body:JSON.stringify({on})})
