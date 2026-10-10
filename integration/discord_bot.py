@@ -77,8 +77,10 @@ async def backend(path: str, interaction: discord.Interaction, extra_id: str | N
 def build_client() -> tuple[discord.Client, app_commands.CommandTree, discord.Object]:
     guild = discord.Object(id=int(os.environ["DISCORD_GUILD_ID"]))
     intents = discord.Intents.none()
-    intents.guilds = True            # 收到「论坛新帖」事件（跑图分享自动点赞 / 评论）
-    intents.message_content = True   # 读新帖的标题和文字（开发者后台已开启 Message Content Intent），用于写评论
+    intents.guilds = True            # 收到「论坛新帖」事件（非特权）；斜杠命令也只需要它
+    # Message Content 是特权 Intent，原本用于画廊 AI 评论读帖子正文。画廊自动互动已关闭，
+    # 不再需要它；为降低特权足迹（配合 Discord 申诉）这里不再申请。若将来恢复画廊 AI 评论，
+    # 需在此加回 intents.message_content=True，并在开发者后台重新开启该 Intent。
     client = discord.Client(intents=intents)
     tree = app_commands.CommandTree(client)
 
