@@ -794,7 +794,7 @@ td.note{min-width:220px}
                 <button class="btn mini" data-chart="text_tokens" aria-label="文本 tokens">文本</button></div></div>
             <div class="chart" id="chart"></div></div>
           <div class="card panel">
-            <div class="panel-head"><h2>各功能用量</h2><div class="desc">点功能名查看日志</div></div>
+            <div class="panel-head"><h2>各功能用量</h2><div class="desc" id="featDesc">只算成员，不含站长 / 测试 Key · 点功能名查看日志</div></div>
             <div class="table-wrap"><table class="rt"><thead><tr><th>功能</th><th class="num">今日<br><span class="sm">成功 / 失败 / 拒绝</span></th><th>今日产出</th><th class="num">近 7 天<br><span class="sm">成功 / 失败 / 拒绝</span></th><th>近 7 天产出</th></tr></thead><tbody id="featUsage"></tbody></table></div>
           </div>
           <details class="card panel fold"><summary class="panel-head"><h2>系统状态</h2><span class="desc" id="statusSum"></span></summary><div class="status-list" id="statusPanel"></div></details>
@@ -1618,6 +1618,7 @@ async function loadOverview(){
     const d = await api('/admin/api/overview');
     const t = d.today;
     ovData = d; renderOverviewTop(d);
+    if(d.log_since){ const days = (Date.now()/1000 - d.log_since) / 86400; $('#featDesc').textContent = '只算成员，不含站长 / 测试 Key' + (days < 7 ? ` · 记录从 ${new Date(d.log_since*1000).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})} 开始，「近 7 天」还不满 7 天` : '') + ' · 点功能名查看日志'; }
     $('#featUsage').innerHTML = (d.feature_usage||[]).map(f=>{
       const cnt = b => `<span class="tri"><span class="num">${b.ok}</span> / <span class="num ${b.error?'bad':''}">${b.error}</span> / <span class="num ${b.rejected?'warn':''}">${b.rejected}</span></span>`;
       const out = b => [b.images?`${b.images} 张`:'', b.tokens?`${fmt(b.tokens)} tokens`:'', b.anlas?`${b.anlas} Anlas`:''].filter(Boolean).join(' · ') || '—';
@@ -1705,7 +1706,7 @@ async function renderOverviewTop(d){
   const reqs = (d.feature_usage||[]).reduce((a, f) => ({rej: a.rej + (f.today.rejected||0), err: a.err + (f.today.error||0)}), {rej:0, err:0});
   const members = (membersCache||[]).filter(m => !m.is_admin && !m.is_test).length;
   $('#ovCards').innerHTML =
-    statCard('今日出图', fmtNum(d.today.images), '张', `成员 ${fmtNum(d.today.member_images)} 张 · V5 ${fmtNum(d.today.v5)}${q.v5_cap ? ' / ' + fmtNum(q.v5_cap) : ''}`) +
+    statCard('今日出图（全部）', fmtNum(d.today.images), '张', `成员 ${fmtNum(d.today.member_images)} · 站长 / 测试 ${fmtNum(d.today.images - d.today.member_images)} · V5 ${fmtNum(d.today.v5)}${q.v5_cap ? ' / ' + fmtNum(q.v5_cap) : ''}`) +
     statCard('今天在用的成员', active, members ? '/ ' + members : '', `有效 Key ${d.keys_active} / ${d.keys_total}`) +
     statCard('近 60 分钟出图', g.hour ?? '—', g.hour_cap ? '/ ' + g.hour_cap : '', g.hour_cap && g.hour >= g.hour_cap ? '已到上限，新请求要等几分钟' : '每小时上限用来保护上游账号', g.hour_cap && g.hour >= g.hour_cap * 0.95 ? 'hot' : '') +
     statCard('今日被拒 / 失败', fmtNum(reqs.rej), '/ ' + fmtNum(reqs.err), `本月 Anlas ${fmtNum(d.month.anlas)}${d.anlas_budget > 0 ? ' / ' + fmtNum(d.anlas_budget) : ''}`);
