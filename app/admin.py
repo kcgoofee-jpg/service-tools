@@ -1482,6 +1482,21 @@ async def audit_export(request: Request, key_id: Optional[int] = None):
                     headers={"Content-Disposition": f"attachment; filename=\"{fname}\"", "Cache-Control": "no-store"})
 
 
+@router.get("/logs/export")
+async def logs_export(request: Request, days: int = 30):
+    """客户端日志导出（zip：请求、Key、网段、防分享证据），给站长定期独立复核。只读，不含提示词和 Key 原文。"""
+    require_admin(request)
+    from . import client_export
+    days = max(0, min(int(days), 3650))
+    data = await client_export.collect(request.app.state.gate.db, days)
+    blob = await run_in_threadpool(client_export.build_zip, data)
+    stamp = time.strftime("%Y%m%d-%H%M")
+    await log_action(request.app.state.gate.db, _actor(request), "导出客户端日志", f"{days or '全部'}天")
+    return Response(blob, media_type="application/zip",
+                    headers={"Content-Disposition": f"attachment; filename=\"owl-client-logs-{stamp}.zip\"",
+                             "Cache-Control": "no-store"})
+
+
 @router.get("/status")
 async def server_status(request: Request):
     """告警与记录功能的当前状态（不含任何密钥）。"""
