@@ -1,8 +1,9 @@
 """美股开盘 / 收盘提醒 → Discord money 频道（Webhook，不经过奶妹）。
 
-每次看纳指 100、标普 500、道指是否在 MA250（最近 250 个交易日收盘均价）之上：
-≥ 2 个在上方 → 🔴 红灯，否则 🟢 绿灯（站长定的规则）。开盘用前一交易日收盘判断，收盘用当天收盘判断，
-另外标出当天刚突破 / 刚跌破 MA250 的指数。
+看纳指 100、标普 500、道指有没有「穿越」MA250（最近 250 个交易日收盘均价）——看变化，不看高低：
+前一天收盘在均线下、这天收盘在均线上 = 上穿；反过来 = 下穿。
+同一天 ≥ 2 个指数上穿或下穿 → 🔴 红灯（几个指数互相印证，信号更可靠）；没有就是 🟢 绿灯（站长定的规则）。
+开盘提醒看前一交易日收盘有没有穿越，收盘提醒看当天收盘。
 
 数据：Yahoo Finance 公开图表接口（免费、不用 Key，每次 3 个请求）。只是信息，不是投资建议。
 cron 每 5 分钟跑一次；只在纽约时间 9:30–9:45（开盘）和 16:05–16:30（收盘）真正取数，其余时间直接退出。
@@ -60,17 +61,22 @@ def analyse(sym: str, name: str, short: str, mode: str, today) -> dict:
     ma_prev = sum(closes[-251:-1]) / 250
     above = (closes[-1] if mode == "close" else closes[-1]) > ma
     was_above = closes[-2] > ma_prev
-    cross = "" if above == was_above else ("今天刚突破 MA250" if above else "今天刚跌破 MA250")
+    cross = "" if above == was_above else ("上穿" if above else "下穿")
     return {"name": name, "short": short, "sym": sym, "price": price, "chg": (price / prev - 1) * 100,
             "ma": ma, "dist": (closes[-1] / ma - 1) * 100, "above": above, "cross": cross}
 
 
 def embed(mode: str, today, items: list[dict], test: bool) -> dict:
-    n_above = sum(1 for i in items if i["above"])
-    red = n_above >= 2
+    crossed = [i for i in items if i["cross"]]
+    red = len(crossed) >= 2
     light = "🔴 红灯" if red else "🟢 绿灯"
     title = ("🔔 美股开盘" if mode == "open" else "🌙 美股收盘") + f" · {today:%m 月 %d 日}（周{WEEK[today.weekday()]}）" + ("（测试）" if test else "")
-    basis = "按前一交易日收盘" if mode == "open" else "按今日收盘"
+    basis = "前一交易日收盘" if mode == "open" else "今日收盘"
+    if crossed:
+        what = "、".join(f"{i['name']}{i['cross']}" for i in crossed)
+        summary = f"{len(crossed)} / 3 个指数{basis}穿越 MA250：{what}" + ("（互相印证）" if red else "（只有 1 个，还不算信号）")
+    else:
+        summary = f"{basis}没有指数穿越 MA250"
     fields = []
     for i in items:
         arrow = "▲" if i["chg"] >= 0 else "▼"
@@ -79,13 +85,13 @@ def embed(mode: str, today, items: list[dict], test: bool) -> dict:
                  f"MA250　{i['ma']:,.0f}",
                  f"{'✅' if i['above'] else '⬇️'} {pos}　{i['dist']:+.1f}%"]
         if i["cross"]:
-            lines.append(f"⚡ **{i['cross']}**")
+            lines.append(f"⚡ **{'今天' if mode == 'close' else '昨天'}{i['cross']} MA250**")
         q = urllib.parse.quote(i["sym"])
         lines.append(f"[行情](https://finance.yahoo.com/quote/{q}) · [图表](https://www.tradingview.com/chart/?symbol={i['short']})")
         fields.append({"name": i["name"], "value": "\n".join(lines), "inline": True})
     return {
         "title": title,
-        "description": f"## {light}\n{n_above} / 3 个指数在 MA250 之上（{basis}）\n-# ≥ 2 个在上方为红灯，否则绿灯",
+        "description": f"## {light}\n{summary}\n-# 同一天 ≥ 2 个指数上穿或下穿 MA250 为红灯（互相印证），没有就是绿灯",
         "color": RED if red else GREEN,
         "fields": fields,
         "footer": {"text": "MA250 = 最近 250 个交易日收盘均价 · 数据：Yahoo Finance · 仅供参考，不是投资建议"},
