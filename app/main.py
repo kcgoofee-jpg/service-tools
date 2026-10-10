@@ -108,6 +108,8 @@ async def lifespan(app: FastAPI):
     install_access_log_filter()
     STATE = GateState(SETTINGS)
     await STATE.db.connect()
+    from . import status_page
+    await status_page.ensure_schema(STATE.db)
     from . import database as _database
     _database.RULE_VERSION = __version__
     await STATE.load_runtime_limits()
@@ -177,7 +179,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "2.15.39"
+__version__ = "2.16.0"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -291,6 +293,9 @@ if SETTINGS.cors_origins:
     app.add_middleware(CORSMiddleware, allow_origins=SETTINGS.cors_origins,
                        allow_methods=["*"], allow_headers=["*"], allow_credentials=False)
 app.include_router(admin.router)
+from . import status_page as _status_page  # noqa: E402
+app.include_router(_status_page.router)
+app.include_router(_status_page.admin_router)
 app.include_router(registration_routes.router)
 app.include_router(registration_routes.member_router)
 
