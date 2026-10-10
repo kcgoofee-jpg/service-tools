@@ -355,6 +355,7 @@ footer{max-width:960px;margin:0 auto;padding:24px 16px 40px;text-align:center;co
 .topbar-in .spacer{flex:1}
 .guest-only{}
 body.authed .guest-only{display:none!important}
+body.haskey #algoNote{display:none!important}
 body.authed #board{margin-top:22px}
 .userchip{position:relative}
 .chip-btn{display:inline-flex;align-items:center;gap:8px;background:var(--surface-2);border:1px solid var(--border);border-radius:999px;padding:4px 10px 4px 4px;cursor:pointer;color:var(--text);font-size:13.5px;transition:background .15s,border-color .15s}
@@ -449,7 +450,7 @@ body.authed #board{margin-top:22px}
   </section>
 
   <section id="board" aria-labelledby="boardTitle">
-    <div class="sec-head"><h2 id="boardTitle"><span class="live-dot" id="liveDot"></span>实时看板</h2><p>每秒刷新。登录后，第一格会显示你的图排第几。</p></div>
+    <div class="sec-head"><h2 id="boardTitle"><span class="live-dot" id="liveDot"></span>实时看板</h2></div>
     <div class="card">
       <div class="dash" id="dash" aria-live="polite" style="margin-top:0">
         <ol class="dstrip" aria-label="出图流程">
@@ -737,6 +738,8 @@ function renderMe(d){
   var me = $('meCard'), lr = $('loginRow');
   var authed = !!(d && d.logged_in);
   document.body.classList.toggle('authed', authed);
+  // 登录且已有 Key 时，隐藏「全站算法分配」那句——它和下面你自己的额度数字会打架
+  document.body.classList.toggle('haskey', !!(authed && d && d.has_key));
   renderChip(d);
   $('liveTitle').innerHTML = icon('key') + (authed && d.has_key ? '我的额度' : '登录');
   var nv = $('navLive'); if(nv) nv.textContent = (authed && d.has_key) ? '我的额度' : '登录';
@@ -752,13 +755,13 @@ function renderMe(d){
     var t = d.today || {}, q = d.queue || [];
     var v45 = Math.max(0, (t.images || 0) - (t.v5 || 0));
     var pos = q.length ? (q[0].state === 'running' ? '生成中' : '排队第 ' + q[0].position + ' 位') : '空闲';
-    me.innerHTML = '<div class="me-grid"><div><span>今日 V4.5</span><b>' + v45 + ' / ' + (t.daily_images || 0) + '</b></div>'
+    me.innerHTML = '<div class="me-key"><code>' + esc(maskKey(d.key)) + '</code>'
+      + '<button class="btn primary" id="copyKeyBtn" type="button">' + icon('copy') + '复制 Key</button>'
+      + '<span class="muted sm">填进 SillyTavern 等客户端</span></div>'
+      + '<div class="me-grid"><div><span>今日 V4.5</span><b>' + v45 + ' / ' + (t.daily_images || 0) + '</b></div>'
       + '<div><span>今日 V5</span><b>' + (t.v5 || 0) + ' / ' + (t.daily_v5 || 0) + '</b></div>'
       + '<div><span>当前</span><b>' + pos + '</b></div>'
       + '<div><span>到期</span><b>' + (d.expires_at ? fmtDate(d.expires_at) : '长期') + '</b></div></div>'
-      + '<div class="me-key"><code>' + esc(maskKey(d.key)) + '</code>'
-      + '<button class="btn" id="copyKeyBtn" type="button">' + icon('copy') + '复制 Key</button>'
-      + '<span class="muted sm">填进 SillyTavern 等客户端</span></div>'
       + (d.images_stored ? '<div class="me-export"><span class="muted sm">你有 ' + d.images_stored + ' 张原图存在服务器，约 ' + (d.image_retention_days||3) + ' 天后自动删除。想留请打包下载（二选一）：</span>'
         + '<div class="me-export-btns"><a class="btn mini" href="/public/my-export?format=epub">' + icon('image') + '下载 EPUB 画册</a>'
         + '<a class="btn mini" href="/public/my-export?format=zip">' + icon('image') + '下载原图 ZIP</a></div></div>' : '');
