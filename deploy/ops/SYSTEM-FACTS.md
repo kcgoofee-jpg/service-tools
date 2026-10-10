@@ -111,6 +111,7 @@
 
 | 键 | 类型 | 默认 | 范围 | 归属 | 说明 |
 |---|---|---|---|---|---|
+| `member_sweep` | flag | True |  | registration | 退群回收：每人每天核对一次是否还在服务器，不在就删 Key |
 | `web_login_paused` | flag | True |  | registration_routes | 网页 Discord OAuth 登录暂停（申诉期间）。Key 登录不受影响 |
 | `economy_mode` | onoff | False |  | ops / autopilot | 节约模式：免费档统一 14 步 + Euler-a |
 | `dm_enabled` | flag | False |  | registration | 私信总闸门（关 = 任何私信都不发） |
@@ -123,3 +124,7 @@
 | `algo_notice` | str | '' |  | quota_algo → 首页 | 首页显示的今日额度说明 |
 | `audit_image_retention_days` | int | 3 | 0–365 | audit | 原图保留天数（0 = 不保存原图） |
 | `share_guard_mode` | choice | 'observe' | enforce / observe / off | share_guard | 防分享：enforce 处罚 / observe 只记录 / off |
+
+## 退群回收（v2.15.0 起）
+
+维护循环每 5 分钟用机器人 Token 查 1 人 `GET /guilds/{DISCORD_GUILD_ID}/members/{id}`，每人每天一次（`discord_registrations.member_checked_at`）。只有 404 + code 10007（Unknown Member）才删 Key、放名额并写操作日志「退群回收 Key」；其他任何结果 1 小时后重查，绝不误删。总开关 `member_sweep`（默认开）。不发私信。

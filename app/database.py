@@ -304,6 +304,7 @@ class Database:
             "ALTER TABLE generation_audit ADD COLUMN image BLOB",
             "ALTER TABLE generation_audit ADD COLUMN image_type TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE usage_log ADD COLUMN reason TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE discord_registrations ADD COLUMN member_checked_at REAL NOT NULL DEFAULT 0",
         ):
             try:
                 await self._db.execute(ddl)

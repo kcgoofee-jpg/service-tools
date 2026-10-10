@@ -56,6 +56,7 @@ def welcome_dm(key: str, site: str, quota: str, expires_days: int, idle_days: in
     rules.append("• 每把 Key 同时生成 1 张，多发的会被退回，等前一张出完再发；凌晨出图会放慢（保护上游账号）")
     rules.append("• 只提供免费出图：总像素 ≤1024×1024（尺寸可自定义，超出自动等比缩小）、≤28 步、每次 1 张；"
                  "图生图、Vibe 等会消耗 Anlas 的功能不开放")
+    rules.append("• Key 只给本服务器成员：退出服务器后 Key 自动失效")
     rules.append("• 一人一把，请勿分享（本站记录打码后的来源网段防分享，不存完整 IP，7 天后删除）")
     text = (f"🦉 **欢迎来到猫头鹰公益站！** 这是你的 API Key（只发这一次，请先保存）：\n`{key}`\n\n"
             f"**三步开始出图（以柏宝绘为例）**\n"
@@ -160,6 +161,43 @@ class RegistrationService:
                 await self.db._db.commit()
                 done += 1
         return done
+
+    async def sweep_departed(self, now: float | None = None, batch: int = 1) -> int:
+        """退群回收：每个领了 Key 的人每天核对一次是否还在本服务器，不在就删 Key、放名额（站长 2026-10-10 决定直接回收）。
+
+        维护循环每 5 分钟调一次、每次只查 1 人 → 约 49 次读取 / 天，均匀分散，不发私信（申诉期间不制造突发请求）。
+        只有 Discord 明确回复「不是成员」（404 + code 10007）才回收；网络错误、限流、机器人不在服务器（10004）
+        或任何其他情况一律跳过、下轮再查，宁可漏收也不误删。返回本次回收人数。"""
+        if not await site_flags.get(self.db, site_flags.MEMBER_SWEEP):
+            return 0
+        now = time.time() if now is None else now
+        rows = await self.db._db.execute_fetchall(
+            "SELECT discord_id FROM discord_registrations WHERE COALESCE(member_checked_at, 0) < ? "
+            "ORDER BY COALESCE(member_checked_at, 0) LIMIT ?", (now - 86400, batch))
+        removed = 0
+        for (discord_id,) in rows:
+            discord_id = str(discord_id)
+            try:
+                response = await self.http.get(
+                    f"https://discord.com/api/v10/guilds/{self.command_guild}/members/{discord_id}",
+                    headers={"Authorization": "Bot " + self.bot_token}, timeout=10)
+                code = response.json().get("code") if response.status_code == 404 else None
+            except (httpx.HTTPError, ValueError, AttributeError):
+                response, code = None, None
+            if response is not None and response.status_code == 404 and code == 10007:
+                label = await self.registration_profile(discord_id)
+                if await self.revoke(discord_id, remove_role=False):
+                    from .action_log import log_action
+                    who = (label or {}).get("display_name") or (label or {}).get("username") or discord_id
+                    await log_action(self.db, "系统", "退群回收 Key", f"Discord:{discord_id} {who}", "已不在服务器，Key 已删除、名额释放")
+                    removed += 1
+                continue
+            # 在服务器 → 明天再查；没查清（限流 / 网络 / 其他错误）→ 1 小时后重查，不能一直卡在队首挡住别人
+            checked = now if response is not None and response.status_code == 200 else now - 86400 + 3600
+            await self.db._db.execute("UPDATE discord_registrations SET member_checked_at=? WHERE discord_id=?",
+                                      (checked, discord_id))
+            await self.db._db.commit()
+        return removed
 
     async def backfill_profiles(self, limit: int = 5) -> int:
         """给还没有 Discord 用户名 / 头像的登记补全（用机器人读取公开资料）；每次最多处理几条，避免触发限流。"""
