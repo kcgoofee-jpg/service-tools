@@ -115,6 +115,14 @@ CREATE TABLE IF NOT EXISTS upstream_token_counters (
     v5 INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (token_id, day)
 );
+CREATE TABLE IF NOT EXISTS key_tags (          -- 后台手动标签（只给站长看，成员看不到）
+    key_id INTEGER NOT NULL,
+    tag TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    by TEXT NOT NULL DEFAULT '',
+    ts REAL NOT NULL,
+    PRIMARY KEY (key_id, tag)
+);
 CREATE TABLE IF NOT EXISTS share_state (       -- 防分享风险分（share_guard.py）
     key_id INTEGER PRIMARY KEY,
     score REAL NOT NULL DEFAULT 0,
@@ -577,6 +585,7 @@ class Database:
         # Counters/logs also accept late settlement from already admitted work.
         await self._db.execute("DELETE FROM key_sources WHERE key_id=?", (key_id,))
         await self._db.execute("DELETE FROM key_idle_reminders WHERE key_id=?", (key_id,))
+        await self._db.execute("DELETE FROM key_tags WHERE key_id=?", (key_id,))
         await self._db.execute("DELETE FROM api_keys WHERE id=?", (key_id,))
         await self._db.commit()
 

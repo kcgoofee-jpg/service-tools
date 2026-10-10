@@ -22,6 +22,8 @@ ADMIN_ACTIONS = {
     ("PATCH", "/keys/{key_id}"): "修改 Key",
     ("POST", "/keys/{key_id}/reset-daily-image-quota"): "重置今日额度",
     ("DELETE", "/keys/{key_id}"): "删除 Key",
+    ("PUT", "/keys/{key_id}/tags"): "成员标签",
+    ("DELETE", "/keys/{key_id}/tags/{tag}"): "移除成员标签",
     ("PUT", "/runtime-limits"): "修改排队与冷却",
     ("POST", "/upstream-tokens"): "添加上游 Token",
     ("PUT", "/upstream-tokens/{token_id}"): "替换上游 Token",
