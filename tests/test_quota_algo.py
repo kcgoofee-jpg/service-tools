@@ -19,7 +19,7 @@ def test_v5_plan_spends_surplus_and_tightens_when_low():
     assert low["global"] < full["global"] and low["each"] >= 3            # 剩得少就收紧，但不低于下限
     few = quota_algo.v5_plan(98, 11.0, active=2)
     assert few["people"] == 10 and few["each"] <= 30                       # 至少按 10 人算，单人不超过 30
-    assert quota_algo.v5_plan(None, None, 14)["rate"] == 11.0              # 拿不到实测值按 11%/天
+    assert quota_algo.v5_plan(None, None, 14)["rate"] == 5.0               # 拿不到读数按保守的 5%/天（原来的 11 是错误读数）
 
 
 def test_daily_adjust_rules():
@@ -196,3 +196,17 @@ async def test_displayed_v5_percent_is_live_not_morning_plan(tmp_path):
         assert json.loads(await db.get_setting(quota_algo.V5_DAY_KEY, "{}"))["plan"]["percent"] == 97
     finally:
         await db.close()
+
+
+def test_choose_rate_guards_unverified_and_mismatched_readings():
+    # 10/10：接口单次读数 11%/天，实测约 5%——没核对过的读数不能直接拿来分额度
+    r, info = quota_algo.choose_rate(11.0, None)
+    assert r == 5.0 and info["status"] == "未核对"
+    r, info = quota_algo.choose_rate(11.0, 5.2)            # 对不上：取较小的，并标出来
+    assert r == 5.2 and info["status"] == "对不上"
+    r, info = quota_algo.choose_rate(5.5, 5.0)             # 差不多：已核对
+    assert r == 5.0 and info["status"] == "已核对"
+    r, info = quota_algo.choose_rate(60.0, None)           # 超出合理范围：不用
+    assert r == 5.0 and info["api"] is None
+    r, info = quota_algo.choose_rate(None, -3.0)           # 实测是负数（比如当天账号被别处用了）：不用
+    assert r == 5.0 and info["measured"] is None

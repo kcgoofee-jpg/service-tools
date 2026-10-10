@@ -49,7 +49,13 @@ from .action_log import log_action
 from .params import P
 
 V5_IMAGES_PER_PERCENT = 14.2      # 官方 17.3 张/1% 按 23 步估算；成员多用 28 步，按步数折算 17.3×23/28
-V5_FALLBACK_RATE = 11.0           # 订阅第一个月的恢复速度（%/天）；拿不到实测值时使用
+V5_FALLBACK_RATE = 5.0            # 拿不到读数时用的恢复速度（%/天）。原来的 11 来自一次错误的单次读数（2026-10-10）
+# 恢复速度的防护（2026-10-10：单次读数算出每天 11%，实际约 5%，V5 分多了）：
+# 1) 合理范围：超出就当读数有问题；2) 和「每天余量变化 + 当天用掉的量」反推的实测值核对；
+# 3) 还没核对过（没有实测值）时，不超过保守值。
+V5_RATE_RANGE = (1.0, 15.0)
+V5_SAFE_RATE = 5.0
+V5_RATE_MISMATCH = 0.5            # 接口值和实测值相差超过 50% 算对不上
 DEFAULTS = {
     "quota_auto_enabled": 1,
     "quota_target_avg": 150,      # A 初始值
@@ -66,6 +72,31 @@ HISTORY_KEY = "quota_algo_history"
 DAY_KEY = "quota_algo_day"
 NOTICE_KEY = "algo_notice"
 V5_DAY_KEY = "quota_v5_day_plan"   # 当天的 V5 分配（每天只定一次）        # 首页一行提醒        # 最近一次做「每日微调」的日期，保证一天只调一次
+
+
+def choose_rate(api_rate: Optional[float], measured: Optional[float]) -> tuple[float, dict[str, Any]]:
+    """决定用哪个恢复速度（纯函数）。返回 (速度, 说明)；说明会显示在后台，并给观测模块做自检。"""
+    lo, hi = V5_RATE_RANGE
+    notes = []
+    if api_rate is not None and not lo <= api_rate <= hi:
+        notes.append(f"接口读数 {api_rate:.1f}%/天 超出合理范围 {lo:g}～{hi:g}，不用")
+        api_rate = None
+    if measured is not None and not lo <= measured <= hi:
+        notes.append(f"实测 {measured:.1f}%/天 超出合理范围，不用")
+        measured = None
+    mismatch = (api_rate is not None and measured is not None
+                and abs(api_rate - measured) > V5_RATE_MISMATCH * measured)
+    if measured is not None:
+        rate = min(measured, api_rate) if api_rate is not None else measured
+        status = "对不上" if mismatch else "已核对"
+        if mismatch:
+            notes.append(f"接口 {api_rate:.1f} 和实测 {measured:.1f} 相差超过一半，取较小的")
+    else:
+        rate = min(api_rate, V5_SAFE_RATE) if api_rate is not None else V5_SAFE_RATE
+        status = "未核对"
+        notes.append(f"还没有实测值核对，不超过保守值 {V5_SAFE_RATE:g}%/天")
+    rate = max(lo, min(hi, rate))
+    return rate, {"api": api_rate, "measured": measured, "used": round(rate, 1), "status": status, "notes": notes}
 
 
 def v5_factor(percent: Optional[float]) -> float:
@@ -173,6 +204,15 @@ async def _yesterday(db, day: str, members: list[int]) -> dict[str, int]:
             "base_blocks": await count("%保底%")}
 
 
+async def _v5_used_equiv(db, day: str) -> float:
+    """这一天全站用掉的 V5，折成 28 步的张数（节约模式 14 步的图按账号当天的折算比例算）。"""
+    (v5,), = await db._db.execute_fetchall("SELECT COALESCE(SUM(v5),0) FROM counters WHERE day=?", (day,))
+    (imgs, units), = await db._db.execute_fetchall(
+        "SELECT COALESCE(SUM(images),0), COALESCE(SUM(COALESCE(units, images)),0) FROM upstream_token_counters WHERE day=?", (day,))
+    ratio = (units / imgs) if imgs else 1.0
+    return float(v5) * ratio
+
+
 async def _members(db) -> list[int]:
     rows = await db._db.execute_fetchall(
         "SELECT id FROM api_keys WHERE enabled=1 AND is_admin=0 AND is_test=0 AND quota_auto=1")
@@ -264,15 +304,24 @@ async def run(state, now: Optional[float] = None) -> dict[str, Any]:
     # 先用的人用到 11 张后额度被降到 9 而被拦）。分母按最近 3 天真正用过 V5 的人数（原来按出过任何图的人，
     # 23 人里只有 10 人用 V5，额度长期浪费在 97%）。只有账号剩余跌破 40% 才在当天收紧（安全优先）。
     pct, rate = await _allowance(state)
+    hist = json.loads(await db.get_setting(HISTORY_KEY, "[]") or "[]")
     if review is not None and pct is not None:
-        # 每天记一笔账号 V5 剩余和官方给的恢复速度：复盘表里能看出「一天恢复多少、用掉多少、净变化」
+        # 每天记一笔账号 V5 剩余和接口给的恢复速度，并用「余量变化 + 前一天用掉的量」反推实测恢复速度
         review.update(v5_pct=round(pct, 1), v5_rate=round(rate, 1) if rate else None)
-        hist = json.loads(await db.get_setting(HISTORY_KEY, "[]") or "[]")
+        prev = next((h for h in reversed(hist[:-1]) if h.get("v5_pct") is not None), None) \
+            if hist and hist[-1].get("day") == review["day"] else None
+        if prev is not None:
+            used = await _v5_used_equiv(db, review["day"])
+            review["v5_used_pct"] = round(used / V5_IMAGES_PER_PERCENT, 2)
+            review["v5_rate_measured"] = round(pct - prev["v5_pct"] + review["v5_used_pct"], 2)
         if hist and hist[-1].get("day") == review["day"]:
             hist[-1] = review
             await db.set_setting(HISTORY_KEY, json.dumps(hist, ensure_ascii=False))
+    measured = next((h["v5_rate_measured"] for h in reversed(hist) if h.get("v5_rate_measured") is not None), None)
+    rate, rate_info = choose_rate(rate, measured)
     stored = json.loads(await db.get_setting(V5_DAY_KEY, "{}") or "{}")
     fresh = v5_plan(pct, rate, await _active_v5(db, 3, now), lo=cfg["quota_v5_min"], hi=cfg["quota_v5_max"])
+    fresh["rate_info"] = rate_info
     if stored.get("day") == today and stored.get("plan"):
         v5 = stored["plan"]
         if pct is not None and pct < P("allocation.v5_tighten_below", 40) and fresh["each"] < v5["each"]:
@@ -290,6 +339,7 @@ async def run(state, now: Optional[float] = None) -> dict[str, Any]:
     # 实际下午已经是 92%（2026-10-10）。决策（收紧、节约放大）本来就用的实时 pct。
     if pct is not None:
         v5["percent"] = pct
+    v5["rate_check"] = rate_info          # 实时的核对结果（方案一天定一次，核对状态每 10 分钟更新）
     mult = await economy_multiplier(db, pct)
     if mult > 1:
         v5.update(base_each=v5["each"], base_global=v5["global"], economy=mult,
