@@ -685,7 +685,7 @@ td.note{min-width:220px}
             <div id="perfFlags"></div>
             <div class="hint" id="perfHourlyLabel" style="margin:2px 0 6px" hidden>近 24 小时请求量（按小时 · 全模型合计；<span style="color:var(--accent)">■</span> 成功 <span style="color:var(--bad)">■</span> 失败）</div>
             <div class="chart24" id="perfHourly"></div>
-            <div class="table-wrap"><table class="rt"><thead><tr><th>模型</th><th class="nw">时段</th><th class="num">请求 / 成功率</th><th class="num" title="上游返回 429 的次数">限流</th><th class="num" title="上游返回 401/402/403/5xx 或连接失败">其他失败</th><th class="num">中位生成</th><th class="num">P90 生成</th><th class="num" title="收到请求到发往上游：排队 + 冷却">平均排队</th><th class="num" title="按中位生成耗时和请求间隔估算：全站 / 单个成员">估算产能 / 小时</th></tr></thead><tbody id="perfBody"></tbody></table></div>
+            <div class="table-wrap"><table class="rt"><thead><tr><th>模型</th><th class="nw">时段</th><th class="num">请求 / 成功率</th><th class="num" title="上游返回 429 的次数">限流</th><th class="num" title="上游返回 401/402/403/5xx 或连接失败">其他失败</th><th class="num" title="P50 = 中位数：一半的图比这快，代表典型速度">生成 P50</th><th class="num" title="P90：90% 的图比这快，代表较慢那 10% 有多慢（看卡顿）">生成 P90</th><th class="num" title="收到请求到发往上游：排队 + 冷却">平均排队</th><th class="num" title="实际：这一时段平均每小时出图张数（随负载变化）；上限：min(生成速度/请求间隔, 全站每小时上限)，只在设置或 AIMD 调整时变化">实际 / 上限（张/时）</th></tr></thead><tbody id="perfBody"></tbody></table></div>
           </div>
           <div class="card panel">
             <div class="panel-head"><h2>调度影子模式</h2><div class="desc" title="用真实请求回放「保底 + 空闲借用 + 成员间轮流 + 账号每日上限」">只回放计算，不改变实际出图顺序</div>
@@ -974,7 +974,7 @@ td.note{min-width:220px}
 <!-- ===== Lightbox ===== -->
 <div class="overlay" id="lightbox">
   <button class="btn icon x" data-act="close-lightbox" aria-label="关闭"><span data-ic="x"></span></button>
-  <img id="lbImg" alt="生成图缩略图">
+  <img id="lbImg" alt="生成图预览">
   <div class="cap" id="lbCap"></div>
 </div>
 
@@ -1318,9 +1318,9 @@ async function loadPerf(){
           <td class="num" data-label="请求 / 成功率">${w.requests} / ${pct(w.success_rate)}</td>
           <td class="num" data-label="限流">${w.rate_limited?`<span class="tag warn">${w.rate_limited}</span>`:'0'}</td>
           <td class="num" data-label="其他失败">${other?`<span class="tag off">${other}</span>`:'0'}</td>
-          <td class="num" data-label="中位生成">${sec(w.p50_ms)}</td><td class="num" data-label="P90 生成">${sec(w.p90_ms)}</td>
+          <td class="num" data-label="生成 P50">${sec(w.p50_ms)}</td><td class="num" data-label="生成 P90">${sec(w.p90_ms)}</td>
           <td class="num" data-label="平均排队">${sec(w.avg_wait_ms)}</td>
-          <td class="num" data-label="估算产能 / 小时">${w.capacity_per_hour==null?'—':`${w.capacity_per_hour} 张 / 每人 ${w.member_capacity_per_hour}`}</td></tr>`);
+          <td class="num" data-label="实际 / 上限（张/时）" title="${w.member_capacity_per_hour==null?'':'单个成员最多约 '+w.member_capacity_per_hour+' 张/时（与他人共享全站上限）'}">${w.actual_per_hour==null?'—':w.actual_per_hour} / ${w.capacity_per_hour==null?'—':w.capacity_per_hour}</td></tr>`);
       }
       if(!f.baseline_ready) rows.push(`<tr><td></td><td colspan="8" class="hint">${esc(fam)} 基线样本不足：需要积累几天带耗时的日志（1.3.0 起记录）才能判断「变慢」。</td></tr>`);
     }
@@ -1519,7 +1519,7 @@ function renderStatus(s){
       <div style="margin-top:8px"><button class="btn mini" data-act="alert-test">发送测试告警</button></div></div></div>
     <div class="status-row"><div class="ico ${rec?'ok':''}">${ic('camera')}</div><div class="body">
       <div class="t">生成记录 <span class="tag ${rec?'on':'dim'}">${rec?'记录中':'已关闭'}</span></div>
-      <div class="d">提示词 ${au.prompts?'开':'关'} · 缩略图 ${au.thumbs?'开':'关'} · 保留 ${au.retention_days>0 ? esc(au.retention_days)+' 天' : '长期'}</div></div></div>
+      <div class="d">提示词 ${au.prompts?'开':'关'} · 生成结果 ${au.thumbs?'开':'关'} · 保留 ${au.retention_days>0 ? esc(au.retention_days)+' 天' : '长期'}${au.thumbs ? (au.image_retention_days>0 ? ' · 原图 '+esc(au.image_retention_days)+' 天' : ' · 不存原图') : ''}</div></div></div>
     <div class="status-row"><div class="ico ok">${ic('lock')}</div><div class="body">
       <div class="t">暴力破解防护 <span class="tag on">已启用</span></div>
       <div class="d">Key 鉴权失败 ${esc(p.auth_fail_max)} 次 / ${esc(p.auth_fail_window)} 秒后封禁 ${esc(p.auth_block_seconds)} 秒；后台登录最多尝试 ${esc(p.login_max_attempts)} 次</div></div></div>
@@ -1910,17 +1910,20 @@ function renderAuditSettings(){
   if(!a) return;
   const on = a.prompts || a.thumbs;
   if(auditSetOpen === null) auditSetOpen = !on;
-  const parts = [a.prompts?'提示词':'', a.thumbs?'缩略图':''].filter(Boolean).join(' + ');
-  const summary = on ? `记录中：${parts} · 保留 ${a.retention_days>0 ? a.retention_days+' 天' : '长期'}` : '记录已关闭：不会保存提示词和缩略图';
+  const parts = [a.prompts?'提示词':'', a.thumbs?'缩略图':'', (a.thumbs && a.image_retention_days>0)?'原图':''].filter(Boolean).join(' + ');
+  const summary = on ? `记录中：${parts} · 保留 ${a.retention_days>0 ? a.retention_days+' 天' : '长期'}${(a.thumbs && a.image_retention_days>0) ? '（原图 '+a.image_retention_days+' 天）' : ''}` : '记录已关闭：不会保存提示词、缩略图和原图';
   const head = `<div class="sumline"><div class="body"><h2 style="font-size:15px;font-weight:600">记录设置</h2>
       <div class="${on?'':'muted'}" style="margin-top:2px">${esc(summary)}</div></div>
       ${on?`<button class="btn" type="button" data-act="toggle-audit-set" aria-expanded="${auditSetOpen}">${auditSetOpen?'收起':'修改'}</button>`:''}</div>`;
   if(!auditSetOpen){ box.innerHTML = head; return; }
   box.innerHTML = head + `<div style="margin-top:16px">
     <div class="feat-row"><div class="body"><div class="t">记录提示词</div></div><label class="switch"><input type="checkbox" id="aud_prompts" ${a.prompts?'checked':''} aria-label="记录提示词"><span></span></label></div>
-    <div class="feat-row"><div class="body"><div class="t">记录缩略图</div></div><label class="switch"><input type="checkbox" id="aud_thumbs" ${a.thumbs?'checked':''} aria-label="记录缩略图"><span></span></label></div>
-    <div class="field" style="margin-top:16px;max-width:260px"><label for="aud_days">保留天数</label><input id="aud_days" type="number" min="0" max="3650" value="${esc(a.retention_days)}"><div class="hint">0 = 长期保留</div></div>
-    <label class="check"><input type="checkbox" id="aud_notify" checked><span>切换时在成员频道发布测试期公告${a.announce_configured?'':'（公告频道未配置，将不会发布）'}</span></label>
+    <div class="feat-row"><div class="body"><div class="t">记录生成结果</div><div class="d">保存缩略图；原图另按下面的天数保存（成员可在首页打包下载）</div></div><label class="switch"><input type="checkbox" id="aud_thumbs" ${a.thumbs?'checked':''} aria-label="记录生成结果"><span></span></label></div>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:16px">
+      <div class="field" style="max-width:260px;flex:1 1 200px"><label for="aud_days">提示词 / 缩略图保留天数</label><input id="aud_days" type="number" min="0" max="3650" value="${esc(a.retention_days)}"><div class="hint">0 = 长期保留</div></div>
+      <div class="field" style="max-width:260px;flex:1 1 200px"><label for="aud_img_days">原图保留天数</label><input id="aud_img_days" type="number" min="0" max="365" value="${esc(a.image_retention_days ?? 3)}"><div class="hint">0 = 不保存原图（原图约 1.5MB/张，最占磁盘）</div></div>
+    </div>
+    <label class="check"><input type="checkbox" id="aud_notify" checked><span>记录范围变化时在成员频道发布数据记录说明${a.announce_configured?'':'（公告频道未配置，将不会发布）'}</span></label>
     <div style="margin-top:16px"><button class="btn primary" data-act="save-audit">保存</button></div></div>`;
 }
 function fillMemberFilter(){
@@ -1957,8 +1960,8 @@ async function loadAudit(){
       const on = au && (au.prompts || au.thumbs);
       grid.innerHTML = `<div class="empty card" style="grid-column:1/-1"><div class="ico">${ic('image')}</div>
         <h3>${kf?'该成员暂无生成记录':'暂无生成记录'}</h3>
-        <p>${au ? (on ? `生成记录功能已开启（提示词${au.prompts?'开':'关'}、缩略图${au.thumbs?'开':'关'}），新的生成请求会出现在这里。${au.retention_days>0 ? `记录会在 ${esc(au.retention_days)} 天后自动清除。` : '记录长期保存。'}`
-          : '生成记录功能当前已关闭，不会保存提示词和缩略图。开启后，记录会在保留期满后自动清除。') : '记录会在保留期满后自动清除。'}</p></div>`;
+        <p>${au ? (on ? `生成记录功能已开启（提示词${au.prompts?'开':'关'}、生成结果${au.thumbs?'开':'关'}${au.thumbs ? (au.image_retention_days>0 ? '，原图保留 '+esc(au.image_retention_days)+' 天' : '，不存原图') : ''}），新的生成请求会出现在这里。${au.retention_days>0 ? `记录会在 ${esc(au.retention_days)} 天后自动清除。` : '记录长期保存。'}`
+          : '生成记录功能当前已关闭，不会保存提示词、缩略图和原图。开启后，记录会在保留期满后自动清除。') : '记录会在保留期满后自动清除。'}</p></div>`;
       $('#auditPager').innerHTML = '';
       return;
     }
@@ -1970,7 +1973,7 @@ async function loadAudit(){
       const sz = (pr.width&&pr.height) ? `${pr.width}×${pr.height}` : '';
       const parts = [pr.seed!=null?`种子 ${esc(pr.seed)}`:'', pr.sampler?esc(pr.sampler):'', pr.steps?esc(pr.steps)+'步':'', pr.scale!=null?'CFG '+esc(pr.scale):'', sz].filter(Boolean);
       return `<article class="card shot">
-        ${(it.has_image||it.has_thumb) ? `<button class="thumb" data-act="zoom" data-id="${id}" aria-label="放大查看原图"><img loading="lazy" decoding="async" alt="" src="/admin/api/audit/${id}/thumb"><span class="zoom">${ic('zoom')}</span></button>`
+        ${(it.has_image||it.has_thumb) ? `<button class="thumb" data-act="zoom" data-id="${id}" aria-label="${it.has_image?'放大查看原图':'放大查看（原图已过期，仅缩略图）'}" title="${it.has_image?'原图':'原图已过期，仅缩略图'}"><img loading="lazy" decoding="async" alt="" src="/admin/api/audit/${id}/thumb"><span class="zoom">${ic('zoom')}</span></button>`
           : `<div class="thumb none">${ic('image')}</div>`}
         <div class="shot-body">
           <div class="shot-top"><span class="who" title="${esc(it.key_name)}">${esc(it.key_name)}</span>${statusTag(it.status)}</div>
@@ -2115,10 +2118,11 @@ async function saveReg(){
   catch(e){ toastErr(e); }
 }
 async function saveAudit(){
-  const days = Number($('#aud_days').value);
-  if(!Number.isInteger(days) || days<0 || days>3650){ toast('保留天数须为 0～3650 的整数（0 = 长期保留）', 'err'); return; }
+  const days = Number($('#aud_days').value), imgDays = Number($('#aud_img_days').value);
+  if(!Number.isInteger(days) || days<0 || days>3650){ toast('提示词 / 缩略图保留天数须为 0～3650 的整数（0 = 长期保留）', 'err'); return; }
+  if(!Number.isInteger(imgDays) || imgDays<0 || imgDays>365){ toast('原图保留天数须为 0～365 的整数（0 = 不保存原图）', 'err'); return; }
   try{
-    opsData = await api('/admin/api/ops/audit', {method:'PUT', body:JSON.stringify({prompts:$('#aud_prompts').checked, thumbs:$('#aud_thumbs').checked, retention_days:days, notify:$('#aud_notify').checked})});
+    opsData = await api('/admin/api/ops/audit', {method:'PUT', body:JSON.stringify({prompts:$('#aud_prompts').checked, thumbs:$('#aud_thumbs').checked, retention_days:days, image_retention_days:imgDays, notify:$('#aud_notify').checked})});
     statusCache = null;
     toast('生成记录设置已保存', 'ok'); auditSetOpen = null; renderAuditSettings(); loadAudit();
   }catch(e){ toastErr(e); }

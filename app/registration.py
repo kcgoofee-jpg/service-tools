@@ -443,9 +443,9 @@ class RegistrationService:
                     await self._set_role(user_id, True)
                 except Exception:
                     pass
-            from .audit import audit_flags, audit_notice
+            from .audit import audit_disclosure
             from .ops import env_audit_defaults
-            notice = audit_notice(*(await audit_flags(self.db, env_audit_defaults())))
+            notice = await audit_disclosure(self.db, env_audit_defaults())
             try:
                 base = int(float(await self.db.get_setting("guard_base_daily_images", 100) or 0))
             except (TypeError, ValueError):
@@ -566,9 +566,9 @@ class RegistrationService:
                      _clip(user.get("avatar"))))
                 await self.db.update_key(row["id"], {"name": member_label(user)})
                 await self.db._db.commit()
-                from .audit import audit_flags, audit_notice
+                from .audit import audit_disclosure
                 from .ops import env_audit_defaults
-                notice = audit_notice(*(await audit_flags(self.db, env_audit_defaults())))
+                notice = await audit_disclosure(self.db, env_audit_defaults())
                 try:
                     base = int(float(await self.db.get_setting("guard_base_daily_images", 100) or 0))
                 except (TypeError, ValueError):

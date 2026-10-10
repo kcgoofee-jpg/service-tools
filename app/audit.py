@@ -102,14 +102,38 @@ def full_image(payload: bytes) -> tuple[Optional[bytes], str]:
         return None, ""
 
 
-def audit_notice(prompts: bool, thumbs: bool, days: int) -> str:
-    """向成员披露记录范围；未开启记录则返回空串。"""
+IMAGE_RETENTION_KEY = "audit_image_retention_days"   # 原图保留天数；0 = 不保存原图（只留缩略图）
+
+
+def audit_notice(prompts: bool, thumbs: bool, days: int, image_days: int = 0) -> str:
+    """向成员披露记录范围（提示词 / 缩略图 / 原图各自保留多久）；未开启记录则返回空串。
+    「记录生成结果」开关同时保存缩略图和原图，原图另有更短的保留天数——两者都要说清楚。"""
     if not (prompts or thumbs):
         return ""
-    what = "、".join(x for x, on in (("图片提示词", prompts), ("生成结果的小缩略图（视请求方式而定，部分请求只有提示词）", thumbs)) if on)
-    if days <= 0:
-        return f"本站会长期保存你的{what}，用于防止滥用和优化调度算法，仅站长可见。"
-    return f"为防止滥用，本站会保留你的{what}，{days} 天后自动删除，仅站长可见。"
+    keep = (lambda d: f"{d} 天后自动删除" if d > 0 else "长期保存")
+    parts = []
+    if prompts:
+        parts.append(f"图片提示词（{keep(days)}）")
+    if thumbs:
+        parts.append(f"生成结果的缩略图（{keep(days)}）")
+        if image_days > 0:
+            parts.append(f"原图（{image_days} 天后自动删除，期间可在首页打包下载）")
+    return "为防止滥用和优化调度，本站会保留你的" + "、".join(parts) + "，仅站长可见。"
+
+
+async def audit_image_days(db) -> int:
+    """原图保留天数（默认 3）。注意不能用 `or 3`：0 是有效值，表示不保存原图。"""
+    raw = await db.get_setting(IMAGE_RETENTION_KEY, None)
+    try:
+        return max(0, min(int(float(raw)), 365)) if raw is not None and str(raw).strip() != "" else 3
+    except (TypeError, ValueError):
+        return 3
+
+
+async def audit_disclosure(db, settings) -> str:
+    """所有给成员看的「本站记录了什么」都走这一个函数，避免各处文案再各写一套。"""
+    prompts, thumbs, days = await audit_flags(db, settings)
+    return audit_notice(prompts, thumbs, days, await audit_image_days(db))
 
 
 async def audit_flags(db, settings) -> tuple[bool, bool, int]:

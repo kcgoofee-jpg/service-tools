@@ -50,7 +50,9 @@ def _kind(status: str, up_status: int, detail: str) -> str:
     return "other"
 
 
-def _stats(rows: list[tuple], slots: int, site_interval: float, key_interval: float) -> dict:
+def _stats(rows: list[tuple], slots: int, site_interval: float, key_interval: float,
+           hours: float = 1.0, hourly_cap: int = 0) -> dict:
+    """hours：这一窗口的小时数（算实际每小时张数）；hourly_cap：全站每小时上限（产能不能超过它）。"""
     ok = [r for r in rows if r[2] == "ok"]
     kinds = [_kind(r[2], r[6], r[7]) for r in rows]
     durs = [r[5] for r in ok if r[5] > 0]
@@ -67,11 +69,17 @@ def _stats(rows: list[tuple], slots: int, site_interval: float, key_interval: fl
         "avg_wait_ms": int(sum(waits) / len(waits)) if waits else None,
         "p90_wait_ms": _pct(waits, 0.9),
     }
+    # 实际每小时出图：随负载变化的真实数字（产能是上限，平时不动；这个才反映「现在用了多少」）
+    out["actual_per_hour"] = round(out["images"] / hours, 1) if hours > 0 and total else None
     if p50:
-        # 每把上游 Token 一次一张，相邻两次至少间隔 site_interval；成员自己的间隔是 key_interval。
+        # 产能上限 = min(「生成耗时 / 请求间隔」决定的速度, 全站每小时上限)。
+        # 生成（几秒）通常比 15s 间隔快，所以间隔那一项常年是 3600/15=240；真正卡住的是每小时上限。
         per_slot = HOUR / max(p50 / 1000, site_interval)
-        out["capacity_per_hour"] = int(per_slot * max(1, slots))
-        out["member_capacity_per_hour"] = int(HOUR / max(p50 / 1000, key_interval))
+        cap = int(per_slot * max(1, slots))
+        if hourly_cap > 0:
+            cap = min(cap, int(hourly_cap))
+        out["capacity_per_hour"] = cap
+        out["member_capacity_per_hour"] = min(int(HOUR / max(p50 / 1000, key_interval)), cap)
     else:
         out["capacity_per_hour"] = out["member_capacity_per_hour"] = None
     return out
@@ -115,7 +123,7 @@ def _flags(fam: str, h1: dict, d1: dict, base: dict) -> list[dict]:
     if recent["samples"] >= MIN_SAMPLES and base["samples"] >= MIN_SAMPLES and base["p50_ms"]:
         ratio = recent["p50_ms"] / base["p50_ms"]
         if ratio >= SLOW_RATIO:
-            add("slow", "warn", f"{label}中位生成耗时 {recent['p50_ms'] / 1000:.1f}s，"
+            add("slow", "warn", f"{label}生成 P50（中位）耗时 {recent['p50_ms'] / 1000:.1f}s，"
                                 f"是过去 7 天的 {ratio:.1f} 倍（{base['p50_ms'] / 1000:.1f}s）。")
     if h1["requests"] >= MIN_SAMPLES and h1["success_rate"] is not None and h1["success_rate"] < FAIL_FLOOR_1H:
         add("fail", "bad", f"最近 1 小时成功率 {round(h1['success_rate'] * 100)}%。")
@@ -127,8 +135,9 @@ def _flags(fam: str, h1: dict, d1: dict, base: dict) -> list[dict]:
 
 
 def analyze(rows: Iterable[tuple], now: float, *, slots: int = 1, site_interval: float = 15,
-            key_interval: float = 15) -> dict:
-    """rows: (ts, model, status, images, wait_ms, dur_ms, up_status, detail)，应覆盖最近 BASELINE_DAYS 天。"""
+            key_interval: float = 15, hourly_cap: int = 0) -> dict:
+    """rows: (ts, model, status, images, wait_ms, dur_ms, up_status, detail)，应覆盖最近 BASELINE_DAYS 天。
+    hourly_cap：全站每小时出图上限（来自账号保护，AIMD 会调）；0 = 不按它封顶。"""
     grouped: dict[str, list[tuple]] = {f: [] for f in FAMILIES}
     for r in rows:
         grouped[family(r[1])].append(r)
@@ -136,10 +145,12 @@ def analyze(rows: Iterable[tuple], now: float, *, slots: int = 1, site_interval:
     for fam, items in grouped.items():
         if not items:
             continue
-        h1 = _stats([r for r in items if r[0] >= now - HOUR], slots, site_interval, key_interval)
-        d1 = _stats([r for r in items if r[0] >= now - DAY], slots, site_interval, key_interval)
+        h1 = _stats([r for r in items if r[0] >= now - HOUR], slots, site_interval, key_interval,
+                    1, hourly_cap)
+        d1 = _stats([r for r in items if r[0] >= now - DAY], slots, site_interval, key_interval,
+                    24, hourly_cap)
         base = _stats([r for r in items if now - BASELINE_DAYS * DAY <= r[0] < now - DAY],
-                      slots, site_interval, key_interval)
+                      slots, site_interval, key_interval, (BASELINE_DAYS - 1) * 24, hourly_cap)
         families[fam] = {"h1": h1, "d1": d1, "baseline": base,
                          "hourly": _hourly([r for r in items if r[0] >= now - DAY], now),
                          "baseline_ready": base["samples"] >= MIN_SAMPLES}
@@ -152,7 +163,10 @@ async def collect(state, now: float) -> dict:
     """从网关状态读取日志和当前并发 / 间隔设置，返回 analyze() 结果。"""
     rows = await state.db.image_perf_rows(now - BASELINE_DAYS * DAY)
     pool = getattr(getattr(state, "nai", None), "pool", []) or []
-    slots = sum(t.image_slots.limit for t in pool if t.usable) or 1
+    usable = [t for t in pool if t.usable]
+    slots = sum(t.image_slots.limit for t in usable) or 1
+    guard = getattr(state, "guard", None)
+    hourly_cap = guard.hourly_cap(now) * max(1, len(usable)) if guard is not None else 0
     settings = state.settings
     return analyze(rows, now, slots=slots, site_interval=float(settings.image_min_interval),
-                   key_interval=float(settings.key_image_min_interval))
+                   key_interval=float(settings.key_image_min_interval), hourly_cap=hourly_cap)

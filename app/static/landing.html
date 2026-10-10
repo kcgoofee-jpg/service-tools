@@ -344,11 +344,14 @@ footer{max-width:960px;margin:0 auto;padding:24px 16px 40px;text-align:center;co
 .me .link{background:none;border:0;color:var(--text-2);cursor:pointer;font-size:13px;margin-left:auto;text-decoration:underline;text-underline-offset:2px;transition:color .15s}
 .me .link:hover{color:var(--text)}
 .me-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:12px}
+.me-grid:last-child{margin-bottom:0}
+.econ-note{display:flex;align-items:flex-start;gap:8px;margin:0 0 12px;padding:10px 12px;border-radius:var(--radius-sm);background:var(--warn-soft,var(--surface));color:var(--text);font-size:13.5px;line-height:1.55}
 .me-grid>div{background:var(--surface);border-radius:var(--radius-sm);padding:8px 10px}
 .me-grid span{display:block;font-size:11.5px;color:var(--text-2)}
 .me-grid b{font-size:17px;font-variant-numeric:tabular-nums}
-.me-key{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.me-key code{font-family:ui-monospace,Menlo,monospace;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:5px 9px;font-size:13px}
+.lh-left{display:flex;align-items:center;gap:12px;flex-wrap:wrap;min-width:0}
+.head-key{display:flex;align-items:center;gap:8px;min-width:0}
+.head-key code{font-family:ui-monospace,Menlo,monospace;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:5px 9px;font-size:13px;white-space:nowrap}
 .me-export{margin-top:12px;padding-top:12px;border-top:1px solid var(--border)}
 .me-export-btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
 @media(max-width:560px){.me-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
@@ -379,7 +382,7 @@ body.authed #board{margin-top:22px}
     <div class="brand"><span class="brand-mark" aria-hidden="true" style="font-size:20px">🦉</span>猫头鹰公益站</div>
     <a class="top-link" href="#live" id="navLive">查额度</a>
     <a class="top-link guest-only" href="#start">上手</a>
-    <a class="top-link guest-only" href="#rules">须知</a>
+    <a class="top-link" href="#rules">须知</a>
     <a class="top-link" href="#board">看板</a>
     <a class="top-link" href="#algo">算法</a>
     <div class="spacer"></div>
@@ -395,12 +398,15 @@ body.authed #board{margin-top:22px}
 <main>
   <section id="live" aria-labelledby="liveTitle">
     <div class="card">
-      <div class="live-head"><div class="t" id="liveTitle"><span data-ic="key"></span>查额度</div>
+      <div class="live-head"><div class="lh-left"><div class="t" id="liveTitle"><span data-ic="key"></span>查额度</div>
+          <div class="head-key" id="headKey" hidden></div></div>
         <div class="pills" id="pills" aria-live="polite"><span class="skel"></span><span class="skel"></span></div></div>
       <p class="algo-note" id="algoNote" hidden></p>
+      <p class="econ-note" id="econNote" hidden><span data-ic="info"></span>节约模式已开启：现在人多，全站统一用 14 步快速出图（质量略降、更快更省）。空闲后恢复，开关都会在公告频道通知。</p>
       <div class="me" id="meCard" hidden></div>
       <div class="loginrow" id="loginRow" hidden>
-        <a class="btn primary dc" href="/login"><span data-ic="discord"></span>用 Discord 登录</a>
+        <a class="btn primary dc" id="loginBtn" href="/login"><span data-ic="discord"></span>用 Discord 登录</a>
+        <p class="muted sm" id="loginPaused" hidden>网页登录暂时不可用（Discord 正在审核本站的应用）。领 Key 用 <code>/register</code>，查额度用 <code>/quota</code>，都在 Discord 里输入即可。</p>
       </div>
       <p class="cooldown" id="cooldown" hidden><span data-ic="clock"></span><span id="cooldownTxt"></span></p>
     </div>
@@ -415,7 +421,7 @@ body.authed #board{margin-top:22px}
     <ol class="steps">
       <li class="card step"><h3><span class="n">1</span>加入 Discord</h3>
         <div class="step-act" id="discordSlot"></div></li>
-      <li class="card step"><h3><span class="n">2</span>领取你的 Key</h3><p>在 <code>🔑｜领取key</code> 输入 <code>/register</code>，Key 会私信发给你。</p></li>
+      <li class="card step"><h3><span class="n">2</span>领取你的 Key</h3><p>在 <code>🔑｜领取key</code> 输入 <code>/register</code>，奶妹会回复一条<b>只有你能看到</b>的消息，里面就是 Key（不会私信）。</p></li>
       <li class="card step"><h3><span class="n">3</span>填入客户端</h3><p>接口地址（不加 /v1）和你的 Key 填进客户端：</p>
         <div class="copyline"><span class="mono" id="siteTxt1">—</span><button class="btn mini" type="button" data-copy="site"><span data-ic="copy"></span>复制</button></div>
       </li>
@@ -439,13 +445,16 @@ body.authed #board{margin-top:22px}
     </div>
   </section>
 
-  <section id="rules" class="guest-only">
-    <div class="sec-head"><h2>使用须知</h2></div>
+  <section id="rules">
+    <div class="sec-head"><h2>使用须知</h2><p>现在的正确用法，按这几条来基本不会报错。</p></div>
     <ul class="rules card">
-      <li><span class="ri" data-ic="image"></span><span><b>只能免费出图</b>：≤ 1024×1024、≤ 28 步、每次 1 张，超出自动缩小；图生图、Vibe 等会扣 Anlas 的功能请在客户端关闭。</span></li>
-      <li><span class="ri" data-ic="key"></span><span><b>一人一把</b>：请勿分享，泄露用 <code>/resetkey</code> 重置<span id="ruleIdle" hidden>；连续 <b id="idleDays"></b> 天不用自动回收</span>。</span></li>
+      <li><span class="ri" data-ic="code"></span><span><b>客户端怎么填</b>：生图客户端（柏宝绘 / 智绘姬 / SillyTavern 等）的 NovelAI 接口地址填 <code class="mono" id="siteTxt3">—</code>（不加 /v1），API Key 填你的 Key。</span></li>
+      <li><span class="ri" data-ic="image"></span><span><b>只能免费出图</b>：V4.5 最大 1024×1024，V5 用预设尺寸（如 832×1216）；≤ 28 步、每次 1 张，超出会自动缩小。图生图、Vibe 等会扣 Anlas 的功能请在客户端关掉。</span></li>
+      <li><span class="ri" data-ic="clock"></span><span><b>一次一张，别狂重试</b>：每把 Key 同时只画 1 张，上一张没出完别重发。被拒后让客户端停下来——1 小时内被拒 60 次会自动暂停 1 小时（到点恢复）。</span></li>
+      <li><span class="ri" data-ic="info"></span><span><b>查额度、重置 Key</b>：在 Discord 输入 <code>/quota</code> 看今日额度；Key 泄露用 <code>/resetkey</code> 重置。</span></li>
+      <li><span class="ri" data-ic="key"></span><span><b>一人一把</b>：请勿分享<span id="ruleIdle" hidden>；连续 <b id="idleDays"></b> 天不用自动回收</span>。</span></li>
       <li><span class="ri" data-ic="ban"></span><span><b>禁止违禁内容</b>：违规的 Key 会被停用。</span></li>
-      <li id="audit" hidden><span class="ri" data-ic="info"></span><span><b>测试期</b>：<span id="auditTxt"></span></span></li>
+      <li id="audit" hidden><span class="ri" data-ic="info"></span><span><b>数据记录</b>：<span id="auditTxt"></span></span></li>
     </ul>
   </section>
 
@@ -556,7 +565,7 @@ body.authed #board{margin-top:22px}
         <h3>上游连续出错就先停 5 分钟</h3>
         <div class="eq">熔断 ⇔ <i>f</i><sub>15m</sub> ≥ 5 ∧ <i>f</i> / <i>n</i> ≥ 0.3</div>
         <div class="eq">暂停 1 小时 ⇔ 拒绝<sub>1h</sub> ≥ 60</div>
-        <p class="m-note">两个条件同时满足才触发：只看次数会被少量请求误伤，只看比例会被一两次偶发错误误伤。右图是 15 分钟里「请求数 × 失败数」的平面，红色区域会熔断。新规则先只记录、不执行，确认没有误伤再启用。</p>
+        <p class="m-note">两个条件同时满足才触发：只看次数会被少量请求误伤，只看比例会被一两次偶发错误误伤。右图是 15 分钟里「请求数 × 失败数」的平面，红色区域会熔断：全站暂停出图 5 分钟，首页显示原因，到点自动恢复。</p>
         <p class="m-prior">同类做法：Netflix Hystrix <b>熔断器</b>与 Google SRE <b>自适应限流</b>。</p>
       </div>
       <div class="plot"><svg id="gB" role="img" aria-label="熔断触发区域"></svg></div>
@@ -631,6 +640,7 @@ function setSite(s){
   site = (s || location.origin).replace(/\/+$/, '');
   $('siteTxt1').textContent = site;
   $('siteTxt2').textContent = site + '/v1';
+  var s3 = $('siteTxt3'); if(s3) s3.textContent = site;
 }
 setSite(null);
 document.addEventListener('click', function(e){
@@ -691,6 +701,10 @@ function renderStatus(d){
   $('algoNote').hidden = !al; $('algoNote').textContent = al;
   var an = (d.audit_notice || '').trim();
   $('audit').hidden = !an; $('auditTxt').textContent = an;
+  var paused = d.web_login === false;
+  if($('loginBtn')) $('loginBtn').hidden = paused;
+  if($('loginPaused')) $('loginPaused').hidden = !paused;
+  if($('econNote')) $('econNote').hidden = !d.economy;
   try{ document.dispatchEvent(new CustomEvent('owl-status', {detail: d})); }catch(_){}
 }
 function statusFailed(){
@@ -743,6 +757,8 @@ function renderMe(d){
   renderChip(d);
   $('liveTitle').innerHTML = icon('key') + (authed && d.has_key ? '我的额度' : '登录');
   var nv = $('navLive'); if(nv) nv.textContent = (authed && d.has_key) ? '我的额度' : '登录';
+  var hk = $('headKey');
+  if(hk){ hk.hidden = true; hk.innerHTML = ''; }
   if(!authed){ me.hidden = true; lr.hidden = false; return; }
   lr.hidden = true; me.hidden = false;
   var dc = d.discord || {}, nm = esc(dc.display_name || dc.username || '成员');
@@ -755,10 +771,12 @@ function renderMe(d){
     var t = d.today || {}, q = d.queue || [];
     var v45 = Math.max(0, (t.images || 0) - (t.v5 || 0));
     var pos = q.length ? (q[0].state === 'running' ? '生成中' : '排队第 ' + q[0].position + ' 位') : '空闲';
-    me.innerHTML = '<div class="me-key"><code>' + esc(maskKey(d.key)) + '</code>'
-      + '<button class="btn primary" id="copyKeyBtn" type="button">' + icon('copy') + '复制 Key</button>'
-      + '<span class="muted sm">填进 SillyTavern 等客户端</span></div>'
-      + '<div class="me-grid"><div><span>今日 V4.5</span><b>' + v45 + ' / ' + (t.daily_images || 0) + '</b></div>'
+    if(hk){
+      hk.innerHTML = '<code title="你的 Key（已打码）">' + esc(maskKey(d.key)) + '</code>'
+        + '<button class="btn primary mini" id="copyKeyBtn" type="button">' + icon('copy') + '复制 Key</button>';
+      hk.hidden = false;
+    }
+    me.innerHTML = '<div class="me-grid"><div><span>今日 V4.5</span><b>' + v45 + ' / ' + (t.daily_images || 0) + '</b></div>'
       + '<div><span>今日 V5</span><b>' + (t.v5 || 0) + ' / ' + (t.daily_v5 || 0) + '</b></div>'
       + '<div><span>当前</span><b>' + pos + '</b></div>'
       + '<div><span>到期</span><b>' + (d.expires_at ? fmtDate(d.expires_at) : '长期') + '</b></div></div>'

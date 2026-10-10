@@ -9,9 +9,11 @@
 每张图成本相同（≈1 张），所以 DRR 退化成「加权轮流」：在等待的 Key 里，挑最近服务得最少的那把先出。
 参数只有一个——quantum（一把 Key 连续出几张后必须让队）。quantum=1 最公平，越大越偏吞吐。
 
-━━ 先观察后执行 ━━
+━━ 现状：只有 observe，enforce 还没接上 ━━
+真实派发顺序仍是 FIFO（main.py 只调 observe_pick / on_serve；drr_pick 只在 observe_pick 内部用来比较）。
+把 module_scheduling_mode 设成 enforce 目前**没有任何效果**——要生效需在派发点用 drr_pick 重排（算法计划里的待办）。
 observe：只记录「此刻 FIFO 服务的人，是不是 DRR 本该挑的人」，算出不公平比例和出图差距，不改真实顺序。
-enforce：空槽时真的按 DRR 挑人——但只在「≥ engage_min_waiters 个不同 Key 同时在等」时才重排，否则天然等于 FIFO；
+enforce（设计，未实现）：空槽时真的按 DRR 挑人——但只在「≥ engage_min_waiters 个不同 Key 同时在等」时才重排，否则天然等于 FIFO；
          任何一张图等满 starvation_seconds 秒强制插到最前（防饥饿）。所以它闲时零影响、挤时才公平，自动切换，无需手动。
          冻结期保持 observe，避免污染测量数据。
 """
@@ -23,7 +25,7 @@ from typing import Any, Optional
 
 from .params import P
 
-MODE_SETTING = "module_scheduling_mode"     # observe（默认）/ enforce / off
+MODE_SETTING = "module_scheduling_mode"     # observe（默认）/ off；enforce 尚未接入派发路径，设了也等于 observe
 WINDOW = 600.0                              # 公平性统计窗口：最近 10 分钟
 DEFAULT_QUANTUM = 1
 
