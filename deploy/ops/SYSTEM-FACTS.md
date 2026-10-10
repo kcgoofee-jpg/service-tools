@@ -98,3 +98,8 @@
 - 生成 P50 = 中位数（一半的图比它快）；P90 = 90% 的图比它快。
 - 实际 / 上限（张/时）：实际 = 这一时段平均每小时出图；上限 = min(生成速度与间隔决定的速度, 每小时上限)。
 - 成功率 = 成功 ÷ (成功 + 失败)，**不含本地拒绝**（额度、限流、功能未开放这些是有意拦截，不算失败）。
+
+## 拒绝原因码（v2.14.2 起）
+
+`usage_log.reason` 记录被拒请求的原因码（定义在 `app/reasons.py`）：`queue_full` 全站排队满、`key_busy` 本 Key 上一张没出完、`hourly_cap` / `quiet_cap` / `cap_3h` / `daily_cap` 账号上限、`breaker` 全站熔断、`key_paused` Key 被暂停。
+节约模式数 `queue_full`，Key 限流排除 `key_paused`，AIMD 加窗看 `hourly_cap`——都按码数，不再 `LIKE` 中文说明。升级时一次性回填最近 2 天的旧记录。

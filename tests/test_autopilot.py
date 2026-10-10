@@ -120,7 +120,7 @@ async def test_economy_enforce_flips_and_announces(tmp_path):
         await db.set_setting("autopilot_economy", "enforce")
         for _ in range(8):
             await db.add_log(1, "m", "image", "x", "rejected",
-                             detail="当前排队的人太多（全站最多同时排 8 张），请稍后再试")
+                             detail="当前排队的人太多（全站最多同时排 8 张），请稍后再试", reason="queue_full")
         posts = []
         ann = SimpleNamespace(post=lambda t: posts.append(t))
         st = SimpleNamespace(db=db, guard=None, share=None, announcer=ann, sources=SimpleNamespace(events=[]))
@@ -132,5 +132,24 @@ async def test_economy_enforce_flips_and_announces(tmp_path):
         # 1 小时内不重复切换（避免公告刷屏）
         out2 = await autopilot.run(st, None, now=now + 60)
         assert not out2["rules"]["economy"].get("applied")
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_upgrade_backfills_reason_codes_for_recent_rejections(tmp_path):
+    # 原因码上线前的拒绝只有中文 detail：升级时回填最近 2 天，节约模式 / Key 限流 / AIMD 不会因为升级漏数
+    path = str(tmp_path / "r.sqlite")
+    db = Database(path)
+    await db.connect()
+    await db.add_log(1, "m", "image", "x", "rejected", detail="429 当前排队的人太多（全站最多同时排 8 张），请稍后再试")
+    await db.add_log(1, "m", "image", "x", "rejected", detail="403 你的 Key 因检测到多人共用已暂停，10-11 自动恢复")
+    await db.add_log(1, "m", "image", "x", "rejected", detail="429 本小时出图量已达上限（每小时 150 张）")
+    await db.close()
+    db = Database(path)
+    await db.connect()
+    try:
+        got = [r[0] for r in await db._db.execute_fetchall("SELECT reason FROM usage_log ORDER BY id")]
+        assert got == ["queue_full", "key_paused", "hourly_cap"]
     finally:
         await db.close()

@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS usage_log (
     tokens INTEGER NOT NULL DEFAULT 0,
     unconfirmed_anlas REAL NOT NULL DEFAULT 0,
     detail TEXT NOT NULL DEFAULT '',
+    reason TEXT NOT NULL DEFAULT '',      -- 拒绝原因码（app/reasons.py）：统计和自动驾驶按它数，不再 LIKE 中文 detail
     wait_ms INTEGER NOT NULL DEFAULT 0,   -- 从收到请求到发往上游（排队 + 冷却）
     dur_ms INTEGER NOT NULL DEFAULT 0,    -- 上游处理耗时；没发到上游为 0
     client TEXT NOT NULL DEFAULT '',      -- User-Agent 摘要，客户端自报，仅供参考
@@ -240,6 +241,10 @@ _INSERT_LOG = """INSERT INTO usage_log (ts, key_id, key_name, kind, model, statu
                                       images, anlas, tokens, detail, unconfirmed_anlas,
                                       wait_ms, dur_ms, client, up_status, rid, src, ver)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"""
+_INSERT_REJECT = """INSERT INTO usage_log (ts, key_id, key_name, kind, model, status,
+                                         images, anlas, tokens, detail, unconfirmed_anlas,
+                                         wait_ms, dur_ms, client, up_status, rid, src, ver, reason)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"""
 RULE_VERSION = ""                     # 启动时由 main.py 设为网关版本
 _UPSERT_COUNTERS = """INSERT INTO counters
                      (key_id, day, images, anlas, text_tokens, requests, v5, legacy_free_images)
@@ -298,12 +303,21 @@ class Database:
             "ALTER TABLE generation_audit ADD COLUMN extra TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE generation_audit ADD COLUMN image BLOB",
             "ALTER TABLE generation_audit ADD COLUMN image_type TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE usage_log ADD COLUMN reason TEXT NOT NULL DEFAULT ''",
         ):
             try:
                 await self._db.execute(ddl)
                 await self._db.commit()
             except aiosqlite.OperationalError:
                 pass  # 列已存在
+        # 原因码上线前的拒绝只有中文 detail：一次性回填最近 2 天（自动驾驶 / AIMD 最长看 24 小时），之后只按 reason 数
+        from .reasons import BACKFILL
+        cols = {r["name"] for r in await (await self._db.execute("PRAGMA table_info(usage_log)")).fetchall()}
+        if {"reason", "detail"} <= cols:          # 很老的库没有 detail 列，也就没有可回填的
+            for code, pattern in BACKFILL:
+                await self._db.execute("UPDATE usage_log SET reason=? WHERE reason='' AND status='rejected' "
+                                       "AND ts>? AND detail LIKE ?", (code, time.time() - 2 * 86400, pattern))
+            await self._db.commit()
         log_columns = await (await self._db.execute("PRAGMA table_info(usage_log)")).fetchall()
         if "unconfirmed_anlas" not in {row["name"] for row in log_columns}:
             # 旧日志缺少报价，待核对金额初始为 0。
@@ -873,12 +887,14 @@ class Database:
         status: str, images: int = 0, anlas: float = 0.0, tokens: int = 0,
         detail: str = "", unconfirmed_anlas: float = 0.0,
         wait_ms: int = 0, dur_ms: int = 0, client: str = "", up_status: int = 0, rid: str = "", src: str = "",
+        reason: str = "",
     ) -> None:
         await self._db.execute(
-            _INSERT_LOG,
+            _INSERT_REJECT,
             (time.time(), key_id, key_name[:80], kind, model[:80], status,
              images, anlas, tokens, detail[:500], unconfirmed_anlas,
-             max(0, int(wait_ms)), max(0, int(dur_ms)), client[:256], int(up_status), rid[:16], src[:40], RULE_VERSION),
+             max(0, int(wait_ms)), max(0, int(dur_ms)), client[:256], int(up_status), rid[:16], src[:40], RULE_VERSION,
+             reason[:24]),
         )
         await self._db.commit()
 

@@ -33,6 +33,7 @@ FIELDS: dict[str, tuple[int, int, int, str]] = {
     "base_daily_images": (100, 0, 100000, "V4.5 每人每天保底张数；超过后只在全站空闲时放行，直到 Key 的每日上限"),
 }
 IDLE_SHARE = 0.6
+from .reasons import BREAKER, CAP_3H, DAILY_CAP, HOURLY_CAP, KEY_BUSY, QUEUE_FULL, QUIET_CAP, Reason
 from .params import P           # 本小时用量低于上限的 60% 且没人排队，算「空闲」，允许借用
 
 
@@ -173,7 +174,7 @@ class Guard:
         hit = await self.db._db.execute_fetchall(
             "SELECT 1 FROM usage_log u LEFT JOIN api_keys k ON k.id=u.key_id WHERE u.ts>? "
             "AND COALESCE(k.is_test,0)=0 AND COALESCE(k.is_admin,0)=0 "
-            "AND u.detail LIKE '%本小时出图量已达上限%' LIMIT 1", (now - 86400,))
+            "AND u.reason=? LIMIT 1", (now - 86400, HOURLY_CAP))
         first = (await self.db._db.execute_fetchall("SELECT MIN(ts) FROM usage_log"))[0][0]
         covered = (now - max(now - 86400, float(first or now))) / 3600
         if not hit or covered < 20:          # 没顶到过上限（没信息），或过去 24 小时数据不完整：不加
@@ -207,23 +208,24 @@ class Guard:
         """这个上游账号现在不能再接新的出图任务时，返回给成员看的原因。"""
         now = time.time() if now is None else now
         if self.breaker_until > now:
-            return self._breaker_reason or f"上游连续出错，已暂停出图，约 {int(self.breaker_until - now)} 秒后自动恢复"
+            return Reason(self._breaker_reason or f"上游连续出错，已暂停出图，约 {int(self.breaker_until - now)} 秒后自动恢复",
+                          BREAKER)
         daily = self.values["account_daily_cap"]
         if daily:
             used = (await db.get_upstream_counter(token_id, day))["images"]
             if used >= daily:
-                return f"本站今天的出图总量已达上限（每个账号 {daily} 张/天，用来保护上游账号），明天 0 点恢复"
+                return Reason(f"本站今天的出图总量已达上限（每个账号 {daily} 张/天，用来保护上游账号），明天 0 点恢复", DAILY_CAP)
         cap = self.hourly_cap(now)
         if cap and self.hour_count(token_id, now) >= cap:
             wait = self.minutes_until_free(token_id, now)
             if self.in_quiet(now):
-                return (f"现在是安静时段（{self.values['quiet_start']}:00–{self.values['quiet_end']}:00），"
-                        f"出图放慢到每小时 {cap} 张，约 {wait} 分钟后有空位")
-            return f"本小时出图量已达上限（每小时 {cap} 张，用来保护上游账号），约 {wait} 分钟后有空位"
+                return Reason(f"现在是安静时段（{self.values['quiet_start']}:00–{self.values['quiet_end']}:00），"
+                              f"出图放慢到每小时 {cap} 张，约 {wait} 分钟后有空位", QUIET_CAP)
+            return Reason(f"本小时出图量已达上限（每小时 {cap} 张，用来保护上游账号），约 {wait} 分钟后有空位", HOURLY_CAP)
         cap3 = self.values["account_3h_cap"]
         if cap3 and self.count_3h(token_id, now) >= cap3:
             wait = self.minutes_until_free_3h(token_id, now)
-            return f"最近 3 小时出图量已达上限（{cap3} 张，用来保护上游账号），约 {wait} 分钟后有空位"
+            return Reason(f"最近 3 小时出图量已达上限（{cap3} 张，用来保护上游账号），约 {wait} 分钟后有空位", CAP_3H)
         return None
 
     # ---------- 排队（P1） ----------
@@ -233,10 +235,10 @@ class Guard:
         extra = self.values["key_image_queue"]
         if mine >= 1 + extra:
             more = f"、最多再排 {extra} 张" if extra else ""
-            return f"你的上一张图还没出完：每把 Key 同时只生成 1 张{more}，请等前面的完成后再发"
+            return Reason(f"你的上一张图还没出完：每把 Key 同时只生成 1 张{more}，请等前面的完成后再发", KEY_BUSY)
         per = self.values["queue_per_account"]
         if per and sum(self.image_inflight.values()) >= per * max(1, accounts):
-            return f"当前排队的人太多（全站最多同时排 {per * max(1, accounts)} 张），请稍后再试"
+            return Reason(f"当前排队的人太多（全站最多同时排 {per * max(1, accounts)} 张），请稍后再试", QUEUE_FULL)
         self.image_inflight[key_id] = mine + 1
         self._seq += 1
         self.entries.append({"id": self._seq, "key": key_id, "since": time.time(), "running": False})

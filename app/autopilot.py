@@ -34,6 +34,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from .action_log import log_action
+from . import reasons
 
 STATE_KEY = "autopilot_last"
 HISTORY_KEY = "autopilot_history"
@@ -170,7 +171,7 @@ async def run(state, registrar=None, now: Optional[float] = None) -> dict[str, A
     events = list(getattr(getattr(state, "sources", None), "events", []) or [])
     # 「Key 正在暂停」本身被拒的请求不算：否则暂停到期时上一小时全是暂停期间的拒绝，会立刻再暂停一次
     rejects = {r[0]: r[1] for r in await _q(db, "SELECT key_id, COUNT(*) FROM usage_log WHERE ts>=? AND status='rejected' "
-                                                 "AND key_id IS NOT NULL AND detail NOT LIKE '%暂停%' GROUP BY key_id",
+                                                 f"AND key_id IS NOT NULL AND reason<>'{reasons.KEY_PAUSED}' GROUP BY key_id",
                                              now - 3600)}
     keys = {r[0]: r[1] for r in await _q(db, "SELECT id, name FROM api_keys WHERE enabled=1 AND is_admin=0 AND is_test=0")}
     decisions = []
@@ -195,9 +196,9 @@ async def run(state, registrar=None, now: Optional[float] = None) -> dict[str, A
     # 6 节约模式：拥挤（排队被拒多）时统一 14 步让更多人出到图，空闲时恢复高质量。切换都会公告。
     econ_now = (await db.get_setting("economy_mode", "off")) == "on"
     qr15 = int((await _q(db, "SELECT COUNT(*) FROM usage_log WHERE ts>=? AND status='rejected' "
-                             "AND detail LIKE '%排队的人太多%'", now - 900))[0][0] or 0)
+                             f"AND reason='{reasons.QUEUE_FULL}'", now - 900))[0][0] or 0)
     qr30 = int((await _q(db, "SELECT COUNT(*) FROM usage_log WHERE ts>=? AND status='rejected' "
-                             "AND detail LIKE '%排队的人太多%'", now - 1800))[0][0] or 0)
+                             f"AND reason='{reasons.QUEUE_FULL}'", now - 1800))[0][0] or 0)
     econ_target, econ_why = economy_rule(econ_now, qr15, qr30)
     out["rules"]["economy"] = {"mode": await _mode(db, "economy"), "value": econ_target, "why": econ_why}
     if econ_target != econ_now and out["rules"]["economy"]["mode"] == "enforce":
