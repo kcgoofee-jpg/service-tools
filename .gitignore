@@ -13,3 +13,4 @@ data/
 
 # Claude Code local session dirs
 .claude/
+exports/

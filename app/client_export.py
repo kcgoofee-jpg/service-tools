@@ -24,7 +24,8 @@ requests.csv（每次请求一行，按时间升序）
   kind 功能（image / image_stream / chat …）· model 模型 · status 结果（ok / rejected / error / cancelled）
   images 张数 · anlas 消耗 · wait_ms 排队 · dur_ms 生成耗时 · up_status 上游状态码
   net 来源网段（只到前两段）· user_agent 客户端自报的 UA
-  device_fp 设备指纹哈希 · device_os 系统 · client_sig 客户端请求特征哈希（同一个软件 + 同一套设置 → 相同）
+  device_fp 浏览器标识哈希（= UA 前 80 字的哈希，很粗：同版本浏览器的不同人也相同，不能单独当成「同一台设备」）
+  device_os 系统 · client_sig 客户端请求特征哈希（同一个软件 + 同一套设置 → 相同；用同一份预设的不同人也可能相同）
   detail / reason 网关备注、拒绝原因 · rid 错误编号
   注：device_* 和 client_sig 取这把 Key 在该请求之前最近一次记下的特征（只记出图请求；10/10 01:58 起才有）。
 
@@ -35,7 +36,7 @@ keys.csv（每把 Key 一行）
 
 怎么看「蛀虫」（思路，不是结论）：
   - 一把 Key 的设备数 / 网段数明显偏多，或同一时间段在两个网段交替出现
-  - 不同 Key 共用同一个 device_fp（一人多号）
+  - 不同 Key 共用同一个 device_fp + client_sig，且时间上互相接替、网段相同（一人多号；只看 device_fp 会大量误报）
   - 24 小时不停、节奏像机器（间隔几乎恒定）
   - client_sig 很多样（多种软件 / 多套设置用同一把 Key）
 """
