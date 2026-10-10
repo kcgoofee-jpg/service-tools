@@ -36,3 +36,22 @@ async def test_export_zip_has_sorted_requests_with_device_features(tmp_path):
     keys = list(csv.DictReader(io.StringIO(z.read("keys.csv").decode("utf-8-sig"))))
     assert keys[0]["devices"] == "1" and keys[0]["ok_images"] == "1"
     assert b"nai-secret-token-a" not in blob
+
+
+def test_csv_formula_injection_is_neutralised():
+    from app.client_export import safe_cell
+    assert safe_cell('=HYPERLINK("http://x","a")').startswith("'=")
+    assert safe_cell("@SUM(1)") == "'@SUM(1)" and safe_cell("+cmd") == "'+cmd"
+    assert safe_cell("Mozilla/5.0") == "Mozilla/5.0" and safe_cell(12) == 12
+
+
+def test_export_matches_device_by_arrival_time():
+    from app.client_export import build_zip
+    now = 1_800_000_000.0
+    d = {"keys": [(1, "k", 1, 0, 0, 1, now - 999, now)], "reg": {}, "sources": [], "share": {}, "evidence": [], "tags": {}, "days": 1,
+         # A 在 t=0 到达、t=40 完成；B 在 t=10 到达
+         "feats": [(now, 1, "", "fpA", "Win", "sigA"), (now + 10, 1, "", "fpB", "Win", "sigB")],
+         "usage": [(now + 40, 1, "k", "image", "image", "ok", 1, 0, 0, 40000, 200, "", "UA", "", "", "")]}
+    z = zipfile.ZipFile(io.BytesIO(build_zip(d)))
+    rows = list(csv.DictReader(io.StringIO(z.read("requests.csv").decode("utf-8-sig"))))
+    assert rows[0]["device_fp"] == "fpA"
