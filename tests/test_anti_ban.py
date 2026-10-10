@@ -261,3 +261,37 @@ def test_proxy_and_http2_settings_propagation(tmp_path):
     assert state.nai._post_jitter_max == 3.5
     assert state.nai._single_slot_enforced is True
     assert state.nai.pool[0].browser_profile["user_agent"] == "CustomAntiBanAgent/2.0"
+
+
+def test_weight_regex_is_linear_on_long_digit_runs():
+    # 10/11 审查 P0：5 万位纯数字曾让预检卡 23 秒、阻塞整个事件循环
+    import time as _t
+    body = {"model": "nai-diffusion-4-5", "input": "1" * 51000, "parameters": {}}
+    t0 = _t.perf_counter()
+    assert upstream_parameter_problem(body) is None
+    assert _t.perf_counter() - t0 < 0.5
+
+
+@pytest.mark.asyncio
+async def test_403_cooldown_backs_off_and_resets(fake_db):
+    import time as _t
+    client = NaiClient(
+        tokens=["token-1"], image_host="https://image.novelai.net", text_host="https://text.novelai.net",
+        legacy_text_host="https://api.novelai.net", db=fake_db, day_fn=lambda: "2026-10-11",
+        v5_daily_limits=[100], allow_anlas=[True],
+    )
+    client.on_event = lambda *a, **k: None
+    ts = client.pool[0]
+    client.mark_rate_limited(ts, 1); client.mark_rate_limited(ts, 1)
+    client.mark_forbidden(ts)                       # 两次 429 + 一次 403 不触发 403 冷却
+    assert ts.forbidden_trips == 0
+    ts.blocked_until = 0
+    waits = []
+    for _ in range(4):
+        for _ in range(3):
+            client.mark_forbidden(ts)
+        waits.append(round((ts.blocked_until - _t.time()) / 60))
+        ts.blocked_until = 0
+    assert waits == [5, 15, 45, 60]
+    client.mark_ok(ts)
+    assert ts.forbidden_trips == 0 and ts.forbidden_streak == 0

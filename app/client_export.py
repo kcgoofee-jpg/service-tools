@@ -49,11 +49,18 @@ def _ts(v) -> str:
         return ""
 
 
+def safe_cell(v):
+    """防 CSV 公式注入：以 = + - @ 制表符 回车开头的文本前加 '（UA、Key 名都可能是成员自己填的）。"""
+    if isinstance(v, str) and v[:1] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + v
+    return v
+
+
 def _csv(rows: list[list], header: list[str]) -> bytes:
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(header)
-    w.writerows(rows)
+    w.writerows([[safe_cell(c) for c in r] for r in rows])
     return ("﻿" + buf.getvalue()).encode("utf-8")
 
 
@@ -91,8 +98,11 @@ def build_zip(d: dict) -> bytes:
         fp = os_ = sig = ""
         if kid in by_key:
             t, rows = by_key[kid]
-            i = bisect.bisect_right(t, ts + 5) - 1        # 特征在派发前记下，结果在完成后记下
-            if i >= 0 and ts - t[i] < 900:
+            # usage_log.ts 是完成时刻，特征是到达时记下的：按到达时刻（完成 − 排队 − 生成）对齐，
+            # 否则同一把 Key 并发时会配上后到那次请求的特征（10/11 审查）
+            arrive = ts - ((wait or 0) + (dur or 0)) / 1000
+            i = bisect.bisect_right(t, arrive + 1) - 1
+            if i >= 0 and arrive - t[i] < 900:
                 fp, os_, sig = rows[i]
         if status == "ok":
             ok_images[kid] = ok_images.get(kid, 0) + (images or 0)

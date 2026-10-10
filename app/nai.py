@@ -89,7 +89,7 @@ class TokenState:
         "admin_enabled",
         "dispatch_lock", "image_slots",
         "fails", "blocked_until", "disabled", "last_ok", "image_next_at",
-        "browser_profile",
+        "browser_profile", "forbidden_streak", "forbidden_trips",
     )
 
     def __init__(self, token: str, index: int, v5_daily_limit: int,
@@ -109,6 +109,8 @@ class TokenState:
         self.disabled = False
         self.last_ok = 0.0
         self.image_next_at = 0.0
+        self.forbidden_streak = 0          # 连续 403 次数（和 429 分开计）
+        self.forbidden_trips = 0           # 冷却触发了几轮（成功一次清零）→ 5 / 15 / 45 / 60 分钟退避
         profile = BROWSER_PROFILES[index % len(BROWSER_PROFILES)].copy()
         if custom_user_agent:
             profile["user_agent"] = custom_user_agent
@@ -444,14 +446,19 @@ class NaiClient:
         ts.fails += 1
 
     def mark_forbidden(self, ts: TokenState) -> None:
-        """403 代表账号受限、Cloudflare 盾拦截或上游 WAF 封禁。连续 3 次（中间没有成功）冷却 5 分钟并告警。
+        """403 代表账号受限、Cloudflare 盾拦截或上游 WAF 封禁。连续 3 次（中间没有成功）就冷却并告警。
 
         不设 disabled：只有一把 Token 时永久停用等于全站停摆，且只能重启恢复。
+        冷却按轮次指数退避（5 → 15 → 45 → 60 分钟），被封期间不会每 5 分钟去试一次；403 和 429 分开计数。
         """
         ts.fails += 1
-        if ts.fails >= 3:
-            ts.blocked_until = max(ts.blocked_until, time.time() + 300.0)
-            self._event("upstream_403_cooldown", f"NovelAI 连续返回 403，账号可能被上游封控。该 Token（{ts.token_id}）冷却 5 分钟后自动重试，请检查上游账号状态。", 1800)
+        ts.forbidden_streak += 1
+        if ts.forbidden_streak >= 3:
+            minutes = min(60, 5 * 3 ** ts.forbidden_trips)
+            ts.forbidden_trips += 1
+            ts.forbidden_streak = 0
+            ts.blocked_until = max(ts.blocked_until, time.time() + minutes * 60.0)
+            self._event("upstream_403_cooldown", f"NovelAI 连续返回 403，账号可能被上游封控。该 Token（{ts.token_id}）冷却 {minutes} 分钟后自动重试（第 {ts.forbidden_trips} 轮），请检查上游账号状态。", 1800)
 
     def _warn_account(self, status: int) -> None:
         """402 / 403 状态告警。"""
@@ -464,6 +471,8 @@ class NaiClient:
 
     def mark_ok(self, ts: TokenState) -> None:
         ts.fails = 0
+        ts.forbidden_streak = 0
+        ts.forbidden_trips = 0
         ts.last_ok = time.time()
 
     @property
