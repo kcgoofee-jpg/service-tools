@@ -41,3 +41,20 @@ BACKFILL = (
     (HOURLY_CAP, "%本小时出图量已达上限%"),
     (KEY_PAUSED, "%暂停%"),
 )
+
+
+LABELS = {
+    KEY_PAUSED: "Key 被暂停", QUEUE_FULL: "排队满", KEY_BUSY: "上一张没出完就重发", HOURLY_CAP: "本小时全站上限",
+    QUIET_CAP: "安静时段上限", CAP_3H: "3 小时全站上限", DAILY_CAP: "全站每日上限", BREAKER: "全站熔断",
+    COOLDOWN: "上游限流暂停", V5_EXHAUSTED: "全站 V5 用完",
+}
+
+
+def reason_label(code: str, detail: str = "") -> str:
+    """拒绝原因的短说明：有原因码用码，没有就从 detail 里取第一句（去掉开头的 HTTP 状态码）。"""
+    if code and code in LABELS:
+        return LABELS[code]
+    import re
+    text = re.sub(r"^\d{3}\s*", "", str(detail or "")).strip()
+    text = re.split(r"[（(，,。：:；;]", text, maxsplit=1)[0].strip()
+    return (text[:18] + "…") if len(text) > 18 else (text or "其他")

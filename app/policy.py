@@ -506,6 +506,24 @@ def clamp_image_params(payload: dict, *, max_pixels: int, max_steps: int,
     return out, notes, None
 
 
+def economy_trim(payload: dict) -> Tuple[dict, list[str]]:
+    """节约模式下给「算法自动分到 Anlas」的 Key 用：只压步数和采样器，不动尺寸（尺寸超出免费档时照常扣 Anlas）。
+
+    这些 Key 不走免费档钳制（要能用 Anlas 出超规格图），以前节约模式也一起跳过了，人多时它们仍按 28 步出图。
+    """
+    notes: list[str] = []
+    out = dict(payload)
+    p = dict(out["parameters"]) if isinstance(out.get("parameters"), dict) else {}
+    out["parameters"] = p
+    if int(p.get("steps", 0) or 0) > ECONOMY_STEPS:
+        p["steps"] = ECONOMY_STEPS
+        notes.append(f"steps 已钳制到 {ECONOMY_STEPS}（节约模式）")
+    if p.get("sampler") and p.get("sampler") != ECONOMY_SAMPLER:
+        p["sampler"] = ECONOMY_SAMPLER
+        notes.append(f"节约模式：采样器已设为 {ECONOMY_SAMPLER}")
+    return out, notes
+
+
 # ------------------------------------------------------------ 文本钳制 ----
 
 def clamp_text_params(payload: dict, *, max_output_tokens: int,

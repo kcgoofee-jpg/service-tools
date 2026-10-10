@@ -624,3 +624,16 @@ async def test_economy_images_carry_half_cost_weight_to_upstream(state):
     state.db.kv = {"economy_mode": "on"}
     assert (await post("/ai/generate-image", image_body())).status_code == 200
     assert seen == [1.0, 0.5]
+
+
+@pytest.mark.asyncio
+async def test_economy_trims_steps_for_auto_anlas_keys_but_not_manual(state):
+    # 线上 10/10：吉吉子（算法分到 Anlas）在节约模式下仍按 28 步出图；手动给 Anlas 的 Key 不受影响
+    state.db.kv = {"economy_mode": "on"}
+    key = state.db.keys["fixture-1"]
+    key.update(allow_anlas=True, anlas_auto=1)
+    assert (await post("/ai/generate-image", image_body(width=1216, height=832, steps=28))).status_code == 200
+    assert state.db.logs[-1][1]["detail"].startswith("1216x832/14step")
+    key.update(anlas_auto=-1)
+    assert (await post("/ai/generate-image", image_body(width=1216, height=832, steps=28))).status_code == 200
+    assert state.db.logs[-1][1]["detail"].startswith("1216x832/28step")

@@ -11,6 +11,8 @@ from uuid import uuid4
 
 import aiosqlite
 
+from .reasons import reason_label
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS api_keys (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1001,6 +1003,18 @@ class Database:
                GROUP BY key_id""", (since,))
         for key_id, n in await cur.fetchall():
             out.setdefault(int(key_id), {"first_image_at": None, "last_image_at": None})["rejected_24h"] = int(n)
+        # 被拒原因（每把 Key 前 3 个）：后台成员详情的「一句话结论」用
+        cur = await self._db.execute(
+            """SELECT key_id, reason, MIN(detail), COUNT(*) FROM usage_log
+               WHERE status='rejected' AND ts>=? AND key_id IS NOT NULL
+               GROUP BY key_id, CASE WHEN reason!='' THEN reason ELSE substr(detail, 1, 24) END""", (since,))
+        why: dict[int, dict[str, int]] = {}
+        for key_id, code, detail, n in await cur.fetchall():      # 同一句话（只差数字）合并
+            label = reason_label(code, detail)
+            why.setdefault(int(key_id), {})[label] = why.get(int(key_id), {}).get(label, 0) + int(n)
+        for key_id, items in why.items():
+            out.setdefault(key_id, {"first_image_at": None, "last_image_at": None, "rejected_24h": 0})["rejected_why"] = \
+                sorted(([k, v] for k, v in items.items()), key=lambda x: -x[1])[:3]
         return out
 
     async def image_perf_rows(self, since: float) -> list[tuple]:

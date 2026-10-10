@@ -54,7 +54,7 @@ from .policy import (
 )
 from .state import GateState
 from . import features
-from .policy import ECONOMY_STEPS, REFERENCE_FIELDS
+from .policy import ECONOMY_STEPS, REFERENCE_FIELDS, economy_trim
 from .key_sources import RETENTION_SECONDS as KEY_SOURCE_RETENTION
 from .action_log import RETENTION_DAYS as ADMIN_ACTION_RETENTION_DAYS, log_action
 from .audit import audit_flags, audit_disclosure, audit_image_days, capture_prompts, full_image
@@ -173,7 +173,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "2.15.22"
+__version__ = "2.15.23"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -1191,6 +1191,9 @@ async def _generate_image(request: Request, *, streaming: bool):
         if problem:
             record(key, "image", model, "rejected", detail=problem)
             raise err(400, problem)
+    elif not key["is_admin"] and key["allow_anlas"] and _anlas_auto(key) \
+            and await site_flags.get(STATE.db, site_flags.ECONOMY):
+        body, notes = economy_trim(body)      # 算法分到的 Anlas 不应让人在节约模式下还按 28 步出图
     else:
         notes = []
 
