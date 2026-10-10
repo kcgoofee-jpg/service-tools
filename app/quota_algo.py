@@ -143,6 +143,12 @@ async def _yesterday(db, day: str, members: list[int]) -> dict[str, int]:
         "SELECT c.key_id, c.images, k.daily_images, c.legacy_free_images, k.quota_auto FROM counters c "
         "JOIN api_keys k ON k.id=c.key_id WHERE c.day=? AND k.is_test=0 AND k.is_admin=0", (day,))
     used = sum(r[1] for r in rows)                      # 账号总量：全部出图（和账号日上限比）
+    # 账号日上限按算力折算（节约模式 14 步算半张）：按当天账号层面「折算值 / 实际张数」的比例换算，
+    # 否则节约模式的日子会被误判成拥挤、把每个人的上限砍掉（2026-10-10）
+    (imgs, units), = await db._db.execute_fetchall(
+        "SELECT COALESCE(SUM(images),0), COALESCE(SUM(COALESCE(units, images)),0) FROM upstream_token_counters WHERE day=?", (day,))
+    if imgs and units < imgs:
+        used = int(round(used * units / imgs))
     # 顶格：V4.5 上限 A 管的是 V4.5 免费图（legacy_free_images），不能拿含 V5 的总张数去比；手动额度的 Key 不参与
     hits = sum(1 for r in rows if r[2] and r[4] == 1 and (r[3] or 0) >= r[2])
 
