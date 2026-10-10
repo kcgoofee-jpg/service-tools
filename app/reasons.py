@@ -14,10 +14,11 @@ CAP_3H = "cap_3h"             # 账号 3 小时上限
 DAILY_CAP = "daily_cap"       # 账号每日上限
 BREAKER = "breaker"           # 全站熔断
 COOLDOWN = "cooldown"         # 上游 429 后全站暂停出图
+V5_EXHAUSTED = "v5_exhausted" # 账号 V5 免费额度用完（未开通 Anlas 的 Key 不能自动转付费）
 
 # 全站层面的拒绝：原因在站点（排队满、账号上限、熔断、冷却），不是这个成员的客户端出了问题。
 # 自动驾驶的「单 Key 被拒 ≥60 次 → 暂停」不能数这些，否则忙时自动重试的正常成员会被误判为死循环。
-SITE_LEVEL = (QUEUE_FULL, HOURLY_CAP, QUIET_CAP, CAP_3H, DAILY_CAP, BREAKER, COOLDOWN)
+SITE_LEVEL = (QUEUE_FULL, HOURLY_CAP, QUIET_CAP, CAP_3H, DAILY_CAP, BREAKER, COOLDOWN, V5_EXHAUSTED)
 
 
 class Reason(str):

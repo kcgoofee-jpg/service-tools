@@ -110,6 +110,7 @@ def test_economy_rule():
     assert autopilot.economy_rule(False, 3, 3)[0] is False      # 不够拥挤 → 保持关
     assert autopilot.economy_rule(True, 5, 0)[0] is False       # 空闲 → 关
     assert autopilot.economy_rule(True, 5, 5)[0] is True        # 还拥挤 → 保持开
+    assert autopilot.economy_rule(False, 20, 20, keys_15m=1)[0] is False   # 一个客户端刷出来的拒绝不算全站拥挤
 
 
 @pytest.mark.asyncio
@@ -118,8 +119,8 @@ async def test_economy_enforce_flips_and_announces(tmp_path):
     await db.connect()
     try:
         await db.set_setting("autopilot_economy", "enforce")
-        for _ in range(8):
-            await db.add_log(1, "m", "image", "x", "rejected",
+        for i in range(8):
+            await db.add_log(1 + i % 3, "m", "image", "x", "rejected",
                              detail="当前排队的人太多（全站最多同时排 8 张），请稍后再试", reason="queue_full")
         posts = []
         ann = SimpleNamespace(post=lambda t: posts.append(t))
