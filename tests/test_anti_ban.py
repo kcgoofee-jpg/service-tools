@@ -295,3 +295,18 @@ async def test_403_cooldown_backs_off_and_resets(fake_db):
     assert waits == [5, 15, 45, 60]
     client.mark_ok(ts)
     assert ts.forbidden_trips == 0 and ts.forbidden_streak == 0
+
+
+def test_name_digit_weight_is_auto_fixed_not_rejected():
+    from app.policy import fix_name_digit_weights
+    body = {"model": "nai-diffusion-4-5", "input": "1.2::artist:bm94199::, 1girl",
+            "parameters": {"negative_prompt": "lowres, tag2024::", "characterPrompts": [{"prompt": "x99::", "uc": ""}],
+                           "v4_prompt": {"caption": {"base_caption": "a bm94199::", "char_captions": [{"char_caption": "c7::"}]}}}}
+    assert fix_name_digit_weights(body) == 5
+    assert body["input"] == "1.2::artist:bm94199 ::, 1girl"
+    assert body["parameters"]["negative_prompt"] == "lowres, tag2024 ::"
+    assert upstream_parameter_problem(body) is None
+    # 独立数字权重不动：正常的照常放行，超大的照常拦
+    plain = {"model": "nai-diffusion-4-5", "input": "1.2::tag::, -3::x::, 94199::y::", "parameters": {}}
+    assert fix_name_digit_weights(plain) == 0
+    assert "94199::" in upstream_parameter_problem(plain)
