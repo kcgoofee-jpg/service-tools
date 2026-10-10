@@ -176,3 +176,23 @@ async def test_yesterday_usage_uses_compute_units(tmp_path):
         assert stats["used"] == 500
     finally:
         await db.close()
+
+
+@pytest.mark.asyncio
+async def test_displayed_v5_percent_is_live_not_morning_plan(tmp_path):
+    db = Database(str(tmp_path / "pct.sqlite"))
+    await db.connect()
+    try:
+        pct = {"v": 97}
+
+        class Allow:
+            async def snapshot(self, pool):
+                return {"accounts": [{"percent": pct["v"], "recharge_per_day": 11.0}]}
+        st = SimpleNamespace(db=db, guard=Guard(db), nai=SimpleNamespace(pool=[SimpleNamespace(usable=True)], allowance=Allow()))
+        first = (await quota_algo.run(st))["v5"]
+        pct["v"] = 92
+        later = (await quota_algo.run(st))["v5"]
+        assert later["percent"] == 92 and later["each"] == first["each"]      # 显示实时剩余，每人额度当天不变
+        assert json.loads(await db.get_setting(quota_algo.V5_DAY_KEY, "{}"))["plan"]["percent"] == 97
+    finally:
+        await db.close()
