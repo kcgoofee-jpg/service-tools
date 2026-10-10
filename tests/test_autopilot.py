@@ -16,6 +16,8 @@ def test_slots_rules_and_no_suggestion_only_rules():
     assert autopilot.slots_rule(50, 50, 3, 0.3, 3)[0] == 50       # 3 个小时被拦：不再加
     assert autopilot.slots_rule(50, 50, 3, 0.7, 0)[0] == 50       # 昨天用量高：不再加
     assert autopilot.slots_rule(100, 100, 3, 0.1, 0)[0] == 100    # 上限 100
+    assert autopilot.slots_rule(50, 50, 3, 0.3, 0, queue_hours=3)[0] == 50   # 高峰排队拥挤 3 个小时：不再加
+    assert autopilot.slots_rule(50, 50, 3, 0.3, 0, queue_hours=2)[0] == 55
 
 
 def test_breaker_and_key_guard():
