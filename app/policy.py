@@ -233,6 +233,9 @@ def _prompt_texts(body: dict):
                     yield f"{key}.char_captions[{i}]", item.get("char_caption")
 
 
+MAX_CHARACTERS = 6        # NovelAI V4 / V4.5 角色提示词上限
+
+
 def upstream_parameter_problem(body: dict) -> Optional[str]:
     """在排队之前拦下上游一定会拒绝的请求，避免白占全站唯一的出图队列。"""
     for path, text in _prompt_texts(body):
@@ -248,6 +251,15 @@ def upstream_parameter_problem(body: dict) -> Optional[str]:
                 lower = max(DIMENSION_STEP, value // DIMENSION_STEP * DIMENSION_STEP)
                 return f"{key}={value} 不是 64 的倍数，上游会拒绝；可改为 {lower} 或 {lower + DIMENSION_STEP}"
     model = str(body.get("model", ""))
+    if model.startswith("nai-diffusion-4"):
+        # V4 / V4.5 最多 6 个角色；超了上游不报清楚原因，直接回 500（2026-10-10 随风飞扬 7 个角色连续 500）
+        counts = [len(p.get("characterPrompts")) if isinstance(p.get("characterPrompts"), list) else 0]
+        for key in ("v4_prompt", "v4_negative_prompt"):
+            caption = (p.get(key) or {}).get("caption") if isinstance(p.get(key), dict) else None
+            if isinstance(caption, dict) and isinstance(caption.get("char_captions"), list):
+                counts.append(len(caption["char_captions"]))
+        if max(counts) > MAX_CHARACTERS:
+            return f"角色太多：这次有 {max(counts)} 个角色，V4/V4.5 最多 {MAX_CHARACTERS} 个，请删掉几个角色再生成"
     sampler = p.get("sampler")
     if (isinstance(sampler, str) and sampler in V4_V5_REJECTED_SAMPLERS
             and (is_v5_model(model) or model.startswith("nai-diffusion-4"))):
