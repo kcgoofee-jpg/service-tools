@@ -57,7 +57,7 @@ LAB_EXTRA = {
     "service_mode": ("max", "服务周期：max = max(耗时, 间隔+抖动)（nai.py 实际）；sum = 耗时+间隔+抖动", "lab"),
     "safety_daily_baseline": (0, "账号安全：日总量基线（0 = 用 account_daily_cap）", "lab"),
     "full_load_share": (0.9, "满载：本小时成功张数 ≥ 该比例 × 每小时上限", "lab"),
-    "v5_recharge_rate": (11.0, "V5 恢复 %/天（斜率代理）", "app/quota_algo.py V5_FALLBACK_RATE"),
+    "v5_recharge_rate": (5.0, "V5 恢复 %/天（斜率代理，未核对时的保守值）", "app/quota_algo.py V5_FALLBACK_RATE"),
     "v5_images_per_percent": (14.2, "每 1% V5 ≈ 张", "app/quota_algo.py V5_IMAGES_PER_PERCENT"),
 }
 
