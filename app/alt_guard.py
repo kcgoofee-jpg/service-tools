@@ -95,6 +95,25 @@ async def scan(db, now: float) -> list[dict[str, Any]]:
             for i, a in enumerate(ks):
                 for b in ks[i + 1:]:
                     add(a, b, "same_src", True)
+
+    # 出图参数习惯特征（req_features）：少见参数签名（≤ 3 把 Key）视为强特征
+    sig_keys: dict[str, set[int]] = defaultdict(set)
+    try:
+        feat_rows = await db._db.execute_fetchall(
+            "SELECT key_id, sig FROM req_features WHERE ts>=? AND key_id IS NOT NULL", (since,))
+        feat_rows = [r for r in feat_rows if r[0] not in staff]
+        for kid, sig_val in feat_rows:
+            if sig_val:
+                sig_keys[sig_val].add(kid)
+        for kids in sig_keys.values():
+            if 2 <= len(kids) <= SRC_RARE:
+                ks = sorted(kids)
+                for i, a in enumerate(ks):
+                    for b in ks[i + 1:]:
+                        add(a, b, "same_sig", True)
+    except Exception:
+        pass
+
     candidates = set(pairs)            # 只有共用指纹的 Key 对才看行为
 
     # 行为：handoff（按「撞上限」次数，不按拒绝条数）、交替、同网段同时出图
@@ -116,11 +135,14 @@ async def scan(db, now: float) -> list[dict[str, Any]]:
     for key, n in handoff.items():
         add(*key, "handoff", n)
 
+    # 两两时序交替：只聚焦候选对自身的时间线，避免被全局并发第三人冲断相邻性
     switch: dict[tuple[int, int], int] = defaultdict(int)
-    for (k1, t1, *_), (k2, t2, *_) in zip(rows, rows[1:]):
-        key = (min(k1, k2), max(k1, k2))
-        if k1 != k2 and t2 - t1 <= SWITCH_GAP and key in candidates:
-            switch[key] += 1
+    for a, b in candidates:
+        ab = [(kid, ts) for kid, ts, *_ in rows if kid in (a, b)]
+        for (k1, t1), (k2, t2) in zip(ab, ab[1:]):
+            if k1 != k2 and t2 - t1 <= SWITCH_GAP:
+                switch[(a, b)] += 1
+
     concurrent: dict[tuple[int, int], int] = defaultdict(int)
     minute: dict[tuple[int, str], set[int]] = defaultdict(set)
     for kid, ts, status, _c, src, _l in rows:
@@ -137,13 +159,17 @@ async def scan(db, now: float) -> list[dict[str, Any]]:
     for key in candidates:
         a, b = key
         sig = dict(pairs[key]["signals"])
-        if switch.get(key, 0) >= 4:
+        if switch.get(key, 0) >= 2:
             sig["switch"] = switch[key]
-        if concurrent.get(key, 0) >= 3:
+        if concurrent.get(key, 0) >= 1:
             sig["concurrent"] = concurrent[key]
-        score = (min(50, 25 * sig.get("handoff", 0)) + (15 if "switch" in sig else 0)
-                 + (20 if "concurrent" in sig else 0) + (30 if sig.get("rare_net") else 0)
-                 + (15 if sig.get("rare_client") else 0) + (10 if sig.get("same_src") else 0))
+        score = (min(50, 25 * sig.get("handoff", 0))
+                 + (20 if sig.get("switch", 0) >= 4 else (15 if sig.get("switch", 0) >= 2 else 0))
+                 + (20 if sig.get("concurrent", 0) >= 2 else (10 if sig.get("concurrent", 0) >= 1 else 0))
+                 + (30 if sig.get("rare_net") else 0)
+                 + (25 if sig.get("same_sig") else 0)
+                 + (15 if sig.get("rare_client") else 0)
+                 + (10 if sig.get("same_src") else 0))
         behavioral = any(s in sig for s in ("handoff", "switch", "concurrent"))
         if score >= FLAG_SCORE and behavioral:
             out.append({"keys": [a, b], "names": [names.get(a, f"#{a}"), names.get(b, f"#{b}")],
@@ -159,6 +185,8 @@ def describe(signals: dict[str, Any]) -> str:
         parts.append(f"来回交替 {signals['switch']} 次")
     if signals.get("concurrent"):
         parts.append(f"同网段同时出图 {signals['concurrent']} 次")
+    if signals.get("same_sig"):
+        parts.append("出图习惯完全相同")
     if signals.get("rare_net"):
         parts.append("少见网段相同")
     if signals.get("rare_client"):

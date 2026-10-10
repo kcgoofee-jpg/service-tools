@@ -124,7 +124,7 @@ def build_client() -> tuple[discord.Client, app_commands.CommandTree, discord.Ob
                 lines.append(f"⏳ 上游限流冷却中，约 {up['image_cooldown_seconds']} 秒后恢复生图")
         await interaction.followup.send("\n".join(lines), ephemeral=True)
 
-    @tree.command(name="反馈", description="给站长提意见：填一份小问卷（只有你能看到，不会私信你）", guild=guild)
+    @tree.command(name="反馈", description="给站长提意见：5 道选择题，30 秒填完（只有你能看到，不会私信你）", guild=guild)
     async def feedback_cmd(interaction: discord.Interaction):
         """弹出 Discord 自带表单。成员自己发起，不私信、不群发（680009 申诉期规则）。"""
         status, data = await backend("/self-register/feedback/questions", interaction)
@@ -138,16 +138,15 @@ def build_client() -> tuple[discord.Client, app_commands.CommandTree, discord.Ob
 
         modal = FeedbackModal(timeout=900)
         inputs = []
-        for q in qs:
-            field = discord.ui.TextInput(
-                label=str(q["label"])[:45], required=bool(q.get("required")), max_length=int(q.get("max", 1000)),
-                style=discord.TextStyle.paragraph if q.get("style") == "long" else discord.TextStyle.short)
-            modal.add_item(field)
+        for q in qs:      # 每题一个必填下拉单选（discord.py 2.6+ 的 Label 包 Select）
+            field = discord.ui.Select(placeholder="请选择", required=True, min_values=1, max_values=1,
+                                      options=[discord.SelectOption(label=str(o)[:100]) for o in q["options"][:25]])
+            modal.add_item(discord.ui.Label(text=str(q["label"])[:45], component=field))
             inputs.append((q["id"], field))
 
         async def on_submit(modal_interaction: discord.Interaction):
             await modal_interaction.response.defer(ephemeral=True)
-            answers = {qid: str(field.value or "") for qid, field in inputs}
+            answers = {qid: (field.values[0] if field.values else "") for qid, field in inputs}
             code, result = await backend("/self-register/feedback", modal_interaction,
                                          extra={"answers": answers,
                                                 "username": str(getattr(modal_interaction.user, "name", "") or "")[:80]})
