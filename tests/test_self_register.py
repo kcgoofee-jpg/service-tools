@@ -453,3 +453,49 @@ class HardeningTests(MemberRoleTests):
         self.assertEqual([c[0] for c in self.role_calls[before:]], ["PUT"])     # 锁内不去摘身份组，只重新挂上
         self.assertEqual(await self.db._db.execute_fetchall("SELECT 1 FROM pending_role_removals"), [])
         self.assertEqual(await self.count("api_keys"), 1)
+
+
+class DepartedSweepTests(RegistrationTests):
+    """退群回收：每人每天核对一次；只有 Discord 明确说「不是成员」(404/10007) 才删 Key，其他错误一律跳过。"""
+
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        self.member_answers = {}
+        inner = self.http._transport
+
+        def sweep(request):
+            if request.method == "GET" and re.match(r"^/api/v10/guilds/\d+/members/\d+$", request.url.path):
+                return self.member_answers.get(request.url.path.rsplit("/", 1)[-1], httpx.Response(200, json={}))
+            return inner.handler(request)
+        self.http = httpx.AsyncClient(transport=httpx.MockTransport(sweep), base_url="https://discord.com")
+        self.service.http = self.http
+
+    async def test_only_confirmed_departures_are_revoked(self):
+        for uid in ("777", "778", "779", "780"):
+            await self.mint(uid)
+        self.member_answers = {
+            "777": httpx.Response(404, json={"code": 10007, "message": "Unknown Member"}),   # 退群了
+            "778": httpx.Response(404, json={"code": 10004, "message": "Unknown Guild"}),    # 机器人配置问题：不能误删
+            "779": httpx.Response(429, json={"retry_after": 1}),                             # 限流：下轮再查
+        }
+        now = time.time()
+        removed = 0
+        for _ in range(4):
+            removed += await self.service.sweep_departed(now=now)
+        self.assertEqual(removed, 1)
+        left = {r[0] for r in await self.db._db.execute_fetchall("SELECT discord_id FROM discord_registrations")}
+        self.assertEqual(left, {"778", "779", "780"})
+        self.assertEqual(await self.count("api_keys"), 3)
+        checked = dict(await self.db._db.execute_fetchall("SELECT discord_id, member_checked_at FROM discord_registrations"))
+        self.assertEqual(checked["780"], now)                  # 在服务器：今天不再查
+        self.assertEqual(checked["778"], now - 86400 + 3600)   # 没查清：1 小时后重查，不挡住队列
+        self.member_answers = {}
+        await self.service.sweep_departed(now=now + 60)         # 778 / 779 重查，780 今天已查过
+        self.assertEqual(await self.service.sweep_departed(now=now + 60), 0)
+
+    async def test_kill_switch(self):
+        await self.mint("777")
+        await self.db.set_setting("member_sweep", "0")
+        self.member_answers = {"777": httpx.Response(404, json={"code": 10007})}
+        self.assertEqual(await self.service.sweep_departed(), 0)
+        self.assertEqual(await self.count("discord_registrations"), 1)

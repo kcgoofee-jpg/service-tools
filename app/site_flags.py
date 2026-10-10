@@ -48,7 +48,9 @@ IMAGE_RETENTION = Spec("audit_image_retention_days", "int", 3, "audit", "原图�
 SHARE_MODE = Spec("share_guard_mode", "choice", "observe", "share_guard", "防分享：enforce 处罚 / observe 只记录 / off",
                   choices=("enforce", "observe", "off"))
 
-ALL = (WEB_LOGIN_PAUSED, ECONOMY, DM_ENABLED, WAITLIST_DM, ISSUE_HOURLY_CAP, REGISTER_OPEN,
+MEMBER_SWEEP = Spec("member_sweep", "flag", True, "registration", "退群回收：每人每天核对一次是否还在服务器，不在就删 Key")
+
+ALL = (MEMBER_SWEEP, WEB_LOGIN_PAUSED, ECONOMY, DM_ENABLED, WAITLIST_DM, ISSUE_HOURLY_CAP, REGISTER_OPEN,
        GLOBAL_DAILY_V5, GLOBAL_MONTHLY_ANLAS, GUARD_BASE, ALGO_NOTICE, IMAGE_RETENTION, SHARE_MODE)
 
 
