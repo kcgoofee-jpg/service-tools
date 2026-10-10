@@ -210,3 +210,19 @@ def test_choose_rate_guards_unverified_and_mismatched_readings():
     assert r == 5.0 and info["api"] is None
     r, info = quota_algo.choose_rate(None, -3.0)           # 实测是负数（比如当天账号被别处用了）：不用
     assert r == 5.0 and info["measured"] is None
+
+
+@pytest.mark.asyncio
+async def test_quiet_recovery_uses_only_fresh_snapshots_without_v5_usage(tmp_path):
+    # 夜里没人用 V5 时，两次「主动读」之间剩余的上涨 = 纯恢复；旧缓存（fresh=0）不能用，有 V5 出图的时段也不能用
+    from app.database import Database
+    db = Database(str(tmp_path / "q.db"))
+    await db.connect()
+    t0 = 1_000_000.0
+    rows = [(t0, 80, 1), (t0 + 3600 * 2, 80.5, 1), (t0 + 3600 * 4, 81, 1), (t0 + 3600 * 6, 81.5, 0), (t0 + 3600 * 8, 82, 1)]
+    for ts, p, f in rows:
+        await db._db.execute("INSERT INTO upstream_snapshots(ts, v5_percent, fresh) VALUES (?,?,?)", (ts, p, f))
+    await db._db.commit()
+    q = await quota_algo.quiet_recovery(db, t0 + 3600 * 9)
+    assert q is not None and q["hours"] == 4.0 and q["rate"] == 6.0      # 只算前两段（4 小时涨 1%）
+    await db.close()
