@@ -68,6 +68,8 @@ def capture_prompts(body: dict) -> tuple[str, str, str]:
     neg_base, neg_chars = _captions(p.get("v4_negative_prompt"))
     if not positive:
         positive = pos_base
+    if not negative:                 # 只在 v4_negative_prompt 里写负面词的客户端，以前会漏记
+        negative = neg_base
     extra = {
         "char_prompts": pos_chars[:12],
         "char_negatives": neg_chars[:12],

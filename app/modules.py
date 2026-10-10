@@ -108,9 +108,7 @@ def allocation(state) -> Module:
         if not last or last.get("enabled") is False:
             return []
         v5, a, b = last.get("v5") or {}, last.get("ceiling"), last.get("base")
-        each, people, glob = v5.get("each") or 0, v5.get("people") or 0, v5.get("global") or 0
-        reg_img = int(float(await db.get_setting("register_daily_images", 0) or 0))
-        reg_v5 = int(float(await db.get_setting("register_daily_v5", 0) or 0))
+        each = v5.get("each") or 0
         drift = int(await _q1(db, "SELECT COUNT(*) FROM api_keys WHERE quota_auto=1 AND is_admin=0 AND is_test=0 "
                                   "AND enabled=1 AND (daily_images<>? OR daily_v5<>?)", a, each) or 0)
         base_now = state.guard.values.get("base_daily_images", 0)

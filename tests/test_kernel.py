@@ -7,7 +7,7 @@ import pytest_asyncio
 
 from app.config import Settings
 from app.database import Database
-from app.kernel import Check, Kernel, Module, Param, confirm
+from app.kernel import Check, Kernel, Module, Param
 from app.state import GateState
 
 
@@ -22,11 +22,6 @@ async def state():
     yield st
     await st.db.close()
     tmp.cleanup()
-
-
-def test_confirm_needs_two_independent_signals():
-    assert confirm([("网络", True), ("客户端", False)]) == (False, ["网络"])
-    assert confirm([("网络", True), ("客户端", True), ("习惯", False)])[0]
 
 
 @pytest.mark.asyncio

@@ -400,11 +400,6 @@ def estimate_image_cost(params: dict, is_opus: bool = True, *,
     return {"anlas": per * paid_outputs + reference_cost, "v5": 0}
 
 
-def estimate_image_anlas(params: dict, is_opus: bool = True) -> int:
-    """兼容旧接口：只返回 Anlas 部分。"""
-    return estimate_image_cost(params, is_opus)["anlas"]
-
-
 # ------------------------------------------------------------ 图片钳制 ----
 
 def fit_size(width: int, height: int, max_pixels: int) -> Tuple[int, int]:

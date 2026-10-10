@@ -1,6 +1,8 @@
 """Private bot bridge and public OAuth callback; never render API keys to a browser."""
 from __future__ import annotations
 
+from typing import Any, Optional
+
 import hmac
 
 from fastapi import APIRouter, HTTPException, Request
@@ -95,7 +97,6 @@ async def admin_ops(request: Request, body: Ops):
     _checked(service, body)
     _admin_actor(service, body)
     gate = request.app.state.gate
-    from . import features as feature_defs, ops
     on = body.value.lower() in ("1", "on", "true", "开")
     target = f"Discord:{body.target}" if body.target else ""
     params = " ".join(x for x in (body.feature, body.value) if x)

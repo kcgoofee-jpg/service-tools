@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import os
 from types import SimpleNamespace
-from typing import Any, Optional
+from typing import Any
 
 from . import features
 from .action_log import log_action

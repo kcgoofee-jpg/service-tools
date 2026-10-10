@@ -5,7 +5,6 @@ import pytest
 from app.policy import (
     clamp_image_params,
     clamp_text_params,
-    estimate_image_anlas,
     estimate_image_cost,
     estimate_tokens,
     fit_size,
@@ -160,9 +159,9 @@ def test_image_model_tier_is_an_explicit_allowlist():
 
 def test_img2img_free_and_paid_step_boundary():
     payload = img_payload(image="AAAA", strength=0.7)
-    assert estimate_image_anlas(payload) == 0
+    assert estimate_image_cost(payload)["anlas"] == 0
     payload["parameters"]["steps"] = 29
-    assert estimate_image_anlas(payload) == 14
+    assert estimate_image_cost(payload)["anlas"] == 14
 
 
 @pytest.mark.parametrize("model,settings,anlas,v5", [

@@ -41,7 +41,6 @@
 from __future__ import annotations
 
 import json
-import math
 import time
 from datetime import datetime, timedelta
 from typing import Any, Optional
@@ -171,14 +170,6 @@ async def _members(db) -> list[int]:
     rows = await db._db.execute_fetchall(
         "SELECT id FROM api_keys WHERE enabled=1 AND is_admin=0 AND is_test=0 AND quota_auto=1")
     return [r[0] for r in rows]
-
-
-async def _active(db, days: int, now: float) -> int:
-    since = [(datetime.fromtimestamp(now) - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(days)]
-    r = await db._db.execute_fetchall(
-        f"SELECT COUNT(DISTINCT c.key_id) FROM counters c JOIN api_keys k ON k.id=c.key_id "
-        f"WHERE c.images>0 AND k.is_test=0 AND k.is_admin=0 AND c.day IN ({','.join('?' * len(since))})", since)
-    return int(r[0][0])
 
 
 async def _active_v5(db, days: int, now: float) -> int:

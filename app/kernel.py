@@ -13,7 +13,8 @@
   · 内存里的每小时计数 ↔ 用量日志（10-10 发现重启会清零，就是这类检查本该抓到的）
   · 分配给所有人的 V5 总和 ↔ 容量模块给出的全站 V5
   · 领 Key 默认额度 ↔ 算法当前给出的额度
-不一致就记进 Bug 追踪并在后台标红；会处罚成员的决定必须有 ≥ 2 个独立证据（见 confirm()）。
+不一致就记进 Bug 追踪并在后台标红。会处罚成员的决定要有强证据：由 share_guard 落实（辅助证据只在 72 小时内
+出现过「网络 + 客户端」强证据时才计分），诚信模块的校验「每个处罚都有强证据」再独立核对一遍。
 """
 from __future__ import annotations
 
@@ -59,12 +60,6 @@ class Module:
     get_enabled: Optional[Callable[["Kernel"], Any]] = None
     set_enabled: Optional[Callable[["Kernel", bool], Any]] = None
     hard_note: str = ""               # 关闭后哪些东西仍然生效（给站长看）
-
-
-def confirm(evidence: list[tuple[str, bool]], need: int = 2) -> tuple[bool, list[str]]:
-    """多指标互证：返回 (是否成立, 成立的证据名)。处罚类决定一律 need ≥ 2。"""
-    hits = [name for name, ok in evidence if ok]
-    return len(hits) >= need, hits
 
 
 class Kernel:

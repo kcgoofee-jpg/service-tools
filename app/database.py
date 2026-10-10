@@ -790,10 +790,6 @@ class Database:
         await self._db.commit()
         return cur.rowcount or 0
 
-    async def audit_image_bytes(self) -> int:
-        r = await self._db.execute_fetchall("SELECT COALESCE(SUM(LENGTH(image)),0) FROM generation_audit")
-        return int(r[0][0] or 0)
-
     async def touch_key_source(self, key_id: int, net_hash: str, label: str,
                                now: float, window_start: float) -> bool:
         """记录来源网段；返回该网段在窗口内是否为新出现（用于决定是否检查分享告警）。"""
