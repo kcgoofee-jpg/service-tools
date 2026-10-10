@@ -64,6 +64,8 @@
 | 领 Key 限速 | 每小时最多 12 人（`issue_hourly_cap`） |
 | 名额 | 上限 61；候补邀请**不私信**（`waitlist_dm` 默认 0），公告频道发一条汇总 |
 | 网页 Discord 登录 | **暂停**（`web_login_paused` 默认 1，设 0 才开放）：首页不显示按钮，服务端 `/login` 也直接跳回首页、不发起 OAuth。应用被 Discord 标记，申诉 10-10 已提交；领 Key 用 `/register`、查额度用 `/quota` |
+| 网页 Key 登录 | `POST /login/key`：粘贴 `/register` 领到的 Key 换取同一个成员会话（按 discord_id 签发，30 天）；后台手建、未绑定 Discord 的 Key 不行；每 IP 10 分钟错 8 次锁定；校验 Origin 防登录 CSRF。不受 `web_login_paused` 影响 |
+| 作品备份（beta） | 首页登录后「作品备份」：EPUB 画册（一图一页 + 提示词/参数）或原图 ZIP（+ prompts.txt），每人 60 秒 1 次，只含仍在保留期内的原图 |
 | 后台 Key 额度 | 后台新建的 Key 为手动额度（算法不覆盖）；编辑 Key 只提交改动过的字段，只有改了额度才转为手动 |
 | `/register` | 由斜杠命令直接发 Key，回复只有本人可见，不走 OAuth、不私信 |
 | 免费规格 | V4.5 ≤ 1024×1024；V5 用预设尺寸（如 832×1216）；≤ 28 步；每次 1 张；图生图 / Vibe 关闭 |

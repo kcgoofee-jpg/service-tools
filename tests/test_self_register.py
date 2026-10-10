@@ -325,6 +325,32 @@ class OpenRegistrationTests(RegistrationTests):
             opened = await client.get("/login", follow_redirects=False)
             self.assertIn("discord.com", opened.headers["location"])
 
+    async def test_key_login_issues_member_session_only_for_registered_keys(self):
+        # 网页 OAuth 暂停期间：用 /register 领到的 Key 登录首页；乱填 / 后台手建的 Key 都不行，错多了限流
+        from types import SimpleNamespace
+        from app.registration_routes import member_router, MEMBER_COOKIE, _KEY_LOGIN_FAILS
+        app = FastAPI()
+        app.include_router(member_router)
+        app.state.registrar = self.service
+        app.state.gate = SimpleNamespace(db=self.db, settings=SimpleNamespace(secret_key="k" * 40, data_dir=None))
+        await self.mint()
+        did = (await self.db._db.execute_fetchall("SELECT discord_id FROM discord_registrations"))[0][0]
+        row = await self.service.key_row_for(did)
+        await self.db._db.execute("UPDATE discord_registrations SET key_id=-1")     # 解绑后同一个 Key 就成了"后台手建"
+        _KEY_LOGIN_FAILS.clear()
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="https://fixture.invalid") as client:
+            self.assertEqual((await client.post("/login/key", json={"key": "nai-wrong"})).status_code, 401)
+            self.assertEqual((await client.post("/login/key", json={"key": row["token"]})).status_code, 401)
+            await self.db._db.execute("UPDATE discord_registrations SET key_id=?", (row["id"],))
+            ok = await client.post("/login/key", json={"key": " " + row["token"] + " "})
+            self.assertEqual(ok.status_code, 200)
+            self.assertIn(MEMBER_COOKIE, ok.headers["set-cookie"])
+            self.assertTrue(ok.cookies[MEMBER_COOKIE].strip('"').startswith(f"{did}:"))
+            for _ in range(8):
+                await client.post("/login/key", json={"key": "nai-wrong"})
+            self.assertEqual((await client.post("/login/key", json={"key": row["token"]})).status_code, 429)
+        _KEY_LOGIN_FAILS.clear()
+
     async def test_registration_and_ban_leave_the_waitlist(self):
         self.service.max_users = 1
         await self.db._db.execute("INSERT INTO waitlist(discord_id, name, joined_at) VALUES ('777','',0), ('999','',1)")

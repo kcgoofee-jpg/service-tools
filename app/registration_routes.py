@@ -380,6 +380,43 @@ async def login_callback(request: Request, code: str = "", state: str = ""):
     return resp
 
 
+class KeyLogin(BaseModel):
+    key: str = ""
+
+
+_KEY_LOGIN_FAILS: dict[str, list[float]] = {}     # 每个来源 IP 的失败时间（内存）：10 分钟内最多错 8 次
+
+
+@member_router.post("/login/key")
+async def login_with_key(request: Request, body: KeyLogin):
+    """用自己的 Key 登录首页（不走 Discord OAuth）：网页登录暂停期间也能看额度、打包下载原图。
+    只认已绑定 Discord 领取记录的 Key；会话按 discord_id 签发，之后 /resetkey 换 Key 也不掉线。"""
+    origin = request.headers.get("origin", "")
+    if origin and origin.split("://", 1)[-1] != request.headers.get("host", ""):
+        raise HTTPException(403, "只接受本站页面的登录")        # 挡登录 CSRF：外站不能把访客登进别人的会话
+    ip = request.client.host if request.client else "unknown"
+    now = _time.time()
+    fails = [t for t in _KEY_LOGIN_FAILS.get(ip, []) if now - t < 600]
+    if len(fails) >= 8:
+        raise HTTPException(429, "尝试次数太多，请 10 分钟后再试")
+    token = (body.key or "").strip()
+    gate = request.app.state.gate
+    row = await gate.db.get_key_by_token(token) if token.startswith("nai-") and len(token) <= 200 else None
+    reg = await gate.db._db.execute_fetchall(
+        "SELECT discord_id FROM discord_registrations WHERE key_id=?", (row["id"],)) if row is not None else []
+    if not reg:
+        fails.append(now)
+        _KEY_LOGIN_FAILS[ip] = fails
+        raise HTTPException(401, "Key 不对，或这个 Key 不是通过 /register 领取的")
+    _KEY_LOGIN_FAILS.pop(ip, None)
+    discord_id = str(reg[0][0])
+    resp = JSONResponse({"ok": True})
+    exp = int(now) + SESSION_DAYS * 86400
+    _set_cookie(resp, MEMBER_COOKIE, _sign_member(request, discord_id, exp), SESSION_DAYS * 86400)
+    await _log_bot(request, discord_id, "Key 登录网页")
+    return resp
+
+
 @member_router.post("/logout")
 async def logout(request: Request):
     resp = JSONResponse({"ok": True})

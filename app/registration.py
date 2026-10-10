@@ -62,7 +62,7 @@ def welcome_dm(key: str, site: str, quota: str, expires_days: int, idle_days: in
             f"2. 接口地址填 `{site}`（**不要**加 /v1）\n"
             f"3. API Key 填上面 `nai-` 开头的整串，保存后随便生成一张图试试\n"
             f"其他支持自定义 NovelAI 地址的客户端同样这样填。\n\n"
-            f"**不确定填对没有？** 打开 {site} 在「查看我的额度」里粘贴 Key，能显示额度就说明 Key 正常。\n\n"
+            f"**不确定填对没有？** 打开 {site} 粘贴 Key 点「用 Key 登录」，能显示额度就说明 Key 正常；登录后还能打包下载自己的作品。\n\n"
             f"**规则**\n" + "\n".join(rules) + "\n\n"
             f"**常用命令**：`/quota` 看额度和服务状态 · `/resetkey` Key 丢了或泄露时换新 · `/help` 简要说明\n"
             f"遇到问题到 🛠️｜问题反馈 发截图（记得打码 Key）。")

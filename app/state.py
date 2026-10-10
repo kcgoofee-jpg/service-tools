@@ -356,7 +356,7 @@ class GateState:
                 text = (f"🦉 猫头鹰公益站提醒：你领取的 Key 还没有成功生成过图片。领取后连续 {days} 天没有使用会自动回收，"
                         f"你的 Key 还剩约 24 小时。\n"
                         f"配置方法（以柏宝绘为例）：渠道 → 配置 → 新建接入点，接口地址填 `{site}`，API Key 填私信里 `nai-` 开头的 Key。"
-                        f"可以先在 {site} 的「查看我的额度」里粘贴 Key 测试。\n"
+                        f"可以先在 {site} 首页粘贴 Key 点「用 Key 登录」测试。\n"
                         f"遇到问题可在 🛠️｜问题反馈 发截图；Key 丢了用 /resetkey 重新获取。")
             ok = await send_dm(row["discord_id"], text)
             blocked = getattr(getattr(send_dm, "__self__", None), "last_dm_block", "") if not ok else ""
