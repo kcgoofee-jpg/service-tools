@@ -1571,3 +1571,16 @@ def test_injected_browser_scripts_are_not_bugs():
     ours = "TypeError: x is undefined\n    at renderMe (https://gate.davidzhao.top/:812:9)"
     assert not main._injected_script_error("Uncaught TypeError", ours, "gate.davidzhao.top")
     assert not main._injected_script_error("Uncaught TypeError", "")       # 没堆栈：保留，宁可多看一条
+
+
+def test_upstream_parameter_problem_rejects_more_than_six_characters():
+    # 2026-10-10 随风飞扬：7 个角色，上游直接 500；6 个以内照常放行，V5 不受这条限制
+    def body(n, model="nai-diffusion-4-5-full"):
+        caps = [{"char_caption": f"c{i}", "centers": [{"x": 0.5, "y": 0.5}]} for i in range(n)]
+        b = image_body(v4_prompt={"caption": {"base_caption": "x", "char_captions": caps}},
+                       characterPrompts=[{"prompt": f"c{i}"} for i in range(n)])
+        b["model"] = model
+        return b
+    assert "最多 6 个" in (policy.upstream_parameter_problem(body(7)) or "")
+    assert policy.upstream_parameter_problem(body(6)) is None
+    assert policy.upstream_parameter_problem(body(7, "nai-diffusion-5-full")) is None
