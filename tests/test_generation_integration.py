@@ -649,3 +649,20 @@ async def test_status_code_distribution_counts_member_api(state):
     codes = {c for (_h, c) in status_stats._PENDING}
     assert {200, 401} <= codes
     assert status_stats.MEANING[401].startswith("Key")
+
+
+@pytest.mark.asyncio
+async def test_v5_borrow_lets_capped_member_continue_only_when_open(state):
+    # 公益版空闲借用：顶到个人 V5 上限后，只有借用开放（账号快满）时才能多用
+    from app import quota_algo
+    key = dict(state.db.keys["fixture-1"], daily_v5=1, exclude_global_v5=True, is_admin=False)
+    state.db.charges = [(key["id"], {"v5": 1})]
+    quota_algo.BORROW.clear(); quota_algo.BORROW.update({"open": False})
+    with pytest.raises(Exception) as caught:
+        await main.quota_image_check(key, {"v5": 1, "anlas": 0})
+    assert "V5" in str(getattr(caught.value, "detail", caught.value))
+    quota_algo.BORROW.update({"open": True, "bonus": 1, "heavy_bonus": 1, "heavy": []})
+    try:
+        await main.quota_image_check(key, {"v5": 1, "anlas": 0})
+    finally:
+        quota_algo.BORROW.clear(); quota_algo.BORROW.update({"open": False})

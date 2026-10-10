@@ -176,3 +176,10 @@ async def test_key_guard_ignores_site_level_rejections(tmp_path):
         assert [d["key"] for d in out["rules"]["key_guard"]["value"]] == [key["id"]]
     finally:
         await db.close()
+
+
+def test_slots_not_added_when_v5_low():
+    from app.autopilot import slots_rule
+    cap, why = slots_rule(75, 75, 3, 0.3, 0, 0, v5_pct=40)
+    assert cap == 75 and "V5" in why
+    assert slots_rule(75, 75, 3, 0.3, 0, 0, v5_pct=90)[0] == 80

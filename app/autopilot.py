@@ -57,12 +57,17 @@ SLOTS_COOLDOWN = 24 * 3600    # 每天最多加一次：判断用的是「昨天
 QUEUE_BUSY_REJECTS = 5     # 一个小时里「排队的人太多」拒绝 ≥ 5 次，算这个小时高峰拥挤
 
 
+SLOTS_V5_MIN = 50          # 账号 V5 剩余低于这个百分比：不加名额（新成员也要分 V5）
+
+
 def slots_rule(cap: int, active: int, waitlist: int, day_util: float, blocked_hours: int,
-               queue_hours: int = 0) -> tuple[int, str]:
+               queue_hours: int = 0, v5_pct: Optional[float] = None) -> tuple[int, str]:
     """名额快满（空位 ≤ 2）或有人在候补，且账号昨天还有余量 → +5。余量看三样：
     日用量 < 60%（按算力折算）、被每小时上限拦的小时 < 3、高峰排队拥挤的小时 < 3。
     人多以后先卡住大家的是高峰排队（出图间隔决定的产能），全天总量可能还很宽松，所以排队也要看（2026-10-10）。
     只加不减：人多了由动态额度把每人份额调小，不踢人。"""
+    if v5_pct is not None and v5_pct < SLOTS_V5_MIN:
+        return cap, f"账号 V5 只剩 {v5_pct:.0f}%：名额不再增加"
     if blocked_hours >= 3:
         return cap, f"昨天 {blocked_hours} 个小时被每小时上限拦过：名额不再增加"
     if queue_hours >= 3:
@@ -134,7 +139,8 @@ async def run(state, registrar=None, now: Optional[float] = None) -> dict[str, A
         queue_hours = len(await _q(db, "SELECT CAST(ts/3600 AS INT) h FROM usage_log WHERE ts>=? AND ts<? "
                                        "AND reason='queue_full' GROUP BY h HAVING COUNT(*)>=?",
                                    start, start + 86400, QUEUE_BUSY_REJECTS))
-    slots, why = slots_rule(cap_now, active, waitlist, day_util, int(last.get("hourly_blocks", 0)), queue_hours)
+    v5_pct = (json.loads(await db.get_setting(quota_algo.STATE_KEY, "{}") or "{}").get("v5") or {}).get("percent")
+    slots, why = slots_rule(cap_now, active, waitlist, day_util, int(last.get("hourly_blocks", 0)), queue_hours, v5_pct)
     if last.get("coverage_hours", 0) < 20:                 # 昨天数据不完整：不据此加名额
         cov = last.get("coverage_hours")
         slots, why = cap_now, (f"昨天只有 {cov} 小时数据，名额不变" if cov is not None
