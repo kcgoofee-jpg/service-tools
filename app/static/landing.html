@@ -842,10 +842,13 @@ function fmtDate(sec){
     if(myRun){ $id('dMeK').textContent = '你的图'; $id('dMeV').textContent = '正在生成'; $id('dMeS').textContent = '通常十几秒，画好直接回到客户端'; mark('nai'); }
     else if(myPos){ $id('dMeK').textContent = '你的图'; $id('dMeV').textContent = '排第 ' + myPos.position + ' 位'; $id('dMeS').textContent = '约 ' + Math.max(5, myPos.eta) + ' 秒后开始画，画好直接回到客户端'; mark('queue'); }
     else {
-      $id('dMeK').textContent = mine ? '你的图 · 没有在排' : '现在';
+      $id('dMeK').textContent = '现在发一张图';
       if(g.cooldown){ $id('dMeV').textContent = '暂停 ' + g.cooldown + ' 秒'; $id('dMeS').textContent = 'NovelAI 限流，全站出图暂停，稍后自动恢复'; }
-      else if(!w && !run){ $id('dMeV').textContent = '空闲'; $id('dMeS').textContent = '新的图马上开始画'; }
-      else { $id('dMeV').textContent = '约 ' + Math.round((w + run) * iv) + ' 秒'; $id('dMeS').textContent = '新的图大约要等这么久'; }
+      else if(!w && !run){ $id('dMeV').textContent = '马上开始'; $id('dMeS').textContent = '没人在排队，发了就画'; }
+      else {
+        $id('dMeV').textContent = '约 ' + Math.round((w + run) * iv) + ' 秒后开始';
+        $id('dMeS').textContent = '前面有 ' + (w + run) + ' 张（' + run + ' 张在画、' + w + ' 张在排），每张约 ' + iv + ' 秒';
+      }
       mark(g.cooldown ? 'pace' : '');
     }
     /* 排队 */
