@@ -79,6 +79,7 @@ def build_client() -> tuple[discord.Client, app_commands.CommandTree, discord.Ob
     guild = discord.Object(id=int(os.environ["DISCORD_GUILD_ID"]))
     intents = discord.Intents.none()
     intents.guilds = True            # 收到「论坛新帖」事件（非特权）；斜杠命令也只需要它
+    intents.guild_messages = True    # 收到频道消息事件（非特权），只用来识别「@奶妹」；不读正文，被 @ 的消息自带 mentions
     # Message Content 是特权 Intent，原本用于画廊 AI 评论读帖子正文。画廊自动互动已关闭，
     # 不再需要它；为降低特权足迹（配合 Discord 申诉）这里不再申请。若将来恢复画廊 AI 评论，
     # 需在此加回 intents.message_content=True，并在开发者后台重新开启该 Intent。
@@ -239,6 +240,28 @@ def build_client() -> tuple[discord.Client, app_commands.CommandTree, discord.Ob
         except discord.HTTPException as exc:
             print(f"[bug] gallery comment send failed: {exc}", flush=True)
             await report_event("error", thread, author, f"发评论失败：{exc}")
+
+    mention_last: dict[int, float] = {}
+
+    @client.event
+    async def on_message(message: discord.Message):
+        """有人在频道里 @奶妹 → 回一句，并 @ 服务器主人（站长 10/10 要求）。
+        同一频道 60 秒只回一次，防刷屏；@everyone / @身份组 不算，机器人消息不理。"""
+        if (message.author.bot or message.guild is None or client.user is None
+                or client.user.id not in {u.id for u in message.mentions}):
+            return
+        now = time.monotonic()
+        if now - mention_last.get(message.channel.id, -1e9) < 60:
+            return
+        mention_last[message.channel.id] = now
+        owner = message.guild.owner_id
+        try:
+            await message.reply(f"我在床上陪主人呢 <@{owner}>",
+                                allowed_mentions=discord.AllowedMentions(users=[discord.Object(owner)], everyone=False,
+                                                                         roles=False, replied_user=False))
+            print(f"[mention] replied in #{getattr(message.channel, 'name', message.channel.id)} to {message.author.id}", flush=True)
+        except discord.HTTPException as exc:
+            print(f"[bug] mention reply failed: {exc}", flush=True)
 
     @tree.error
     async def on_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):

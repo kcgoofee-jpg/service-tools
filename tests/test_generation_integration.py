@@ -640,8 +640,8 @@ async def test_economy_trims_steps_for_auto_anlas_keys_but_not_manual(state):
 
 
 @pytest.mark.asyncio
-async def test_economy_routes_v5_full_to_medium_and_counts_medium_at_weight(state):
-    # 节约模式下 V5 Full 走官方 Medium 档；Medium 每张按 V5_MEDIUM_WEIGHT 记个人 V5 额度
+async def test_economy_routes_v5_full_to_medium(state):
+    # 节约模式下 V5 Full 走官方 Medium 档；Medium 和 High 一样每张记 1 张 V5（不打折）
     sent = []
     orig = state.nai.request
 
@@ -650,7 +650,6 @@ async def test_economy_routes_v5_full_to_medium_and_counts_medium_at_weight(stat
         return await orig(*a, **kw)
     state.nai.request = spy
     state.db.keys["fixture-1"]["allow_anlas"] = False
-    main._MEDIUM_CARRY.clear()
     state.db.kv = {"economy_mode": "on"}
     v5 = image_body(width=832, height=1216, negative_prompt="hat") | {"model": "nai-diffusion-5-full"}
     assert (await post("/ai/generate-image", v5)).status_code == 200
@@ -658,7 +657,7 @@ async def test_economy_routes_v5_full_to_medium_and_counts_medium_at_weight(stat
     state.db.kv = {}
     assert (await post("/ai/generate-image", v5)).status_code == 200
     assert sent[-1] == "nai-diffusion-5-full"                     # 关掉节约模式就按成员选的 High 出图
-    assert [main._medium_v5_units(99, 1) for _ in range(5)] == [0, 1, 0, 1, 1]
+    assert not hasattr(main, "_medium_v5_units")
 
 
 @pytest.mark.asyncio
