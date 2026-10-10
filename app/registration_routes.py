@@ -339,10 +339,18 @@ def _set_cookie(response, name: str, value: str, max_age: int) -> None:
 
 
 @member_router.get("/login")
+async def _web_login_paused(request: Request) -> bool:
+    """网页 Discord 登录是否暂停（默认暂停，设置 web_login_paused=0 才开放）：Discord 应用审核期间不发起任何 OAuth。"""
+    db = request.app.state.gate.db
+    return str(await db.get_setting("web_login_paused", "1")).strip() != "0"
+
+
 async def login_start(request: Request):
     service = getattr(request.app.state, "registrar", None)
     if service is None:
         raise HTTPException(503, "登录尚未配置")
+    if await _web_login_paused(request):      # 首页按钮已隐藏；书签 / 旧链接 / 爬虫直接访问也不能进入 OAuth
+        return RedirectResponse("/?login=paused#live")
     state = secrets.token_urlsafe(24)
     resp = RedirectResponse(service.web_login_url(state))
     _set_cookie(resp, STATE_COOKIE, state, 600)
@@ -354,11 +362,15 @@ async def login_callback(request: Request, code: str = "", state: str = ""):
     service = getattr(request.app.state, "registrar", None)
     if service is None:
         raise HTTPException(503, "登录尚未配置")
-    if not code or not state or state != request.cookies.get(STATE_COOKIE, ""):
+    if await _web_login_paused(request):
+        return RedirectResponse("/?login=paused#live")
+    if not code or not state or not hmac.compare_digest(state, request.cookies.get(STATE_COOKIE, "")):
         return RedirectResponse("/?login=failed")
     try:
         who = await service.web_identify(code)
     except RegistrationError:
+        return RedirectResponse("/?login=failed")
+    if not who.get("in_server", True):          # 不在社区服务器的 Discord 账号不发会话
         return RedirectResponse("/?login=failed")
     resp = RedirectResponse("/")
     exp = int(_time.time()) + SESSION_DAYS * 86400

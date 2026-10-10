@@ -1,4 +1,4 @@
-"""防分享：证据 + 风险分 + 自动处罚（share_guard_mode：未设置时代码默认 enforce；2026-10-10 起线上设为 observe，校准前只记录不处罚）。
+"""防分享：证据 + 风险分 + 自动处罚（share_guard_mode：未设置时默认 observe；线上为 observe，校准前只记录不处罚）。
 
 站长原则：Key 只给本人用，「做慈善眼里容不得沙子」。但一个人也会换网络、用两台设备，
 所以每条信号都要求「一个人很难做到」的模式，单次换网络不加分。
@@ -177,8 +177,9 @@ class ShareGuard:
         return until if until > (time.time() if now is None else now) else 0.0
 
     async def mode(self) -> str:
-        v = await self.db.get_setting(MODE_SETTING, "enforce")
-        return v if v in ("enforce", "observe", "off") else "enforce"
+        """未设置或值不对时按 observe 处理（fail-closed）：库重建 / 恢复后不会突然开始处罚成员。"""
+        v = await self.db.get_setting(MODE_SETTING, "observe")
+        return v if v in ("enforce", "observe", "off") else "observe"
 
     async def pause_key(self, key_id: int, seconds: float, reason: str, now: Optional[float] = None) -> bool:
         """非防分享的 Key 暂停（如自动驾驶对死循环重试限流）。复用 paused_until 闸门和 main.py 的拦截，

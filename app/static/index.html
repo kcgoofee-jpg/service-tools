@@ -985,6 +985,8 @@ td.note{min-width:220px}
 (function(page){ var sent = 0;
   function report(msg, src, line, stack){
     if(sent >= 5 || (src && src.indexOf(location.origin) !== 0)) return;
+    // 堆栈里没有本站地址 = 手机浏览器 / 插件往页面里注入的脚本（如 hit_test、native_call_*），不是我们的代码，修不了也不上报
+    var st = String(stack || ''); if(st && st.indexOf(location.origin) < 0) return;
     sent++;
     try{ navigator.sendBeacon ? navigator.sendBeacon('/public/client-error', JSON.stringify({page:page, msg:String(msg).slice(0,200), src:String(src||'').replace(location.origin,''), line:line||0, stack:String(stack||'').slice(0,1500)}))
       : fetch('/public/client-error', {method:'POST', body:JSON.stringify({page:page, msg:String(msg).slice(0,200)}), keepalive:true}); }catch(_){}
@@ -2223,6 +2225,16 @@ async function saveKey(){
     if(editingId){
       const cur = keysCache.find(x=>x.id===editingId), nf = readFeatMode('f_feat_mode','#f_feat_list');
       if(!cur || !sameFeat(nf, cur.features)) body.features = nf;
+      // 只发改动过的字段：后端只要收到额度字段就会把这把 Key 转为「手动额度」、退出动态额度算法，
+      // 只改名字 / RPM 时不能顺带把成员踢出算法管理
+      if(cur){
+        const same = k => { const a = body[k], b = cur[k];
+          if(typeof a === 'boolean') return a === !!b;
+          if(typeof a === 'number') return Number(b) === a;
+          return String(b ?? '') === String(a ?? ''); };
+        ['name','image_model_scope','daily_anlas','daily_images','daily_v5','monthly_anlas','daily_text_tokens',
+         'rpm','allow_anlas','allow_img2img','exclude_global_v5','is_test'].forEach(k => { if(k in body && same(k)) delete body[k]; });
+      }
       await api('/admin/api/keys/'+editingId, {method:'PATCH', body: JSON.stringify(body)});
       toast('已保存', 'ok');
     }else{

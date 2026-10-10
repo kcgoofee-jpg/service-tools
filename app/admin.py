@@ -464,6 +464,11 @@ async def create_key(request: Request):
         "features": await _new_key_features(request, body),
         "expires_at": expires_at,
     })
+    # 后台手动建的 Key 用站长填的额度和模型范围：标为手动，动态额度算法不覆盖（否则 10 分钟内会被改成算法默认值、
+    # 连 V4.5-only 也会被开成 V5）；Anlas 同理。要交给算法，可在成员页切回「自动」。
+    await st.db._db.execute("UPDATE api_keys SET quota_auto=-1, anlas_auto=-1 WHERE id=?", (row["id"],))
+    await st.db._db.commit()
+    row = await st.db.get_key(row["id"])
     c = await st.db.get_counter(row["id"], st.day())
     return {"key": _key_json(row, c, 0)}
 
@@ -480,9 +485,13 @@ async def _notify_member(request: Request, key_id: int, text: str) -> None:
         sent = await registrar.send_dm(discord_id, "🦉 猫头鹰公益站通知：" + text)
     except Exception:              # 私信失败绝不能让后台操作本身失败
         sent = False
+    blocked = "" if sent else getattr(registrar, "last_dm_block", "")
+    import re as _re
+    summary = _re.sub(r"nai-[A-Za-z0-9_\-]+", "nai-***", text)[:80]     # 操作日志里绝不能出现明文 Key
     from .action_log import log_action
     await log_action(request.app.state.gate.db, "系统", "私信成员", f"Key #{key_id}",
-                     text[:120] if sent else "私信失败（对方可能关闭了私信）", ok=sent)
+                     (f"已私信：{summary}" if sent else f"未私信（{blocked}）：{summary}" if blocked
+                      else "私信失败（对方可能关闭了私信）"), ok=sent or bool(blocked))
 
 
 def _describe_changes(before, fields: dict) -> list[str]:

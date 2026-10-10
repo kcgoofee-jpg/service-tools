@@ -7,12 +7,18 @@ import asyncio
 import os
 import secrets
 import time
+from collections import deque
 from urllib.parse import urlencode
 
 import httpx
 
 from . import features
 from .policy import gen_key
+
+# 私信总闸门：所有私信（闲置提醒、候补邀请、Anlas 通知、后台操作通知、防分享处罚）都经过 send_dm。
+# 默认关（fail-closed）：新库、恢复备份、设置丢失时都不会私信。2026-10-10 Discord 应用被标记的信号之一就是批量私信。
+DM_SETTING = "dm_enabled"
+DM_BURST, DM_WINDOW, DM_DAILY = 3, 600, 20        # 开启时也限速：10 分钟最多 3 条、24 小时最多 20 条
 
 COMMAND_GUILD = "1480185480048808009"
 MEMBERSHIP_GUILD = "1134557553011998840"
@@ -93,6 +99,8 @@ class RegistrationService:
         self.redirect_uri = redirect_uri
         self.pending: dict[str, tuple[str, float]] = {}
         self.lock = asyncio.Lock()
+        self._dm_sent: deque = deque()             # 最近 24 小时成功发出的私信时间（进程内）
+        self.last_dm_block = ""                     # 最近一次被闸门拦下的原因，供调用方写日志
 
     async def count_active(self) -> int:
         """占用名额的人数：持有未过期 Key 的已注册用户。Key 过期或被删则名额释放。
@@ -262,10 +270,10 @@ class RegistrationService:
     async def invite_waitlist(self, now: float | None = None, announce=None) -> int:
         """维护循环调用：过期的邀请让给下一位；有空位就按顺序为候补保留 24 小时名额并通知。返回本次邀请数。
 
-        通知方式由设置 waitlist_dm 决定：1（默认）逐个私信；0 = 不私信，只在公告频道发一条汇总
+        通知方式由设置 waitlist_dm 决定：1 = 逐个私信（仍受私信总闸门限制）；0（默认）= 不私信，只在公告频道发一条汇总
         （Discord 应用审核期间用 0：批量私信正是 2026-10-10 被标记的信号之一）。announce 是发公告频道的函数。"""
         now = time.time() if now is None else now
-        use_dm = str(await self.db.get_setting("waitlist_dm", "1")).strip() != "0"
+        use_dm = str(await self.db.get_setting("waitlist_dm", "0")).strip() == "1"     # 默认不私信（fail-closed）
         cfg = await self.settings()
         expired = await self.db._db.execute_fetchall(
             "SELECT discord_id FROM waitlist WHERE invited_at IS NOT NULL AND invited_at <= ?", (now - WAITLIST_HOLD,))
@@ -498,8 +506,26 @@ class RegistrationService:
                 "global_name": user.get("global_name"), "avatar": user.get("avatar"),
                 "in_server": in_server, "has_role": has_role, "role_note": cfg.get("role_note") or ""}
 
+    async def dm_block_reason(self, now: float | None = None) -> str:
+        """私信能不能发：返回空串表示可以，否则返回原因（总开关关闭 / 超过限速）。"""
+        if str(await self.db.get_setting(DM_SETTING, "0")).strip() != "1":
+            return "私信总开关已关闭"
+        now = time.time() if now is None else now
+        while self._dm_sent and self._dm_sent[0] < now - 86400:
+            self._dm_sent.popleft()
+        if len(self._dm_sent) >= DM_DAILY:
+            return f"24 小时内已发 {DM_DAILY} 条私信，达到上限"
+        if sum(1 for t in self._dm_sent if t > now - DM_WINDOW) >= DM_BURST:
+            return f"10 分钟内已发 {DM_BURST} 条私信，达到上限"
+        return ""
+
     async def send_dm(self, discord_id: str, text: str) -> bool:
-        """机器人私信成员；对方关闭私信等失败返回 False，不抛异常。"""
+        """机器人私信成员（唯一出口，经过总闸门和限速）；被拦下或对方关闭私信都返回 False，不抛异常。
+        被闸门拦下时原因写在 self.last_dm_block。"""
+        self.last_dm_block = await self.dm_block_reason()
+        if self.last_dm_block:
+            return False
+        self._dm_sent.append(time.time())
         try:
             channel = await self._discord("POST", "/users/@me/channels", bearer="Bot " + self.bot_token,
                                           json={"recipient_id": str(discord_id)})

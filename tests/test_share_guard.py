@@ -19,6 +19,7 @@ async def guard():
     tmp = tempfile.TemporaryDirectory()
     db = Database(str(Path(tmp.name) / "g.sqlite"))
     await db.connect()
+    await db.set_setting("share_guard_mode", "enforce")    # 这些测试验证的是执行模式下的逐级处罚
     g = ShareGuard(db)
     yield g
     await db.close()
@@ -242,3 +243,18 @@ async def test_pause_key_sets_reason_and_is_idempotent(guard):
     assert guard.paused_until(1)
     assert guard.pause_reasons[1] == "你的 Key 短时间内被大量拒绝"
     assert not await guard.pause_key(1, 3600, "再次")      # 已在暂停中，不重复
+
+
+@pytest.mark.asyncio
+async def test_mode_defaults_to_observe_when_unset():
+    """未设置 / 值不对时按 observe（fail-closed）：库重建或恢复后不会突然开始处罚成员。"""
+    tmp = tempfile.TemporaryDirectory()
+    db = Database(str(Path(tmp.name) / "g.sqlite"))
+    await db.connect()
+    try:
+        g = ShareGuard(db)
+        assert await g.mode() == "observe"
+        await db.set_setting("share_guard_mode", "bogus")
+        assert await g.mode() == "observe"
+    finally:
+        await db.close(); tmp.cleanup()

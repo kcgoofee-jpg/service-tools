@@ -166,7 +166,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "2.12.3"
+__version__ = "2.13.0"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -241,7 +241,7 @@ class RequestContextMiddleware:
             await self.app(scope, receive, send_with_id)
         except Exception as exc:
             # 500 处理器在这个中间件外面执行，那时上下文已还原：先把请求编号 / Key 挂到异常上
-            exc._gate_ctx = (rid.decode(), _REQUEST_KEY.get(), _REQUEST_LOGGED.get())
+            exc._gate_ctx = (rid.decode(), _REQUEST_KEY.get(), _REQUEST_LOGGED.get() or request_timing.logged())
             raise
         finally:
             _REQUEST_KEY.reset(key_token)
@@ -277,7 +277,7 @@ NOTICE_PREFIX = "猫头鹰公益站提醒："     # 成员在客户端里看到�
 @app.exception_handler(GateError)
 async def gate_error_handler(request: Request, exc: GateError):
     key = _REQUEST_KEY.get()
-    if key is not None and 400 <= exc.status < 500 and not _REQUEST_LOGGED.get():
+    if key is not None and 400 <= exc.status < 500 and not (_REQUEST_LOGGED.get() or request_timing.logged()):
         # 鉴权之后被拒（Key 停用 / 过期、功能未开通、额度用完、限流、排队超时……）统一记一条，方便排查成员问题
         try:
             record(key, _kind_for_path(request.url.path), request_timing.model(), "rejected", detail=f"{exc.status} {exc.message}"[:160])
@@ -297,7 +297,8 @@ async def gate_error_handler(request: Request, exc: GateError):
 @app.exception_handler(Exception)
 async def fallback_handler(request: Request, exc: Exception):
     """没有预料到的异常 = bug：记录堆栈、私信站长，给成员一个可以报给站长的请求编号。"""
-    rid, key, logged = getattr(exc, "_gate_ctx", (request_timing.rid(), _REQUEST_KEY.get(), _REQUEST_LOGGED.get()))
+    rid, key, logged = getattr(exc, "_gate_ctx", (request_timing.rid(), _REQUEST_KEY.get(),
+                                                 _REQUEST_LOGGED.get() or request_timing.logged()))
     bug("request", exc, path=request.url.path, rid=rid, key_id=key["id"] if key is not None else None)
     if key is not None and not logged:
         try:
@@ -829,7 +830,7 @@ def record(key, kind: str, model: str, status: str, *, images: int = 0,
            legacy_free_images: int = 0, detail: str = "",
            unconfirmed_anlas: float = 0.0) -> asyncio.Task:
     """写日志；成功请求额外计入每日配额。"""
-    _REQUEST_LOGGED.set(True)
+    _REQUEST_LOGGED.set(True); request_timing.mark_logged()
     live.note(status)
     timing = request_timing.snapshot()
     async def _go():
@@ -1335,6 +1336,8 @@ async def _generate_image(request: Request, *, streaming: bool):
                         reservation = reserved
                         await complete_image_operation(perform_stream(response), can_cancel=lambda: not dispatched)
             except GateError as exc:
+                # 和非流式一样记「拒绝」：自动驾驶（节约模式 / Key 限流）、AIMD、每日微调都靠这些记录感知拥挤
+                record(key, "image_stream", model, "rejected", detail=f"{exc.status} {exc.message}"[:160])
                 await response.error(exc.status, exc.message)
 
         return ImageStreamResponse(run_stream, wire_format)
@@ -1390,7 +1393,7 @@ async def _suggest_tags(request: Request, key):
 
     async with acquire_concurrency(key):
         if await request.is_disconnected():
-            _REQUEST_LOGGED.set(True)         # 客户端已经换了新的查询，不算拒绝
+            _REQUEST_LOGGED.set(True); request_timing.mark_logged()         # 客户端已经换了新的查询，不算拒绝
             raise err(499, "补全查询已取消")
         check_image_cooldown()
         query = urlencode({
@@ -1880,7 +1883,7 @@ async def _public_status_body(request: Request) -> dict:
         "default_features": [{"id": n, "label": feature_defs.FEATURES[n]} for n in defaults],
         "audit_notice": await audit_disclosure(STATE.db, SETTINGS),
         # 网页 Discord 登录：Discord 应用审核期间 OAuth 被封，暂停时首页改为提示用 /register、/quota（站长可随时改回 0）
-        "web_login": str(await STATE.db.get_setting("web_login_paused", "0")).strip() != "1",
+        "web_login": str(await STATE.db.get_setting("web_login_paused", "1")).strip() == "0",   # 默认暂停（fail-closed）
         "economy": (await STATE.db.get_setting("economy_mode", "off")) == "on",
         "algo_notice": str(await STATE.db.get_setting("algo_notice", "") or "")[:300],
         "discord_invite": SETTINGS.discord_invite_url,

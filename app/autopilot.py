@@ -148,9 +148,13 @@ async def run(state, registrar=None, now: Optional[float] = None) -> dict[str, A
     out["rules"]["reset_hour"] = {"mode": "observe", "value": quiet,
                                   "why": f"最近 7 天 {quiet}:00 出图最少（{by_hour[quiet]} 张）；现在是 0 点重置（0 点 {by_hour[0]} 张）"}
 
-    # 4 熔断
-    rows = await _q(db, "SELECT SUM(CASE WHEN status='error' THEN 1 ELSE 0 END), COUNT(*) FROM usage_log "
-                        "WHERE ts>=? AND kind LIKE 'image%' AND status IN ('ok','error')", now - 900)
+    # 4 熔断：只算真正打到上游的失败——5xx，或 200 开头后流中途断开（up_status 2xx 但 status=error）。
+    # 本地拦截（冷却 / 上限 / 排队超时，up_status=0）、上游 429（另有冷却和 AIMD 减半）、成员参数错误（4xx）都不算。
+    # 只看上次熔断结束之后的数据，避免暂停期间没有新样本、下一轮拿同一批旧数据再熔断一次。
+    since = max(now - 900, float(await db.get_setting("autopilot_breaker_until", 0) or 0))
+    rows = await _q(db, "SELECT SUM(CASE WHEN status='error' AND (up_status>=500 OR up_status BETWEEN 200 AND 299) "
+                        "THEN 1 ELSE 0 END), COUNT(*) FROM usage_log "
+                        "WHERE ts>=? AND kind LIKE 'image%' AND status IN ('ok','error')", since)
     fails, total = int(rows[0][0] or 0), int(rows[0][1] or 0)
     trip, why = breaker_rule(fails, total)
     out["rules"]["breaker"] = {"mode": await _mode(db, "breaker"), "value": trip, "why": why}
@@ -158,13 +162,16 @@ async def run(state, registrar=None, now: Optional[float] = None) -> dict[str, A
         guard = getattr(state, "guard", None)
         if guard is not None and getattr(guard, "breaker_until", 0.0) <= now:
             guard.trip_breaker(300, f"上游连续出错，已暂停出图 5 分钟（{why}）", now)
+            await db.set_setting("autopilot_breaker_until", now + 300)
             await log_action(db, "系统", "自动驾驶：熔断", "", f"{why}；全站暂停出图 5 分钟")
             out["rules"]["breaker"]["applied"] = True
 
     # 5 单个 Key
     events = list(getattr(getattr(state, "sources", None), "events", []) or [])
+    # 「Key 正在暂停」本身被拒的请求不算：否则暂停到期时上一小时全是暂停期间的拒绝，会立刻再暂停一次
     rejects = {r[0]: r[1] for r in await _q(db, "SELECT key_id, COUNT(*) FROM usage_log WHERE ts>=? AND status='rejected' "
-                                                 "AND key_id IS NOT NULL GROUP BY key_id", now - 3600)}
+                                                 "AND key_id IS NOT NULL AND detail NOT LIKE '%暂停%' GROUP BY key_id",
+                                             now - 3600)}
     keys = {r[0]: r[1] for r in await _q(db, "SELECT id, name FROM api_keys WHERE enabled=1 AND is_admin=0 AND is_test=0")}
     decisions = []
     for kid, name in keys.items():
