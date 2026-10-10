@@ -15,6 +15,7 @@ build_request / send(stream=True) / aclose 等调用方代码一行不改。
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import logging
 import re
 from typing import Any, Optional
@@ -32,6 +33,10 @@ _DROP_REQUEST_HEADERS = {"host", "content-length", "connection", "transfer-encod
 # curl 已解压，长度和编码头不再对应 body
 _DROP_RESPONSE_HEADERS = {"content-encoding", "content-length", "transfer-encoding"}
 _HTTP_VERSIONS = {1: b"HTTP/1.0", 2: b"HTTP/1.1", 3: b"HTTP/2", 30: b"HTTP/3"}
+# httpx 的 read=None（不限）在 curl 流式模式下没有对应写法，用一个足够长的值代替，同时保留 connect 超时
+_NO_READ_LIMIT = 24 * 3600
+# 本次请求拿到的 curl 句柄与连接池超时：在 pop_curl 钩子里写入，取消时据此中止传输
+_INFLIGHT: contextvars.ContextVar[Optional[dict]] = contextvars.ContextVar("curl_inflight", default=None)
 
 
 def resolve_target(value: Optional[str]) -> tuple[Optional[str], Optional[str]]:
@@ -50,8 +55,8 @@ def resolve_target(value: Optional[str]) -> tuple[Optional[str], Optional[str]]:
     ver = tuple(int(x) for x in re.findall(r"\d+", str(getattr(curl_cffi, "__version__", "0")))[:2])
     if ver < MIN_CURL_CFFI:
         return None, f"curl_cffi 版本 {curl_cffi.__version__} 过旧，需要 ≥ {'.'.join(map(str, MIN_CURL_CFFI))}"
-    resolve = getattr(imp, "resolve_latest_browser_type", None) or getattr(imp, "normalize_browser_type")
     try:
+        resolve = getattr(imp, "resolve_latest_browser_type", None) or getattr(imp, "normalize_browser_type")
         target = str(resolve(value))
         curl = Curl()
         try:
@@ -95,9 +100,13 @@ def chrome_profiles(profiles: list[dict[str, str]], major: int) -> list[dict[str
     return out
 
 
-# curl 错误码（CURLE_*）：连接阶段失败，请求肯定没发出去
-_CONNECT_CODES = {5, 6, 7, 35, 60}   # 解析代理 / 解析域名 / 连不上 / TLS 握手失败 / 证书校验失败
+# curl 错误码（CURLE_*）：请求发出前就失败（肯定没扣费）——不支持的协议 / URL 格式错 / 解析代理 / 解析域名 /
+# 连不上 / TLS 握手失败 / 客户端证书 / 加密套件 / 证书校验 / 要求 TLS 失败 / TLS 引擎初始化 / CA 文件
+_CONNECT_CODES = {1, 3, 5, 6, 7, 35, 58, 59, 60, 64, 66, 77}
 _PROXY_CODES = {97}
+# 28（超时）发生在建连 / 握手阶段时 curl 的提示语
+_CONNECT_TIMEOUT_HINTS = ("Connection timed out", "Resolving timed out", "SSL connection timeout",
+                          "Connection time-out")
 
 
 def _map_error(exc: Exception, request: httpx.Request, *, streaming: bool) -> httpx.HTTPError:
@@ -110,7 +119,7 @@ def _map_error(exc: Exception, request: httpx.Request, *, streaming: bool) -> ht
             return httpx.ProxyError(msg, request=request)
         if code in _CONNECT_CODES:
             return httpx.ConnectError(msg, request=request)
-        if code == 28 and ("Connection timed out" in str(exc) or "Resolving timed out" in str(exc)):
+        if code == 28 and any(h in str(exc) for h in _CONNECT_TIMEOUT_HINTS):
             return httpx.ConnectTimeout(msg, request=request)
     if code == 28:
         return httpx.ReadTimeout(msg, request=request)
@@ -133,8 +142,8 @@ class _CurlStream(httpx.AsyncByteStream):
         except httpx.HTTPError:
             raise
         except Exception as exc:
-            from curl_cffi.requests.exceptions import RequestException
-            if isinstance(exc, RequestException):
+            from curl_cffi import CurlError
+            if isinstance(exc, CurlError):
                 raise _map_error(exc, self._request, streaming=True) from exc
             raise
 
@@ -146,15 +155,22 @@ class _CurlStream(httpx.AsyncByteStream):
         task = getattr(rsp, "astream_task", None)
         if task is None or task.done():
             return
-        # 告诉 curl 不要再写数据，并把句柄从 multi 里摘掉，传输立刻结束（否则 aclose 会一直等到上游发完）
-        quit_now = getattr(rsp, "quit_now", None)
-        if quit_now is not None:
-            quit_now.set()
-        try:
-            self._session.acurl.remove_handle(rsp.curl)
-        except Exception:
-            pass
+        _abort(self._session, rsp.curl, getattr(rsp, "quit_now", None))
         await asyncio.wait([task], timeout=5)
+
+
+class _PoolTimeout(Exception):
+    pass
+
+
+def _abort(session: Any, curl: Any, quit_now: Any = None) -> None:
+    """中止一个进行中的 curl 传输：不再写数据，并把句柄从 multi 里摘掉（curl_cffi 随后自行回收句柄）。"""
+    if quit_now is not None:
+        quit_now.set()
+    try:
+        session.acurl.remove_handle(curl)
+    except Exception:
+        pass
 
 
 class CurlCffiTransport(httpx.AsyncBaseTransport):
@@ -170,9 +186,29 @@ class CurlCffiTransport(httpx.AsyncBaseTransport):
         # 延迟到第一次请求再建：AsyncSession 绑定当前事件循环
         if self._session is None:
             from curl_cffi.requests import AsyncSession
-            self._session = AsyncSession(
+            session = AsyncSession(
                 impersonate=self.target, proxy=self._proxy, max_clients=self._max_clients,
                 default_headers=False, allow_redirects=False, discard_cookies=True)
+            orig_pop = session.pop_curl
+
+            async def pop_curl():
+                # 等连接池加超时（对应 httpx 的 pool 超时），并记下本次请求用的句柄
+                state = _INFLIGHT.get()
+                pool = state.get("pool") if state else None
+                try:
+                    if pool is not None:
+                        async with asyncio.timeout(pool):
+                            curl = await orig_pop()
+                    else:
+                        curl = await orig_pop()
+                except TimeoutError:
+                    raise _PoolTimeout() from None
+                if state is not None:
+                    state["curl"] = curl
+                return curl
+
+            session.pop_curl = pop_curl
+            self._session = session
         return self._session
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
@@ -183,17 +219,40 @@ class CurlCffiTransport(httpx.AsyncBaseTransport):
         t = request.extensions.get("timeout") or {}
         connect = t.get("connect") or 15
         read = t.get("read")
-        # curl 流式模式：connect 超时 + 「低于 1 字节/秒持续 connect+read 秒」视为读超时；None 表示不限
-        timeout = (connect, read) if read is not None else None
+        # curl 流式模式：connect 超时 + 「低于 1 字节/秒持续 connect+read 秒」视为读超时；read=None 也保留 connect 超时
+        timeout = (connect, read if read is not None else _NO_READ_LIMIT)
+        state: dict = {"curl": None, "pool": t.get("pool")}
+        token = _INFLIGHT.set(state)
         try:
-            rsp = await session.request(
+            # 单独起任务（复制当前上下文，pop_curl 钩子能看到 state）；外层被取消时据 state 中止传输
+            inner = asyncio.ensure_future(session.request(
                 request.method, str(request.url), headers=headers, data=body or None,
-                timeout=timeout, stream=True, accept_encoding=CHROME_ACCEPT_ENCODING)
+                timeout=timeout, stream=True, accept_encoding=CHROME_ACCEPT_ENCODING))
+        finally:
+            _INFLIGHT.reset(token)
+        try:
+            rsp = await inner
+        except asyncio.CancelledError:
+            # 收到响应头前被取消（asyncio.timeout / 客户端断开）：curl_cffi 不会自己停，
+            # 不中止的话传输会一直占着连接直到读超时
+            if not inner.done():
+                inner.cancel()
+            if not inner.done() or inner.cancelled():
+                if state["curl"] is not None:        # 句柄还在 curl_cffi 的后台任务手里
+                    _abort(session, state["curl"])
+            elif inner.exception() is None:          # 恰好已拿到响应头：中止响应体
+                rsp = inner.result()
+                task = getattr(rsp, "astream_task", None)
+                if task is not None and not task.done():
+                    _abort(session, rsp.curl, getattr(rsp, "quit_now", None))
+            raise
+        except _PoolTimeout:
+            raise httpx.PoolTimeout("curl_cffi: 等待连接池超时", request=request) from None
         except httpx.HTTPError:
             raise
         except Exception as exc:
-            from curl_cffi.requests.exceptions import RequestException
-            if isinstance(exc, RequestException):
+            from curl_cffi import CurlError
+            if isinstance(exc, CurlError):
                 raise _map_error(exc, request, streaming=False) from exc
             raise
         resp_headers = [(k, v) for k, v in rsp.headers.multi_items()
