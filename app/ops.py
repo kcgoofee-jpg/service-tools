@@ -9,7 +9,32 @@ from types import SimpleNamespace
 from typing import Any, Optional
 
 from . import features
+from .action_log import log_action
 from .audit import audit_flags
+
+ECONOMY_SETTING = "economy_mode"
+
+
+async def economy_enabled(db) -> bool:
+    return (await db.get_setting(ECONOMY_SETTING, "off")) == "on"
+
+
+async def set_economy(db, on: bool, state=None, *, by: str = "站长") -> bool:
+    """开 / 关节约模式（全站免费档统一 14 步 + Euler-a，Anlas 约省 40%）。
+    发生变化时写操作日志，并在成员公告频道通知（无论算法还是站长触发都公告）。返回是否发生变化。"""
+    cur = (await db.get_setting(ECONOMY_SETTING, "off")) == "on"
+    if cur == bool(on):
+        return False
+    await db.set_setting(ECONOMY_SETTING, "on" if on else "off")
+    await log_action(db, by, "节约模式", "", "开启" if on else "关闭")
+    announcer = getattr(state, "announcer", None) if state is not None else None
+    if announcer is not None:
+        if on:
+            announcer.post("⚙️ **节约模式已开启**：当前使用人较多，为了让更多人都能出到图，暂时统一用 14 步快速出图"
+                           "（质量略降、出图更快、更省额度）。空闲后会恢复正常高质量模式。")
+        else:
+            announcer.post("✅ **节约模式已关闭**：已恢复正常步数和采样器，高质量出图。")
+    return True
 
 
 def env_audit_defaults() -> SimpleNamespace:

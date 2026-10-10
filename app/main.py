@@ -185,7 +185,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "2.10.0"
+__version__ = "2.11.0"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -1148,12 +1148,14 @@ async def _generate_image(request: Request, *, streaming: bool):
 
     # 免费档钳制：只对没有 Anlas 权限的 Key 生效；有 Anlas（含自动分配）的 Key 可以用超规格参数，按 Anlas 扣
     if STATE.settings.safe_clamp and not key["is_admin"] and not key["allow_anlas"]:
+        economy_on = (await STATE.db.get_setting("economy_mode", "off")) == "on"
         try:
             body, notes, problem = clamp_image_params(
                 body,
                 max_pixels=STATE.settings.max_pixels,
                 max_steps=STATE.settings.max_steps,
                 allow_img2img=True,  # 权限已在上面预检
+                economy=economy_on,
             )
         except (TypeError, ValueError, OverflowError):
             raise err(400, "图片参数无效") from None

@@ -645,7 +645,7 @@ td.note{min-width:220px}
         <!-- 总览 -->
         <section id="tab-ov">
           <div class="page-head"><div class="ttl"><h1>总览</h1></div>
-            <div class="tools"><button class="btn rf" data-act="refresh-ov" aria-label="刷新" title="刷新"><span data-ic="refresh"></span><span class="lbl">刷新</span></button></div></div>
+            <div class="tools"><button class="btn" id="econBtn" data-act="toggle-economy" title="节约模式：全站免费档统一 14 步 + Euler-a，省约 40% 额度、出图更快；开 / 关都会在公告频道通知成员">节约模式：—</button><button class="btn rf" data-act="refresh-ov" aria-label="刷新" title="刷新"><span data-ic="refresh"></span><span class="lbl">刷新</span></button></div></div>
           <div class="stats" id="ovCards"></div>
           <div class="two-col">
             <div class="card panel"><div class="panel-head"><div><div class="hint" id="chartLabel" style="margin:0">今日生成图片</div>
@@ -1418,6 +1418,7 @@ async function loadOverview(){
         <td class="num" data-label="近 7 天">${cnt(f.week)}</td><td data-label="近 7 天产出">${esc(out(f.week))}</td></tr>`;
     }).join('');
     ovData = d; drawChart();
+    const eb=$('#econBtn'); if(eb){ eb.textContent='节约模式：'+(d.economy?'开':'关'); eb.classList.toggle('primary', !!d.economy); }
     const pool = d.pool.length ? d.pool : [];
     $('#pool').innerHTML = (!d.pool_configured)
       ? `<span class="tag warn">未配置上游 Token —— 请点右侧「添加 Token」</span>`
@@ -2556,6 +2557,18 @@ document.addEventListener('click', ev=>{
   const id = Number(el.dataset.id);
   switch(el.dataset.act){
     case 'refresh-ov': loadOverview(); loadAllowance(); break;
+    case 'toggle-economy': {
+      const on = !(ovData && ovData.economy);
+      askConfirm(on
+        ? '开启节约模式？全站免费档将统一用 14 步 + Euler-a（质量略降、更省额度、出图更快），并在公告频道通知成员。'
+        : '关闭节约模式？恢复正常步数和采样器，并在公告频道通知成员。', on?'开启':'关闭').then(ok=>{
+        if(!ok) return;
+        api('/admin/api/ops/economy',{method:'PUT',body:JSON.stringify({on})})
+          .then(()=>{ toast(on?'节约模式已开启，已公告':'节约模式已关闭，已公告','ok'); loadOverview(); })
+          .catch(toastErr);
+      });
+      break;
+    }
     case 'feat-logs': $('#logFeature').value = el.dataset.feat; $('#logFilter').value = ''; logPage = 1; tab('logs'); break;
     case 'refresh-members': membersCache=null; loadMembers(); break;
     case 'refresh-audit': loadAuditSettings(); loadAudit(); break;

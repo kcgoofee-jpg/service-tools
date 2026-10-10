@@ -302,3 +302,21 @@ def test_text_host_routing():
     assert "text.novelai" in text_model_host("llama-3-erato-v1", "https://text.novelai.net", "x")
     assert "api.novelai" in text_model_host("clio-v1", "https://text.novelai.net",
                                             "https://api.novelai.net")
+
+
+def test_economy_mode_clamps_steps_and_sampler():
+    out, notes, err = clamp_image_params(
+        img_payload(model="nai-diffusion-4-5-full", w=832, h=1216, steps=28, sampler="k_dpmpp_2m"),
+        max_pixels=1048576, max_steps=28, allow_img2img=False, economy=True)
+    assert err is None
+    assert out["parameters"]["steps"] == 14
+    assert out["parameters"]["sampler"] == "k_euler_ancestral"
+    assert any("节约" in n for n in notes)
+
+
+def test_economy_off_keeps_steps_and_sampler():
+    out, notes, err = clamp_image_params(
+        img_payload(model="nai-diffusion-4-5-full", steps=28, sampler="k_dpmpp_2m"),
+        max_pixels=1048576, max_steps=28, allow_img2img=False, economy=False)
+    assert err is None
+    assert out["parameters"]["steps"] == 28 and out["parameters"]["sampler"] == "k_dpmpp_2m"

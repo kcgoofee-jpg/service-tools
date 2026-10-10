@@ -99,3 +99,34 @@ async def test_key_guard_enforce_pauses_only_rejects_branch(tmp_path):
         assert not applied[alt_key["id"]].get("applied") and not share.paused_until(alt_key["id"], now)
     finally:
         await db.close()
+
+
+def test_economy_rule():
+    assert autopilot.economy_rule(False, 8, 8)[0] is True       # 拥挤 → 开
+    assert autopilot.economy_rule(False, 3, 3)[0] is False      # 不够拥挤 → 保持关
+    assert autopilot.economy_rule(True, 5, 0)[0] is False       # 空闲 → 关
+    assert autopilot.economy_rule(True, 5, 5)[0] is True        # 还拥挤 → 保持开
+
+
+@pytest.mark.asyncio
+async def test_economy_enforce_flips_and_announces(tmp_path):
+    db = Database(str(tmp_path / "e.sqlite"))
+    await db.connect()
+    try:
+        await db.set_setting("autopilot_economy", "enforce")
+        for _ in range(8):
+            await db.add_log(1, "m", "image", "x", "rejected",
+                             detail="当前排队的人太多（全站最多同时排 8 张），请稍后再试")
+        posts = []
+        ann = SimpleNamespace(post=lambda t: posts.append(t))
+        st = SimpleNamespace(db=db, guard=None, share=None, announcer=ann, sources=SimpleNamespace(events=[]))
+        now = time.time()
+        out = await autopilot.run(st, None, now=now)
+        assert out["rules"]["economy"]["value"] is True and out["rules"]["economy"].get("applied")
+        assert (await db.get_setting("economy_mode")) == "on"
+        assert posts and "节约模式已开启" in posts[0]
+        # 1 小时内不重复切换（避免公告刷屏）
+        out2 = await autopilot.run(st, None, now=now + 60)
+        assert not out2["rules"]["economy"].get("applied")
+    finally:
+        await db.close()
