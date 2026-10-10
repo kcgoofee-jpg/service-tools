@@ -103,8 +103,8 @@ async def _api_error_days(db, start: float) -> dict[str, float]:
     """出图接口每天的 5xx 占比（status_hourly）。"""
     out: dict[str, list[int]] = {}
     for hour, code, n in await db._db.execute_fetchall(
-            "SELECT hour, code, n FROM status_hourly WHERE hour >= ?", (int(start // 3600),)):
-        d = datetime.fromtimestamp(hour * 3600).strftime("%Y-%m-%d")
+            "SELECT hour, code, n FROM status_hourly WHERE hour >= ?", (int(start),)):
+        d = datetime.fromtimestamp(hour).strftime("%Y-%m-%d")        # hour 存的是整点的秒数（status_stats.record）
         tot = out.setdefault(d, [0, 0])
         tot[0] += n
         if code >= 500:
