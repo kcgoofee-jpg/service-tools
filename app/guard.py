@@ -152,7 +152,8 @@ class Guard:
         """上游限流是我们唯一能拿到的「红线」信号：立刻把每小时上限减半（不低于 100），返回 (旧, 新)。"""
         now = time.time() if now is None else now
         old = self.values["account_hourly_cap"]
-        new = max(P("capacity.hourly_min", HOURLY_MIN), int(old * P("capacity.hourly_decrease", 0.5)))
+        # min(old, …)：上限已经被手动调到下限以下时，429 只能维持或降低，绝不能反而把它抬回下限
+        new = min(old, max(P("capacity.hourly_min", HOURLY_MIN), int(old * P("capacity.hourly_decrease", 0.5))))
         await self._set_adaptive(new, now, last_429=now)
         return (old, new) if new != old else None
 

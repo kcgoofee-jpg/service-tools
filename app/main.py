@@ -166,7 +166,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "2.14.0"
+__version__ = "2.14.1"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -601,15 +601,46 @@ def limit_inflight(handler):
         if count >= MAX_INFLIGHT_PER_KEY:
             raise err(429, f"同时进行中的请求过多（上限 {MAX_INFLIGHT_PER_KEY} 个），请等前面的请求完成")
         _INFLIGHT[ident] = count + 1
-        try:
-            return await handler(request)
-        finally:
+        released = False
+
+        def release() -> None:
+            nonlocal released
+            if released:
+                return
+            released = True
             left = _INFLIGHT.get(ident, 1) - 1
             if left > 0:
                 _INFLIGHT[ident] = left
             else:
                 _INFLIGHT.pop(ident, None)
+        try:
+            resp = await handler(request)
+        except BaseException:
+            release()
+            raise
+        if isinstance(resp, (StreamingResponse, ImageStreamResponse)):
+            return _ReleaseAfterSend(resp, release)      # 流式：处理函数一返回流才刚开始，名额要占到推流结束
+        release()
+        return resp
     return wrapper
+
+
+class _ReleaseAfterSend(Response):
+    """包住流式响应：整个推流（含客户端断开后的上游结算）结束才归还 limit_inflight 名额。"""
+
+    def __init__(self, inner: Response, release) -> None:
+        self.inner, self.release = inner, release
+        self.status_code = inner.status_code
+        self.background = None
+        self.raw_headers = inner.raw_headers          # 同一个列表：FastAPI 往外层追加的头也进到真正发出的响应
+
+    async def __call__(self, scope, receive, send) -> None:
+        try:
+            await self.inner(scope, receive, send)
+            if self.background is not None:
+                await self.background()
+        finally:
+            self.release()
 
 
 async def read_json(request: Request, limit_mb: float = 25) -> dict:
