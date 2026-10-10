@@ -43,10 +43,7 @@ COMPONENTS = [
     ("bot", "Discord 机器人（奶妹）"),
     ("upstream", "上游 NovelAI"),
 ]
-STATUS_LABEL = {"investigating": "调查中", "identified": "已定位", "update": "更新",
-                "monitoring": "观察中", "resolved": "已解决"}
 IMPACT_RANK = {"none": 0, "minor": 1, "major": 2, "critical": 3}
-IMPACT_COMPONENT = {0: "正常运行", 1: "性能下降", 2: "部分中断", 3: "严重中断"}
 TRACKING_START = "2026-10-09"          # usage_log 第一条：10-09 18:18
 DAYS = 90
 HISTORY_DAYS = 15
@@ -155,89 +152,148 @@ async def snapshot(db, now: Optional[float] = None) -> dict[str, Any]:
 
 
 # ------------------------------------------------------------------ 页面
-COLORS = {None: "#c9ccd1", 0: "#76ad2a", 1: "#e3b341", 2: "#e8743b", 3: "#e5484d"}
-TEXT_COLOR = {0: "#76ad2a", 1: "#d29a12", 2: "#e8743b", 3: "#e5484d"}
-BANNER = {"none": "#76ad2a", "minor": "#e3a21a", "major": "#e8743b", "critical": "#e5484d"}
+# 照 status.claude.com（Atlassian Statuspage 标准模板）：结构 / 类名 / 尺寸 / 颜色取自它的 HTML 与 status_manifest.css
+# （2026-10-10 站长：字体、结构、文案都要照它）。文案用 Statuspage 自带的中文本地化措辞。
+STATUS_LABEL = {"investigating": "调查中", "identified": "已确定", "update": "更新",
+                "monitoring": "监控中", "resolved": "已解决"}
+IMPACT_COMPONENT = {0: "运行正常", 1: "性能下降", 2: "部分中断", 3: "严重中断"}
+BAR = {None: "#B3BAC5", 0: "#76AD2A", 1: "#FAA72A", 2: "#E86235", 3: "#E04343"}
+IMPACT_COLOR = {"none": "#333333", "minor": "#FAA72A", "major": "#E86235", "critical": "#E04343"}
+STATUS_TEXT = {0: "#76AD2A", 1: "#FAA72A", 2: "#E86235", 3: "#E04343"}
 
 CSS = """
-*{box-sizing:border-box}body{margin:0;background:#faf9f5;color:#1a1a1a;
-font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue","PingFang SC","Microsoft YaHei",sans-serif;
--webkit-font-smoothing:antialiased}
-.wrap{max-width:860px;margin:0 auto;padding:48px 16px 80px}
-header{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:56px}
-.logo{display:flex;align-items:center;gap:10px;font-size:30px;font-weight:600;letter-spacing:-.01em;color:#1a1a1a;text-decoration:none}
-.logo span.mark{font-size:30px}
-.sub{background:#1a1a1a;color:#fff;border-radius:6px;padding:12px 20px;font-size:13px;font-weight:600;letter-spacing:.12em;text-decoration:none}
-.banner{border-radius:4px 4px 0 0;padding:20px 24px;color:#fff;font-size:20px;font-weight:600;display:flex;justify-content:space-between;align-items:center}
-.ok{background:#76ad2a;border-radius:4px;padding:20px 24px;color:#fff;font-size:20px;font-weight:600;margin-bottom:48px}
-.inc{border:1px solid;border-top:0;border-radius:0 0 4px 4px;padding:8px 24px 16px;margin-bottom:40px;background:#faf9f5}
-.upd{margin:16px 0}.upd p{margin:0 0 4px;line-height:1.6;font-size:16px}.upd b{font-weight:700}
-.when{color:#8a8a8a;font-size:14px}
-.note{text-align:right;color:#8a8a8a;font-size:14px;margin:0 0 8px}
-.box{border:1px solid #e3e1db;border-radius:4px;margin-bottom:56px}
-.comp{padding:22px 24px;border-bottom:1px solid #e3e1db}.comp:last-child{border-bottom:0}
-.row{display:flex;justify-content:space-between;gap:12px;align-items:baseline;flex-wrap:wrap}
-.name{font-size:17px;font-weight:600}.state{font-size:15px}
-.bars{display:flex;gap:2px;margin:14px 0 8px;height:34px}
-.bars i{flex:1;border-radius:1px;min-width:1px}
-.legend{display:flex;align-items:center;gap:12px;color:#8a8a8a;font-size:13px}
-.legend hr{flex:1;border:0;border-top:1px solid #d4d2cc;margin:0}
-h2{font-size:26px;font-weight:600;margin:0 0 24px}
-.day{border-bottom:1px solid #e3e1db;padding-bottom:6px;margin:32px 0 16px;font-size:19px;font-weight:600}
-.none{color:#8a8a8a;font-size:15px}
-.title{font-size:19px;font-weight:600;margin:18px 0 8px;color:#e8743b}
-.title.minor{color:#d29a12}.title.critical{color:#e5484d}.title.none{color:#1a1a1a}
-footer{color:#8a8a8a;font-size:13px;margin-top:56px;border-top:1px solid #e3e1db;padding-top:16px}
-@media(max-width:600px){.wrap{padding-top:28px}header{margin-bottom:32px}.logo{font-size:24px}.banner,.ok{font-size:17px}.bars{gap:1px;height:28px}}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background-color:#FAF9F5;color:#141413;font-family:"Atlassian Sans","Helvetica Neue",Helvetica,Arial,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+font-weight:400;font-size:16px;line-height:24px;-webkit-font-smoothing:antialiased}
+a{color:inherit;text-decoration:none}
+small{font-size:.875rem;line-height:1.334375rem;color:#87867F}
+.layout-content{width:90%;max-width:850px;margin:0 auto;padding-bottom:3rem}
+.font-regular{font-size:1rem;line-height:1.5rem}
+.font-large{font-weight:500;font-size:1.25rem;line-height:1.8125rem}
+.font-largest{font-weight:500;font-size:1.75rem;line-height:2.3625rem}
+.masthead{padding-top:70px;margin-bottom:70px;display:flex;align-items:center;justify-content:space-between;gap:16px}
+.logo{display:flex;align-items:center;gap:.5rem;font-family:"Copernicus","Tiempos Headline",Georgia,"Songti SC","STSong",serif;
+font-size:2.6rem;line-height:1;letter-spacing:-.02em;color:#141413;white-space:nowrap}
+.logo .mark{font-size:2.2rem}
+.show-updates-dropdown{background:#141413;color:#fff;border-radius:4px;padding:.8rem 1.6rem;font-size:.8125rem;font-weight:600;letter-spacing:.14em;white-space:nowrap}
+.page-status{font-weight:500;border-radius:4px;border:1px solid rgba(0,0,0,.1);text-shadow:0 1px 0 rgba(0,0,0,.1);margin-bottom:70px;padding:.75rem 1.25rem;background:#76AD2A;color:#fff;font-size:1.25rem;line-height:1.8125rem}
+.unresolved-incidents{margin-bottom:70px}
+.unresolved-incident{margin-top:25px}.unresolved-incident:first-of-type{margin-top:0}
+.unresolved-incident .incident-title{text-shadow:0 1px 0 rgba(0,0,0,.2);padding:.85rem 1.25rem .75rem;color:#fff;display:flex;justify-content:space-between;gap:1rem;border-radius:4px 4px 0 0}
+.unresolved-incident .incident-title .subscribe{font-size:1rem;font-weight:500;white-space:nowrap}
+.unresolved-incident .updates{padding:1.25rem;border-style:solid;border-width:1px;border-top:none;border-radius:0 0 4px 4px}
+.update{margin-bottom:20px;overflow-wrap:break-word}.update:last-of-type{margin-bottom:0}
+.whitespace-pre-wrap{white-space:pre-wrap}
+.components-uptime-link{text-align:right;font-size:.85em;color:#87867F;margin-bottom:.4rem}
+.components-section{margin-bottom:70px}
+.component-container{padding:1.1rem 1.25rem 1rem;border:1px solid #DEDCD1;border-top-width:0}
+.component-container:first-child{border-top-width:1px;border-radius:4px 4px 0 0}
+.component-container:last-child{border-radius:0 0 4px 4px}
+.component-inner-container{display:flex;justify-content:space-between;align-items:baseline;gap:1rem}
+.component-container .name{font-weight:500;color:rgba(20,20,19,.8);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:75%}
+.component-container .component-status{font-size:.875rem;white-space:nowrap}
+.uptime-90-days-wrapper{padding-top:5px;margin-bottom:-2px}
+.uptime-90-days-wrapper svg{display:block;margin:0;padding:0;height:34px;width:100%;overflow:hidden}
+.uptime-90-days-wrapper svg rect:hover{fill:#5e6c84}
+.legend{display:flex;flex-direction:row;justify-content:space-between;position:relative;top:-2px}
+.legend .legend-item{flex:0 0 auto;font-size:.875rem;color:#87867f}
+.legend .spacer{flex:1;margin:.75rem 1rem 0 1rem;height:1px;background:#87867f;opacity:.3}
+.incidents-list{margin-top:70px}
+.incidents-list h2{margin:0}
+.status-day{margin-top:35px}.status-day:nth-child(2){margin-top:20px}
+.status-day .date{font-weight:500;border-bottom:1px solid #DEDCD1;padding-bottom:3px;margin:0 0 10px}
+.status-day p{margin:0}
+.color-secondary{color:#87867F}
+.incident-container{margin-bottom:1.5rem}
+.incident-container .incident-title{margin:.5rem 0}
+.incident-title.impact-none a{color:#141413}.incident-title.impact-minor a{color:#FAA72A}
+.incident-title.impact-major a{color:#E86235}.incident-title.impact-critical a{color:#E04343}
+.updates-container .update{margin:0 0 1rem}
+.page-footer{margin-top:3rem;border-top:1px solid #DEDCD1;padding-top:1rem;display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap}
+@media(max-width:768px){.masthead{padding-top:60px;margin-bottom:60px}.page-status,.unresolved-incidents,.components-section{margin-bottom:60px}
+.incidents-list{margin-top:60px}.font-largest{font-size:1.375rem;line-height:1.959375rem}.font-large{font-size:1.125rem;line-height:1.659375rem}
+.component-container{padding:.85rem 1rem .75rem}.logo{font-size:2rem}.logo .mark{font-size:1.7rem}}
+@media(max-width:450px){.masthead{padding-top:50px;margin-bottom:50px;flex-direction:column;align-items:center}.page-status,.unresolved-incidents,.components-section{margin-bottom:50px}
+.font-regular{font-size:.875rem;line-height:1.334375rem}.font-large{font-size:1rem;line-height:1.5rem}small{font-size:.75rem}
+.component-container{padding:.6rem .75rem .5rem}.unresolved-incident .updates{padding:.75rem}.components-uptime-link{text-align:center}
+.unresolved-incident .incident-title{padding:.65rem .75rem .55rem}}
 """
 
 
-def _updates_html(updates: list[dict]) -> str:
-    out = []
-    for u in updates:
-        out.append(f'<div class="upd"><p><b>{STATUS_LABEL.get(u["status"], u["status"])}</b> - '
-                   f'{html.escape(u["body"])}</p><div class="when">{_fmt(u["at"])}</div></div>')
-    return "".join(out)
+def _stamp(ts: float, with_year: bool = True) -> str:
+    t = datetime.fromtimestamp(ts)
+    return (f"{t.year}年" if with_year else "") + f"{t.month}月{t.day}日 {t:%H:%M} UTC+8"
 
 
-def render(snap: dict[str, Any]) -> str:
-    parts = [f"<!doctype html><html lang=zh-CN><head><meta charset=utf-8>"
-             f"<meta name=viewport content='width=device-width,initial-scale=1'>"
-             f"<title>猫头鹰公益站 · 运行状态</title><style>{CSS}</style></head><body><div class=wrap>",
-             '<header><a class=logo href="/status"><span class=mark>🦉</span>猫头鹰公益站 状态</a>'
-             '<a class=sub href="/">返回官网</a></header>']
+def _update_html(u: dict, with_year: bool = True) -> str:
+    return (f'<div class="update font-regular {html.escape(u["status"])}"><strong>{STATUS_LABEL.get(u["status"], u["status"])}</strong> - '
+            f'<span class="whitespace-pre-wrap">{html.escape(u["body"])}</span><br>'
+            f'<small>{_stamp(u["at"], with_year)}</small></div>')
+
+
+def _bars_svg(days: list[dict]) -> str:
+    rects = []
+    for i, d in enumerate(days):
+        if d["level"] is None:
+            tip = f'{d["day"]}：无数据'
+        else:
+            tip = f'{d["day"]}：' + ("；".join(d["titles"]) if d["titles"] else "没有记录的停机")
+        rects.append(f'<rect height="34" width="3" x="{i * 5}" y="0" fill="{BAR[d["level"]]}"><title>{html.escape(tip)}</title></rect>')
+    return (f'<svg class="availability-time-line-graphic" preserveAspectRatio="none" height="34" '
+            f'viewBox="0 0 {len(days) * 5 - 2} 34">{"".join(rects)}</svg>')
+
+
+def render(snap: dict[str, Any], subscribe_url: str = "/") -> str:
+    status_cls = "status-none" if not snap["active"] else "status-" + max(
+        (i["impact"] for i in snap["active"]), key=lambda x: IMPACT_RANK.get(x, 1))
+    parts = [f'<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">'
+             f'<meta name="viewport" content="width=device-width,initial-scale=1">'
+             f'<title>猫头鹰公益站 状态</title><style>{CSS}</style></head>'
+             f'<body class="status index {status_cls}"><div class="layout-content status status-index">',
+             f'<div class="masthead"><a class="logo" href="/status"><span class="mark">🦉</span>猫头鹰公益站 状态</a>'
+             f'<a class="show-updates-dropdown" href="{html.escape(subscribe_url)}" target="_blank" rel="noopener">订阅更新</a></div>']
     if snap["active"]:
+        parts.append('<div class="unresolved-incidents">')
         for inc in snap["active"]:
-            c = BANNER.get(inc["impact"], "#e8743b")
-            parts.append(f'<div class=banner style="background:{c}">{html.escape(inc["title"])}</div>'
-                         f'<div class=inc style="border-color:{c}">{_updates_html(inc["updates"])}</div>')
+            c = IMPACT_COLOR.get(inc["impact"], "#E86235")
+            parts.append(f'<div class="unresolved-incident impact-{html.escape(inc["impact"])}">'
+                         f'<div class="incident-title font-large" style="background-color:{c}">'
+                         f'<span class="whitespace-pre-wrap actual-title">{html.escape(inc["title"])}</span>'
+                         f'<a class="subscribe" href="{html.escape(subscribe_url)}" target="_blank" rel="noopener">订阅</a></div>'
+                         f'<div class="updates font-regular" style="border-color:{c}">'
+                         + "".join(_update_html(u) for u in inc["updates"]) + '</div></div>')
+        parts.append('</div>')
     else:
-        parts.append('<div class=ok>所有服务运行正常</div>')
-    parts.append(f'<p class=note>过去 {DAYS} 天的可用率。</p><div class=box>')
+        parts.append('<div class="page-status status-none"><span class="status font-large">所有系统运行正常</span></div>')
+    parts.append(f'<div class="components-section font-regular"><div class="components-uptime-link">'
+                 f'过去 {DAYS} 天的正常运行时间。</div><div class="components-container one-column">')
     for comp in snap["components"]:
-        bars = "".join(
-            f'<i style="background:{COLORS[d["level"]]}" title="{d["day"]}：'
-            f'{"无数据" if d["level"] is None else (html.escape("；".join(d["titles"])) or "没有事件")}"></i>'
-            for d in comp["days"])
-        up = f'{comp["uptime"]:.2f} % 可用' if comp["uptime"] is not None else "无数据"
-        parts.append(f'<div class=comp><div class=row><span class=name>{html.escape(comp["name"])}</span>'
-                     f'<span class=state style="color:{TEXT_COLOR[comp["level"]]}">{comp["status"]}</span></div>'
-                     f'<div class=bars>{bars}</div><div class=legend><span>{DAYS} 天前</span><hr>'
-                     f'<span>{up}</span><hr><span>今天</span></div></div>')
-    parts.append('</div><h2>历史事件</h2>')
+        up = f'{comp["uptime"]:.2f} % 正常运行时间' if comp["uptime"] is not None else "无数据"
+        parts.append(f'<div class="component-container border-color"><div class="component-inner-container">'
+                     f'<span class="name" role="heading" aria-level="2">{html.escape(comp["name"])}</span>'
+                     f'<span class="component-status" style="color:{STATUS_TEXT[comp["level"]]}">{comp["status"]}</span></div>'
+                     f'<div class="shared-partial uptime-90-days-wrapper">{_bars_svg(comp["days"])}'
+                     f'<div class="legend"><div class="legend-item light legend-item-date-range">{DAYS} 天前</div>'
+                     f'<div class="spacer"></div><div class="legend-item legend-item-uptime-value">{up}</div>'
+                     f'<div class="spacer"></div><div class="legend-item light legend-item-date-range">今天</div></div></div></div>')
+    parts.append('</div></div><div class="incidents-list format-expanded">'
+                 '<h2 class="font-largest no-link" id="past-incidents">过去的事件</h2>')
     today = datetime.fromtimestamp(snap["now"]).date()
     for i in range(HISTORY_DAYS):
         d = today - timedelta(days=i)
         d0 = datetime.combine(d, datetime.min.time()).timestamp()
         day_incs = [inc for inc in snap["incidents"] if d0 <= inc["started_at"] < d0 + 86400]
-        parts.append(f'<div class=day>{d.year} 年 {d.month} 月 {d.day} 日</div>')
+        parts.append(f'<div class="status-day font-regular{"" if day_incs else " no-incidents"}">'
+                     f'<h3 class="date border-color font-large">{d.year}年{d.month}月{d.day}日</h3>')
         if not day_incs:
-            parts.append(f'<div class=none>{"今天没有事件。" if i == 0 else "当天没有事件。"}</div>')
+            parts.append(f'<p class="color-secondary">{"今天没有报告事件。" if i == 0 else "没有报告事件。"}</p>')
         for inc in day_incs:
-            parts.append(f'<div class="title {inc["impact"]}">{html.escape(inc["title"])}</div>'
-                         f'{_updates_html(inc["updates"])}')
-    parts.append('<footer>事件按标准流程更新：调查中 → 已定位 → 观察中 → 已解决。时间均为北京时间。'
-                 '有问题请到 Discord 的 🛠️｜问题反馈 频道告诉我们。</footer></div></body></html>')
+            parts.append(f'<div class="incident-container"><div class="incident-title impact-{html.escape(inc["impact"])} font-large">'
+                         f'<a class="whitespace-pre-wrap">{html.escape(inc["title"])}</a></div><div class="updates-container">'
+                         + "".join(_update_html(u, with_year=False) for u in inc["updates"]) + '</div></div>')
+        parts.append('</div>')
+    parts.append('</div><div class="page-footer"><small>所有时间均为北京时间（UTC+8）。</small>'
+                 '<small>事件按 调查中 → 已确定 → 监控中 → 已解决 更新</small></div></div></body></html>')
     return "".join(parts)
 
 
@@ -248,7 +304,10 @@ STATUS_HEADERS = {"Content-Security-Policy": "default-src 'none'; style-src 'uns
 @router.get("/status", response_class=HTMLResponse)
 async def status_page(request: Request):
     snap = await snapshot(request.app.state.gate.db)
-    return HTMLResponse(render(snap), headers=STATUS_HEADERS)
+    import os
+    guild, chan = os.getenv("DISCORD_GUILD_ID", ""), os.getenv("ANNOUNCE_CHANNEL_ID", "")
+    sub = f"https://discord.com/channels/{guild}/{chan}" if guild and chan else "/"
+    return HTMLResponse(render(snap, sub), headers=STATUS_HEADERS)
 
 
 @router.get("/status.json")
