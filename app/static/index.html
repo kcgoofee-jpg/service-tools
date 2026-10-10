@@ -188,6 +188,7 @@ tr.muted a{opacity:1}
 .panel-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px}
 .panel-head h2{font-size:15px;font-weight:600;flex:1;min-width:140px}
 .panel-head .desc{flex-basis:100%;color:var(--muted);font-size:12.5px;margin-top:-8px;order:9}
+.panel-head > div > .desc{margin-top:2px}   /* 标题和说明包在一个 div 里时不再往上拉，否则压住标题（状态码分布，10/11） */
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px}
 .stat{padding:16px 20px}
 .stat .k{font-size:12.5px;color:var(--muted);display:flex;align-items:center;gap:6px}
@@ -3212,6 +3213,26 @@ document.addEventListener('keydown', e=>{
   document.body.classList.remove('nav-open');
 });
 document.addEventListener('visibilitychange', ()=>{ if(!document.hidden && allowanceTimer) loadAllowance(); });
+// 当前页的数字每 30 秒自动刷新（10/11 站长：「有些变化跟不上」——原来只有切页或点刷新才更新）。
+// 有弹窗、下拉菜单打开、正在输入，或在带表单的设置页时不刷新，免得冲掉正在填的内容。
+const AUTO_REFRESH = {
+  ov: () => loadOverview(), up: () => { loadOverview(); loadPerf(); loadShadow(); },
+  members: () => { membersCache = null; loadMembers(); }, audit: () => loadAudit(), logs: () => loadLogs(),
+  actions: () => loadActions(), bugs: () => loadBugs(), feedback: () => loadFeedback(), risk: () => loadRisk(),
+  limits: () => { loadQuotaAlgo(); loadAutopilot(); }, modules: () => loadModules(),
+};
+function currentTab(){ return TABS.find(t => !$('#tab-' + t).hidden); }
+function userBusy(){
+  if($$('.overlay.show').length || $$('details.menu[open]').length) return true;
+  const a = document.activeElement;
+  return !!(a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName));
+}
+setInterval(() => {
+  if(document.hidden || $('#app').style.display==='none' || userBusy()) return;
+  const t = currentTab(), fn = AUTO_REFRESH[t];
+  try{ if(fn) fn(); else loadBugs(); }catch(e){}        // 设置页只更新边栏角标
+}, 30000);
+
 if(window.matchMedia) matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', applyThemeUi);
 
 hydrateIcons();
