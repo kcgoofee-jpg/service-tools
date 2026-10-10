@@ -305,6 +305,8 @@ class Database:
             "ALTER TABLE generation_audit ADD COLUMN image_type TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE usage_log ADD COLUMN reason TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE discord_registrations ADD COLUMN member_checked_at REAL NOT NULL DEFAULT 0",
+            # 站长手动定的 V5 每日张数（基础值）；实际 daily_v5 = max(它 × 节约倍数, 算法给普通成员的值)，见 quota_algo
+            "ALTER TABLE api_keys ADD COLUMN v5_pinned INTEGER",
         ):
             try:
                 await self._db.execute(ddl)
@@ -545,7 +547,7 @@ class Database:
         allowed = {
             "name", "enabled", "daily_images", "daily_anlas", "daily_v5", "monthly_anlas",
             "daily_text_tokens", "rpm", "allow_anlas", "allow_img2img", "exclude_global_v5", "image_model_scope", "expires_at", "features",
-            "is_test",
+            "is_test", "v5_pinned",
         }
         sets, vals = [], []
         for k, v in fields.items():

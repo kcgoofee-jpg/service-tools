@@ -289,6 +289,13 @@ async def run(state, now: Optional[float] = None) -> dict[str, Any]:
             "UPDATE api_keys SET daily_images=?, daily_v5=?, image_model_scope='all' "
             "WHERE quota_auto=1 AND is_admin=0 AND is_test=0", (a, v5["each"]))
         await db._db.commit()
+    # 手动定了 V5 基础值的 Key：实际 = max(基础值 × 节约倍数, 普通成员的值)——手动的人不会比大家少，节约模式一样放大
+    pinned = await db._db.execute(
+        "UPDATE api_keys SET daily_v5=MAX(CAST(v5_pinned * ? AS INTEGER), ?) "
+        "WHERE quota_auto=-1 AND v5_pinned IS NOT NULL AND image_model_scope='all' AND is_admin=0 AND is_test=0 "
+        "AND daily_v5<>MAX(CAST(v5_pinned * ? AS INTEGER), ?)", (mult, v5["each"], mult, v5["each"]))
+    if pinned.rowcount:
+        await db._db.commit()
     settings = {"global_daily_v5": v5["global"], "register_daily_images": a, "register_daily_v5": v5["each"],
                 "register_image_scope": "all"}
     if guard is not None and guard.values.get("base_daily_images") != b:
