@@ -4,7 +4,7 @@ DB=/opt/service-tools/data/nai_gate.db
 q(){ sqlite3 -readonly -separator ' ' "$DB" "$1" 2>/dev/null; }
 last=$(date +%s); hour=$(date +%H); shared_prev=""; down_prev=""; cool_prev=0
 summary(){
-  echo "📊 $(date +%H:%M) 汇总：今日请求 $(q "SELECT COALESCE(SUM(requests),0) FROM counters WHERE day=date('now','+8 hours')") · 图片 $(q "SELECT COALESCE(SUM(images),0) FROM counters WHERE day=date('now','+8 hours')") 张 · Anlas $(q "SELECT COALESCE(SUM(anlas),0) FROM counters WHERE day=date('now','+8 hours')") · 已领 Key $(q "SELECT COUNT(*) FROM discord_registrations")/$(q "SELECT value FROM site_settings WHERE key='register_max_users'") · 今日拒绝 $(q "SELECT COUNT(*) FROM usage_log WHERE status='rejected' AND ts>strftime('%s','now','+8 hours','start of day','-8 hours')")"
+  echo "📊 $(date +%H:%M) 汇总：今日请求 $(q "SELECT COALESCE(SUM(requests),0) FROM counters WHERE day=date('now','+8 hours')") · 图片 $(q "SELECT COALESCE(SUM(images),0) FROM counters WHERE day=date('now','+8 hours')") 张 · Anlas $(q "SELECT COALESCE(SUM(anlas),0) FROM counters WHERE day=date('now','+8 hours')") · 已领 Key $(q "SELECT COUNT(*) FROM discord_registrations")/$(q "SELECT CASE WHEN CAST(value AS INT)>0 THEN value ELSE '不限' END FROM site_settings WHERE key='register_max_users'") · 今日拒绝 $(q "SELECT COUNT(*) FROM usage_log WHERE status='rejected' AND ts>strftime('%s','now','+8 hours','start of day','-8 hours')")"
   mem=$(free -m | awk '/Mem:/{print $7}'); disk=$(df / | awk 'NR==2{print $5+0}')
   echo "🖥 服务器：负载 $(cut -d' ' -f1-3 /proc/loadavg) · 可用内存 ${mem}MB · 磁盘已用 ${disk}%"
   [ "$mem" -lt 300 ] && echo "🚨 服务器可用内存只剩 ${mem}MB，考虑升级配置"
