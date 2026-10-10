@@ -1358,7 +1358,10 @@ async def _generate_image(request: Request, *, streaming: bool):
                 raise
             finally:
                 completed = tracker.completed_images
-                if not (local_reject and not completed):      # 本地拒绝且没出图：交给 run_stream 记「拒绝」
+                if not dispatched and not completed and failure is None and not local_reject:
+                    # 还在排队时客户端就断开了：没发到上游，不能记成「上游出错」，也不能拉低上游健康度
+                    await record(key, "image_stream", model, "cancelled", detail="排队时客户端断开（未发到上游，未记费）")
+                elif not (local_reject and not completed):      # 本地拒绝且没出图：交给 run_stream 记「拒绝」
                     settled_anlas = 0
                     if completed:
                         # 按完整结果重算首张减免，沿用派发前确认的 V5 额度状态。

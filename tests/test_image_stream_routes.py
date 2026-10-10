@@ -321,6 +321,11 @@ async def test_disconnect_during_token_pacing_cancels_before_http_dispatch(state
     await asyncio.wait_for(task, 1)
     assert not state.nai.calls and not state.db.charges
     assert state.global_active == 0 and not state.image_budget_lock.locked()
+    await asyncio.sleep(0)
+    # 线上 15:16 jhx666：排队中断开被记成「上游出错」并拉低上游健康度
+    assert [kw.get("detail") for args, kw in state.db.logs if args[4] == "cancelled"] == ["排队时客户端断开（未发到上游，未记费）"]
+    assert not any(args[4] == "error" for args, _ in state.db.logs)
+    assert False not in [ok for _, ok in getattr(state, "_upstream_events", [])]
 
 
 @pytest.mark.asyncio
