@@ -44,10 +44,11 @@ async def _setting(db, name: str) -> int:
 
 async def fetch_account(host: str, token: str) -> Optional[dict]:
     """读上游账号的剩余 Anlas 和订阅到期（= 下次补满）时间；失败返回 None。"""
+    from .nai import default_browser_headers  # 和生图同一套浏览器请求头
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             r = await client.get(host.rstrip("/") + "/user/subscription",
-                                 headers={"Authorization": "Bearer " + token})
+                                 headers=default_browser_headers(token))
         data = r.json() if r.status_code == 200 else None
         steps = data["trainingStepsLeft"]
         return {"anlas": int(steps["fixedTrainingStepsLeft"]) + int(steps.get("purchasedTrainingSteps") or 0),

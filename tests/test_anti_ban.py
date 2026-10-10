@@ -124,12 +124,16 @@ async def test_consecutive_403_breaker(fake_db):
     client.mark_forbidden(ts)
     assert ts.fails == 2 and not ts.disabled
 
-    # Third consecutive 403: triggers circuit breaker disable
+    # Third consecutive 403: cools down for 5 minutes, never permanently disables
     client.mark_forbidden(ts)
     assert ts.fails == 3
-    assert ts.disabled is True
+    assert ts.disabled is False
     assert not ts.usable
-    assert "upstream_403_disable" in events
+    assert 250 < ts.blocked_until - __import__("time").time() <= 300
+    assert "upstream_403_cooldown" in events
+    ts.blocked_until = 0
+    client.mark_ok(ts)
+    assert ts.usable and ts.fails == 0
 
 
 def test_parameter_preflight_seed_normalization():

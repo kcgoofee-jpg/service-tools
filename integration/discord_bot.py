@@ -248,12 +248,17 @@ def build_client() -> tuple[discord.Client, app_commands.CommandTree, discord.Ob
         """有人在频道里 @奶妹 → 回一句，并 @ 服务器主人（站长 10/10 要求）。
         同一频道 60 秒只回一次，防刷屏；@everyone / @身份组 不算，机器人消息不理。"""
         if (message.author.bot or message.guild is None or client.user is None
-                or client.user.id not in {u.id for u in message.mentions}):
-            return
+                or not any(f"<@{m}{client.user.id}>" in (message.content or "") for m in ("", "!"))):
+            return  # 只认正文里明确的 @奶妹；回复奶妹的消息（自动带 ping）不算
         now = time.monotonic()
-        if now - mention_last.get(message.channel.id, -1e9) < 60:
+        # 同一频道 60 秒、同一成员 5 分钟、全服 20 秒各一次，防多频道刷屏（申诉期少发公开消息）
+        if (now - mention_last.get(message.channel.id, -1e9) < 60
+                or now - mention_last.get(-message.author.id, -1e9) < 300
+                or now - mention_last.get(0, -1e9) < 20):
             return
-        mention_last[message.channel.id] = now
+        if len(mention_last) > 500:
+            mention_last.clear()
+        mention_last[message.channel.id] = mention_last[-message.author.id] = mention_last[0] = now
         owner = message.guild.owner_id
         try:
             await message.reply(f"我在床上陪主人呢 <@{owner}>",

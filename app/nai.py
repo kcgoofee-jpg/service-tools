@@ -444,12 +444,14 @@ class NaiClient:
         ts.fails += 1
 
     def mark_forbidden(self, ts: TokenState) -> None:
-        """403 代表账号受限、Cloudflare 盾拦截或上游 WAF 封禁，记录失败并在连续失败时安全熔断。"""
+        """403 代表账号受限、Cloudflare 盾拦截或上游 WAF 封禁。连续 3 次（中间没有成功）冷却 5 分钟并告警。
+
+        不设 disabled：只有一把 Token 时永久停用等于全站停摆，且只能重启恢复。
+        """
         ts.fails += 1
         if ts.fails >= 3:
-            ts.disabled = True
-            ts.blocked_until = max(ts.blocked_until, time.time() + 900.0)
-            self._event("upstream_403_disable", f"NovelAI 连续返回 403，账号可能被上游封控或拉黑。已自动停用该 Token（{ts.token_id}）以保护其它账号和 IP。", 1800)
+            ts.blocked_until = max(ts.blocked_until, time.time() + 300.0)
+            self._event("upstream_403_cooldown", f"NovelAI 连续返回 403，账号可能被上游封控。该 Token（{ts.token_id}）冷却 5 分钟后自动重试，请检查上游账号状态。", 1800)
 
     def _warn_account(self, status: int) -> None:
         """402 / 403 状态告警。"""
@@ -624,7 +626,7 @@ class NaiClient:
                     if image_lane:
                         raise UpstreamError(429, "上游限流(429)，全站图片生成已进入冷却")
                     continue
-                if resp.status_code == 403:
+                if resp.status_code == 403 and image_lane:
                     self.mark_forbidden(ts)
                     if image_lane:
                         raise UpstreamError(403, "上游拒绝了请求（HTTP 403），该账号已临时隔离保护")
@@ -802,8 +804,7 @@ class NaiClient:
         if resp.status_code not in (200, 201):
             if resp.status_code == 401:
                 self.mark_unauthorized(ts)
-            elif resp.status_code == 403:
-                self.mark_forbidden(ts)
+            # 文本 403 不计入熔断：成员反复请求文本不该让生图停摆。
             # 文本 429 不冻结整把 Token：否则成员刷文本就能让全站生图停摆。
             # Error bodies may stall or contain private upstream details.
             # Close before handing the failure back to the route, even on cancel.

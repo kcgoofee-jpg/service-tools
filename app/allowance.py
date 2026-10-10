@@ -81,15 +81,9 @@ class AllowanceCache:
             response = None
             try:
                 async with asyncio.timeout(8):
-                    headers = {
-                        "Authorization": "Bearer " + token,
-                        "Accept": "application/json",
-                        "Origin": "https://novelai.net",
-                        "Referer": "https://novelai.net/",
-                        "Sec-Fetch-Dest": "empty",
-                        "Sec-Fetch-Mode": "cors",
-                        "Sec-Fetch-Site": "same-site",
-                    }
+                    from .nai import default_browser_headers
+                    # 和生图同一套浏览器请求头（之前缺 UA，httpx 默认 UA 与 Origin 自相矛盾）
+                    headers = default_browser_headers(token)
                     request = client.build_request("GET", host.rstrip('/') + '/user/subscription',
                         headers=headers, timeout=8)
                     response = await client.send(request, stream=True, follow_redirects=False)
