@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import hashlib
+import logging
 import random
 import time
 from contextlib import asynccontextmanager
@@ -20,6 +21,7 @@ from .allowance import AllowanceCache, AllowanceUnavailable
 from .concurrency import AdjustableLimiter
 from .image_tools import validate_result
 
+log = logging.getLogger(__name__)
 
 # 真实最新的主流桌面浏览器指纹池，完全模拟合法网页端请求
 BROWSER_PROFILES: list[dict[str, str]] = [
@@ -42,6 +44,8 @@ BROWSER_PROFILES: list[dict[str, str]] = [
         "sec_ch_ua_platform": '"macOS"',
     },
 ]
+# 原始指纹池快照：开启 TLS 模拟时据此改写 Chrome 版本（关闭时 BROWSER_PROFILES 不动）
+_BASE_BROWSER_PROFILES = [dict(p) for p in BROWSER_PROFILES]
 
 
 def default_browser_headers(token: Optional[str] = None, accept: str = "application/json",
@@ -174,7 +178,8 @@ class NaiClient:
                  http2: bool = True,
                  post_jitter_min: float = 1.0,
                  post_jitter_max: float = 3.0,
-                 single_slot_enforced: bool = False):
+                 single_slot_enforced: bool = False,
+                 tls_impersonate: Optional[str] = None):
         self.image_host = image_host.rstrip("/")
         self.text_host = text_host.rstrip("/")
         self.legacy_text_host = legacy_text_host.rstrip("/")
@@ -184,6 +189,12 @@ class NaiClient:
         self._post_jitter_min = max(0.0, post_jitter_min)
         self._post_jitter_max = max(self._post_jitter_min, post_jitter_max)
         self._single_slot_enforced = bool(single_slot_enforced)
+        # TLS 指纹模拟（UPSTREAM_TLS_IMPERSONATE）：默认关闭，关闭时不导入 curl_cffi，行为与原来完全一致
+        self.tls_requested = (tls_impersonate or "").strip() or None
+        self.tls_target: Optional[str] = None
+        self.tls_error: Optional[str] = None
+        if self.tls_requested:
+            self._setup_tls_impersonate()
         self.pool = [
             TokenState(
                 token,
@@ -203,7 +214,31 @@ class NaiClient:
         self.allowance = AllowanceCache(db)
         self.guard = None          # app.guard.Guard：账号每日 / 每小时上限、安静时段、间隔抖动
 
+    def _setup_tls_impersonate(self) -> None:
+        from . import tls_impersonate as tls
+        self.tls_target, self.tls_error = tls.resolve_target(self.tls_requested)
+        if self.tls_target is None:
+            log.warning("UPSTREAM_TLS_IMPERSONATE=%s 未生效，上游仍走 httpx（原生 TLS 指纹）：%s",
+                        self.tls_requested, self.tls_error)
+            return
+        # 请求头里自称的 Chrome 版本对齐到 TLS 目标版本（只在开关打开时改；平台 Windows / macOS 不变）
+        major = tls.chrome_major(self.tls_target)
+        if major is not None:
+            BROWSER_PROFILES[:] = tls.chrome_profiles(_BASE_BROWSER_PROFILES, major)
+        else:
+            log.warning("TLS 目标 %s 不是桌面 Chrome，请求头仍自称 Chrome 129，两者不一致", self.tls_target)
+        log.info("上游 TLS 指纹模拟已开启：curl_cffi impersonate=%s", self.tls_target)
+
     async def start(self) -> None:
+        if self.tls_target:
+            from .tls_impersonate import CurlCffiTransport
+            # 代理交给 curl；trust_env=False 防止 httpx 按环境变量挂代理传输层绕过 curl（curl 自己读代理环境变量）。
+            # HTTP/2 由 curl 按 Chrome 的 ALPN 协商，UPSTREAM_HTTP2 在这条路径上不起作用。
+            self._client = httpx.AsyncClient(
+                timeout=httpx.Timeout(connect=15, read=300, write=120, pool=300),
+                follow_redirects=True, trust_env=False,
+                transport=CurlCffiTransport(self.tls_target, proxy=self._proxy, max_clients=32))
+            return
         client_kwargs: dict[str, Any] = {
             "timeout": httpx.Timeout(connect=15, read=300, write=120, pool=300),
             "limits": httpx.Limits(max_connections=32, max_keepalive_connections=8),

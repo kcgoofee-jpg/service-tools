@@ -42,13 +42,18 @@ async def _setting(db, name: str) -> int:
         return DEFAULTS[name]
 
 
-async def fetch_account(host: str, token: str) -> Optional[dict]:
-    """读上游账号的剩余 Anlas 和订阅到期（= 下次补满）时间；失败返回 None。"""
+async def fetch_account(host: str, token: str, client: Optional[httpx.AsyncClient] = None) -> Optional[dict]:
+    """读上游账号的剩余 Anlas 和订阅到期（= 下次补满）时间；失败返回 None。
+    client：开了 TLS 指纹模拟时传入网关的上游客户端（同一套 curl 传输）；否则临时建 httpx 客户端（原行为）。"""
     from .nai import default_browser_headers  # 和生图同一套浏览器请求头
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        if client is not None:
             r = await client.get(host.rstrip("/") + "/user/subscription",
-                                 headers=default_browser_headers(token))
+                                 headers=default_browser_headers(token), timeout=10)
+        else:
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.get(host.rstrip("/") + "/user/subscription",
+                                     headers=default_browser_headers(token))
         data = r.json() if r.status_code == 200 else None
         steps = data["trainingStepsLeft"]
         return {"anlas": int(steps["fixedTrainingStepsLeft"]) + int(steps.get("purchasedTrainingSteps") or 0),
@@ -93,7 +98,10 @@ async def rebalance(state, now: Optional[float] = None, account: Optional[dict] 
     else:
         if account is None:
             pool = [t for t in getattr(state.nai, "pool", []) if t.usable and t.allow_anlas]
-            account = await fetch_account(state.nai.image_host, pool[0].token) if pool else None
+            # 开了 TLS 指纹模拟就复用网关的上游客户端（curl 传输）；关闭时与原来完全一样
+            shared = state.nai._client if getattr(state.nai, "tls_target", None) else None
+            account = (await fetch_account(state.nai.image_host, pool[0].token, client=shared)
+                       if pool else None)
         if account is None:
             prev = await db.get_setting(STATE_KEY, None)
             return json.loads(prev) if prev else {"enabled": True, "error": "无法读取上游 Anlas"}
