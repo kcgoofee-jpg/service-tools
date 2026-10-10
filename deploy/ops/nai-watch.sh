@@ -45,6 +45,7 @@ while true; do
   if [ "$down" != "$down_prev" ]; then [ -n "$down" ] && echo "🚨 容器未运行：$down" || echo "✅ 容器已恢复"; fi; down_prev=$down
   curl -s -m 5 -o /dev/null -w '%{http_code}' 127.0.0.1:3003/healthz | grep -q 200 || echo "🚨 /healthz 无响应"
   docker logs --since 61s nai-gate 2>&1 | grep -E 'Traceback|\[error\]|\[warn\]|" 5[0-9][0-9] ' | grep -v '^\[bug\]' | grep -v 'healthz' | head -5 | sed 's/^/⚠ 网关日志：/'
+  docker logs --since 61s nai-gate 2>&1 | grep '\[alert-quiet\] upstream_degraded' | head -1 | sed 's/^.*\] upstream_degraded: /🔕 上游波动（只记日志、未私信站长）：/'
   docker logs --since 61s nai-gate-discord 2>&1 | grep -E 'Traceback|ERROR|Exception|\[bug\]' | head -3 | sed 's/^/⚠ 机器人日志：/'
   docker logs --since 61s nai-gate-discord 2>&1 | grep '\[gallery\] new post' | sed 's/^.*\[gallery\] new post /🎨 跑图分享新帖（已自动点赞，待写评论）：/'
 
