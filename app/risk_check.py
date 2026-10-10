@@ -24,10 +24,9 @@ import os
 import ssl
 import sys
 import time
-from typing import Any, Optional
+from typing import Optional
 
-HOUR = 3600
-DAY = 24 * HOUR
+DAY = 24 * 3600
 
 # 状态档位：ok 正常 / warn 注意 / bad 有风险 / na 不适用（含明确留空项）
 OK, WARN, BAD, NA = "ok", "warn", "bad", "na"
@@ -44,10 +43,15 @@ def _item(id_: str, title: str, status: str, detail: str, evidence: Optional[lis
 
 
 def _mask_token(token: str) -> str:
+    """只露后 4 位：上游 Token 是全站最敏感的凭据，后台页面也不必多露。"""
     token = token or ""
-    if len(token) <= 12:
-        return token[:4] + "…" if token else ""
-    return token[:8] + "…" + token[-4:]
+    return "…" + token[-4:] if len(token) > 8 else ("…" if token else "")
+
+
+def _redact_proxy(value: str) -> str:
+    """代理地址里的账号密码（scheme://user:pass@host）打码后再显示。"""
+    import re
+    return re.sub(r"(://)[^/@\s]+@", r"\1***@", value)
 
 
 # ---------- 出站指纹盘点 ----------
@@ -94,7 +98,7 @@ def _tls_fingerprint_item() -> dict:
 def _egress_ip_item() -> dict:
     proxies = {name: os.environ.get(name, "") for name in
                ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY")}
-    active = [f"{k}={v}" for k, v in proxies.items() if v]
+    active = [f"{k}={_redact_proxy(v)}" for k, v in proxies.items() if v]
     evidence = ["未配置代理：出站即服务器本机 IP，所有上游 Token 共用同一出口。" if not active
                 else "检测到代理环境变量（httpx 默认信任它们）："]
     evidence += active
@@ -237,7 +241,14 @@ async def _burn_today_item(state, now: float) -> dict:
                             + (f"（本账号日限 {t.v5_daily_limit}）" if t.v5_daily_limit else ""))
     except Exception as exc:
         return _item("burn_today", "今日上游额度消耗（V5）", NA, f"读取失败：{exc}")
-    cap = int(getattr(state.settings, "global_daily_v5", 0) or 0)
+    cap = 0
+    try:   # 优先用额度算法当前给的全站 V5 日额度（动态），没有再退回环境变量的静态值
+        import json
+        cap = int(((json.loads(await state.db.get_setting("quota_algo_last", None) or "{}").get("v5") or {})
+                   .get("global")) or 0)
+    except (TypeError, ValueError, AttributeError):
+        cap = 0
+    cap = cap or int(getattr(state.settings, "global_daily_v5", 0) or 0)
     if cap > 0:
         ratio = total_v5 / cap
         status = BAD if ratio >= 1 else (WARN if ratio >= 0.8 else OK)

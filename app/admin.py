@@ -840,6 +840,16 @@ async def upstream_perf(request: Request):
     return await perf.collect(request.app.state.gate, time.time())
 
 
+@router.get("/risk-check")
+async def risk_check(request: Request):
+    """风险检查（只读）：出站指纹盘点（请求头 / TLS / 出口链路）与白嫖行为信号。
+
+    伪装类指标（TLS 指纹伪装、浏览器指纹、代理换出口）明确留空并说明原因，见 app/risk_check.py。"""
+    require_admin(request)
+    from . import risk_check
+    return await risk_check.collect(request.app.state.gate, time.time())
+
+
 @router.get("/guard")
 async def guard_get(request: Request):
     """账号保护与排队（P0 / P1）的当前设置和实时用量。"""

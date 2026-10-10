@@ -1499,7 +1499,7 @@ async def test_admin_thumb_is_generated_from_original(tmp_path):
     buf = io.BytesIO(); Image.new("RGB", (832, 1216), (10, 120, 200)).save(buf, "PNG")
     thumb = make_thumbnail(buf.getvalue())
     assert thumb and thumb[:2] == b"\xff\xd8"                    # JPEG
-    assert max(Image.open(io.BytesIO(thumb)).size) <= 512
+    assert max(Image.open(io.BytesIO(thumb)).size) <= __import__("app.audit", fromlist=["THUMB_SIDE"]).THUMB_SIDE
 
 
 @pytest.mark.asyncio
