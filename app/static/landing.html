@@ -191,6 +191,28 @@ section{margin-top:40px}
 .dseg i.me{background:var(--warn)}
 .drow{display:flex;justify-content:space-between;font-size:13px;font-variant-numeric:tabular-nums}
 @media (prefers-reduced-motion: reduce){.dash *{transition:none!important}}
+/* 运行情况：一句结论 + 4 个关键数字 */
+.verdict{display:flex;flex-direction:column;gap:10px;padding-bottom:14px;border-bottom:1px solid var(--border)}
+.v-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.v-title{font-size:clamp(18px,4.6vw,22px);line-height:1.3;letter-spacing:-.01em;display:flex;align-items:center;gap:10px;text-wrap:balance;margin:0}
+.v-title i{width:11px;height:11px;border-radius:50%;background:var(--muted);flex:none}
+.verdict[data-tone=ok] .v-title i{background:var(--ok);animation:pulse 2.4s infinite}
+.verdict[data-tone=busy] .v-title i{background:var(--accent)}
+.verdict[data-tone=warn] .v-title i{background:var(--warn)}
+.verdict[data-tone=bad] .v-title i{background:var(--bad)}
+.verdict[data-tone=warn] .v-title{color:var(--warn)}
+.verdict[data-tone=bad] .v-title{color:var(--bad)}
+.v-econ{font-size:12px;padding:4px 10px;border-radius:999px;background:var(--accent-soft);color:var(--accent-text)}
+.v-sub{margin:0;font-size:13.5px;color:var(--text-2)}
+.v-sub:empty{display:none}
+.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:0}
+@media (max-width:520px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.kpis div{background:var(--surface-2);border-radius:var(--radius-sm);padding:10px 12px;min-width:0}
+.kpis dt{font-size:12px;color:var(--muted)}
+.kpis dd{margin:2px 0 0;display:flex;align-items:baseline;gap:4px;font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.kpis dd b{font-size:22px;line-height:1.2;color:var(--text);font-weight:700}
+.kpis dd b.hot{color:var(--warn)}
+#board{margin-top:16px}
 /* 调度数学（首页底部）：配色全部来自上面的主题变量；琥珀色（--warn）只标「当前值」 */
 .m-live{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted);margin:0 0 10px}
 .m-live i{width:7px;height:7px;border-radius:50%;background:var(--muted);flex:none}
@@ -365,7 +387,7 @@ body.authed #board{margin-top:22px}
     <a class="top-link" href="#live" id="navLive">查额度</a>
     <a class="top-link guest-only" href="#start">上手</a>
     <a class="top-link guest-only" href="#rules">须知</a>
-    <a class="top-link" href="#board">看板</a>
+    <a class="top-link" href="#board">运行情况</a>
     <a class="top-link" href="#algo">算法</a>
     <button class="btn ghost icon" id="themeBtn" type="button" aria-label="切换明暗主题" title="切换明暗主题"><span data-ic="theme"></span></button>
     <div class="userchip" id="userChip" hidden>
@@ -394,6 +416,35 @@ body.authed #board{margin-top:22px}
         <p class="muted sm" id="loginPaused" hidden>用 <code>/register</code> 领到的 Key 登录，就能看自己的额度、打包下载作品。还没有 Key？在 Discord 里输入 <code>/register</code>。</p>
       </div>
       <p class="cooldown" id="cooldown" hidden><span data-ic="clock"></span><span id="cooldownTxt"></span></p>
+    </div>
+  </section>
+
+  <section id="board" aria-labelledby="boardTitle">
+    <div class="card">
+      <div class="dash" id="dash" style="margin-top:0">
+        <div class="verdict" id="verdict" data-tone="idle">
+          <div class="v-head"><h2 class="v-title" id="boardTitle"><i aria-hidden="true"></i><span id="vText">正在读取运行情况…</span></h2><span class="v-econ" id="vEcon" hidden>节约模式</span></div>
+          <p class="v-sub" id="vSub" aria-live="polite"></p>
+          <dl class="kpis">
+            <div><dt>成员</dt><dd><b id="kMem">—</b><span id="kMemC"></span></dd></div>
+            <div><dt>今日出图</dt><dd><b id="kDay">—</b><span>张</span></dd></div>
+            <div><dt>近 60 分钟</dt><dd><b id="kHour">—</b><span id="kHourC"></span></dd></div>
+            <div><dt>排队</dt><dd><b id="kQ">—</b><span>张</span></dd></div>
+          </dl>
+        </div>
+        <ol class="dstrip" aria-label="出图流程">
+          <li data-step="client"><span>客户端</span></li><li data-step="auth"><span>验 Key</span></li><li data-step="quota"><span>查额度</span></li><li data-step="queue"><span>排队</span></li><li data-step="pace"><span>控速</span></li><li data-step="nai"><span>NovelAI</span></li>
+        </ol>
+        <div class="dgrid">
+          <div class="dtile dme" id="dMe"><div class="dk" id="dMeK">现在</div><div class="dbig" id="dMeV">—</div><div class="dsub" id="dMeS"></div></div>
+          <div class="dtile"><div class="dk">排队</div><div class="dnum"><b id="dQ">0</b><span id="dQs"></span></div><div class="dseg" id="dQbar"></div><div class="dnote" id="dQn"></div></div>
+          <div class="dtile"><div class="dk">近 60 分钟出图</div><div class="dnum"><b id="dP">0</b><span id="dPs"></span></div><div class="dbar" role="progressbar" aria-label="近 60 分钟出图占上限的比例" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="dPbar"></i></div><div class="dnote" id="dPn"></div></div>
+          <div class="dtile"><div class="dk">全站今日额度</div>
+            <div class="drow"><span>全部出图</span><span><b id="d45">0</b> / <span id="d45c">0</span></span></div><div class="dbar" role="progressbar" aria-label="全部出图占今日额度的比例" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="d45bar"></i></div>
+            <div class="drow"><span>V5</span><span><b id="d5">0</b> / <span id="d5c">0</span></span></div><div class="dbar v5" role="progressbar" aria-label="V5 出图占今日额度的比例" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="d5bar"></i></div>
+            <div class="dnote" id="dAn"></div></div>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -443,24 +494,6 @@ body.authed #board{margin-top:22px}
     </ul>
   </section>
 
-  <section id="board" aria-label="实时看板">
-    <div class="card">
-      <div class="dash" id="dash" aria-live="polite" style="margin-top:0">
-        <ol class="dstrip" aria-label="出图流程">
-          <li data-step="client"><span>客户端</span></li><li data-step="auth"><span>验 Key</span></li><li data-step="quota"><span>查额度</span></li><li data-step="queue"><span>排队</span></li><li data-step="pace"><span>控速</span></li><li data-step="nai"><span>NovelAI</span></li>
-        </ol>
-        <div class="dgrid">
-          <div class="dtile dme" id="dMe"><div class="dk" id="dMeK">现在</div><div class="dbig" id="dMeV">—</div><div class="dsub" id="dMeS"></div></div>
-          <div class="dtile"><div class="dk">排队</div><div class="dnum"><b id="dQ">0</b><span id="dQs"></span></div><div class="dseg" id="dQbar"></div><div class="dnote" id="dQn"></div></div>
-          <div class="dtile"><div class="dk">近 60 分钟出图</div><div class="dnum"><b id="dP">0</b><span id="dPs"></span></div><div class="dbar" role="progressbar" aria-label="近 60 分钟出图占上限的比例" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="dPbar"></i></div><div class="dnote" id="dPn"></div></div>
-          <div class="dtile"><div class="dk">全站今日额度</div>
-            <div class="drow"><span>全部出图</span><span><b id="d45">0</b> / <span id="d45c">0</span></span></div><div class="dbar" role="progressbar" aria-label="全部出图占今日额度的比例" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="d45bar"></i></div>
-            <div class="drow"><span>V5</span><span><b id="d5">0</b> / <span id="d5c">0</span></span></div><div class="dbar v5" role="progressbar" aria-label="V5 出图占今日额度的比例" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="d5bar"></i></div>
-            <div class="dnote" id="dAn"></div></div>
-        </div>
-      </div>
-    </div>
-  </section>
 
   <section id="algo" aria-labelledby="algoTitle">
     <div class="sec-head"><h2 id="algoTitle">调度的数学</h2><p>所有成员共用上游账号，一张图要过七道算法。每张卡是一条公式和它的函数图，拖动滑块看结果怎么变。</p></div>
@@ -711,6 +744,7 @@ function renderStatus(d){
   if($('loginBtn')) $('loginBtn').hidden = paused;
   if($('loginPaused')) $('loginPaused').hidden = !paused;
   if($('econNote')) $('econNote').hidden = !d.economy;
+  if($('vEcon')) $('vEcon').hidden = !d.economy;
   try{ document.dispatchEvent(new CustomEvent('owl-status', {detail: d})); }catch(_){}
 }
 function statusFailed(){
@@ -895,6 +929,23 @@ function fmtDate(sec){
     $id('d45c').textContent = q.images_cap || 0; setBar('d45bar', used45, q.images_cap || 0);
     $id('d5').textContent = q.v5_today || 0; $id('d5c').textContent = q.v5_cap || 0; setBar('d5bar', q.v5_today || 0, q.v5_cap || 0);
     $id('dAn').textContent = r.borrow_open ? '全站空闲：用完保底后也能继续出图' : '全站较忙：用完保底后要等空闲才能继续';
+    /* 运行情况：一句结论（按严重程度取第一条）+ 4 个关键数字 */
+    var m = d.members || {}, hour = g.hour || 0, hcap = g.hour_cap || 0, qcap = r.queue_cap || 0, tone, txt, sub;
+    if(g.cooldown){ tone = 'bad'; txt = '上游限流，全站暂停出图'; sub = '约 ' + g.cooldown + ' 秒后自动恢复，期间发的图会被拒绝，不用重试'; }
+    else if(hcap && hour >= hcap){ tone = 'warn'; txt = '本小时出图已满'; sub = '为了保护上游账号，每小时最多 ' + hcap + ' 张；最早那张满 60 分钟后就有空位，通常几分钟'; }
+    else if(hcap && hour >= hcap * 0.95){ tone = 'warn'; txt = '本小时出图快满了'; sub = '每小时最多 ' + hcap + ' 张，已出 ' + hour + ' 张；满了要等几分钟才有空位'; }
+    else if(qcap && w >= qcap){ tone = 'warn'; txt = '排队已满，请稍后再发'; sub = '队伍最多 ' + qcap + ' 张，新请求会被拒绝，过一会儿再试'; }
+    else if(w + run > 0){ tone = 'busy'; txt = '正常出图 · 有人在排队'; sub = '现在发一张约 ' + Math.round((w + run) * iv) + ' 秒后开始画'; }
+    else { tone = 'ok'; txt = '运行正常 · 发了就画'; sub = '没人在排队'; }
+    if(tone !== 'bad' && tone !== 'warn' && hcap && hour >= hcap * 0.85) sub += '；本小时已出 ' + hour + ' / ' + hcap + ' 张，快到上限';
+    var vd = $id('verdict'); vd.dataset.tone = tone;
+    $id('vText').textContent = txt; $id('vSub').textContent = sub;
+    $id('kMem').textContent = m.max ? (m.active || 0) : '—';
+    $id('kMemC').textContent = m.max ? '/ ' + m.max + (m.active >= m.max ? ' 已满' : '') : '';
+    $id('kDay').textContent = q.images_today || 0;
+    $id('kHour').textContent = hour; $id('kHour').classList.toggle('hot', !!(hcap && hour >= hcap * 0.85));
+    $id('kHourC').textContent = '/ ' + hcap;
+    $id('kQ').textContent = w;
   }
   /* 只用查询成功过的 Key，避免输错的 Key 每秒请求一次触发防暴力破解 */
   function poll(){
