@@ -702,7 +702,8 @@ async def gift_member(request: Request):
         cfg = await reg.settings()
         active = await reg.count_active()
         if cfg.get("max_users") and active > cfg["max_users"]:
-            await ops.set_registration(st.db, {"max_users": active}, st, reg)
+            # 静默调整：奖励发 Key 不是「放名额」，不发名额公告（10/10 站长反馈）
+            await ops.set_registration(st.db, {"max_users": active, "notify": False}, st, reg)
             out["max_users"] = active
     if g["new"]:
         extra = (f"\n\n🎁 这把 Key 是奶妹送你的（{reason}）" if reason else "") + \
