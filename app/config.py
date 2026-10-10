@@ -52,6 +52,12 @@ class Settings:
     text_host_legacy: str = os.environ.get(
         "NAI_TEXT_HOST_LEGACY", "https://api.novelai.net"
     )  # 老模型(Sigurd/Clio等)走这里
+    upstream_proxy: str = os.environ.get("UPSTREAM_PROXY", "").strip()
+    upstream_user_agent: str = os.environ.get("UPSTREAM_USER_AGENT", "").strip()
+    upstream_http2: bool = field(default_factory=lambda: _bool("UPSTREAM_HTTP2", True))
+    post_request_jitter_min: float = field(default_factory=lambda: _float("POST_REQUEST_JITTER_MIN", 1.0))
+    post_request_jitter_max: float = field(default_factory=lambda: _float("POST_REQUEST_JITTER_MAX", 3.0))
+    single_image_slot_enforced: bool = field(default_factory=lambda: _bool("SINGLE_IMAGE_SLOT_ENFORCED", False))
 
     # ---- 并发 / 限流 ----
     global_concurrency: int = _int("GLOBAL_CONCURRENCY", 1)  # 文本等非图片请求的全站并发

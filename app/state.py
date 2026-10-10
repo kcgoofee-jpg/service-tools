@@ -54,6 +54,12 @@ class GateState:
             v5_daily_limits=[] if managed else settings.nai_token_v5_daily_limits,
             allow_anlas=[e["allow_anlas"] for e in managed] if managed else settings.nai_token_allow_anlas,
             image_min_interval=settings.image_min_interval,
+            proxy=settings.upstream_proxy,
+            custom_user_agent=settings.upstream_user_agent,
+            http2=settings.upstream_http2,
+            post_jitter_min=settings.post_request_jitter_min,
+            post_jitter_max=settings.post_request_jitter_max,
+            single_slot_enforced=settings.single_image_slot_enforced,
         )
         self.nai.managed_path = self.token_store_path
         from .guard import Guard

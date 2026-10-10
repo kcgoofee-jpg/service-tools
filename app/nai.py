@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import hashlib
+import random
 import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -19,6 +20,50 @@ from .allowance import AllowanceCache, AllowanceUnavailable
 from .concurrency import AdjustableLimiter
 from .image_tools import validate_result
 
+
+# 真实最新的主流桌面浏览器指纹池，完全模拟合法网页端请求
+BROWSER_PROFILES: list[dict[str, str]] = [
+    {
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
+        "sec_ch_ua": '"Google Chrome";v="129", "Not=A?Brand";v="8", "Chromium";v="129"',
+        "sec_ch_ua_mobile": "?0",
+        "sec_ch_ua_platform": '"Windows"',
+    },
+    {
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        "sec_ch_ua": '"Chromium";v="128", "Not;A=Brand";v="24", "Google Chrome";v="128"',
+        "sec_ch_ua_mobile": "?0",
+        "sec_ch_ua_platform": '"Windows"',
+    },
+    {
+        "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
+        "sec_ch_ua": '"Google Chrome";v="129", "Not=A?Brand";v="8", "Chromium";v="129"',
+        "sec_ch_ua_mobile": "?0",
+        "sec_ch_ua_platform": '"macOS"',
+    },
+]
+
+
+def default_browser_headers(token: Optional[str] = None, accept: str = "application/json",
+                            profile: Optional[dict[str, str]] = None) -> dict[str, str]:
+    p = profile or BROWSER_PROFILES[0]
+    headers: dict[str, str] = {
+        "Accept": accept,
+        "User-Agent": p["user_agent"],
+        "Origin": "https://novelai.net",
+        "Referer": "https://novelai.net/",
+        "Sec-Ch-Ua": p["sec_ch_ua"],
+        "Sec-Ch-Ua-Mobile": p["sec_ch_ua_mobile"],
+        "Sec-Ch-Ua-Platform": p["sec_ch_ua_platform"],
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-site",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Priority": "u=1, i",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
 
 
 # 这次出图的算力权重：节约模式 14 步约是 28 步的一半，计 0.5 张；其余计 1 张。网关在派发前设置。
@@ -44,10 +89,11 @@ class TokenState:
         "admin_enabled",
         "dispatch_lock", "image_slots",
         "fails", "blocked_until", "disabled", "last_ok", "image_next_at",
+        "browser_profile",
     )
 
     def __init__(self, token: str, index: int, v5_daily_limit: int,
-                 allow_anlas: bool):
+                 allow_anlas: bool, custom_user_agent: Optional[str] = None):
         self.token = token
         # 永不把原始上游 Token 写入数据库；只存不可逆的短哈希标识。
         self.token_id = "token-" + hashlib.sha256(token.encode()).hexdigest()[:16]
@@ -63,6 +109,10 @@ class TokenState:
         self.disabled = False
         self.last_ok = 0.0
         self.image_next_at = 0.0
+        profile = BROWSER_PROFILES[index % len(BROWSER_PROFILES)].copy()
+        if custom_user_agent:
+            profile["user_agent"] = custom_user_agent
+        self.browser_profile = profile
 
     @property
     def usable(self) -> bool:
@@ -118,16 +168,29 @@ class NaiClient:
     def __init__(self, tokens: list[str], image_host: str, text_host: str,
                  legacy_text_host: str, *, db: Any, day_fn: Callable[[], str],
                  v5_daily_limits: list[int], allow_anlas: list[bool],
-                 image_min_interval: float = 15):
+                 image_min_interval: float = 15,
+                 proxy: Optional[str] = None,
+                 custom_user_agent: Optional[str] = None,
+                 http2: bool = True,
+                 post_jitter_min: float = 1.0,
+                 post_jitter_max: float = 3.0,
+                 single_slot_enforced: bool = False):
         self.image_host = image_host.rstrip("/")
         self.text_host = text_host.rstrip("/")
         self.legacy_text_host = legacy_text_host.rstrip("/")
+        self._proxy = proxy or None
+        self._custom_user_agent = custom_user_agent or None
+        self._http2 = bool(http2)
+        self._post_jitter_min = max(0.0, post_jitter_min)
+        self._post_jitter_max = max(self._post_jitter_min, post_jitter_max)
+        self._single_slot_enforced = bool(single_slot_enforced)
         self.pool = [
             TokenState(
                 token,
                 index,
                 v5_daily_limits[index] if index < len(v5_daily_limits) else 0,
                 allow_anlas[index] if index < len(allow_anlas) else True,
+                custom_user_agent=self._custom_user_agent,
             )
             for index, token in enumerate(tokens)
         ]
@@ -141,12 +204,20 @@ class NaiClient:
         self.guard = None          # app.guard.Guard：账号每日 / 每小时上限、安静时段、间隔抖动
 
     async def start(self) -> None:
-        self._client = httpx.AsyncClient(
-            timeout=httpx.Timeout(connect=15, read=300, write=120, pool=300),
-            limits=httpx.Limits(max_connections=32, max_keepalive_connections=8),
-            headers={"User-Agent": "nai-gate/1.0"},
-            follow_redirects=True,
-        )
+        client_kwargs: dict[str, Any] = {
+            "timeout": httpx.Timeout(connect=15, read=300, write=120, pool=300),
+            "limits": httpx.Limits(max_connections=32, max_keepalive_connections=8),
+            "follow_redirects": True,
+        }
+        if self._proxy:
+            client_kwargs["proxy"] = self._proxy
+        if self._http2:
+            try:
+                import h2  # noqa: F401
+                client_kwargs["http2"] = True
+            except ImportError:
+                pass
+        self._client = httpx.AsyncClient(**client_kwargs)
 
     async def close(self) -> None:
         if self._client:
@@ -170,7 +241,7 @@ class NaiClient:
             return {"ok": False, "error": "服务尚未就绪"}
         try:
             response = await self._client.get(f"{self.image_host}/user/subscription",
-                                              headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+                                              headers=default_browser_headers(token, accept="application/json"),
                                               timeout=12)
         except httpx.HTTPError:
             return {"ok": False, "error": "无法连接 NovelAI 验证这把 Token，请稍后再试"}
@@ -189,7 +260,7 @@ class NaiClient:
 
     async def add_token(self, token: str, allow_anlas: bool = False) -> TokenState:
         async with self._lock:
-            new = TokenState(token, len(self.pool), 0, allow_anlas)
+            new = TokenState(token, len(self.pool), 0, allow_anlas, custom_user_agent=self._custom_user_agent)
             if any(t.token_id == new.token_id for t in self.pool):
                 raise ValueError("这把 Token 已经在令牌池里")
             saved = await self._db.get_upstream_token_limits()
@@ -210,11 +281,11 @@ class NaiClient:
             if index is None:
                 raise LookupError("令牌不存在")
             old = self.pool[index]
-            new = TokenState(token, index, old.v5_daily_limit, old.allow_anlas)
+            new = TokenState(token, index, old.v5_daily_limit, old.allow_anlas, custom_user_agent=self._custom_user_agent)
             if new.token_id != old.token_id and any(t.token_id == new.token_id for t in self.pool):
                 raise ValueError("这把 Token 已经在令牌池的另一个位置")
             new.admin_enabled = old.admin_enabled
-            new.image_slots.resize(old.image_slots.limit)
+            new.image_slots.resize(1 if self._single_slot_enforced else old.image_slots.limit)
             await self._db.move_upstream_token(old.token_id, new.token_id)
             pool = list(self.pool)
             pool[index] = new
@@ -244,7 +315,8 @@ class NaiClient:
             if token.token_id in enabled:
                 token.admin_enabled = enabled[token.token_id]
             if token.token_id in image_concurrency:
-                token.image_slots.resize(min(4, max(1, image_concurrency[token.token_id])))
+                eff_limit = 1 if self._single_slot_enforced else min(4, max(1, image_concurrency[token.token_id]))
+                token.image_slots.resize(eff_limit)
 
     async def set_v5_daily_limit(self, token_id: str, limit: int) -> bool:
         async with self._lock:
@@ -274,8 +346,9 @@ class NaiClient:
             token = next((item for item in self.pool if item.token_id == token_id), None)
             if token is None:
                 return False
-            await self._db.set_upstream_token_image_concurrency(token_id, limit)
-            token.image_slots.resize(limit)
+            eff_limit = 1 if self._single_slot_enforced else min(4, max(1, limit))
+            await self._db.set_upstream_token_image_concurrency(token_id, eff_limit)
+            token.image_slots.resize(eff_limit)
             return True
 
     async def pick_token(self, *, requires_anlas: bool = False,
@@ -370,12 +443,19 @@ class NaiClient:
         ts.blocked_until = time.time() + clamp_retry_after(retry_after)
         ts.fails += 1
 
+    def mark_forbidden(self, ts: TokenState) -> None:
+        """403 代表账号受限、Cloudflare 盾拦截或上游 WAF 封禁，记录失败并在连续失败时安全熔断。"""
+        ts.fails += 1
+        if ts.fails >= 3:
+            ts.disabled = True
+            ts.blocked_until = max(ts.blocked_until, time.time() + 900.0)
+            self._event("upstream_403_disable", f"NovelAI 连续返回 403，账号可能被上游封控或拉黑。已自动停用该 Token（{ts.token_id}）以保护其它账号和 IP。", 1800)
+
     def _warn_account(self, status: int) -> None:
-        """402 / 403 只提醒站长、不自动停用：402 也可能只是单次请求 Anlas 不足，
-        只有一把 Token 时自动停用会导致全站不可用。"""
+        """402 / 403 状态告警。"""
         if status in (402, 403):
             reason = "需要付费 / 订阅或 Anlas 不足" if status == 402 else "拒绝访问，账号可能受限"
-            self._event(f"upstream_{status}", f"NovelAI 返回 {status}（{reason}），请检查上游账号状态。Token 未被自动停用。", 1800)
+            self._event(f"upstream_{status}", f"NovelAI 返回 {status}（{reason}），请检查上游账号状态。", 1800)
 
     def mark_unauthorized(self, ts: TokenState) -> None:
         ts.disabled = True
@@ -414,11 +494,10 @@ class NaiClient:
 
     # ---------------- requests ----------------
     def _headers(self, ts: TokenState, accept: str = "*/*") -> dict[str, str]:
-        return {
-            "Authorization": f"Bearer {ts.token}",
-            "Accept": accept,
-            "Content-Type": "application/json",
-        }
+        profile = getattr(ts, "browser_profile", None) or BROWSER_PROFILES[0]
+        headers = default_browser_headers(ts.token, accept=accept, profile=profile)
+        headers["Content-Type"] = "application/json"
+        return headers
 
     def _unavailable(self, requires_anlas: bool, v5_free: bool) -> UpstreamError:
         # 先区分「账号暂时不可用（冷却 / 停用）」和「额度真的用完」，避免把冷却误报成 V5 额度已用完。
@@ -436,10 +515,19 @@ class NaiClient:
         return UpstreamError(503, "上游令牌全部被限流或不可用，请稍后再试")
 
     async def _settle(self, ts: TokenState, *, succeeded: bool,
-                      v5_free: bool, image_count: int) -> None:
+                      v5_free: bool, image_count: int, send_started: bool = False) -> None:
         await self.finish_v5_reservation(ts, succeeded=succeeded, v5_free=v5_free)
         if succeeded:
             await self.record_successful_images(ts, image_count)
+        # 拟人化后置静默冷却：仅对实际发往上游且有正常间隔策略（>0.5s）的请求生效，测试环境（<=0.5s）自动跳过
+        if send_started and self._image_min_interval > 0.5 and self._post_jitter_max > 0:
+            now = time.monotonic()
+            jitter_max = min(self._post_jitter_max, self._image_min_interval)
+            jitter_min = min(self._post_jitter_min, jitter_max)
+            post_delay = random.uniform(jitter_min, jitter_max) if jitter_max > 0 else 0.0
+            if post_delay > 0:
+                async with self._lock:
+                    ts.image_next_at = max(ts.image_next_at, now + post_delay)
 
     async def _rate_limit(self, ts: TokenState, resp: httpx.Response,
                           callback: Optional[Callable[[float], Awaitable[None]]]) -> None:
@@ -536,6 +624,10 @@ class NaiClient:
                     if image_lane:
                         raise UpstreamError(429, "上游限流(429)，全站图片生成已进入冷却")
                     continue
+                if resp.status_code == 403:
+                    self.mark_forbidden(ts)
+                    if image_lane:
+                        raise UpstreamError(403, "上游拒绝了请求（HTTP 403），该账号已临时隔离保护")
                 self._warn_account(resp.status_code)
                 if resp.status_code == 401:
                     self.mark_unauthorized(ts)
@@ -559,7 +651,7 @@ class NaiClient:
             finally:
                 try:
                     await _wait_cleanup(asyncio.create_task(self._settle(
-                        ts, succeeded=succeeded, v5_free=v5_free, image_count=image_count
+                        ts, succeeded=succeeded, v5_free=v5_free, image_count=image_count, send_started=send_started
                     )))
                 finally:
                     if slot_acquired:
@@ -621,7 +713,7 @@ class NaiClient:
             finally:
                 count = max(0, handle.completed_images) if handle is not None else 0
                 await self._settle(ts, succeeded=count > 0, v5_free=v5_free,
-                                   image_count=count)
+                                   image_count=count, send_started=send_started)
                 if count > 0:
                     self.mark_ok(ts)
             if close_failed:
@@ -662,6 +754,9 @@ class NaiClient:
             if resp.status_code == 429:
                 await self._rate_limit(ts, resp, on_rate_limited)
                 raise UpstreamError(429, "上游限流(429)，全站图片生成已进入冷却")
+            if resp.status_code == 403:
+                self.mark_forbidden(ts)
+                raise UpstreamError(403, "上游拒绝了请求（HTTP 403），该账号已临时隔离保护")
             self._warn_account(resp.status_code)
             if resp.status_code == 401:
                 self.mark_unauthorized(ts)
@@ -707,6 +802,8 @@ class NaiClient:
         if resp.status_code not in (200, 201):
             if resp.status_code == 401:
                 self.mark_unauthorized(ts)
+            elif resp.status_code == 403:
+                self.mark_forbidden(ts)
             # 文本 429 不冻结整把 Token：否则成员刷文本就能让全站生图停摆。
             # Error bodies may stall or contain private upstream details.
             # Close before handing the failure back to the route, even on cancel.
@@ -717,6 +814,8 @@ class NaiClient:
             if resp.status_code == 401:
                 self._event("upstream_401", "NovelAI 返回 401：上游 Token 已失效，生图和文本全部不可用，请尽快更换 Token。", 1800)
                 raise UpstreamError(502, "上游令牌已失效（401），请站长更换 NovelAI Token")
+            if resp.status_code == 403:
+                raise UpstreamError(403, "上游拒绝了请求（HTTP 403），该账号已临时隔离保护")
             if resp.status_code == 429:
                 raise UpstreamError(429, "上游限流(429)，请降低频率后重试")
             status = resp.status_code if resp.status_code in (400, 422, 503) else 502
