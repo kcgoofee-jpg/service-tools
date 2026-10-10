@@ -9,7 +9,8 @@
 
 ━━ 规则 ━━
 1. slots 名额上限 —— 可执行
-   名额快满（空位 ≤ 2）或有人在候补，且昨天日用量 < 60%、被每小时上限拦的小时 < 3 → +5（最多 100），
+   名额快满（空位 ≤ 2）或有人在候补，且昨天日用量 < 60%（按算力折算）、被每小时上限拦的小时 < 3、
+   高峰排队拥挤（排队满被拒 ≥ 5 次）的小时 < 3 → +5（最多 100），
    每天最多一次，且昨天数据要覆盖 ≥ 20 小时（数据不足时不动）。只加不减。
 2. breaker 全站临时暂停 —— 可执行
    最近 15 分钟上游失败（5xx / 超时）≥ 5 次且占比 ≥ 30% → guard.trip_breaker 暂停出图 5 分钟，到点自动恢复。
@@ -51,11 +52,19 @@ SLOTS_STEP = 5
 SLOTS_COOLDOWN = 24 * 3600    # 每天最多加一次：判断用的是「昨天」的复盘，一天内重复判断是同一份数据（统计审查：会自我加速）
 
 
-def slots_rule(cap: int, active: int, waitlist: int, day_util: float, blocked_hours: int) -> tuple[int, str]:
-    """名额快满（空位 ≤ 2）或有人在候补，且账号昨天还有余量（日用量 < 60%、被每小时上限拦的小时 < 3）→ +5。
+QUEUE_BUSY_REJECTS = 5     # 一个小时里「排队的人太多」拒绝 ≥ 5 次，算这个小时高峰拥挤
+
+
+def slots_rule(cap: int, active: int, waitlist: int, day_util: float, blocked_hours: int,
+               queue_hours: int = 0) -> tuple[int, str]:
+    """名额快满（空位 ≤ 2）或有人在候补，且账号昨天还有余量 → +5。余量看三样：
+    日用量 < 60%（按算力折算）、被每小时上限拦的小时 < 3、高峰排队拥挤的小时 < 3。
+    人多以后先卡住大家的是高峰排队（出图间隔决定的产能），全天总量可能还很宽松，所以排队也要看（2026-10-10）。
     只加不减：人多了由动态额度把每人份额调小，不踢人。"""
     if blocked_hours >= 3:
         return cap, f"昨天 {blocked_hours} 个小时被每小时上限拦过：名额不再增加"
+    if queue_hours >= 3:
+        return cap, f"昨天 {queue_hours} 个小时高峰排队拥挤（每小时排队满被拒 ≥ {QUEUE_BUSY_REJECTS} 次）：名额不再增加"
     if day_util >= 0.6:
         return cap, f"昨天用量 {day_util:.0%}：名额不再增加"
     if cap and cap < SLOTS_MAX and (waitlist > 0 or cap - active <= 2):
@@ -117,7 +126,13 @@ async def run(state, registrar=None, now: Optional[float] = None) -> dict[str, A
     last = hist[-1] if hist else {}
     day_util = (last.get("used", 0) / last["cap"]) if last.get("cap") else 0.0
     cap_now = cfg.get("max_users") or 0
-    slots, why = slots_rule(cap_now, active, waitlist, day_util, int(last.get("hourly_blocks", 0)))
+    queue_hours = 0
+    if last.get("day"):
+        start = time.mktime(time.strptime(last["day"], "%Y-%m-%d"))
+        queue_hours = len(await _q(db, "SELECT CAST(ts/3600 AS INT) h FROM usage_log WHERE ts>=? AND ts<? "
+                                       "AND reason='queue_full' GROUP BY h HAVING COUNT(*)>=?",
+                                   start, start + 86400, QUEUE_BUSY_REJECTS))
+    slots, why = slots_rule(cap_now, active, waitlist, day_util, int(last.get("hourly_blocks", 0)), queue_hours)
     if last.get("coverage_hours", 0) < 20:                 # 昨天数据不完整：不据此加名额
         slots, why = cap_now, f"昨天只有 {last.get('coverage_hours', 0)} 小时数据，名额不变"
     mode = await _mode(db, "slots")
