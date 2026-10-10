@@ -1286,14 +1286,14 @@ async def test_public_live_has_only_aggregates(tmp_path):
         class Reg:
             async def settings(self): return {"max_users": 30, "open": True}
             async def count_active(self): return 13
-            async def waitlist(self): return [{"name": "千分之一的心", "invited_at": None, "discord_id": "123"}]
+            async def waitlist(self): return [{"name": "千分之一的心", "invited_at": None, "discord_id": "9988776655"}]
         live._cache.update(at=0, body=None)
         live.note("ok"); live.note("rejected")
         body = await live.build(st, Reg())
         text = json.dumps(body, ensure_ascii=False)
         assert body["queue"] == {"waiting": 1, "running": 0} and body["quota"]["images_cap"] == 1000
         assert body["members"]["waitlist"] == [{"name": "千分**", "invited": False}]
-        assert "123" not in text and "千分之一" not in text and "token" not in text.lower().replace("token_", "")
+        assert "9988776655" not in text and "千分之一" not in text and "token" not in text.lower().replace("token_", "")
         assert body["auth"]["rejected"] >= 1
         me = live.mine(st, 7)
         assert me["mine"] == [{"state": "waiting", "position": 1, "eta": 15}]
