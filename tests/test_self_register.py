@@ -289,6 +289,24 @@ class OpenRegistrationTests(RegistrationTests):
         self.assertEqual(self.service.send_dm.await_args.args[0], "902")
         self.assertEqual([w["discord_id"] for w in await self.service.waitlist()], ["902", "903"])
 
+    async def test_waitlist_without_dm_holds_slot_and_posts_one_announcement(self):
+        # 申诉期：waitlist_dm=0 → 不私信，照样保留名额，公告频道只发一条汇总
+        from unittest.mock import AsyncMock
+        self.service.max_users = 2
+        self.service.send_dm = AsyncMock(return_value=True)
+        await self.db.set_setting("waitlist_dm", "0")
+        await self.mint()
+        await self.db._db.execute("INSERT INTO waitlist(discord_id, name, joined_at) VALUES ('901','a',0), ('902','b',1)")
+        await self.db._db.commit()
+        posts = []
+        self.assertEqual(await self.service.invite_waitlist(announce=posts.append), 1)   # 只空 1 个位
+        self.service.send_dm.assert_not_awaited()
+        self.assertEqual(len(posts), 1)
+        self.assertIn("候补前 1 位", posts[0])
+        with self.assertRaises(RegistrationError):
+            await self.service.begin("902", "1480185480048808009")                       # 名额为 901 保留
+        self.assertIn("state=", await self.service.begin("901", "1480185480048808009"))
+
     async def test_registration_and_ban_leave_the_waitlist(self):
         self.service.max_users = 1
         await self.db._db.execute("INSERT INTO waitlist(discord_id, name, joined_at) VALUES ('777','',0), ('999','',1)")
