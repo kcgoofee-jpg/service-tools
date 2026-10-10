@@ -166,7 +166,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "2.13.1"
+__version__ = "2.13.2"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -1726,7 +1726,8 @@ _ANNOUNCEMENT_HEADERS = {"Content-Security-Policy": "sandbox allow-popups allow-
 
 LANDING_HEADERS = {
     "Content-Security-Policy": ("default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; "
-                                "connect-src 'self'; img-src 'self' data:; frame-src 'self'; "
+                                # 头像来自 Discord CDN（以前被挡，成员看到的是空白圆）
+                                "connect-src 'self'; img-src 'self' data: https://cdn.discordapp.com; frame-src 'self'; "
                                 "base-uri 'none'; form-action 'none'; frame-ancestors 'none'"),
     "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", "Cache-Control": "no-cache",
 }

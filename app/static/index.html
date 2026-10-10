@@ -186,7 +186,6 @@ tr.muted td{opacity:.6}
 .stat .v{font-size:26px;font-weight:650;margin-top:6px;letter-spacing:-.01em;font-variant-numeric:tabular-nums;line-height:1.2}
 .stat .v small{font-size:13px;font-weight:400;color:var(--muted)}
 .stat .sub{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.6}
-.stat.accent{background:linear-gradient(180deg,var(--accent-soft),var(--surface) 90%)}
 .two-col{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:24px;margin-bottom:24px;align-items:stretch}
 .two-col>.panel{margin-bottom:0}
 
@@ -260,20 +259,13 @@ td.nw,th.nw{white-space:nowrap}
 .tri .num{display:inline-block;min-width:3ch;text-align:right}
 td .stack{display:flex;flex-direction:column;gap:2px}
 td .tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
-.cell-name{font-weight:600;overflow-wrap:anywhere;min-width:120px}
 .actions{display:flex;gap:6px;flex-wrap:wrap;min-width:150px;max-width:210px}
 .empty-cell{text-align:center!important;color:var(--muted);padding:32px 16px!important}
 .pager{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:16px;flex-wrap:wrap}
 .pager .info{color:var(--muted);font-size:12.5px;margin-right:auto}
-
-/* ===== Members ===== */
-.toolbar{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:24px}
 .search{position:relative;flex:1;min-width:200px;max-width:360px}
 .search svg{position:absolute;left:12px;top:10px;color:var(--muted)}
 .search input{padding-left:38px}
-.seg{display:inline-flex;background:var(--surface-3);border-radius:var(--radius-sm);padding:3px;gap:2px}
-.seg button{border:0;background:none;padding:5px 12px;border-radius:6px;cursor:pointer;color:var(--text-2);font-weight:500;min-height:30px}
-.seg button.active{background:var(--surface);color:var(--text);box-shadow:var(--shadow-sm)}
 .member-grid{display:block}
 .mtable td{vertical-align:middle;padding-top:10px;padding-bottom:10px}
 .mtable tr.dim>td:not(.mact){opacity:.55}
@@ -338,15 +330,10 @@ th.sortable.on{color:var(--text)}
 .menu-pop a:hover{background:var(--surface-3)}
 .member{padding:20px;display:flex;flex-direction:column;gap:16px;transition:border-color .15s,box-shadow .15s}
 .member:hover{border-color:var(--border-strong);box-shadow:var(--shadow)}
-.member.dim>:not(.member-foot){opacity:.5}
 .member.dim{background:var(--surface-2)}
 .avatar{position:relative;overflow:hidden}
 .avatar.dc{border-radius:50%}
 .avatar img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
-.member-top .nm2{font-size:12.5px;color:var(--muted);overflow-wrap:anywhere;line-height:1.4}
-.dc-row{display:flex;gap:8px;flex-wrap:wrap}
-.dc-row .btn{text-decoration:none}
-.m-actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 details.menu{position:relative}
 details.menu>summary{list-style:none;cursor:pointer}
 details.menu>summary::-webkit-details-marker{display:none}
@@ -356,28 +343,13 @@ details.menu>summary::-webkit-details-marker{display:none}
 .menu-pop button:hover{background:var(--surface-3)}
 .menu-pop button.danger{color:var(--bad)}
 .menu-pop button.danger:hover{background:var(--bad-soft)}
-.codeblk{display:flex;gap:8px;align-items:flex-start;background:var(--surface-3);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;margin:8px 0 12px}
-.codeblk pre{margin:0;flex:1;min-width:0;font-family:var(--mono);font-size:12.5px;line-height:1.7;white-space:pre-wrap;overflow-wrap:anywhere}
-details.help{margin-top:16px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface-2)}
-details.help>summary{cursor:pointer;font-weight:600;padding:12px 16px}
-details.help .help-body{padding:0 16px 8px;font-size:13px;color:var(--text-2);line-height:1.75}
-details.help ol{margin:8px 0 8px;padding-left:20px}
 .pwbox{display:flex;gap:8px}
 .ok-msg{color:var(--ok);background:var(--ok-soft);border-radius:var(--radius-sm);padding:10px 14px;margin-bottom:12px;font-size:13px}
 .sumline{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .sumline .body{flex:1;min-width:200px}
-.member-top{display:flex;gap:12px;align-items:flex-start}
 .avatar{width:40px;height:40px;border-radius:12px;background:var(--accent-soft);color:var(--accent-text);display:grid;place-items:center;font-weight:700;font-size:16px;flex:none}
-.member-top .nm{font-weight:600;font-size:15px;overflow-wrap:anywhere;line-height:1.35}
-.member-top .tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
 .quota .row{display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:6px;color:var(--text-2)}
 .quota .row b{color:var(--text);font-weight:600}
-.trio{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:12px 0;border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
-.trio div{text-align:center}
-.trio .n{font-size:18px;font-weight:650;font-variant-numeric:tabular-nums}
-.trio .l{font-size:11.5px;color:var(--muted)}
-.member-foot{display:flex;align-items:center;gap:8px;justify-content:space-between;flex-wrap:wrap;font-size:12.5px;color:var(--muted)}
-.member-foot .meta{display:flex;flex-direction:column;gap:2px}
 
 /* ===== Audit gallery ===== */
 .gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px}
@@ -425,7 +397,6 @@ details.neg div{margin-top:6px;white-space:pre-wrap;overflow-wrap:anywhere;max-h
 /* skeleton */
 .skel{background:linear-gradient(90deg,var(--surface-3) 25%,var(--surface-2) 50%,var(--surface-3) 75%);background-size:200% 100%;animation:sk 1.3s infinite;border-radius:var(--radius-sm)}
 @keyframes sk{from{background-position:200% 0}to{background-position:-200% 0}}
-.skel-card{height:140px}
 @media (prefers-reduced-motion:reduce){.skel{animation:none}.bar>i,.chart .fill{transition:none}
   .overlay.show,.overlay.show .dialog,.toast{animation:none}
   .thumb img,.btn,.nav button,.card,.fchip,.mx-arrow{transition:none!important}}
@@ -520,7 +491,6 @@ td.note{min-width:220px}
   .stat{padding:14px}
   .stat .v{font-size:22px}
   .member-grid,.gallery{grid-template-columns:1fr}
-  .toolbar .search{max-width:none;flex-basis:100%}
   .dialog-head{padding:16px 16px 0}.dialog-body{padding:12px 16px}.dialog-foot{padding:12px 16px 16px}
   #toasts{right:16px;left:16px;bottom:16px;align-items:stretch}
   /* tables become cards */
@@ -530,9 +500,6 @@ td.note{min-width:220px}
   table.rt tr{border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:12px;background:var(--surface-2);padding:4px 0}
   table.rt td{border:0;padding:8px 14px;display:flex;gap:12px;justify-content:space-between;align-items:flex-start;text-align:right}
   table.rt td::before{content:attr(data-label);color:var(--muted);font-size:12px;text-align:left;flex:none;padding-top:1px}
-  table.rt td.cell-name{font-size:15px;flex-direction:column;align-items:stretch;text-align:left}
-  table.rt td.cell-name::before{display:none}
-  table.rt td.cell-name .tags{justify-content:flex-start}
   table.rt tbody tr:hover td{background:none}
   table.rt td.full{display:block;text-align:left}
   table.rt td.full::before{display:block;margin-bottom:6px}
@@ -652,7 +619,7 @@ td.note{min-width:220px}
         <!-- 总览 -->
         <section id="tab-ov">
           <div class="page-head"><div class="ttl"><h1>总览</h1></div>
-            <div class="tools"><button class="btn" id="econBtn" data-act="toggle-economy" title="节约模式：全站免费档统一 14 步 + Euler-a，省约 40% 额度、出图更快；开 / 关都会在公告频道通知成员">节约模式：—</button><button class="btn rf" data-act="refresh-ov" aria-label="刷新" title="刷新"><span data-ic="refresh"></span><span class="lbl">刷新</span></button></div></div>
+            <div class="tools"><button class="btn" id="econBtn" data-act="toggle-economy" title="节约模式：全站免费档统一 14 步 + Euler-a，省约 42% 额度、出图更快；开 / 关都会在公告频道通知成员">节约模式：—</button><button class="btn rf" data-act="refresh-ov" aria-label="刷新" title="刷新"><span data-ic="refresh"></span><span class="lbl">刷新</span></button></div></div>
           <div class="stats" id="ovCards"></div>
           <div class="two-col">
             <div class="card panel"><div class="panel-head"><div><div class="hint" id="chartLabel" style="margin:0">今日生成图片</div>
@@ -814,18 +781,18 @@ td.note{min-width:220px}
             <div class="form-grid">
               <div class="field">
                 <label for="s_budget">全站月度 Anlas 预算</label>
-                <input id="s_budget" type="number" min="0" step="1" required value="10000">
+                <input id="s_budget" type="number" min="0" step="1" required placeholder="加载中…">
                 <div class="hint">0 = 不限</div>
               </div>
               <div class="field">
                 <label for="s_v5">全站每日 V5 张数</label>
-                <input id="s_v5" type="number" min="0" step="1" required value="150">
+                <input id="s_v5" type="number" min="0" step="1" required placeholder="加载中…">
                 <div class="hint">0 = 不限</div>
                 <div class="notice-box" id="s_v5_cap" hidden style="margin-top:8px"></div>
               </div>
               <div class="field">
                 <label for="s_v5_alert">V5 官方余量告警阈值（%）</label>
-                <input id="s_v5_alert" type="number" min="1" max="100" step="1" value="20">
+                <input id="s_v5_alert" type="number" min="1" max="100" step="1" placeholder="加载中…">
                 <div class="hint">1～100</div>
               </div>
             </div>
@@ -1090,7 +1057,7 @@ async function api(path, opts={}){
   const r = await fetch(path, {headers:{'Content-Type':'application/json'}, credentials:'same-origin', ...opts});
   if(r.status === 401 && path !== '/admin/api/login'){ showLogin(); throw new Error('未登录'); }
   const data = await r.json().catch(()=>({}));
-  if(!r.ok){ const e = new Error(data.error?.message || data.detail || ('HTTP '+r.status)); e.status = r.status; throw e; }
+  if(!r.ok){ const dt = data.detail; const e = new Error(data.error?.message || (typeof dt === 'string' ? dt : dt ? JSON.stringify(dt) : '') || ('HTTP '+r.status)); e.status = r.status; throw e; }
   return data;
 }
 function openOverlay(id){ $(id).classList.add('show'); }
@@ -1212,7 +1179,7 @@ function renderAllowance(d){
     const value = p.percent == null ? '未查询 · 首次 V5 生图时确认'
       : `${p.is_negative ? '已耗尽' : p.percent + '%'}${p.uncertain ? '（上次记录）' : ''}`;
     const checked = p.checked_at ? ` · ${new Date(p.checked_at*1000).toLocaleTimeString()} 更新` : '';
-    const rate = p.recharge_per_day ? ` · 实测恢复约 ${p.recharge_per_day}%/天（约 ${Math.round(p.recharge_per_day / 0.0558)} 张 V5/天）` : '';
+    const rate = p.recharge_per_day ? ` · 实测恢复约 ${p.recharge_per_day}%/天（约 ${Math.round(p.recharge_per_day * 14.2)} 张 V5/天）` : '';
     return `账号 ${p.account} · V5 ${value}${rate}${checked}`;
   }).join('\n') : 'V5 余量：未配置上游账号';
 }
@@ -1376,7 +1343,7 @@ function drawChart(){
   const d = ovData; if(!d) return;
   const t = d.today, k = chartMetric;
   const M = {
-    images: ['今日生成图片', t.images, '张', (t.member_images != null && t.member_images !== t.images ? `其中成员 ${t.member_images} 张，其余来自测试 / 已删除的 Key · ` : '') + '账号保护每日上限见「设置」'],
+    images: ['今日生成图片', t.images, '张', (t.member_images != null && t.member_images !== t.images ? `其中成员 ${t.member_images} 张，其余来自测试 / 已删除的 Key · ` : '') + '账号保护每日上限见「额度与保护」'],
     v5: ['今日 V5', t.v5 || 0, '/ ' + (d.v5_limit > 0 ? d.v5_limit : '∞'), '全站日限；每人另有个人 V5 上限'],
     requests: ['今日请求数', t.requests, '次', '含查额度以外的所有调用'],
     anlas: ['今日消耗 Anlas（估算）', t.anlas, 'Anlas', `本月 ${d.month.anlas} / 预算 ${d.anlas_budget > 0 ? d.anlas_budget : '∞'}`],
@@ -1562,7 +1529,10 @@ async function saveUpstreamImageConcurrency(tokenId){
   }catch(e){ toastErr(e); }
 }
 async function setUpstreamEnabled(tokenId, enabled){
-  if(!enabled && !await askConfirm('确定停用这把上游 Key？它将不再接收新请求；已发出的请求继续完成。', '停用')) return;
+  const others = ((ovData && ovData.pool) || []).filter(p => p.token_id !== tokenId && p.admin_enabled && !p.disabled).length;
+  const msg = others ? '确定停用这把上游 Token？它将不再接收新请求；已发出的请求继续完成。'
+    : '这是最后一把可用的上游 Token：停用后全站将无法出图，直到重新启用。确定停用？';
+  if(!enabled && !await askConfirm(msg, '停用')) return;
   try{
     await api('/admin/api/upstream-tokens/' + tokenId + '/enabled', {
       method:'PUT', body:JSON.stringify({enabled})});
@@ -1707,7 +1677,7 @@ function memberFilters(now){
 }
 function ago(sec){ return sec < H ? Math.max(1, Math.round(sec/60)) + ' 分钟' : sec < D ? Math.round(sec/H) + ' 小时' : Math.round(sec/D) + ' 天'; }
 /* 快捷权限：额度方式、Anlas 方式。改动立即生效，并由机器人私信成员 */
-const ANLAS_PRESETS = [30, 78, 150];
+const ANLAS_PRESETS = [30, 90, 150];          // 一张 V5 续杯 30 Anlas（anlas_pool.V5_PAID_PRICE）
 function permControls(m){
   const scope = m.image_model_scope === 'all' ? 'all' : 'legacy';
   const mode = m.anlas_mode || 'auto', daily = Math.round(m.daily_anlas || 0);
@@ -1734,7 +1704,7 @@ document.addEventListener('change', async e => {
   sel.disabled = true;
   try{
     await api('/admin/api/keys/' + m.id, {method:'PATCH', body:JSON.stringify(body)});
-    toast(`已更新「${memberLabel(m)}」，机器人已私信通知`, 'ok');
+    toast(`已更新「${memberLabel(m)}」`, 'ok');
     membersCache = null; await loadMembers();
   }catch(err){ toastErr(err); sel.disabled = false; }
 });
@@ -1938,6 +1908,7 @@ function viewAudit(id){
   auditPage = 1;
   fillMemberFilter();
   $('#auditFilter').value = String(id);
+  const xb = $('#auditExport'); if(xb) xb.disabled = !$('#auditFilter').value;   // 程序设值不触发 change，要手动同步
   tab('audit');
 }
 function statusTag(s){
@@ -2076,7 +2047,7 @@ function renderOpsReg(){
       <div class="body"><div class="t">${r.open?'可领取':'未开放'}</div><div class="hint" style="margin:0">${r.open?'成员可通过 Discord /register 自助领取 Key':'新成员暂时无法领取 Key'}${r.reset_at?` · 重置时间 ${esc(r.reset_at)}`:''}</div></div>
       <div style="min-width:200px;flex:1;max-width:280px"><div class="quota"><div class="row"><span>名额</span><span class="num"><b>${esc(r.active)}</b> / ${r.max_users>0?esc(r.max_users):'不限'}</span></div>
       <div class="bar ${cls}"><i style="width:${pct}%"></i></div></div></div></div>
-    ${(r.waitlist||[]).length ? `<div class="notice-box">候补 ${r.waitlist.length} 人（名额满时 /register 自动排队；有空位后按顺序私信邀请，保留 24 小时）：${r.waitlist.map((w,i)=>`${i+1}. ${esc(w.name||('Discord '+w.discord_id))}${w.invited_at?'（已邀请，'+esc(new Date(w.invited_at*1000).toLocaleString())+'）':''}`).join('；')}</div>` : ''}
+    ${(r.waitlist||[]).length ? `<div class="notice-box">候补 ${r.waitlist.length} 人（名额满时 /register 自动排队；有空位后按顺序保留名额 24 小时，在公告频道通知（不私信））：${r.waitlist.map((w,i)=>`${i+1}. ${esc(w.name||('Discord '+w.discord_id))}${w.invited_at?'（已邀请，'+esc(new Date(w.invited_at*1000).toLocaleString())+'）':''}`).join('；')}</div>` : ''}
     <div class="cols-3">
       <div class="field"><label for="reg_max">名额上限</label><input id="reg_max" type="number" min="0" value="${esc(r.max_users)}"><div class="hint">0 = 不限</div></div>
       <div class="field"><label for="reg_exp">有效期（天）</label><input id="reg_exp" type="number" min="0" value="${esc(r.expires_days)}"><div class="hint">0 = 永久</div></div>
@@ -2103,7 +2074,10 @@ async function putReg(body, okMsg){
   opsData = d; toast(okMsg, 'ok'); renderOpsReg();
 }
 async function toggleRegOpen(input){
-  const val = input.checked; input.disabled = true;
+  const val = input.checked;
+  if(!await askConfirm(val ? '开放自助领 Key？会在成员公告频道发布一条名额公告。' : '暂停自助领 Key？会在成员公告频道发布一条公告，已领取的成员不受影响。',
+                       val ? '开放并公告' : '暂停并公告')){ input.checked = !val; return; }
+  input.disabled = true;
   try{ await putReg({open:val}, val?'已开放领 Key':'已关闭领 Key'); }
   catch(e){ input.checked = !val; input.disabled = false; toastErr(e); }
 }
@@ -2366,7 +2340,7 @@ async function loadSettings(){
       $('#r_'+name).value = r[name];
     }
     $('#cfgInfo').innerHTML =
-      `上游令牌池：${o.pool_configured ? o.pool.map(p=>esc(p.token)).join(', ') : '未配置（在总览页添加 Token）'}<br>` +
+      `上游令牌池：${o.pool_configured ? o.pool.map(p=>esc(p.token)).join(', ') : '未配置（在「上游」页添加 Token）'}<br>` +
       `本月 Anlas：${esc(o.month.anlas)} / 预算 ${o.anlas_budget>0?esc(o.anlas_budget):'∞'}<br>` +
       `今日请求：${esc(o.today.requests)} ｜ 图片 ${esc(o.today.images)} ｜ Anlas ${esc(o.today.anlas)}<br>` +
       `其余敏感配置在 .env；更多说明见项目 README`;
@@ -2435,13 +2409,13 @@ async function loadGuard(){
 const ANLAS_LABELS = {anlas_auto_enabled:['开启自动分配（1 开 / 0 关）',0,1], anlas_reserve:['保留不分的 Anlas',0,10000],
   anlas_member_daily_cap:['每人每天最多',0,1000], anlas_min_images_7d:['近 7 天至少出图张数',0,10000], anlas_min_key_age_days:['领取满几天',0,365]};
 /* 动态额度：结果 + 每日微调历史（数据来自 /admin/api/quota-algo，算法说明见 app/quota_algo.py） */
-const AP_NAME = {idle_days:'闲置回收天数', slots:'名额上限', reset_hour:'额度重置时间', breaker:'全站熔断', key_guard:'单个 Key 守护'};
+const AP_NAME = {idle_days:'闲置回收天数（仅建议）', slots:'名额上限', reset_hour:'额度重置时间（仅建议）', breaker:'全站熔断', key_guard:'单个 Key 守护', economy:'节约模式'};
 const AP_MODE = {observe:'<span class="tag warn">观察</span>', enforce:'<span class="tag on">执行</span>', off:'<span class="tag off">关闭</span>'};
 async function loadAutopilot(){
   try{
     const d = await api('/admin/api/autopilot'), r = (d.last || {}).rules || {};
     const val = (k, v) => k === 'key_guard' ? (v.length ? v.map(x => `${esc(x.name)}：${x.action==='reset'?'重置':'暂停'}`).join('；') : '—')
-      : k === 'breaker' ? (v ? '暂停 5 分钟' : '正常') : k === 'reset_hour' ? v + ':00' : k === 'idle_days' ? v + ' 天' : esc(v);
+      : k === 'breaker' ? (v ? '暂停 5 分钟' : '正常') : k === 'economy' ? (v ? '建议开启' : '保持关闭') : k === 'reset_hour' ? v + ':00' : k === 'idle_days' ? v + ' 天' : esc(v);
     $('#apBody').innerHTML = Object.keys(r).length ? `<div class="table-wrap"><table class="rt"><thead><tr><th>规则</th><th>模式</th><th>判断</th><th>理由</th></tr></thead><tbody>${
       Object.entries(r).map(([k, v]) => `<tr><td data-label="规则">${esc(AP_NAME[k]||k)}</td><td data-label="模式">${AP_MODE[v.mode]||esc(v.mode)}</td><td data-label="判断">${val(k, v.value)}</td><td class="muted" data-label="理由">${esc(v.why)}</td></tr>`).join('')
     }</tbody></table></div><div class="muted sm" style="margin-top:8px">更新于 ${esc(new Date(d.last.at*1000).toLocaleString())}</div>` : '<div class="muted">还没有运行记录（每 10 分钟一次）</div>';
@@ -2502,7 +2476,7 @@ async function loadBot(){
     hydrateIcons($('#botCfg'));
     const ev = d.events || [];
     $('#botEvents').innerHTML = ev.length ? `<div class="table-wrap"><table class="rt"><thead><tr><th class="t">时间</th><th class="nw">动作</th><th>帖子</th><th class="nw">作者</th><th>内容</th></tr></thead><tbody>${
-      ev.map(e => `<tr><td class="t" data-label="时间" title="${esc(fullTime(e.at))}">${esc(shortTime(e.at))}</td><td data-label="动作"><span class="tag ${BOT_TAG[e.kind]||''}">${esc(d.kinds[e.kind]||e.kind)}</span></td><td data-label="帖子">${e.url?`<a href="${esc(e.url)}" target="_blank" rel="noopener">${esc(e.title||'帖子')}</a>`:esc(e.title)}</td><td data-label="作者">${esc(e.author)}</td><td class="muted" data-label="内容">${esc(e.detail)}</td></tr>`).join('')
+      ev.map(e => `<tr><td class="t" data-label="时间" title="${esc(fullTime(e.at))}">${esc(shortTime(e.at))}</td><td data-label="动作"><span class="tag ${BOT_TAG[e.kind]||''}">${esc(d.kinds[e.kind]||e.kind)}</span></td><td data-label="帖子">${e.url?`<a href="${esc(safeUrl(e.url, 'https://discord.com/'))}" target="_blank" rel="noopener">${esc(e.title||'帖子')}</a>`:esc(e.title)}</td><td data-label="作者">${esc(e.author)}</td><td class="muted" data-label="内容">${esc(e.detail)}</td></tr>`).join('')
     }</tbody></table></div>` : '<div class="muted">还没有记录（跑图分享有新帖时出现）</div>';
   }catch(e){ $('#botStatus').innerHTML = '<div class="muted">读取失败</div>'; }
 }
@@ -2533,10 +2507,10 @@ async function loadAnlasPool(){
   try{
     const d = await api('/admin/api/anlas-pool'), v = d.settings, L = d.last;
     $('#anlasFields').innerHTML = Object.keys(ANLAS_LABELS).map(k => `<div class="field"><label for="a_${k}">${ANLAS_LABELS[k][0]}</label><input id="a_${k}" type="number" min="${ANLAS_LABELS[k][1]}" max="${ANLAS_LABELS[k][2]}" step="1" value="${esc(v[k])}"></div>`).join('');
-    $('#anlasLive').textContent = !L ? '还没有运行过（每小时自动运行一次，保存后立即运行）。'
+    $('#anlasLive').textContent = !L ? '还没有运行过（每 10 分钟自动运行一次，保存后立即运行）。'
       : L.error ? '上次运行：' + L.error
       : !L.enabled ? '自动分配已关闭。'
-      : `账号剩余 ${L.anlas} Anlas · 约 ${L.days_to_refill} 天后补满 · 今日池 ${L.daily_pool}\n合格成员 ${L.members.length} 人${L.members.length ? '（' + L.members.slice(0, 8).join('、') + (L.members.length > 8 ? '…' : '') + '）' : ''} · 每人每天 ${L.per_member}${L.per_member ? '（约 ' + Math.floor(L.per_member / 26) + ' 张续杯 V5）' : '（不足一张付费 V5，本轮不分）'}\n更新于 ${new Date(L.updated_at * 1000).toLocaleString()}`;
+      : `账号剩余 ${L.anlas} Anlas · 约 ${L.days_to_refill} 天后补满 · 今日池 ${L.daily_pool}\n合格成员 ${L.members.length} 人${L.members.length ? '（' + L.members.slice(0, 8).join('、') + (L.members.length > 8 ? '…' : '') + '）' : ''} · 每人每天 ${L.per_member}${L.per_member ? '（约 ' + Math.floor(L.per_member / 30) + ' 张续杯 V5）' : '（不足一张付费 V5，本轮不分）'}\n更新于 ${new Date(L.updated_at * 1000).toLocaleString()}`;
   }catch(e){ $('#anlasLive').textContent = '读取失败'; }
 }
 async function saveAnlasPool(){
@@ -2554,6 +2528,10 @@ async function saveGuard(){
       const f = guardData.fields[k];
       body[k] = readNum('g_' + k, f.label, {min:f.min, max:f.max});
     }
+    // 每小时 / 3 小时 / 每日上限是保护唯一上游账号的硬闸门：填 0 = 关掉该项，必须确认
+    const zeroCaps = ['account_hourly_cap','account_3h_cap','account_daily_cap'].filter(k => k in body && body[k] === 0)
+      .map(k => guardData.fields[k].label);
+    if(zeroCaps.length && !await askConfirm(`「${zeroCaps.join('、')}」填了 0，等于关掉这项对上游账号的保护（不再限量）。确定保存？`, '关掉保护')) return;
     await api('/admin/api/guard', {method:'PUT', body: JSON.stringify(body)});
     toast('账号保护设置已保存，立即生效', 'ok'); loadGuard();
   }catch(e){ toastErr(e); }
