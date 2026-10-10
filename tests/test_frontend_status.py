@@ -43,9 +43,13 @@ def test_landing_html_clean_and_valid():
     assert "(d.image_retention_days||3)" not in content
     assert "retDays === 0" in content
 
-    # 额度为 0（不限）时不再显示 / 0
+    # 额度为 0（不限）时不再显示 / 0，且 V5 不限时标注全站上限约束
     assert "lim45" in content
     assert "lim5" in content
+    assert 'title="个人不限额度，仍受全站日上限约束"' in content
+
+    # 名额上限为 0（不限名额）时仍正常展示当前活跃成员数，不回退为破折号
+    assert "m.active != null ? m.active : '—'" in content
 
     # 提取脚本并通过 node 语法校验
     scripts = re.findall(r"<script>(.*?)</script>", content, re.DOTALL)
