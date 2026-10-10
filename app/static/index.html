@@ -202,6 +202,13 @@ tr.muted td{opacity:.6}
 .chart .col:hover .fill{opacity:1}
 .chart .lb{font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums}
 .chart .val{font-size:12px;font-weight:600;font-variant-numeric:tabular-nums}
+.chart24{display:flex;align-items:stretch;gap:2px;height:118px;margin:2px 0 14px}
+.chart24 .col{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:3px}
+.chart24 .track{flex:1;width:100%;display:flex;align-items:flex-end;justify-content:center}
+.chart24 .stk{width:68%;min-width:3px;display:flex;flex-direction:column-reverse;border-radius:3px 3px 0 0;overflow:hidden;min-height:2px;transition:height .3s}
+.chart24 .stk .ok{background:var(--accent)}
+.chart24 .stk .er{background:var(--bad);opacity:.85}
+.chart24 .hh{font-size:10px;color:var(--muted);height:12px;line-height:12px;font-variant-numeric:tabular-nums}
 
 /* status panel */
 .status-list{display:flex;flex-direction:column}
@@ -676,6 +683,8 @@ td.note{min-width:220px}
           <div class="card panel">
             <div class="panel-head"><h2>上游表现</h2><div class="desc">按 V4.5 / V5 分开，对比过去 7 天</div></div>
             <div id="perfFlags"></div>
+            <div class="hint" id="perfHourlyLabel" style="margin:2px 0 6px" hidden>近 24 小时请求量（按小时 · 全模型合计；<span style="color:var(--accent)">■</span> 成功 <span style="color:var(--bad)">■</span> 失败）</div>
+            <div class="chart24" id="perfHourly"></div>
             <div class="table-wrap"><table class="rt"><thead><tr><th>模型</th><th class="nw">时段</th><th class="num">请求 / 成功率</th><th class="num" title="上游返回 429 的次数">限流</th><th class="num" title="上游返回 401/402/403/5xx 或连接失败">其他失败</th><th class="num">中位生成</th><th class="num">P90 生成</th><th class="num" title="收到请求到发往上游：排队 + 冷却">平均排队</th><th class="num" title="按中位生成耗时和请求间隔估算：全站 / 单个成员">估算产能 / 小时</th></tr></thead><tbody id="perfBody"></tbody></table></div>
           </div>
           <div class="card panel">
@@ -1276,9 +1285,26 @@ function statCard(k, v, small, sub, cls){
 }
 function skeletons(n, h){ return Array.from({length:n}, ()=>`<div class="skel" style="height:${h||110}px"></div>`).join(''); }
 
+function renderPerfHourly(fams){
+  const box=$('#perfHourly'), lbl=$('#perfHourlyLabel'); if(!box) return;
+  const H=Array.from({length:24},()=>({ok:0,er:0,t:0})); let any=false;
+  for(const f of Object.values(fams||{})){
+    (f.hourly||[]).forEach((b,i)=>{ if(i<24){ H[i].ok+=b.ok||0; H[i].er+=b.err||0; H[i].t=b.t; if((b.ok||0)+(b.err||0))any=true; } });
+  }
+  const max=Math.max(1,...H.map(h=>h.ok+h.er));
+  if(lbl) lbl.hidden=!any;
+  if(!any){ box.innerHTML=''; return; }
+  box.innerHTML=H.map(h=>{
+    const tot=h.ok+h.er, hh=h.t?new Date(h.t*1000).getHours():0;
+    const okH=tot?Math.round(h.ok/tot*100):0;
+    const title=`${String(hh).padStart(2,'0')}:00 · 请求 ${tot}（成功 ${h.ok} / 失败 ${h.er}）`;
+    return `<div class="col" title="${title}"><div class="track"><div class="stk" style="height:${tot?Math.max(3,Math.round(tot/max*100)):0}%"><div class="ok" style="height:${okH}%"></div><div class="er" style="height:${100-okH}%"></div></div></div><div class="hh">${hh%4===0?String(hh).padStart(2,'0'):''}</div></div>`;
+  }).join('');
+}
 async function loadPerf(){
   try{
     const d = await api('/admin/api/perf');
+    renderPerfHourly(d.families);
     const sec = ms => ms==null ? '—' : (ms/1000).toFixed(1) + 's';
     const pct = r => r==null ? '—' : Math.round(r*100) + '%';
     $('#perfFlags').innerHTML = d.flags.length
@@ -1954,9 +1980,9 @@ async function loadAudit(){
           ${it.negative ? `<details class="neg"><summary>负面提示词</summary><div>${esc(it.negative)}${nchars.length?'<br>'+nchars.map((c,i)=>`<b>角色${i+1}负面</b> ${esc(c)}`).join('<br>'):''}</div></details>` : ''}
           ${parts.length ? `<div class="shot-params mono">${esc(parts.join(' · '))}</div>` : ''}
           <div class="shot-actions">
-            ${it.prompt?`<button class="btn mini" data-act="copy-pos" data-id="${id}">${ic('copy')}复制正面</button>`:''}
-            ${it.negative?`<button class="btn mini" data-act="copy-neg" data-id="${id}">${ic('copy')}复制负面</button>`:''}
-            ${chars.length?`<button class="btn mini" data-act="copy-chars" data-id="${id}">${ic('copy')}复制角色</button>`:''}</div>
+            ${it.prompt?`<button class="btn mini" data-act="copy-pos" data-id="${id}">${ic('copy')}正面</button>`:''}
+            ${it.negative?`<button class="btn mini" data-act="copy-neg" data-id="${id}">${ic('copy')}负面</button>`:''}
+            ${chars.length?`<button class="btn mini" data-act="copy-chars" data-id="${id}">${ic('copy')}角色</button>`:''}</div>
         </div></article>`;
     }).join('');
     pager($('#auditPager'), d, 'audit');
