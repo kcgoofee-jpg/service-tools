@@ -173,7 +173,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "2.15.18"
+__version__ = "2.15.19"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -909,7 +909,7 @@ async def settle_record(*args, **kwargs) -> None:
             raise
 
 
-async def complete_image_operation(operation, *, can_cancel=None):
+async def complete_image_operation(operation, *, can_cancel=None, delivered=None):
     """Once sent, finish upstream response handling and its ledger even on disconnect.
 
     The caller retains both the budget and concurrency locks. A caller cancelled
@@ -929,9 +929,11 @@ async def complete_image_operation(operation, *, can_cancel=None):
                 if can_cancel is not None and can_cancel():
                     task.cancel()
         result = task.result()
-    if cancelled:
-        # 图已经生成（也已计数），但客户端先断开了：通常是客户端超时设得太短，成员会以为失败而重试
+    if cancelled and not (delivered is not None and delivered()):
+        # 图已经生成（也已计数），但客户端先断开了：通常是客户端超时设得太短，成员会以为失败而重试。
+        # 流式出图收到最终图后客户端自己关连接是正常的（2026-10-10 jhx666 连续误报），不记
         bug("disconnect", title="客户端在图片返回前断开连接（图已生成并计数）", level="warn")
+    if cancelled:
         raise asyncio.CancelledError()
     return result
 
@@ -1297,12 +1299,14 @@ async def _generate_image(request: Request, *, streaming: bool):
             raise err(400, "stream 仅支持 sse 或 msgpack")
         body.setdefault("parameters", {})["stream"] = wire_format
         dispatched = False
+        delivered = False          # 全部最终图都已推给客户端（之后客户端断开不算「没拿到图」）
 
         def on_dispatch():
             nonlocal dispatched
             dispatched = True
 
         async def perform_stream(response):
+            nonlocal delivered
             local_reject = False
             tracker = ImageEventTracker(image_count, wire_format)
             failure = None
@@ -1342,6 +1346,7 @@ async def _generate_image(request: Request, *, streaming: bool):
                                 if tracker.failed:
                                     raise UpstreamError(502, "上游流式生成失败")
                                 if tracker.completed_images == image_count:
+                                    delivered = True
                                     break
                             tracker.finish()
                             if tracker.completed_images < image_count:
@@ -1399,7 +1404,8 @@ async def _generate_image(request: Request, *, streaming: bool):
                     async with reserve_image_budget(key, est, legacy_free_images=legacy_free_images) as reserved:
                         nonlocal reservation
                         reservation = reserved
-                        await complete_image_operation(perform_stream(response), can_cancel=lambda: not dispatched)
+                        await complete_image_operation(perform_stream(response), can_cancel=lambda: not dispatched,
+                                                       delivered=lambda: delivered)
             except GateError as exc:
                 # 和非流式一样记「拒绝」：自动驾驶（节约模式 / Key 限流）、AIMD、每日微调都靠这些记录感知拥挤
                 record(key, "image_stream", model, "rejected", detail=f"{exc.status} {exc.message}"[:160], reason=exc.code)

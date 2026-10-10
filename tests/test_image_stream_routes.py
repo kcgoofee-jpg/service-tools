@@ -376,3 +376,24 @@ async def test_real_http_delivers_preview_before_final_without_buffering(state):
         server.should_exit = True
         await serving
         listener.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("delivered,warned", [(True, False), (False, True)])
+async def test_disconnect_after_all_images_delivered_is_not_a_bug(monkeypatch, delivered, warned):
+    # 2026-10-10 jhx666：流式出图收到最终图后客户端自己关连接，被误记成「图返回前断开」
+    calls = []
+    monkeypatch.setattr(main, "bug", lambda source, *a, **kw: calls.append(source) or "")
+    gate = asyncio.Event()
+
+    async def op():
+        await gate.wait()
+        return "ok"
+    task = asyncio.create_task(main.complete_image_operation(op(), delivered=lambda: delivered))
+    await asyncio.sleep(0.01)
+    task.cancel()                      # 客户端断开
+    await asyncio.sleep(0.01)
+    gate.set()                         # 收尾记账照常完成
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert (calls == ["disconnect"]) is warned
