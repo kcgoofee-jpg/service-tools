@@ -49,3 +49,22 @@
 
 ## 五、顺带：关于"接入大模型的 bot"
 想要的那类（如 Odysseia-Guidance）= LLM 聊天 + **读消息** + **新帖自动评论** + 自动引导——**正是把我们封掉的行为**（需要 message_content 特权 + 自动 AI 互动）。**申诉通过前绝对不碰**；即使以后要做，也应：年龄门/opt-in、严格限频、可一键关、与"发 Key"职责分离。我们现在的奶妹是**确定性发 Key**（一条命令→Key，不读消息、不 AI），这正是它"干净"、好过审的原因。
+
+---
+
+## 六、Phase A 已执行（2026-10-10，v2.10.0）
+
+站长「按 A」后落地。代码已接上执行层并上线，实测 949 测试通过、线上无报错。
+
+| 预案项 | 状态 | 实现 |
+|---|---|---|
+| 1 key_guard enforce（仅拒绝1h≥60→停1h） | ✅ 上线 + 开关 enforce | `autopilot.run` 调 `share.pause_key`，复用 paused_until 闸门；换网段/重置仍 observe（重置会私信，申诉期避免群发私信） |
+| 2 熔断 enforce（5xx 成簇→全站停5min） | ✅ 上线 + 开关 enforce | `guard.trip_breaker` + `token_block_reason`，到点自动恢复，首页显示原因 |
+| 3 流式失败退 V5 + 自动重试 | ✅ 退费已正确（无需改）；❌ 自动重试故意不加 | 失败流 completed=0 不写 settle_record，成员配额不扣；billing_uncertain 另记 unconfirmed_anlas 交对账。重试会有二次真实出图、双扣共享账号的风险，冻结期不加 |
+| 4 新 OAuth/领 Key 每小时限速 | ✅ 上线并生效（默认 12/小时） | `issue_hourly_cap`；issue_direct 与网页 OAuth finish 两条通路都加 |
+| 5 audit_retention_days 有限值 | ✅ 设 14 天 | 库很新（最早记录 10-09），今天不删任何数据，仅封顶未来增长 |
+
+**复核修正（供站长知情）**：复盘把 1/2 说成「翻开关」，实际执行逻辑此前从未接上（autopilot 一直只 observe），已补齐。且 1/2 的真实收益比复盘估计低——R3 的重试风暴全部本地拦下、根本没打到上游，所以 key_guard enforce 主要是减少本地日志噪音、不降上游/风控风险；熔断在窗口期几乎不触发。阈值都有绝对下限，误伤概率低，可随时回退：
+`UPDATE site_settings SET value='observe' WHERE key IN ('autopilot_breaker','autopilot_key_guard');`
+
+**B/C 仍未动**：防分享校准后再开 warn、/24 网段告警、DRR、重置点改 12:00。
