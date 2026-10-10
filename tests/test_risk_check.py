@@ -10,7 +10,7 @@ from app.database import Database
 from app.risk_check import collect, DAY
 
 NOW = 1_800_000_000.0
-NA_IDS = {"tls_fingerprint", "browser_fingerprint", "egress_ip"}
+NA_IDS = {"browser_fingerprint", "egress_ip"}
 
 
 @pytest_asyncio.fixture
@@ -44,17 +44,23 @@ async def test_na_items_are_left_blank_with_reason(env, monkeypatch):
     for id_ in NA_IDS:
         assert by_id[id_]["status"] == "na", id_
         assert by_id[id_]["detail"], f"{id_} 必须解释为什么留空"
-    assert "伪装" in by_id["tls_fingerprint"]["detail"]
+    assert by_id["tls_fingerprint"]["status"] == "warn" and "Chrome" in by_id["tls_fingerprint"]["detail"]
     assert sum(data["summary"][k] for k in ("ok", "warn", "bad", "na")) == len(data["items"])
 
 
 @pytest.mark.asyncio
 async def test_headers_item_lists_what_we_send(env):
+    from app.nai import BROWSER_PROFILES
     _, state = env
+    state.nai = SimpleNamespace(_client=object(), _http2=False, _post_jitter_min=1.0, _post_jitter_max=3.0,
+                                pool=[SimpleNamespace(position=1, token="pst-abcdefgh1234",
+                                                      browser_profile=BROWSER_PROFILES[0])])
     data = await collect(state, NOW)
     item = next(it for it in data["items"] if it["id"] == "outbound_headers")
     assert item["status"] == "ok"
-    assert any("User-Agent" in e for e in item["evidence"])
+    assert any("User-Agent" in e and "Chrome" in e for e in item["evidence"])
+    assert any("Sec-Ch-Ua" in e for e in item["evidence"])
+    assert not any("pst-abcdefgh1234" in e for e in item["evidence"])
 
 
 @pytest.mark.asyncio

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
+
 import anyio
 
 import hashlib
@@ -1420,17 +1422,28 @@ async def audit_list(request: Request, key_id: Optional[int] = None, page: int =
     return {"items": [dict(r) for r in rows], "page": page, "per_page": per_page, "total": total, "pages": pages}
 
 
+_THUMB_CACHE: "OrderedDict[int, bytes]" = OrderedDict()   # 现场缩图约 70ms/张，翻页回来不再重算；约 400×55KB ≈ 22MB
+
+
 @router.get("/audit/{audit_id}/thumb")
 async def audit_thumb(request: Request, audit_id: int):
     """画廊用的小图：不再另存缩略图，从原图现场缩小（浏览器缓存 1 小时）；旧记录仍有存好的缩略图就直接用。"""
     require_admin(request)
     db = request.app.state.gate.db
-    data = await db.audit_thumb(audit_id)
+    data = _THUMB_CACHE.get(audit_id)
+    if data is not None:
+        _THUMB_CACHE.move_to_end(audit_id)
+    else:
+        data = await db.audit_thumb(audit_id)
     if data is None:
         image, _ = await db.audit_image(audit_id)
         if image is not None:
             from .audit import make_thumbnail
             data = await anyio.to_thread.run_sync(make_thumbnail, image)
+            if data is not None:
+                _THUMB_CACHE[audit_id] = data
+                while len(_THUMB_CACHE) > 400:
+                    _THUMB_CACHE.popitem(last=False)
     if data is None:
         raise HTTPException(404, "没有图片（原图已过期或未记录）")
     return Response(data, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=3600"})

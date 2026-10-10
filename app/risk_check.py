@@ -6,15 +6,13 @@
 2. 白嫖 / 滥用识别 —— 谁在多人共用一把 Key、谁在把站当量产机：防分享风险分、网段共用、
    用量集中度、上游限流 / 认证失败信号、当日 V5 消耗。
 
-━━ 明确留空（前端显示「不适用」）的三类，以及为什么 ━━
-- 伪装类：伪造浏览器请求头、改 TLS(JA3/JA4) 指纹、挂代理换出口 IP，把流量伪装成官方
-  客户端以规避上游识别。上游风控主要看行为模式（多 Key 同源、请求节奏），伪装指纹既
-  不解决根因也不改变账号共享的事实，因此不做。
-- 第三方回显：主动向 JA3 / IP 回显服务发请求来「实测指纹」。这会把网关出口与查询行为
-  关联起来，收益只有满足好奇心，默认不做；出口 IP 实测仅在显式配置
-  RISK_CHECK_IP_ECHO_URL 时执行（自担该风险）。
-- 浏览器端指标：Canvas / Audio / WebGL / 字体 / WebRTC 泄漏等，全部是浏览器运行时概念；
-  本网关是纯服务端进程，没有浏览器环境，指标本身不适用。
+━━ 出站伪装的现状（2026-10-10 站长批准，见 nai.py「anti-ban」）━━
+- 请求头：已模拟 Chrome 浏览器（UA、sec-ch-ua、Origin、Referer 等），每把 Token 固定一套 profile；
+  查额度、对账、查 Anlas 也用同一套。
+- HTTP/2：装了 h2 就启用；请求后 1~3 秒随机间隔；连续 3 次 403 冷却 5 分钟。
+- 代理：支持 UPSTREAM_PROXY，未配置时直连。
+- TLS(JA3/JA4) 指纹没有改，仍是 Python/OpenSSL 的原生指纹（页面如实标出这一不一致）。
+- 浏览器端指标（Canvas / WebGL 等）对纯服务端进程不适用。
 
 全部只读：不写数据库、不发上游请求（出口 IP 回显除外且默认关闭）、不发 Discord 消息。
 """
@@ -57,23 +55,31 @@ def _redact_proxy(value: str) -> str:
 # ---------- 出站指纹盘点 ----------
 
 def _outbound_headers_item(state) -> dict:
+    """如实列出生图请求真正发出去的头（来自 nai.default_browser_headers + 每把 Token 的 profile）。"""
+    from .nai import default_browser_headers
     nai = getattr(state, "nai", None)
-    client = getattr(nai, "_client", None)
-    evidence = ["每次上游请求实际发送："]
-    if client is not None:
-        headers = dict(getattr(client, "headers", {}))
-        ua = headers.get("User-Agent", "")
-        evidence.append(f"User-Agent: {ua or '(未设置)'}（httpx 客户端级全局头，自报的第三方客户端标识）")
-    else:
-        evidence.append("User-Agent: nai-gate/1.0（代码默认值；上游客户端尚未启动）")
     pool = list(getattr(nai, "pool", []) or [])
-    sample = _mask_token(pool[0].token) if pool else ""
-    evidence.append(f"Authorization: Bearer <上游Token>（按请求换 Token，本页打码示意：{sample}）")
-    evidence.append("Accept / Content-Type: 按场景设置（application/json、x-msgpack、text/event-stream）")
-    evidence.append("无浏览器指纹头（sec-ch-ua、Accept-Language、Referer、Origin 均不发送）——现状如此，仅盘点，不做伪装。")
-    return _item("outbound_headers", "出站请求头", OK,
-                 "上游收到的是「网关自报家门」的头。是否调整属于站长与上游的关系，本模块只如实列出。",
-                 evidence)
+    if not pool:
+        return _item("outbound_headers", "出站请求头", NA, "上游客户端尚未启动，没有 Token。")
+    evidence = []
+    for ts in pool:
+        h = default_browser_headers("x", profile=getattr(ts, "browser_profile", None))
+        h.pop("Authorization", None)
+        evidence.append(f"Token #{ts.position}（{_mask_token(ts.token)}）：")
+        evidence += [f"  {k}: {v}" for k, v in h.items()]
+    client = getattr(nai, "_client", None)
+    http2 = bool(getattr(nai, "_http2", False))
+    try:
+        import h2  # noqa: F401
+        h2_ok = True
+    except ImportError:
+        h2_ok = False
+    evidence.append(f"HTTP/2：{'启用' if http2 and h2_ok else '未启用（缺 h2 包，已降级 HTTP/1.1）' if http2 else '关闭'}")
+    evidence.append(f"请求后随机间隔：{getattr(nai, '_post_jitter_min', '?')}~{getattr(nai, '_post_jitter_max', '?')} 秒；"
+                    "连续 3 次 403 冷却 5 分钟")
+    status = OK if client is not None and (h2_ok or not http2) else WARN
+    return _item("outbound_headers", "出站请求头", status,
+                 "生图、查额度、对账、查 Anlas 都发同一套 Chrome 浏览器请求头（站长 10/10 批准）。", evidence)
 
 
 def _tls_stack_item() -> dict:
@@ -90,21 +96,20 @@ def _tls_stack_item() -> dict:
 
 
 def _tls_fingerprint_item() -> dict:
-    return _item("tls_fingerprint", "TLS 指纹（JA3/JA4）实测与伪装", NA,
-                 "留空：测 JA3 需要向第三方指纹回显服务发请求，改指纹（curl_cffi impersonate 等）"
-                 "属于「伪装成真实客户端以规避上游识别」，这两件都不做。理由见模块说明。")
+    return _item("tls_fingerprint", "TLS 指纹（JA3/JA4）", WARN,
+                 "没有改：TLS 握手仍是 Python/OpenSSL 的原生指纹，和请求头里自称的 Chrome 不一致。"
+                 "实测要向第三方回显服务发请求，默认不做。是否改 TLS 指纹（如 curl_cffi）由站长决定。")
 
 
 def _egress_ip_item() -> dict:
     proxies = {name: os.environ.get(name, "") for name in
-               ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY")}
+               ("UPSTREAM_PROXY", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY")}
     active = [f"{k}={_redact_proxy(v)}" for k, v in proxies.items() if v]
     evidence = ["未配置代理：出站即服务器本机 IP，所有上游 Token 共用同一出口。" if not active
                 else "检测到代理环境变量（httpx 默认信任它们）："]
     evidence += active
     return _item("proxy_config", "代理 / 出口链路", OK,
-                 "网关走什么链路出站。注意：多把上游 Token 共用一个出口 IP 是客观事实，"
-                 "用代理把不同 Token 分散到不同 IP 属于伪装手段，不做。",
+                 "网关走什么链路出站。生图支持 UPSTREAM_PROXY；未配置时直连本机 IP。",
                  evidence)
 
 

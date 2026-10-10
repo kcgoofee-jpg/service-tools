@@ -734,6 +734,12 @@ td.note{min-width:220px}
   .mx-grid{grid-template-columns:1fr;gap:16px}
   .mx-perm{grid-template-columns:1fr}
 }
+
+/* 日志页内的标签：生成记录 / 用量日志 / 操作日志 / Bug 追踪 */
+.subtabs{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 14px;padding:4px;border:1px solid var(--border);background:var(--surface);border-radius:10px;width:max-content;max-width:100%}
+.subtabs button{border:0;background:none;color:var(--muted);padding:6px 12px;border-radius:7px;font:inherit;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.subtabs button.on{background:var(--accent-soft);color:var(--accent-text);font-weight:600}
+.subtabs .sub-badge{background:var(--warn);color:var(--on-bad);border-radius:999px;font-size:11px;line-height:16px;padding:0 6px}
 </style>
 </head>
 <body>
@@ -762,13 +768,10 @@ td.note{min-width:220px}
       <button data-tab="ov" class="active"><span data-ic="home"></span>总览</button>
       <div class="nav-label">日常</div>
       <button data-tab="members"><span data-ic="users"></span>成员</button>
-      <button data-tab="audit"><span data-ic="image"></span>生成记录</button>
-      <button data-tab="bugs"><span data-ic="alert"></span>Bug 追踪<span class="nav-badge" id="navBugs" hidden></span></button>
+      <button data-tab="audit" data-group="logs"><span data-ic="list"></span>日志<span class="nav-badge" id="navBugs" hidden></span></button>
       <div class="nav-label">监控</div>
       <button data-tab="up"><span data-ic="pulse"></span>上游</button>
       <button data-tab="risk"><span data-ic="shield"></span>风险检查</button>
-      <button data-tab="logs"><span data-ic="list"></span>用量日志</button>
-      <button data-tab="actions"><span data-ic="clock"></span>操作日志</button>
       <div class="nav-label">设置</div>
       <button data-tab="ops"><span data-ic="key"></span>领 Key 与功能</button>
       <button data-tab="limits"><span data-ic="sliders"></span>额度与保护</button>
@@ -1431,9 +1434,21 @@ async function boot(){
 
 /* ---------- tabs ---------- */
 const TABS = ['ov','members','ops','audit','up','risk','bugs','logs','actions','modules','limits','discord','set'];
+// 生成记录 / 用量日志 / 操作日志 / Bug 追踪 合并成边栏一项「日志」，页内用标签切换（10/10 站长：边栏太多）
+const LOG_TABS = [['audit','生成记录'],['logs','用量日志'],['actions','操作日志'],['bugs','Bug 追踪']];
+function logSubtabs(){
+  LOG_TABS.forEach(([t])=>{
+    const sec = $('#tab-'+t); if(!sec || sec.querySelector('.subtabs')) return;
+    const bar = document.createElement('div'); bar.className = 'subtabs'; bar.setAttribute('role','tablist');
+    bar.innerHTML = LOG_TABS.map(([k,l])=>`<button type="button" role="tab" data-sub="${k}" aria-selected="${k===t}" class="${k===t?'on':''}">${l}${k==='bugs'?'<span class="sub-badge" hidden></span>':''}</button>`).join('');
+    sec.prepend(bar);
+  });
+}
 function tab(name){
   document.body.classList.remove('nav-open');
-  $$('.nav button').forEach(b=>b.classList.toggle('active', b.dataset.tab===name));
+  logSubtabs();
+  const isLog = LOG_TABS.some(([t])=>t===name);
+  $$('.nav button').forEach(b=>b.classList.toggle('active', b.dataset.tab===name || (isLog && b.dataset.group==='logs')));
   TABS.forEach(t=> $('#tab-'+t).hidden = t!==name);
   window.scrollTo(0,0);
   if(name==='ov') loadOverview();
@@ -1612,6 +1627,7 @@ async function loadBugs(){
     { const err = d.errors.filter(e => !e.resolved_at && e.level === 'error').length;
       setPV('bugs', err ? 'bad' : d.open ? 'warn' : 'ok', !d.open ? '没有没处理的 Bug' : err ? `${d.open} 个没处理，其中 ${err} 个是错误级别` : `${d.open} 个没处理，都是「注意」级别（多数是客户端断开之类，不影响服务）`); }
     $('#navBugs').hidden = !d.open; $('#navBugs').textContent = d.open;
+    $$('.subtabs .sub-badge').forEach(x=>{ x.hidden = !d.open; x.textContent = d.open; });
     $('#bugCount').className = 'tag ' + (d.open ? 'warn' : 'on');
     $('#bugBody').innerHTML = d.errors.map(e=>`
       <tr${e.resolved_at?' class="muted"':''}>
@@ -1633,7 +1649,7 @@ document.addEventListener('click', async e => {
   if(r){ e.preventDefault(); logRid = r.dataset.rid; logPage = 1; tab('logs'); }
 });
 async function loadOverview(){
-  loadBugs();                     // 只为更新边栏的未处理数；面板本身在「Bug 追踪」页
+  loadBugs();                     // 只为更新边栏「日志」上的未处理数；面板本身在「日志 › Bug 追踪」
   loadStatus();
   if(!$('#ovCards').children.length) $('#ovCards').innerHTML = skeletons(4, 96);
   try{
@@ -3011,6 +3027,8 @@ document.addEventListener('click', ev=>{
   $$('details.menu[open]').forEach(d=>{ if(!d.contains(ev.target)) d.removeAttribute('open'); });
   const nav = ev.target.closest('.nav button[data-tab]');
   if(nav){ tab(nav.dataset.tab); return; }
+  const sub = ev.target.closest('.subtabs button[data-sub]');
+  if(sub){ tab(sub.dataset.sub); return; }
   const el = ev.target.closest('[data-act]');
   if(!el){
     // 点遮罩不关闭确认框与 Key 编辑框（避免误触丢失未保存的修改）。

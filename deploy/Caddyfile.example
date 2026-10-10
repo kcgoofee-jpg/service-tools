@@ -10,6 +10,9 @@ gate.example.com {
 	}
 	respond @bridge 404
 	respond /openapi.json 404
+	# 只压缩网页、后台和公开 JSON；出图接口（含流式）不压缩，避免缓冲
+	@compress path / /admin /admin/* /status /status.json /public/* /static/*
+	encode @compress zstd gzip
 	header {
 		Strict-Transport-Security "max-age=31536000"
 		X-Content-Type-Options "nosniff"
