@@ -22,7 +22,10 @@ PNG = base64.b64encode(PNG_BYTES).decode()
 
 def image_body(*, precise=0, **parameters):
     params = dict(width=1024, height=1024, steps=28, n_samples=1,
-                  sm=False, sm_dyn=False)
+                  sm=False, sm_dyn=False,
+                  # 真实 V4 / V4.5 客户端都带结构化提示词；缺了网关会照官方格式补上（fill_v4_prompt）
+                  v4_prompt={"caption": {"base_caption": "fixture", "char_captions": []}, "use_coords": False, "use_order": True},
+                  v4_negative_prompt={"caption": {"base_caption": "", "char_captions": []}, "legacy_uc": False})
     if precise:
         params.update(
             director_reference_images_cached=[{"cache_secret_key": "a" * 64, "data": PNG}] * precise,
