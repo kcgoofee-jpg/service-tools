@@ -202,6 +202,25 @@ def normalize_image_request(body: dict) -> None:
         if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 65536:
             raise ValueError(f"{name} 必须是非负整数")
 
+    # seed 规范化：客户端经常传 -1 表示随机种子；上游只接受 0..4294967295 的 uint32
+    if "seed" in p:
+        seed = p.get("seed")
+        if isinstance(seed, float) and seed.is_integer():
+            seed = p["seed"] = int(seed)
+        if isinstance(seed, int):
+            if seed < 0 or seed > 4294967295:
+                import random
+                p["seed"] = random.randint(0, 4294967295)
+        elif seed is not None:
+            import random
+            p["seed"] = random.randint(0, 4294967295)
+
+    # scale 校验
+    scale = p.get("scale")
+    if scale is not None:
+        if isinstance(scale, bool) or not isinstance(scale, (int, float)) or not math.isfinite(scale) or scale < 0 or scale > 50:
+            raise ValueError("scale 必须是 0 到 50 之间的有效数值")
+
 
 # 以下上游限制来自实测（参考 Steven52065/novelai_proxy 2026-09 的记录，均为上游原始报错）：
 # - 提示词上限 51200，上游按 UTF-8 字节计（中文约 1.7 万字）；
@@ -261,9 +280,15 @@ def upstream_parameter_problem(body: dict) -> Optional[str]:
         if max(counts) > MAX_CHARACTERS:
             return f"角色太多：这次有 {max(counts)} 个角色，V4/V4.5 最多 {MAX_CHARACTERS} 个，请删掉几个角色再生成"
     sampler = p.get("sampler")
-    if (isinstance(sampler, str) and sampler in V4_V5_REJECTED_SAMPLERS
-            and (is_v5_model(model) or model.startswith("nai-diffusion-4"))):
-        return f"采样器 {sampler} 不支持 V4/V4.5/V5 模型，请换用 k_euler_ancestral、k_dpmpp_2m 等"
+    if sampler is not None:
+        if not isinstance(sampler, str) or not sampler.isascii() or len(sampler) > 64 or not sampler.replace("_", "").isalnum():
+            return "采样器名称无效，请选择官方支持的标准采样器"
+        if (sampler in V4_V5_REJECTED_SAMPLERS
+                and (is_v5_model(model) or model.startswith("nai-diffusion-4"))):
+            return f"采样器 {sampler} 不支持 V4/V4.5/V5 模型，请换用 k_euler_ancestral、k_dpmpp_2m 等"
+    schedule = p.get("noise_schedule")
+    if schedule is not None and (not isinstance(schedule, str) or not schedule.isascii() or len(schedule) > 32):
+        return "noise_schedule 参数无效"
     return None
 
 

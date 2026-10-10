@@ -81,8 +81,17 @@ class AllowanceCache:
             response = None
             try:
                 async with asyncio.timeout(8):
+                    headers = {
+                        "Authorization": "Bearer " + token,
+                        "Accept": "application/json",
+                        "Origin": "https://novelai.net",
+                        "Referer": "https://novelai.net/",
+                        "Sec-Fetch-Dest": "empty",
+                        "Sec-Fetch-Mode": "cors",
+                        "Sec-Fetch-Site": "same-site",
+                    }
                     request = client.build_request("GET", host.rstrip('/') + '/user/subscription',
-                        headers={"Authorization": "Bearer " + token, "Accept": "application/json"}, timeout=8)
+                        headers=headers, timeout=8)
                     response = await client.send(request, stream=True, follow_redirects=False)
                     if response.status_code == 429:
                         retry_seconds = 300
