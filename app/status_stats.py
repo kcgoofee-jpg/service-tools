@@ -9,7 +9,7 @@ import time
 from collections import Counter
 from typing import Any, Optional
 
-PATHS = ("/ai/", "/user/", "/v1/")
+PATHS = ("/ai/", "/user/", "/v1/", "/nai/")
 _PENDING: Counter = Counter()          # (小时起点, 状态码) → 次数
 
 MEANING = {
