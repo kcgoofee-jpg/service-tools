@@ -274,6 +274,12 @@ class RegistrationService:
             raise RegistrationError("领 Key 暂未开放，请等待站长开放。")
         if not cfg["max_users"]:
             return cfg
+        if not await site_flags.get(self.db, site_flags.WAITLIST):
+            # 候补已取消（2026-10-10 站长：机器人不能私信，候补只会空占名额）：有空位先到先得
+            if cfg["max_users"] - await self.count_active() > 0:
+                return cfg
+            raise RegistrationError(f"名额已满（上限 {cfg['max_users']} 人），请过段时间再试。"
+                                    "闲置的 Key 会被自动回收，空出的名额先到先得。")
         now = time.time()
         rows = await self.db._db.execute_fetchall(
             "SELECT discord_id, invited_at FROM waitlist ORDER BY joined_at")
@@ -318,6 +324,8 @@ class RegistrationService:
         通知方式由设置 waitlist_dm 决定：1 = 逐个私信（仍受私信总闸门限制）；0（默认）= 不私信，只在公告频道发一条汇总
         （Discord 应用审核期间用 0：批量私信正是 2026-10-10 被标记的信号之一）。announce 是发公告频道的函数。"""
         now = time.time() if now is None else now
+        if not await site_flags.get(self.db, site_flags.WAITLIST):
+            return 0
         use_dm = await site_flags.get(self.db, site_flags.WAITLIST_DM)     # 默认不私信（fail-closed）
         hold = await self._hold_seconds()
         cfg = await self.settings()

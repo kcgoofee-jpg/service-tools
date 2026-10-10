@@ -41,6 +41,7 @@ class RegistrationTests(unittest.IsolatedAsyncioTestCase):
                 return httpx.Response(200, json={})
             raise AssertionError(f"Unexpected Discord request {request.method} {request.url}")
         await self.db.set_setting("register_open", "1")        # registration is closed by default (safe default)
+        await self.db.set_setting("waitlist_enabled", "1")     # 候补默认关；这里的候补用例显式打开
         self.http = httpx.AsyncClient(transport=httpx.MockTransport(discord), base_url="https://discord.com")
         self.service = RegistrationService(self.db, self.http, client_id="client-id", client_secret="client-secret",
             bot_token="fake-bot-token", bridge_secret="bridge-secret")
@@ -524,3 +525,18 @@ class SessionBindingTests(RegistrationTests):
             self.assertEqual(await mr._member_session(req), str(did))
             await self.db.rotate_key_token(old["id"], gen_key("nai"))          # /resetkey
             self.assertIsNone(await mr._member_session(req))
+
+
+class NoWaitlistTests(RegistrationTests):
+    async def test_full_without_waitlist_refuses_and_frees_first_come(self):
+        # 候补关闭（默认）：名额满直接提示、不进候补；有空位先到先得
+        await self.db.set_setting("waitlist_enabled", "0")
+        self.service.max_users = 1
+        await self.db.set_setting("register_max_users", "1")
+        await self.mint("777")
+        with self.assertRaises(RegistrationError) as ctx:
+            await self.mint("888")
+        self.assertIn("先到先得", str(ctx.exception))
+        self.assertEqual(await self.count("waitlist"), 0)
+        await self.service.revoke("777")
+        self.assertIn("nai-", (await self.mint("888"))["key"])
