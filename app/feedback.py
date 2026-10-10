@@ -63,7 +63,8 @@ def to_csv(items: list[dict]) -> bytes:
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(["time", "discord_id", "username", "key_id", "key_name"] + [q["label"] for q in QUESTIONS])
+    from .client_export import safe_cell
     for it in sorted(items, key=lambda x: x["ts"]):
-        w.writerow([datetime.fromtimestamp(it["ts"]).strftime("%Y-%m-%d %H:%M:%S"), it["discord_id"], it["username"],
-                    it["key_id"] or "", it["key_name"]] + [it["answers"].get(q["id"], "") for q in QUESTIONS])
+        w.writerow([safe_cell(c) for c in [datetime.fromtimestamp(it["ts"]).strftime("%Y-%m-%d %H:%M:%S"), it["discord_id"], it["username"],
+                    it["key_id"] or "", it["key_name"]] + [it["answers"].get(q["id"], "") for q in QUESTIONS]])
     return ("﻿" + buf.getvalue()).encode("utf-8")
