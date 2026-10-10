@@ -464,6 +464,7 @@ async def public_me(request: Request):
         out.update(has_key=True, key=key["token"], name=key["name"],
                    expires_at=key["expires_at"], image_scope=key["image_model_scope"],
                    today={"images": c["images"], "v5": c["v5"],
+                          "legacy": c.get("legacy_free_images", 0),
                           "daily_images": key["daily_images"], "daily_v5": key["daily_v5"]},
                    queue=qv.get("mine", []),
                    coupons=await gate.db.list_coupons(key["id"]),
