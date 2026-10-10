@@ -33,6 +33,20 @@ def test_landing_html_clean_and_valid():
     # 死代码 bjMinute 已清理
     assert "bjMinute" not in content
 
+    # 死代码：未使用的 SVG 图标已清理
+    p_block = re.search(r"var P = \{(.*?)\};", content, re.DOTALL)
+    assert p_block is not None
+    for dead_icon in ["shield", "eye", "eyeoff", "search", "lock", "check", "sparkle"]:
+        assert re.search(rf"\b{dead_icon}\s*:", p_block.group(1)) is None
+
+    # 假数字与原图保留为 0 天时的文案校准（不能用 || 3，0 表示不保留原图）
+    assert "(d.image_retention_days||3)" not in content
+    assert "retDays === 0" in content
+
+    # 额度为 0（不限）时不再显示 / 0
+    assert "lim45" in content
+    assert "lim5" in content
+
     # 提取脚本并通过 node 语法校验
     scripts = re.findall(r"<script>(.*?)</script>", content, re.DOTALL)
     assert len(scripts) >= 2
@@ -53,6 +67,11 @@ def test_index_html_clean_and_valid():
     assert "memberLimitRatio" not in content
     assert "function srcBadge" not in content
 
+    # 未使用图标 clock 已清理
+    icons_block = re.search(r"const ICONS\s*=\s*\{(.*?)\};", content, re.DOTALL)
+    assert icons_block is not None
+    assert "clock:" not in icons_block.group(1)
+
     # ensureMembers 确保完整载入成员与 Key 关联
     assert "async function ensureMembers(){" in content
     assert "await loadMembers()" in content
@@ -69,3 +88,44 @@ def test_index_html_clean_and_valid():
             tmp.flush()
             res = subprocess.run(["node", "--check", tmp.name], capture_output=True, text=True)
             assert res.returncode == 0, f"JS syntax error: {res.stderr}"
+
+
+@pytest.mark.asyncio
+async def test_public_me_returns_legacy_field():
+    from unittest.mock import AsyncMock, MagicMock
+    from starlette.requests import Request
+    from app.registration_routes import public_me
+
+    req = MagicMock(spec=Request)
+    req.cookies = {"nai_member": "valid_token"}
+    req.app.state.gate.day.return_value = "2026-10-11"
+    req.app.state.gate.db.get_counter = AsyncMock(return_value={
+        "images": 15, "v5": 5, "legacy_free_images": 10
+    })
+    req.app.state.gate.db.list_coupons = AsyncMock(return_value=[])
+    req.app.state.gate.db.audit_image_count = AsyncMock(return_value=2)
+    req.app.state.gate.guard.queue_view.return_value = {"mine": []}
+
+    mock_service = MagicMock()
+    mock_service.registration_profile = AsyncMock(return_value={"id": "1234567890", "username": "alice"})
+    mock_service.key_row_for = AsyncMock(return_value={
+        "id": 1, "token": "nai-test-key", "name": "alice", "enabled": 1,
+        "expires_at": 1800000000, "image_model_scope": "all",
+        "daily_images": 100, "daily_v5": 20
+    })
+    req.app.state.registrar = mock_service
+
+    # mock session decode
+    import app.registration_routes as rr
+    orig_session = rr._member_session
+    rr._member_session = AsyncMock(return_value="1234567890")
+    try:
+        resp = await public_me(req)
+        import json
+        body = json.loads(resp.body)
+        assert body["logged_in"] is True
+        assert body["today"]["legacy"] == 10
+        assert body["today"]["images"] == 15
+        assert body["today"]["v5"] == 5
+    finally:
+        rr._member_session = orig_session
