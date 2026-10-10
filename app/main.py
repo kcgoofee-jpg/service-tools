@@ -55,7 +55,7 @@ from .policy import (
 from .state import GateState
 from . import features
 from .policy import ECONOMY_STEPS, REFERENCE_FIELDS, economy_trim
-from . import status_stats
+from . import status_stats, quota_algo
 from .key_sources import RETENTION_SECONDS as KEY_SOURCE_RETENTION
 from .action_log import RETENTION_DAYS as ADMIN_ACTION_RETENTION_DAYS, log_action
 from .audit import audit_flags, audit_disclosure, audit_image_days, capture_prompts, full_image
@@ -174,7 +174,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "2.15.33"
+__version__ = "2.15.34"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -826,9 +826,13 @@ async def quota_image_check(key, est: dict, *, legacy_free_images: int = 0,
                                "现在有其他人在排队或用量较高，请过几分钟再试")
     if est["v5"] > 0:
         # V5 周额度是账户级共享资源，用全站日计数镜像（恢复量 ~190 张/天）
-        if key["daily_v5"] > 0 and c["v5"] + sum(r.v5 for r in own_day) + est["v5"] > key["daily_v5"]:
-            raise err(402, f"已达今日 V5 额度（{key['daily_v5']} 张/天），明天恢复后再用")
+        borrow = quota_algo.borrow_for(key["id"]) if key["daily_v5"] > 0 else 0    # 账号快满时的空闲借用
+        if key["daily_v5"] > 0 and c["v5"] + sum(r.v5 for r in own_day) + est["v5"] > key["daily_v5"] + borrow:
+            raise err(402, f"已达今日 V5 额度（{key['daily_v5']} 张/天" + (f"，含空闲借用 {borrow} 张" if borrow else "")
+                      + "），明天恢复后再用")
         g = await site_flags.get(STATE.db, site_flags.GLOBAL_DAILY_V5, STATE.settings)
+        if g > 0 and quota_algo.BORROW.get("open"):
+            g = int(g * (1 + quota_algo.BORROW_GLOBAL_RATIO))
         if g > 0 and not key["exclude_global_v5"]:
             total = await STATE.db.day_v5_total(STATE.day())
             if total + sum(r.v5 for r in global_day if not r.exclude_global_v5) + est["v5"] > g:

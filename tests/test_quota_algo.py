@@ -226,3 +226,15 @@ async def test_quiet_recovery_uses_only_fresh_snapshots_without_v5_usage(tmp_pat
     q = await quota_algo.quiet_recovery(db, t0 + 3600 * 9)
     assert q is not None and q["hours"] == 4.0 and q["rate"] == 6.0      # 只算前两段（4 小时涨 1%）
     await db.close()
+
+
+def test_borrow_only_when_pool_nearly_full_and_heavy_users_get_less():
+    # 公益版：账号快满（≥95%）才借；用得最多的三分之一只借一半，不奖励刷量
+    assert quota_algo.borrow_plan(90, 18, {1: 50})["open"] is False
+    usage = {1: 2, 2: 5, 3: 10, 4: 40, 5: 90, 6: 120}
+    p = quota_algo.borrow_plan(97, 18, usage)
+    assert p["open"] and p["bonus"] == 9 and p["heavy_bonus"] == 4 and sorted(p["heavy"]) == [5, 6]
+    quota_algo.BORROW.clear(); quota_algo.BORROW.update(p)
+    assert quota_algo.borrow_for(1) == 9 and quota_algo.borrow_for(6) == 4
+    quota_algo.BORROW.clear(); quota_algo.BORROW.update({"open": False})
+    assert quota_algo.borrow_for(1) == 0
