@@ -185,7 +185,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "2.9.1"
+__version__ = "2.10.0"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -359,6 +359,9 @@ async def authenticate(request: Request, *, passive: bool = False):
     share = getattr(STATE, "share", None)
     if share is not None and share.paused_until(row["id"]):
         until = time.strftime("%m-%d %H:%M", time.localtime(share.paused_until(row["id"])))
+        reason = getattr(share, "pause_reasons", {}).get(row["id"])
+        if reason:
+            raise err(403, f"{reason}，{until} 自动恢复。如有疑问请联系站长。")
         raise err(403, f"你的 Key 因检测到多人共用已暂停，{until} 自动恢复。Key 仅限本人使用；如果是误判，请联系站长。")
     # 只要 Key 实际通过鉴权即视为使用，避免 Launcher 登录/上游暂时失败时被误删。
     await STATE.db.touch_key(row["id"])

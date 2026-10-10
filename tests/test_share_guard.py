@@ -233,3 +233,12 @@ async def test_hourly_cap_aimd_and_3h_window(guard):
 class _DB0:
     async def get_upstream_counter(self, token_id, day):
         return {"images": 0}
+
+
+@pytest.mark.asyncio
+async def test_pause_key_sets_reason_and_is_idempotent(guard):
+    """非防分享的 Key 暂停（自动驾驶限流用）：设置 paused_until + 原因，已暂停则不重复。"""
+    assert await guard.pause_key(1, 3600, "你的 Key 短时间内被大量拒绝")
+    assert guard.paused_until(1)
+    assert guard.pause_reasons[1] == "你的 Key 短时间内被大量拒绝"
+    assert not await guard.pause_key(1, 3600, "再次")      # 已在暂停中，不重复

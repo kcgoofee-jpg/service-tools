@@ -138,6 +138,12 @@ async def run(state, registrar=None, now: Optional[float] = None) -> dict[str, A
     fails, total = int(rows[0][0] or 0), int(rows[0][1] or 0)
     trip, why = breaker_rule(fails, total)
     out["rules"]["breaker"] = {"mode": await _mode(db, "breaker"), "value": trip, "why": why}
+    if trip and out["rules"]["breaker"]["mode"] == "enforce":
+        guard = getattr(state, "guard", None)
+        if guard is not None and getattr(guard, "breaker_until", 0.0) <= now:
+            guard.trip_breaker(300, f"上游连续出错，已暂停出图 5 分钟（{why}）", now)
+            await log_action(db, "系统", "自动驾驶：熔断", "", f"{why}；全站暂停出图 5 分钟")
+            out["rules"]["breaker"]["applied"] = True
 
     # 5 单个 Key
     events = list(getattr(getattr(state, "sources", None), "events", []) or [])
@@ -152,10 +158,20 @@ async def run(state, registrar=None, now: Optional[float] = None) -> dict[str, A
             decisions.append({"key": kid, "name": name, "action": d[0], "seconds": d[1], "why": d[2]})
     out["rules"]["key_guard"] = {"mode": await _mode(db, "key_guard"), "value": decisions,
                                  "why": f"{len(decisions)} 把 Key 触发" if decisions else "没有 Key 触发"}
+    if decisions and out["rules"]["key_guard"]["mode"] == "enforce":
+        share = getattr(state, "share", None)
+        for d in decisions:
+            # 只执行「1 小时内被拒 ≥60 次」这一条（客户端死循环限流，seconds==3600）；
+            # 换网段(86400) / 重置 Key 仍只观察——重置会私信本人，申诉期间避免任何群发私信。
+            if share is not None and d["action"] == "pause" and d["seconds"] == 3600:
+                if await share.pause_key(d["key"], d["seconds"],
+                                         "你的 Key 短时间内被大量拒绝，疑似客户端在反复重试，已暂停 1 小时", now):
+                    await log_action(db, "系统", "自动驾驶：Key 限流", str(d["name"]), d["why"])
+                    d["applied"] = True
 
-    # 观察模式：只记录；有「会执行的动作」时写操作日志，方便第二天审核
+    # 观察模式：只记录；有「会执行的动作」时写操作日志，方便第二天审核（已执行的规则各自单独记日志，这里不重复）
     notable = [f"{r}：{v['why']}" for r, v in out["rules"].items()
-               if (r == "key_guard" and v["value"]) or (r == "breaker" and v["value"])]
+               if v.get("mode") != "enforce" and ((r == "key_guard" and v["value"]) or (r == "breaker" and v["value"]))]
     if notable:
         await log_action(db, "系统", "自动驾驶（观察）", "", "；".join(notable)[:500])
     await db.set_setting(STATE_KEY, json.dumps(out, ensure_ascii=False))
