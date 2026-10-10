@@ -3,6 +3,8 @@ services:
     build: .
     container_name: nai-gate
     restart: unless-stopped
+    # 部署 / 重启时给正在生成的图留足时间收尾并记账（默认只有 10 秒，生成中的请求会被硬杀、不进日志）
+    stop_grace_period: 120s
     ports:
       - "127.0.0.1:3003:8000"
     env_file: .env

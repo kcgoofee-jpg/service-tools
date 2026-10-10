@@ -15,5 +15,9 @@ gate.example.com {
 		X-Content-Type-Options "nosniff"
 		-Server
 	}
-	reverse_proxy 127.0.0.1:3003
+	# 部署重启时网关短暂连不上：挂住请求、每 0.5 秒重连，最多 45 秒，不直接回 502（只重试连不上的情况，不会重复发送）
+	reverse_proxy 127.0.0.1:3003 {
+		lb_try_duration 45s
+		lb_try_interval 500ms
+	}
 }

@@ -128,3 +128,10 @@
 ## 退群回收（v2.15.0 起）
 
 维护循环每 5 分钟用机器人 Token 查 1 人 `GET /guilds/{DISCORD_GUILD_ID}/members/{id}`，每人每天一次（`discord_registrations.member_checked_at`）。只有 404 + code 10007（Unknown Member）才删 Key、放名额并写操作日志「退群回收 Key」；其他任何结果 1 小时后重查，绝不误删。总开关 `member_sweep`（默认开）。不发私信。
+
+## 部署不中断（v2.15.3 起）
+
+- Caddy `reverse_proxy` 加 `lb_try_duration 45s / lb_try_interval 500ms`：重启期间连不上网关时挂住请求重连，不再回 502（只重试拨号失败，请求未发出，不会重复出图）。线上 /opt/caddy/Caddyfile 已同步。
+- `stop_grace_period: 120s` + uvicorn `--timeout-graceful-shutdown 110`：停机时让生成中的图完成并记账，不再 10 秒硬杀。
+- deploy.sh 仍先等队列空闲（最多 60 秒）、先做快照再重建。
+
