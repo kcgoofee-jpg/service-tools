@@ -568,12 +568,12 @@ def fill_v4_prompt(payload: dict) -> Tuple[dict, list[str]]:
         return [{"x": cen.get("x", 0.5), "y": cen.get("y", 0.5)}]
     if not isinstance(p.get("v4_prompt"), dict):
         p["v4_prompt"] = {"caption": {"base_caption": str(out.get("input", "") or ""),
-                                      "char_captions": [{"char_caption": str(c.get("prompt", "")), "centers": centers(c)} for c in chars]},
+                                      "char_captions": [{"char_caption": str(c.get("prompt") or ""), "centers": centers(c)} for c in chars]},
                           "use_coords": bool(p.get("use_coords", False)), "use_order": True}
         notes.append("已按官方格式补上 v4_prompt")
     if not isinstance(p.get("v4_negative_prompt"), dict):
         p["v4_negative_prompt"] = {"caption": {"base_caption": str(p.get("negative_prompt", "") or ""),
-                                               "char_captions": [{"char_caption": str(c.get("uc", "")), "centers": centers(c)} for c in chars]},
+                                               "char_captions": [{"char_caption": str(c.get("uc") or ""), "centers": centers(c)} for c in chars]},
                                    "legacy_uc": False}
         notes.append("已按官方格式补上 v4_negative_prompt")
     return out, notes

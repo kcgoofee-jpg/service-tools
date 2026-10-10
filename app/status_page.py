@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import html
 import json
+import math
 import time
 from datetime import datetime, timedelta
 from typing import Any, Optional
@@ -221,7 +222,10 @@ font-size:2.6rem;line-height:1;letter-spacing:-.02em;color:#141413;white-space:n
 
 
 def _stamp(ts: float, with_year: bool = True) -> str:
-    t = datetime.fromtimestamp(ts)
+    try:
+        t = datetime.fromtimestamp(ts)
+    except (ValueError, OverflowError, OSError):
+        return "时间无效"
     return (f"{t.year}年" if with_year else "") + f"{t.month}月{t.day}日 {t:%H:%M} UTC+8"
 
 
@@ -332,6 +336,19 @@ def _check(body: dict, need_title: bool) -> tuple[str, str]:
     return status, text[:2000]
 
 
+def _at(body: dict) -> float | None:
+    """可选的事件时间（秒）。超出 [400 天前, 明天] 返回 422：坏值入库会让公开 /status 一直 500。"""
+    at = body.get("at")
+    if at is None:
+        return None
+    if isinstance(at, bool) or not isinstance(at, (int, float)) or not math.isfinite(at):
+        raise HTTPException(422, "at 必须是秒级时间戳")
+    now = time.time()
+    if not now - 400 * 86400 <= at <= now + 86400:
+        raise HTTPException(422, "at 超出范围（要秒，不是毫秒）")
+    return float(at)
+
+
 @admin_router.post("/incidents")
 async def admin_create_incident(request: Request):
     from .admin import require_admin
@@ -340,10 +357,11 @@ async def admin_create_incident(request: Request):
     body = await read_json_body(request)
     status, text = _check(body, True)
     impact = body.get("impact", "minor")
-    if impact not in IMPACT_RANK:
+    if not isinstance(impact, str) or impact not in IMPACT_RANK:
         raise HTTPException(422, "impact 必须是 none / minor / major / critical")
-    comps = [c for c in body.get("components", []) if c in dict(COMPONENTS)] or ["api"]
-    at = float(body["at"]) if isinstance(body.get("at"), (int, float)) else None
+    raw = body.get("components", [])
+    comps = [c for c in (raw if isinstance(raw, list) else []) if isinstance(c, str) and c in dict(COMPONENTS)] or ["api"]
+    at = _at(body)
     iid = await create_incident(request.app.state.gate.db, str(body["title"]).strip()[:200], impact, comps, status, text, at)
     return {"id": iid}
 
@@ -358,7 +376,7 @@ async def admin_add_update(request: Request, incident_id: int):
     db = request.app.state.gate.db
     if not await db._db.execute_fetchall("SELECT 1 FROM incidents WHERE id=?", (incident_id,)):
         raise HTTPException(404, "事件不存在")
-    at = float(body["at"]) if isinstance(body.get("at"), (int, float)) else None
+    at = _at(body)
     await add_update(db, incident_id, status, text, at)
     return {"ok": True}
 

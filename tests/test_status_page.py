@@ -45,3 +45,15 @@ def test_render_escapes_text():
          "resolved_at": None, "updates": [{"status": "investigating", "body": "<b>", "at": time.time()}]}]}
     page = sp.render(snap)
     assert "<script>x" not in page and "&lt;script&gt;" in page
+
+
+def test_incident_at_rejects_out_of_range():
+    import time as _t
+    from fastapi import HTTPException
+    from app.status_page import _at, _stamp
+    assert _at({}) is None
+    assert abs(_at({"at": _t.time()}) - _t.time()) < 5
+    for bad in (1.7e12, 1e300, float("nan"), True, "x", -5):
+        with pytest.raises(HTTPException):
+            _at({"at": bad})
+    assert _stamp(1e300) == "时间无效"
