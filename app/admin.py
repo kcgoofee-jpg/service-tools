@@ -970,6 +970,7 @@ async def overview(request: Request):
     data["anlas_budget"] = float(await site_flags.get(st.db, site_flags.GLOBAL_MONTHLY_ANLAS, st.settings))
     data["v5_limit"] = await site_flags.get(st.db, site_flags.GLOBAL_DAILY_V5, st.settings)
     data["feature_usage"] = await _feature_usage(st)
+    data["log_since"] = (await st.db._db.execute_fetchall("SELECT MIN(ts) FROM usage_log"))[0][0]
     data["economy"] = await ops.economy_enabled(st.db)
     return data
 
