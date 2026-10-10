@@ -199,6 +199,22 @@ def test_parameter_preflight_sampler_validation():
     assert upstream_parameter_problem(body) is None
 
 
+def test_parameter_preflight_bracket_nesting_nan_prevention():
+    # Prompt with >= 8 continuous brackets causes FP16 attention overflow / NaN
+    body = {
+        "model": "nai-diffusion-4-5",
+        "input": "1girl, {{{{{{{{masterpiece}}}}}}}}, best quality",
+        "parameters": {}
+    }
+    prob = upstream_parameter_problem(body)
+    assert prob is not None
+    assert "权重括号嵌套过深" in prob
+
+    # Reasonable prompt passes
+    body["input"] = "1girl, {{{masterpiece}}}, best quality"
+    assert upstream_parameter_problem(body) is None
+
+
 @pytest.mark.asyncio
 async def test_strict_single_slot_enforced(fake_db):
     client = NaiClient(
