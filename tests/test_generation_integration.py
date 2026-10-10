@@ -595,3 +595,14 @@ async def test_cancelled_semaphore_wait_restores_key_slot_and_queue_counts(state
         await task
     assert state.global_waiting == 0 and state.global_active == 0
     assert state.semaphores[1]._value == state.settings.key_concurrency
+
+
+@pytest.mark.asyncio
+async def test_economy_log_detail_keeps_size_steps_and_cost(state):
+    # 线上 15:06 起节约模式的日志只剩「steps 已钳制到 14」，尺寸 / 步数 / 费用全丢了
+    state.db.keys["fixture-1"]["allow_anlas"] = False
+    state.db.kv = {"economy_mode": "on"}
+    ok = await post("/ai/generate-image", image_body(width=832, height=1216, sampler="k_euler"))
+    assert ok.status_code == 200
+    detail = state.db.logs[-1][1]["detail"]
+    assert detail.startswith("832x1216/14step 免费") and "钳制到 14" in detail and "k_euler_ancestral" in detail
