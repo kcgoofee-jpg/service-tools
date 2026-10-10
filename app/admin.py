@@ -939,6 +939,7 @@ async def overview(request: Request):
     v5lim = await st.db.get_setting("global_daily_v5", st.settings.global_daily_v5)
     data["v5_limit"] = int(float(v5lim or 0))
     data["feature_usage"] = await _feature_usage(st)
+    data["economy"] = await ops.economy_enabled(st.db)
     return data
 
 
@@ -1349,6 +1350,16 @@ async def ops_set_features(request: Request):
         raise HTTPException(422, "flags 必须是 {功能名: true/false}")
     await ops.set_global_features(request.app.state.gate.db, flags)
     return await _ops_snapshot(request)
+
+
+@router.put("/ops/economy")
+async def ops_set_economy(request: Request):
+    """站长手动开 / 关节约模式（全站免费档 14 步 + Euler-a）。变化会在成员公告频道通知。"""
+    require_admin(request)
+    body = await read_json_body(request)
+    on = str(body.get("on")).strip().lower() in ("1", "true", "yes", "on") if not isinstance(body.get("on"), bool) else body["on"]
+    changed = await ops.set_economy(request.app.state.gate.db, on, request.app.state.gate, by="站长")
+    return {"economy": on, "changed": changed}
 
 
 @router.put("/ops/audit")

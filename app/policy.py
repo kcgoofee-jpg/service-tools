@@ -424,13 +424,19 @@ def fit_size(width: int, height: int, max_pixels: int) -> Tuple[int, int]:
     return w2, h2
 
 
+ECONOMY_STEPS = 14                       # 节约模式固定步数（镜像 NovelAI「节约模式」）
+ECONOMY_SAMPLER = "k_euler_ancestral"    # 低步数下收敛快、质量稳，官方节约模式也锁这个
+
+
 def clamp_image_params(payload: dict, *, max_pixels: int, max_steps: int,
-                       allow_img2img: bool) -> Tuple[dict, list[str], Optional[str]]:
+                       allow_img2img: bool, economy: bool = False) -> Tuple[dict, list[str], Optional[str]]:
     """把请求改写进「V5 额度条件 / 老模型免费档」的形状。
 
     返回 (新payload, 变更说明列表, 错误)。
     错误非 None 表示该请求被拒绝（例如 img2img 未开放）。
     对 V5：钳制后可走周额度（不烧 Anlas）；对老模型：钳制后直接免费。
+    economy=True（节约模式）：步数封顶 14、采样器锁 k_euler_ancestral，Anlas 约省 40%（我们计价按步数线性，
+    V5 周额度按 (A+B·14)/(A+B·23) 自动少扣）；保留用户的负面词，只动步数和采样器。
     """
     notes: list[str] = []
     # 只改写 parameters 的顶层字段：浅拷贝即可，避免对大请求体做 deepcopy（内存/CPU 放大数倍）。
@@ -451,10 +457,11 @@ def clamp_image_params(payload: dict, *, max_pixels: int, max_steps: int,
         p["n_samples"] = 1
         notes.append("n_samples 已限制为 1，避免额外图片产生 Anlas")
 
-    # steps -> 上限
-    if int(p.get("steps", 0) or 0) > max_steps:
-        p["steps"] = max_steps
-        notes.append(f"steps 已钳制到 {max_steps}")
+    # steps -> 上限（节约模式再压到 14）
+    eff_max_steps = min(max_steps, ECONOMY_STEPS) if economy else max_steps
+    if int(p.get("steps", 0) or 0) > eff_max_steps:
+        p["steps"] = eff_max_steps
+        notes.append(f"steps 已钳制到 {eff_max_steps}" + ("（节约模式）" if economy else ""))
 
     # 老模型保留免费面积内的自定义尺寸；V5 继续使用预设边界。
     w = int(p.get("width", 0) or 0)
@@ -476,6 +483,11 @@ def clamp_image_params(payload: dict, *, max_pixels: int, max_steps: int,
         p["sm"] = False
         p["sm_dyn"] = False
         notes.append("SMEA 已按安全钳制规则关闭")
+
+    # 节约模式：锁采样器（低步数下更稳），不动负面词
+    if economy and p.get("sampler") and p.get("sampler") != ECONOMY_SAMPLER:
+        p["sampler"] = ECONOMY_SAMPLER
+        notes.append(f"节约模式：采样器已设为 {ECONOMY_SAMPLER}")
 
     # ControlNet / 角色参考（额外计费）
     if p.get("controlnet_model") or p.get("controlnet_condition"):

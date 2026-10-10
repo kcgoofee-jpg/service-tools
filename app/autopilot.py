@@ -32,7 +32,7 @@ from typing import Any, Optional
 
 from .action_log import log_action
 
-RULES = ("idle_days", "slots", "reset_hour", "breaker", "key_guard")
+RULES = ("idle_days", "slots", "reset_hour", "breaker", "key_guard", "economy")
 STATE_KEY = "autopilot_last"
 HISTORY_KEY = "autopilot_history"
 
@@ -87,6 +87,20 @@ def key_guard_rule(alternate: int, clients: int, allday: int, rejects_1h: int) -
     if rejects_1h >= 60:
         return "pause", 3600, f"1 小时内被拒绝 {rejects_1h} 次（多半是客户端在死循环重试）：暂停 1 小时"
     return None
+
+
+ECON_ON_REJECTS = 8        # 最近 15 分钟「排队的人太多」≥ 这么多次 → 拥挤，开节约模式
+ECON_OFF_REJECTS = 1       # 最近 30 分钟 ≤ 这么多次 → 不拥挤，关节约模式
+ECON_DWELL = 3600          # 两次切换至少间隔 1 小时，避免公告刷屏
+
+
+def economy_rule(on_now: bool, queue_rejects_15m: int, queue_rejects_30m: int) -> tuple[bool, str]:
+    """拥挤（排队被拒多）时建议开节约模式让更多人出到图；持续空闲时建议关掉恢复高质量。带滞回。"""
+    if not on_now and queue_rejects_15m >= ECON_ON_REJECTS:
+        return True, f"最近 15 分钟 {queue_rejects_15m} 次因排队拥挤被拒：建议开节约模式（14 步）多服务些人"
+    if on_now and queue_rejects_30m <= ECON_OFF_REJECTS:
+        return False, f"最近 30 分钟排队拥挤仅 {queue_rejects_30m} 次：建议关节约模式，恢复高质量"
+    return on_now, f"排队拥挤 15m={queue_rejects_15m}：保持{'节约' if on_now else '正常'}模式"
 
 
 async def run(state, registrar=None, now: Optional[float] = None) -> dict[str, Any]:
@@ -168,6 +182,22 @@ async def run(state, registrar=None, now: Optional[float] = None) -> dict[str, A
                                          "你的 Key 短时间内被大量拒绝，疑似客户端在反复重试，已暂停 1 小时", now):
                     await log_action(db, "系统", "自动驾驶：Key 限流", str(d["name"]), d["why"])
                     d["applied"] = True
+
+    # 6 节约模式：拥挤（排队被拒多）时统一 14 步让更多人出到图，空闲时恢复高质量。切换都会公告。
+    econ_now = (await db.get_setting("economy_mode", "off")) == "on"
+    qr15 = int((await _q(db, "SELECT COUNT(*) FROM usage_log WHERE ts>=? AND status='rejected' "
+                             "AND detail LIKE '%排队的人太多%'", now - 900))[0][0] or 0)
+    qr30 = int((await _q(db, "SELECT COUNT(*) FROM usage_log WHERE ts>=? AND status='rejected' "
+                             "AND detail LIKE '%排队的人太多%'", now - 1800))[0][0] or 0)
+    econ_target, econ_why = economy_rule(econ_now, qr15, qr30)
+    out["rules"]["economy"] = {"mode": await _mode(db, "economy"), "value": econ_target, "why": econ_why}
+    if econ_target != econ_now and out["rules"]["economy"]["mode"] == "enforce":
+        last_flip = float(await db.get_setting("autopilot_economy_at", 0) or 0)
+        if now - last_flip >= ECON_DWELL:                 # 间隔 ≥1 小时，避免公告刷屏
+            from . import ops
+            if await ops.set_economy(db, econ_target, state, by="自动驾驶"):
+                await db.set_setting("autopilot_economy_at", now)
+                out["rules"]["economy"]["applied"] = True
 
     # 观察模式：只记录；有「会执行的动作」时写操作日志，方便第二天审核（已执行的规则各自单独记日志，这里不重复）
     notable = [f"{r}：{v['why']}" for r, v in out["rules"].items()
