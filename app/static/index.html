@@ -298,6 +298,13 @@ td .tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
 .mf.warn{background:var(--warn-soft);color:var(--warn)}
 .mf.bad{background:var(--bad-soft);color:var(--bad)}
 .mf.ok{background:var(--ok-soft);color:var(--ok)}
+.mf.tag{background:var(--surface-3);color:var(--text);box-shadow:inset 0 0 0 1px var(--accent)}   /* 手动标签：站长 / 运维打的，只在后台显示 */
+.tag-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.tag-row .mf{display:inline-flex;align-items:center;gap:4px}
+.tag-row .mf button{border:0;background:none;color:inherit;cursor:pointer;padding:0 0 0 2px;font-size:12px;line-height:1;opacity:.7}
+.tag-row .mf button:hover{opacity:1}
+.tag-add{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.tag-add input{min-width:0;flex:1 1 110px;font-size:12.5px;padding:4px 8px}
 .mq{display:flex;flex-direction:column;align-items:flex-start;gap:4px;white-space:nowrap;font-size:12.5px}
 .mbar{width:120px;height:6px;border-radius:3px;background:var(--surface-3);display:flex;overflow:hidden;flex:none}
 .mbar i{display:block;height:100%;background:var(--accent)}
@@ -1752,6 +1759,9 @@ function memberLimitRatio(m){ return m.daily_images>0 ? m.today.images/m.daily_i
 const H = 3600, D = 86400;
 const activityAt = m => m.last_used_at || m.registered_at || m.created_at || 0;
 const isManual = m => !m.is_admin && !m.is_test && !m.discord && !m.discord_id;
+/* 标签：手动（站长 / 运维打的，带备注）+ 自动（近 24 小时因成员自己能改的原因被拒）；都只在后台显示 */
+const tagNames = m => [...(m.tags||[]).map(t => t.tag), ...(m.auto_tags||[]).map(t => t.tag)];
+const hasTags = m => tagNames(m).length > 0;
 function memberFilters(now){
   const idleDays = memberMeta.inactivity_days || 3, nets = memberMeta.share_alert_nets || 3;
   return [
@@ -1764,6 +1774,7 @@ function memberFilters(now){
     ['shared', '疑似分享', m => shareHot(m)],
     ['disabled', '已停用', m => !m.enabled],
     ['manual', '手动', isManual],
+    ['tagged', '已标记', hasTags],
     ['staff', '站长 / 测试', m => m.is_test || m.is_admin],
   ];
 }
@@ -1826,6 +1837,16 @@ async function loadShare(id){
       <h5>最近请求的来源</h5>${tr ? `<div class="table-wrap"><table class="rt"><thead><tr><th class="t">时间</th><th>网络</th><th>客户端</th><th>请求</th></tr></thead><tbody>${tr}</tbody></table></div>` : '<div class="muted sm">没有记录</div>'}`;
   }catch(e){ box.innerHTML = '<div class="muted sm">读取失败</div>'; }
 }
+async function addMemberTag(id){
+  const tag = ($('#tagIn' + id).value || '').trim(), note = ($('#tagNote' + id).value || '').trim();
+  if(!tag){ toast('先填标签名', 'err'); $('#tagIn' + id).focus(); return; }
+  try{ await api(`/admin/api/keys/${id}/tags`, {method:'PUT', body: JSON.stringify({tag, note})}); toast('已标记：' + tag, 'ok'); membersCache = null; await loadMembers(); }
+  catch(e){ toastErr(e); }
+}
+async function delMemberTag(id, tag){
+  try{ await api(`/admin/api/keys/${id}/tags/${encodeURIComponent(tag)}`, {method:'DELETE'}); toast('已移除：' + tag, 'ok'); membersCache = null; await loadMembers(); }
+  catch(e){ toastErr(e); }
+}
 async function clearShare(id){
   try{ await api(`/admin/api/keys/${id}/share-clear`, {method:'POST'}); toast('已清除风险分并解除暂停', 'ok'); loadMembers(); }
   catch(e){ toastErr(e); }
@@ -1851,7 +1872,9 @@ function memberPanel(m, now){
           <button class="btn mini" type="button" data-act="share-view" data-id="${k.id}">查看来源</button>
           ${m.share ? `<button class="btn mini" type="button" data-act="share-clear" data-id="${k.id}">清除风险分（误判）</button>` : ''}</dd>
         <dt>${m.discord_id ? '领取' : '创建'}</dt><dd title="${esc(fullTime(m.registered_at))}">${m.registered_at ? esc(rel(m.registered_at)) : '—'}</dd>
-        <dt>最近使用</dt><dd>${k.last_used_at ? esc(fullTime(k.last_used_at)) : '从未使用'}</dd></dl>`;
+        <dt>最近使用</dt><dd>${k.last_used_at ? esc(fullTime(k.last_used_at)) : '从未使用'}</dd>
+        <dt>标记</dt><dd><div class="tag-row">${(m.tags||[]).map(t => `<span class="mf tag" title="${esc((t.note ? t.note + ' · ' : '') + (t.by||'') + ' · ' + fullTime(t.ts))}">${esc(t.tag)}<button type="button" data-act="tag-del" data-id="${k.id}" data-tag="${esc(t.tag)}" aria-label="移除标签 ${esc(t.tag)}">×</button></span>`).join('')}${(m.auto_tags||[]).map(t => `<span class="mf warn" title="近 24 小时因此被拒 ${t.count} 次（自动标记，原因消失后自动去掉）">${esc(t.tag)} ×${t.count}</span>`).join('')}${hasTags(m) ? '' : '<span class="muted sm">无</span>'}</div>
+          <div class="tag-add"><input id="tagIn${k.id}" maxlength="12" placeholder="标签（如：站长熟人）" aria-label="新标签"><input id="tagNote${k.id}" maxlength="200" placeholder="备注（可选，只有后台能看到）" aria-label="标签备注"><button class="btn mini" type="button" data-act="tag-add" data-id="${k.id}">添加</button></div></dd></dl>`;
     const u = k.used;
     const quota = k.is_admin
       ? `<dt>配额</dt><dd>单 Key 不限 · 仍受全站保护 · RPM ${k.rpm}</dd>`
@@ -1886,14 +1909,16 @@ function renderMembers(){
   const everyone = membersCache || [];
   const now = Date.now()/1000;
   const isStaff = m => m.is_test || m.is_admin;
-  const filters = memberFilters(now);
+  const tagSet = [...new Set(everyone.flatMap(tagNames))];
+  const filters = [...memberFilters(now), ...tagSet.map(t => ['tag:' + t, '# ' + t, m => tagNames(m).includes(t)])];
   const testView = memberFilter === 'staff';
-  const all = everyone.filter(m => testView ? isStaff(m) : !isStaff(m));      // 站长 / 测试账号只在「站长 / 测试」里出现，不混进成员统计
+  const tagView = memberFilter === 'tagged' || memberFilter.startsWith('tag:');      // 标签筛选也显示站长 / 测试账号（站长自己也可能被标记）
+  const all = everyone.filter(m => tagView || (testView ? isStaff(m) : !isStaff(m)));      // 站长 / 测试账号只在「站长 / 测试」里出现，不混进成员统计
   const members = everyone.filter(m => !isStaff(m));
   const topWeek = new Set(members.length>3 ? members.filter(m=>m.week.images>0).sort((a,b)=>b.week.images-a.week.images).slice(0,3).map(m=>m.id) : []);
   const cnt = fn => members.filter(fn).length;
   $('#memberFilter').innerHTML = filters.map(([id, label, fn]) => {
-    const n = id === 'staff' ? everyone.filter(isStaff).length : cnt(fn);
+    const n = id === 'staff' ? everyone.filter(isStaff).length : (id === 'tagged' || id.startsWith('tag:')) ? everyone.filter(fn).length : cnt(fn);
     if(!n && id !== 'all' && memberFilter !== id) return '';
     return `<button class="fchip${memberFilter===id?' active':''}" data-mfilter="${id}">${esc(label)} <span class="num">${n}</span></button>`;
   }).join('');
@@ -1922,7 +1947,9 @@ function renderMembers(){
     const full = cap && m.today.images >= cap;
     // 状态标签按优先级取前 3 个：停用 / 过期 / 疑似分享最先
     const flags = [
+      ...(m.tags||[]).map(t => flag('tag', t.tag, (t.note ? t.note + ' · ' : '') + (t.by || '') + ' 标记')),
       !m.enabled ? flag('bad', '已停用') : '',
+      ...(m.auto_tags||[]).map(t => flag('warn', t.tag, `近 24 小时因此被拒 ${t.count} 次（自动标记）`)),
       m.expires_at && m.expires_at < now ? flag('bad', '已过期') : '',
       m.share && m.share.paused_until > now ? flag('bad', '已暂停', '防分享暂停中') : shareHot(m) ? flag('bad', '风险 ' + Math.round(m.share.score), `防分享风险分（违规 ${m.share.strikes} 次）`) : '',
       full ? flag('bad', '已达日限') : '',
@@ -2753,6 +2780,8 @@ document.addEventListener('click', ev=>{
     case 'regen-key': regenerateKey(id, el); break;
     case 'share-view': loadShare(id); break;
     case 'share-clear': clearShare(id); break;
+    case 'tag-add': addMemberTag(id); break;
+    case 'tag-del': delMemberTag(id, el.dataset.tag); break;
     case 'reset-quota': resetDailyImageQuota(id); break;
     case 'copy-key': copyKey(el); break;
     case 'copy-modal-key': { const v=$('#keyModalVal').value; copyText(v).then(ok=>{ if(!ok){ $('#keyModalVal').select(); toast('请按 Ctrl/Cmd+C 复制', 'err'); } }); break; }

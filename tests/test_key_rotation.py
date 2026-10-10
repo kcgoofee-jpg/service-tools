@@ -198,3 +198,26 @@ async def test_noop_scope_patch_keeps_algorithm_and_pin_goes_manual(env):
     r = await client.patch(f"/admin/api/keys/{key['id']}", json={'quota_mode': 'auto', 'notify': False})
     row = await state.db.get_key(key['id'])
     assert row['quota_auto'] == 1 and row['v5_pinned'] is None            # 交回算法：清掉手动基础值
+
+
+@pytest.mark.asyncio
+async def test_member_tags_manual_and_auto(env):
+    # 后台标签：手动（带备注）+ 自动（近 24 小时因成员自己能改的原因被拒）；删 Key 时标签一起清掉
+    state, client, key = env
+    await login(client)
+    await state.db.add_log(key['id'], key['name'], 'image', 'm', 'rejected',
+                           detail='403 Vibe 编码会消耗 Anlas（每次编码参考图约 2 Anlas）')
+    r = await client.put(f"/admin/api/keys/{key['id']}/tags", json={'tag': '疑似小号', 'note': '和 #100 同前缀'})
+    assert r.status_code == 200
+    assert (await client.put(f"/admin/api/keys/{key['id']}/tags", json={'tag': '  '})).status_code == 422
+    from app.admin import member_tags
+    manual, auto = await member_tags(state.db, time.time() - 86400)
+    assert [t['tag'] for t in manual[key['id']]] == ['疑似小号'] and manual[key['id']][0]['note'] == '和 #100 同前缀'
+    assert auto[key['id']] == [{'tag': '开着 Vibe', 'count': 1}]
+    actions = [a['action'] for a in await state.db.list_admin_actions()]
+    assert '成员标签' in actions
+    assert (await client.delete(f"/admin/api/keys/{key['id']}/tags/疑似小号")).status_code == 200
+    assert (await client.delete(f"/admin/api/keys/{key['id']}/tags/疑似小号")).status_code == 404
+    await client.put(f"/admin/api/keys/{key['id']}/tags", json={'tag': '站长熟人'})
+    await state.db.delete_key(key['id'])
+    assert not await state.db._db.execute_fetchall("SELECT 1 FROM key_tags WHERE key_id=?", (key['id'],))

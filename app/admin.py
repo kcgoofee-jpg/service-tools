@@ -1176,6 +1176,66 @@ async def put_announcement(request: Request):
 
 # ----------------------------------------------------------- 成员与生成记录 ----
 
+# 自动标签：近 24 小时因这些「成员自己能改」的原因被拒 / 失败（按 detail 识别；顺序即优先级）
+AUTO_TAG_PATTERNS = (
+    ("开着 Vibe", "%Vibe%"),
+    ("传了底图", "%img2img%"),
+    ("画师串 NaN", "%NaN%"),
+    ("角色超 6 个", "%角色太多%"),
+    ("请求过快", "%请求过于频繁%"),
+    ("调文本接口", "%文本生成%"),
+)
+TAG_MAX_LEN, TAG_NOTE_MAX = 12, 200
+
+
+@router.put("/keys/{key_id}/tags")
+async def put_key_tag(request: Request, key_id: int):
+    """给成员打 / 改手动标签（只在后台显示）。body: {tag, note}"""
+    require_admin(request)
+    st = request.app.state.gate
+    if not await st.db.get_key(key_id):
+        raise HTTPException(404, "key 不存在")
+    body = await read_json_body(request)
+    tag = " ".join(str(body.get("tag") or "").split())[:TAG_MAX_LEN]
+    if not tag:
+        raise HTTPException(422, "标签不能为空")
+    note = str(body.get("note") or "").strip()[:TAG_NOTE_MAX]
+    who = str(body.get("by") or "站长").strip()[:20] or "站长"
+    await st.db._db.execute(
+        "INSERT INTO key_tags(key_id, tag, note, by, ts) VALUES (?,?,?,?,?) "
+        "ON CONFLICT(key_id, tag) DO UPDATE SET note=excluded.note, by=excluded.by, ts=excluded.ts",
+        (key_id, tag, note, who, time.time()))
+    await st.db._db.commit()
+    return {"ok": True, "tag": tag}
+
+
+@router.delete("/keys/{key_id}/tags/{tag}")
+async def delete_key_tag(request: Request, key_id: int, tag: str):
+    require_admin(request)
+    st = request.app.state.gate
+    cur = await st.db._db.execute("DELETE FROM key_tags WHERE key_id=? AND tag=?", (key_id, tag))
+    await st.db._db.commit()
+    if not cur.rowcount:
+        raise HTTPException(404, "没有这个标签")
+    return {"ok": True}
+
+
+async def member_tags(db, since: float) -> tuple[dict[int, list], dict[int, list]]:
+    """标签：手动（key_tags，站长 / 运维打的）+ 自动（since 之后因已知的成员侧原因被拒 / 失败）。"""
+    manual_tags: dict[int, list] = {}
+    for kid, tag, note, by, ts in await db._db.execute_fetchall(
+            "SELECT key_id, tag, note, by, ts FROM key_tags ORDER BY ts"):
+        manual_tags.setdefault(kid, []).append({"tag": tag, "note": note, "by": by, "ts": ts})
+    auto_tags: dict[int, list] = {}
+    for kid, label, n in await db._db.execute_fetchall(
+            "SELECT key_id, CASE "
+            + " ".join(f"WHEN detail LIKE '{pat}' THEN '{label}'" for label, pat in AUTO_TAG_PATTERNS)
+            + " END AS label, COUNT(*) FROM usage_log WHERE ts>? AND status IN ('rejected','error') "
+              "AND key_id IS NOT NULL GROUP BY key_id, label HAVING label IS NOT NULL", (since,)):
+        auto_tags.setdefault(kid, []).append({"tag": label, "count": n})
+    return manual_tags, auto_tags
+
+
 @router.get("/members")
 async def members(request: Request):
     """每位成员（Key）的今日 / 近 7 天 / 累计用量，以及来源。"""
@@ -1196,6 +1256,7 @@ async def members(request: Request):
             "SELECT key_id, score, score_ts, strikes, paused_until FROM share_state"):
         share_map[kid] = {"score": round(decayed(score, ts, time.time()), 1), "strikes": strikes,
                           "paused_until": paused if paused > time.time() else 0}
+    manual_tags, auto_tags = await member_tags(st.db, since)
     # 今日「重置今日额度」痕迹：按服务日起点统计次数与最近一次（从操作日志取，只读）
     import re as _re
     from datetime import datetime as _dt
@@ -1239,6 +1300,8 @@ async def members(request: Request):
             "sources_24h": len(sources.get(row["id"], [])),
             "share": share_map.get(row["id"]),
             "reset_today": reset_map.get(row["id"]),
+            "tags": manual_tags.get(row["id"], []),
+            "auto_tags": auto_tags.get(row["id"], []),
         })
     return {"members": out, "share_alert_nets": st.settings.key_share_alert_nets,
             "inactivity_days": st.settings.key_inactivity_delete_days}
