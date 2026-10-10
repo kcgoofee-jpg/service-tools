@@ -1,4 +1,5 @@
 """自动驾驶规则（纯函数）：名额、熔断、单个 Key 守护、节约模式。"""
+import json
 import time
 from types import SimpleNamespace
 
@@ -183,3 +184,33 @@ def test_slots_not_added_when_v5_low():
     cap, why = slots_rule(75, 75, 3, 0.3, 0, 0, v5_pct=40)
     assert cap == 75 and "V5" in why
     assert slots_rule(75, 75, 3, 0.3, 0, 0, v5_pct=90)[0] == 80
+
+
+@pytest.mark.asyncio
+async def test_slots_never_turns_unlimited_into_a_cap(tmp_path):
+    # 10/10 站长：名额不限（0）。名额规则不能把 0 当成「快满」加 5，变成上限 5
+    from app import quota_algo
+    db = Database(str(tmp_path / "s.sqlite"))
+    await db.connect()
+    try:
+        await db.set_setting("autopilot_slots", "enforce")
+        await db.set_setting(quota_algo.HISTORY_KEY, json.dumps([{"day": "2026-10-09", "used": 10, "cap": 1000,
+                                                                  "coverage_hours": 24, "hourly_blocks": 0}]))
+        calls = []
+
+        async def settings():
+            return {"max_users": 0, "open": True}
+
+        async def count_active():
+            return 120
+
+        async def waitlist():
+            return []
+        reg = SimpleNamespace(settings=settings, count_active=count_active, waitlist=waitlist,
+                              set_registration=lambda *a, **k: calls.append(a))
+        st = SimpleNamespace(db=db, guard=None, share=None, announcer=None, sources=SimpleNamespace(events=[]))
+        out = await autopilot.run(st, reg)
+        assert out["rules"]["slots"]["value"] == 0 and not out["rules"]["slots"].get("applied")
+        assert "不限" in out["rules"]["slots"]["why"]
+    finally:
+        await db.close()
