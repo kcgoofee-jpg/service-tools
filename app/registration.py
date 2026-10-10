@@ -53,7 +53,7 @@ def welcome_dm(key: str, site: str, quota: str, expires_days: int, idle_days: in
         rules.append(f"• 有效期 {expires_days} 天，到期后可重新 /register")
     if idle_days:
         rules.append(f"• 连续 {idle_days} 天没有使用会被自动回收（回收前 1 天私信提醒）")
-    rules.append("• 每把 Key 同时生成 1 张，多发的会被退回，等前一张出完再发；凌晨出图会放慢（保护上游账号）")
+    rules.append("• 每把 Key 同时生成 1 张，多发的会被退回，等前一张出完再发")
     rules.append("• 只提供免费出图：总像素 ≤1024×1024（尺寸可自定义，超出自动等比缩小）、≤28 步、每次 1 张；"
                  "图生图、Vibe 等会消耗 Anlas 的功能不开放")
     rules.append("• Key 只给本服务器成员：退出服务器后 Key 自动失效")
@@ -440,10 +440,15 @@ class RegistrationService:
             if role_guild and role_id:
                 note = cfg.get("role_note") or "指定身份组"
                 try:
-                    member = await self._discord("GET", f"/guilds/{role_guild}/members/{user_id}",
-                                                 bearer="Bot " + self.bot_token)
-                except RegistrationError:
+                    resp = await self.http.get(f"https://discord.com/api/guilds/{role_guild}/members/{user_id}",
+                                               headers={"Authorization": "Bot " + self.bot_token}, timeout=12)
+                except httpx.HTTPError:
+                    raise RegistrationError("Discord 暂时连不上，请过几分钟再用 /register。")
+                if resp.status_code == 404:
                     raise RegistrationError(f"目前只开放给「{note}」：请先加入对应的社区服务器后再用 /register。")
+                if resp.status_code != 200:     # 限流 / Discord 故障：不能误报成「你不在服务器」
+                    raise RegistrationError("Discord 暂时无法核验身份组，请过几分钟再用 /register。")
+                member = resp.json()
                 if role_id not in (member.get("roles") or []):
                     raise RegistrationError(f"目前只开放给「{note}」，没有检测到这个身份组，暂时不能领取 Key。")
             user = {"id": user_id, "username": username, "global_name": global_name, "avatar": avatar}

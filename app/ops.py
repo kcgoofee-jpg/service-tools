@@ -63,7 +63,7 @@ async def registration_settings(db, service) -> dict[str, Any]:
     feats_raw = await read("register_features")
     return {
         "configured": service is not None,
-        "open": False if open_raw is None else str(open_raw) in ("1", "true", "True"),   # 默认关闭：站长明确开放后才接受注册
+        "open": site_flags.parse(site_flags.REGISTER_OPEN, open_raw, False),   # 默认关闭：站长明确开放后才接受注册
         "max_users": to_int(await read("register_max_users"), defaults.max_users if defaults else 0),
         "features": (None if feats_raw == "*" else features.parse_list(feats_raw)) if feats_raw is not None else
                     (features.parse_list(defaults.key_features) if defaults else None),

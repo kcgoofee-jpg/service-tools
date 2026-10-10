@@ -786,8 +786,25 @@ class Database:
             return bytes(row["image"]), (row["image_type"] or "image/png")
         return None, ""
 
-    async def audit_images_for(self, key_id: int):
-        """导出用：某成员所有带原图的记录，产出 (id, ts, image_type, prompt, negative, extra, image)。"""
+    async def audit_images_for(self, key_id: int, max_bytes: int = 0):
+        """导出用：某成员带原图的记录，产出 (id, ts, image_type, prompt, negative, extra, image)。
+        max_bytes>0 时只取最新的、原图合计不超过这么多字节的那些（防止一次打包把内存撑爆）。"""
+        if max_bytes > 0:
+            sizes = await self._db.execute_fetchall(
+                "SELECT id, length(image) FROM generation_audit WHERE key_id=? AND image IS NOT NULL ORDER BY ts DESC",
+                (key_id,))
+            keep, total = [], 0
+            for rid, size in sizes:
+                if total + int(size or 0) > max_bytes and keep:
+                    break
+                keep.append(int(rid))
+                total += int(size or 0)
+            if not keep:
+                return []
+            marks = ",".join("?" * len(keep))
+            return await self._db.execute_fetchall(
+                "SELECT id, ts, image_type, prompt, negative, extra, image FROM generation_audit "
+                f"WHERE id IN ({marks}) ORDER BY ts", tuple(keep))
         rows = await self._db.execute_fetchall(
             "SELECT id, ts, image_type, prompt, negative, extra, image FROM generation_audit "
             "WHERE key_id=? AND image IS NOT NULL ORDER BY ts", (key_id,))
