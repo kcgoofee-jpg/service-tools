@@ -183,7 +183,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "2.16.15"
+__version__ = "2.16.16"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -394,7 +394,11 @@ async def authenticate(request: Request, *, passive: bool = False):
         raise err(403, f"你的 Key 因检测到多人共用已暂停，{until} 自动恢复。Key 仅限本人使用；如果是误判，请联系站长。",
                   reasons.KEY_PAUSED)
     # 只要 Key 实际通过鉴权即视为使用，避免 Launcher 登录/上游暂时失败时被误删。
-    await STATE.db.touch_key(row["id"])
+    # 记「最后使用时间」只是记账：写失败（如 database is locked）不能让成员的请求 500（10/11 02:01 实际发生一次）。
+    try:
+        await STATE.db.touch_key(row["id"])
+    except Exception as exc:
+        bug("touch_key", exc)
     sources = getattr(STATE, "sources", None)
     if sources is not None:
         try:                            # 来源网段统计（防 Key 分享）；失败不能影响请求

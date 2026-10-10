@@ -709,3 +709,13 @@ async def test_extreme_bracket_and_weight_preflight_blocks_without_dispatch(stat
     resp = await post("/ai/generate-image", body)
     assert resp.status_code == 200
 
+
+
+@pytest.mark.asyncio
+async def test_touch_key_failure_does_not_fail_request(state, monkeypatch):
+    import sqlite3
+    async def boom(key_id):
+        raise sqlite3.OperationalError("database is locked")
+    monkeypatch.setattr(state.db, "touch_key", boom, raising=False)
+    resp = await post("/ai/generate-image", image_body())
+    assert resp.status_code == 200
