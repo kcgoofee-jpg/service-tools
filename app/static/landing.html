@@ -296,6 +296,9 @@ footer{max-width:960px;margin:0 auto;padding:24px 16px 40px;text-align:center;co
   *,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}
 }
 .loginrow{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:4px 0 14px}
+.keylogin{display:flex;gap:8px;flex:1 1 320px;min-width:0;max-width:520px}
+.keylogin input[type=password]{flex:1;min-width:0;padding-right:12px}
+.keylogin .btn{flex:none}
 .btn.dc{background:#5865F2;border-color:#5865F2;color:#fff;box-shadow:0 1px 2px rgba(20,28,50,.12),0 4px 14px -6px rgba(88,101,242,.6)}
 .btn.dc:hover{background:#4752c4;border-color:#4752c4;color:#fff;box-shadow:0 2px 4px rgba(20,28,50,.14),0 8px 22px -6px rgba(88,101,242,.7)}
 .muted.sm{color:var(--text-2);font-size:12.5px}
@@ -313,7 +316,13 @@ footer{max-width:960px;margin:0 auto;padding:24px 16px 40px;text-align:center;co
 .head-key{display:flex;align-items:center;gap:8px;min-width:0}
 .head-key code{font-family:ui-monospace,Menlo,monospace;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:5px 9px;font-size:13px;white-space:nowrap}
 .me-export{margin-top:12px;padding-top:12px;border-top:1px solid var(--border)}
-.me-export-btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.me-export-h{display:flex;align-items:center;gap:8px;font-weight:600;font-size:14px}
+.me-export-h .beta{font-size:11px;font-weight:600;padding:1px 7px;border-radius:999px;background:var(--accent-soft);color:var(--accent)}
+.me-export-btns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px}
+.me-export-btns .btn{justify-content:flex-start;text-align:left;height:auto;padding:10px 12px;line-height:1.35}
+.me-export-btns .btn small{display:block;font-weight:400;font-size:12px;color:var(--text-2)}
+.me-export-btns .btn[aria-disabled=true]{opacity:.55;pointer-events:none}
+@media(max-width:560px){.me-export-btns{grid-template-columns:1fr}}
 @media(max-width:560px){.me-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .topbar-in .spacer{flex:1}
 .guest-only{}
@@ -366,7 +375,11 @@ body.authed #board{margin-top:22px}
       <div class="me" id="meCard" hidden></div>
       <div class="loginrow" id="loginRow" hidden>
         <a class="btn primary dc" id="loginBtn" href="/login" hidden><span data-ic="discord"></span>用 Discord 登录</a>
-        <p class="muted sm" id="loginPaused" hidden>网页登录暂时不可用（Discord 正在审核本站的应用）。领 Key 用 <code>/register</code>，查额度用 <code>/quota</code>，都在 Discord 里输入即可。</p>
+        <form class="keylogin" id="keyLogin" autocomplete="off">
+          <input type="password" id="keyLoginIn" placeholder="粘贴你的 Key（nai-…）" aria-label="你的 Key" spellcheck="false">
+          <button class="btn primary" type="submit" id="keyLoginBtn"><span data-ic="key"></span>用 Key 登录</button>
+        </form>
+        <p class="muted sm" id="loginPaused" hidden>用 <code>/register</code> 领到的 Key 登录，就能看自己的额度、打包下载作品。还没有 Key？在 Discord 里输入 <code>/register</code>。</p>
       </div>
       <p class="cooldown" id="cooldown" hidden><span data-ic="clock"></span><span id="cooldownTxt"></span></p>
     </div>
@@ -578,6 +591,8 @@ var P = {
   info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.01"/>',
   alert:'<path d="M12 3l10 18H2L12 3z"/><path d="M12 10v5M12 18v.01"/>',
   check:'<path d="M5 12l5 5 9-10"/>',
+  book:'<path d="M4 5a2 2 0 012-2h13v16H6a2 2 0 00-2 2V5z"/><path d="M4 19a2 2 0 012-2h13"/>',
+  archive:'<rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 001 1h12a1 1 0 001-1V8M10 12h4"/>',
   sparkle:'<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3z"/>'
 };
 function icon(n){ return '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">' + (P[n] || '') + '</svg>'; }
@@ -752,14 +767,42 @@ function renderMe(d){
       + '<div><span>今日 V5</span><b>' + (t.v5 || 0) + ' / ' + (t.daily_v5 || 0) + '</b></div>'
       + '<div><span>当前</span><b>' + pos + '</b></div>'
       + '<div><span>到期</span><b>' + (d.expires_at ? fmtDate(d.expires_at) : '长期') + '</b></div></div>'
-      + (d.images_stored ? '<div class="me-export"><span class="muted sm">你有 ' + d.images_stored + ' 张原图存在服务器，约 ' + (d.image_retention_days||3) + ' 天后自动删除。想留请打包下载（二选一）：</span>'
-        + '<div class="me-export-btns"><a class="btn mini" href="/public/my-export?format=epub">' + icon('image') + '下载 EPUB 画册</a>'
-        + '<a class="btn mini" href="/public/my-export?format=zip">' + icon('image') + '下载原图 ZIP</a></div></div>' : '');
+      + '<div class="me-export"><div class="me-export-h">' + icon('archive') + '作品备份<span class="beta">beta</span></div>'
+      + (d.images_stored
+        ? '<p class="muted sm" style="margin-top:4px">服务器上有你最近 ' + d.images_stored + ' 张原图，只保留 ' + (d.image_retention_days||3) + ' 天，到期自动删除。喜欢的请及时打包带走（每分钟限 1 次）。</p>'
+          + '<div class="me-export-btns"><a class="btn exp" href="/public/my-export?format=epub">' + icon('book') + '<span>EPUB 画册<small>一图一页，附提示词和参数，手机 / 电脑的图书 App 直接看</small></span></a>'
+          + '<a class="btn exp" href="/public/my-export?format=zip">' + icon('image') + '<span>原图 ZIP<small>PNG 原图 + prompts.txt，适合存档或二次编辑</small></span></a></div>'
+        : '<p class="muted sm" style="margin-top:4px">最近 ' + (d.image_retention_days||3) + ' 天还没有可备份的原图。出图后会出现在这里。</p>')
+      + '</div>';
     var ck = $('copyKeyBtn'); if(ck) ck.onclick = function(){ copyText(d.key, '已复制 Key'); };
+    Array.prototype.forEach.call(me.querySelectorAll('a.exp'), function(a){
+      a.onclick = function(){      // 打包较重：点一次后两个按钮都锁 60 秒，避免连点撞上服务端限流跳出错误页
+        var all = me.querySelectorAll('a.exp');
+        Array.prototype.forEach.call(all, function(b){ b.setAttribute('aria-disabled', 'true'); });
+        toast('正在打包，下载马上开始…');
+        setTimeout(function(){ Array.prototype.forEach.call(all, function(b){ b.removeAttribute('aria-disabled'); }); }, 60000);
+      };
+    });
   }
   hydrate(me);
 }
 function loadMe(){ fetch('/public/me', {cache:'no-store', credentials:'include'}).then(function(r){ return r.ok ? r.json() : null; }).then(renderMe, function(){ renderMe(null); }); }
+(function(){
+  var f = $('keyLogin'); if(!f) return;
+  f.addEventListener('submit', function(e){
+    e.preventDefault();
+    var v = ($('keyLoginIn').value || '').trim(), b = $('keyLoginBtn');
+    if(!/^nai-/.test(v)){ toast('请粘贴完整的 Key（以 nai- 开头）'); return; }
+    b.disabled = true;
+    fetch('/login/key', {method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body: JSON.stringify({key: v})})
+      .then(function(r){ return r.json().catch(function(){ return {}; }).then(function(j){ return {ok: r.ok, j: j}; }); })
+      .then(function(x){
+        b.disabled = false;
+        if(!x.ok){ toast((x.j && x.j.detail) || '登录失败'); return; }
+        $('keyLoginIn').value = ''; toast('已登录'); loadMe();
+      }, function(){ b.disabled = false; toast('网络错误，请重试'); });
+  });
+})();
 loadMe();
 setInterval(function(){ if(!document.hidden) loadMe(); }, 60000);      // Key 被 /resetkey 换掉、今日用量变化时跟着更新
 document.addEventListener('visibilitychange', function(){ if(!document.hidden) loadMe(); });
