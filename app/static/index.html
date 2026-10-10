@@ -946,6 +946,7 @@ td.note{min-width:220px}
         <section id="tab-logs" hidden>
           <div class="page-head"><div class="ttl"><h1>用量日志</h1></div>
             <div class="tools">
+              <button class="btn" data-act="logs-export" title="导出最近 30 天的客户端日志（zip：每次请求、每把 Key、网段、防分享证据；不含提示词和 Key 原文），拿去独立复核">导出客户端日志</button>
               <input id="logRid" class="mono" type="search" placeholder="错误编号" aria-label="按错误编号查找" style="width:130px">
               <details class="lfilt" id="logFilters"><summary class="btn">筛选</summary><div class="lfilt-body">
               <select id="logFeature" aria-label="按功能筛选" style="width:160px"><option value="">全部功能</option>
@@ -3079,6 +3080,7 @@ document.addEventListener('click', ev=>{
         case 'copy-pos': { const m = auditPrompts.get(Number(el.dataset.id)); if(m) copyText(m.p, '已复制正面提示词'); break; }
     case 'copy-neg': { const m = auditPrompts.get(Number(el.dataset.id)); if(m) copyText(m.n, '已复制负面提示词'); break; }
     case 'copy-chars': { const m = auditPrompts.get(Number(el.dataset.id)); if(m) copyText((m.chars||[]).map((c,i)=>`角色${i+1}: ${c}`).join('\n'), '已复制角色提示词'); break; }
+    case 'logs-export': window.open('/admin/api/logs/export?days=30', '_blank'); break;
     case 'audit-export': { const kf = $('#auditFilter').value; if(kf) window.open('/admin/api/audit/export?key_id=' + encodeURIComponent(kf), '_blank'); break; }
     case 'audit-page': auditPage = Math.max(1, auditPage + Number(el.dataset.d)); loadAudit(); break;
     case 'audit-goto': auditPage = Math.max(1, Number(el.dataset.p)); loadAudit(); break;
