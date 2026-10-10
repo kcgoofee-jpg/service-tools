@@ -373,7 +373,6 @@ details.fold[open]>summary{margin-bottom:14px}
 .mtable td,.mtable th{padding-left:12px;padding-right:12px}
 .mtable tr.mr{cursor:pointer}
 .mtable td.mtime{white-space:nowrap;color:var(--text-2);font-size:12.5px;width:96px}
-.mtable td.mweek{width:110px}
 .mtable td.mtoday{width:220px}
 #memberFilter .fchip{min-height:28px;padding:3px 10px;font-size:12.5px}
 .mrow{display:flex;gap:10px;align-items:center;min-width:0}
@@ -381,7 +380,6 @@ details.fold[open]>summary{margin-bottom:14px}
 .avatar.sm .av{width:28px;height:28px}
 .mn{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px}
 .mn .muted{font-weight:400;font-size:12px}
-.mflags{display:flex;flex-wrap:wrap;gap:4px;margin-top:2px}
 .mf{font-size:11px;line-height:1.6;padding:1px 8px;border-radius:999px;background:var(--surface-3);color:var(--text-2);white-space:nowrap}
 .mf.new{background:var(--accent-soft);color:var(--accent-text)}
 .mf.info{background:var(--accent-soft);color:var(--accent-text)}
@@ -395,11 +393,6 @@ details.fold[open]>summary{margin-bottom:14px}
 .tag-row .mf button:hover{opacity:1}
 .tag-add{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
 .tag-add input{min-width:0;flex:1 1 110px;font-size:12.5px;padding:4px 8px}
-.mq{display:flex;flex-direction:column;align-items:flex-start;gap:4px;white-space:nowrap;font-size:12.5px}
-.mbar{width:120px;height:6px;border-radius:3px;background:var(--surface-3);display:flex;overflow:hidden;flex:none}
-.mbar i{display:block;height:100%;background:var(--accent)}
-.mbar i.v5{background:var(--v5)}
-.mbar.full i{background:var(--bad)}
 .mact{white-space:nowrap;text-align:right;width:1%}
 .mact>*{vertical-align:middle}
 .mact .menu{display:inline-block}
@@ -414,7 +407,6 @@ tr.mr.open>td{background:var(--surface-2);border-bottom-color:transparent}
 .mx-g h4{font-size:12px;font-weight:600;color:var(--muted);margin:0 0 10px;letter-spacing:.02em}
 .mod.off{opacity:.65}.mod-checks{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}.bad-text{color:var(--bad)}
 .mod .kv{margin-bottom:6px}
-.mx-wide{grid-column:1/-1;order:9}.mx-wide:empty{display:none}
 .share-ev h5{font-size:12px;font-weight:600;color:var(--muted);margin:4px 0 8px}.share-ev .table-wrap{max-height:280px;overflow:auto;margin-bottom:12px}
 .kv{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 14px;font-size:12.5px;margin:0}
 .kv dt{color:var(--muted);white-space:nowrap}
@@ -424,7 +416,6 @@ tr.mr.open>td{background:var(--surface-2);border-bottom-color:transparent}
 .mx-perm{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
 .mx-acts{display:flex;flex-wrap:wrap;gap:6px}
 .mx-acts .btn{text-decoration:none}
-.mx-acts.danger-row{margin-top:10px;padding-top:10px;border-top:1px dashed var(--border-strong);justify-content:flex-end}
 @media (max-width:1000px){.mx-grid{grid-template-columns:1fr 1fr}.mx-g.ops{grid-column:1/-1}}
 .mtools{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:14px}
 .mtools .search{flex:0 1 260px}
@@ -714,21 +705,18 @@ td.note{min-width:220px}
   .page-head:has(.lfilt[open]) .tools{flex-basis:100%}
   .page-head:has(.lfilt[open]) #logRid{flex:1;width:auto!important}
 }
-/* 成员表手机布局：一位成员一张紧凑卡片：名字 + 操作一行、今日用量一行、7 天与最近使用一行；展开面板接在卡片下面 */
+/* 成员表手机布局：一位成员一张紧凑卡片：名字 + 操作一行、今日用量一行、状态与最近使用一行；展开面板接在卡片下面 */
 @media (max-width:720px){
-  table.mtable tr.mr{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"m act" "q q" "w t";gap:8px 10px;padding:12px 14px}
+  table.mtable tr.mr{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"m act" "q q" "s t";gap:8px 10px;padding:12px 14px}
   table.mtable tr.mr.open{border-bottom-left-radius:0;border-bottom-right-radius:0;margin-bottom:0;border-bottom:0}
   table.mtable td{display:block;padding:0;text-align:left;width:auto}
   table.mtable td::before{display:none}
   table.mtable td.mcell{grid-area:m;min-width:0}
   table.mtable td.mact{grid-area:act;align-self:start;justify-self:end;width:auto}
-  table.mtable .mbar{flex:1;width:auto}
   table.mtable td.mtoday{grid-area:q;width:auto}
-  table.mtable td.mweek{grid-area:w;font-size:12.5px;color:var(--text-2);text-align:left;width:auto}
-  table.mtable td.mweek::before{display:inline;content:"7 天 / 累计 ";color:var(--muted)}
+  table.mtable td.mstat{grid-area:s;width:auto}
   table.mtable td.mtime{grid-area:t;text-align:right;width:auto}
   table.mtable td.mtime::before{display:inline;content:"最近 ";color:var(--muted)}
-  table.mtable .mq{flex-direction:row;align-items:center;gap:10px}
   table.mtable .mn{max-width:none}
   table.mtable tr.mx{padding:0;border-top-left-radius:0;border-top-right-radius:0;border-top:1px dashed var(--border-strong)}
   table.mtable tr.mx>td{padding:12px 14px 14px;background:none}
@@ -1208,7 +1196,6 @@ const ICONS = {
   alert:'<path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18h0"/>',
   info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h0"/>',
   chev:'<path d="M9 6l6 6-6 6"/>',
-  more:'<circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>',
   pulse:'<path d="M3 12h4l3-7 4 14 3-7h4"/>',
 };
 function ic(name){ return `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]||''}</svg>`; }
@@ -1254,6 +1241,9 @@ function rel(ts){
   if(s < 86400*30) return Math.floor(s/86400)+' 天前';
   return new Date(ts*1000).toLocaleDateString('zh-CN');
 }
+const fullTime = ts => ts ? new Date(ts*1000).toLocaleString('zh-CN') : '';
+const pad2 = n => String(n).padStart(2, '0');
+function shortTime(ts){ const d = new Date(ts*1000); return `${pad2(d.getMonth()+1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; }
 function toast(msg, type){
   const t = document.createElement('div');
   t.className = 'toast ' + (type||'');
@@ -1776,7 +1766,7 @@ async function loadStatusCodes(){
   try{
     const d = await api('/admin/api/status-codes?hours=' + scHours);
     const ok = (d.codes.find(c => c.code === 200) || {}).pct || 0;
-    $('#scSum').textContent = d.total ? `成员接口共 ${fmtNum(d.total)} 次请求，成功 ${ok}%` : '这段时间还没有请求（统计从 2.15.32 上线开始）';
+    $('#scSum').textContent = d.total ? `成员接口共 ${fmtNum(d.total)} 次请求，成功 ${ok}%` : '这段时间还没有请求';
     $('#scList').innerHTML = d.codes.length ? d.codes.map(c => { const k = 'c' + String(c.code)[0];
       return `<div class="sc-row"><span class="sc-pill ${k}">${c.code}</span><div class="sc-main"><span class="sc-n">${fmtNum(c.n)} 次</span><span class="sc-m">${esc(c.meaning)}</span></div>
         <span class="sc-pct">${c.pct}%</span><div class="sc-bar"><i class="${k}" style="width:${c.pct}%"></i></div></div>`; }).join('')
@@ -2044,9 +2034,6 @@ document.addEventListener('change', async e => {
 });
 const sortTh = (k, label, cls='') => `<th class="sortable ${cls}${memberSort===k?' on':''}" data-sort="${k}" tabindex="0" aria-sort="${memberSort===k?'descending':'none'}">${label}</th>`;
 const memberOpen = new Set();          // 展开的成员：刷新、筛选、排序后保持
-const fullTime = ts => ts ? new Date(ts*1000).toLocaleString('zh-CN') : '';
-const pad2 = n => String(n).padStart(2, '0');
-function shortTime(ts){ const d = new Date(ts*1000); return `${pad2(d.getMonth()+1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; }
 /* 防分享（share_guard.py）：风险分 ≥ 30、有违规或暂停中算「疑似分享」；只看网段数会误伤 VPN 用户 */
 function shareHot(m){ const s = m.share; return !!s && (s.score >= 30 || s.strikes > 0 || s.paused_until > Date.now()/1000); }
 async function loadShare(id){
