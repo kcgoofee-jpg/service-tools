@@ -177,10 +177,13 @@ async def lifespan(app: FastAPI):
                 pass
         await registration_http.aclose()
         await STATE.nai.close()
+        # 关停时还在跑的审计任务先写完再关库（10/10 22:55 部署时一条审计写在关库之后丢失）
+        if _AUDIT_TASKS:
+            await asyncio.wait(list(_AUDIT_TASKS), timeout=10)
         await STATE.db.close()
 
 
-__version__ = "2.16.4"
+__version__ = "2.16.5"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
