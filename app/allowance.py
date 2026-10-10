@@ -25,11 +25,39 @@ class AllowanceUnavailable(Exception):
     pass
 
 
+PERIOD_KEY = "v5_period_samples"      # 每个上游账号最近 48 小时「再恢复 1% 还要多少秒」的读数
+PERIOD_WINDOW = 48 * 3600
+
+
 class AllowanceCache:
     def __init__(self, db):
         self._db = db
         self._rows = {}
         self._locks = {}
+        self._periods = None             # {token_id: [[ts, seconds], ...]}，第一次用时从库里读
+
+    async def _note_period(self, token_id, seconds):
+        """官方给的是「当前这 1% 还剩多少秒」，不是恢复 1% 要多久：刚好读在快恢复完的时候，
+        单次读数算出来的速度会高好几倍（10/10 显示每天 11%，实际约 5%）。
+        剩余时间 ≤ 真实周期，所以取 48 小时里最长的那次读数当周期。"""
+        if self._periods is None:
+            try:
+                self._periods = json.loads(await self._db.get_setting(PERIOD_KEY, "{}") or "{}")
+            except (TypeError, ValueError):
+                self._periods = {}
+        now = time.time()
+        rows = [r for r in self._periods.get(token_id, []) if now - r[0] < PERIOD_WINDOW]
+        rows.append([round(now), int(seconds)])
+        self._periods[token_id] = rows[-500:]
+        try:
+            await self._db.set_setting(PERIOD_KEY, json.dumps(self._periods))
+        except Exception:
+            pass
+
+    def period(self, token_id):
+        now = time.time()
+        rows = [r[1] for r in (self._periods or {}).get(token_id, []) if now - r[0] < PERIOD_WINDOW]
+        return max(rows) if rows else None
 
     async def threshold(self):
         return await read_alert_threshold(self._db)
@@ -81,6 +109,8 @@ class AllowanceCache:
                     checked_at=time.time(), at=time.monotonic(), error=None, retry_at=0,
                     # 官方返回「再恢复 1% 还要多少秒」，据此算出实测恢复速度（%/天）
                     next_percent_seconds=next_pct if type(next_pct) is int and 0 < next_pct < 10 ** 7 else None)
+                if self._rows[token_id]["next_percent_seconds"]:
+                    await self._note_period(token_id, self._rows[token_id]["next_percent_seconds"])
                 if negative or percent < threshold:
                     log.warning("V5 low allowance: account %s; remaining=%s%%; exhausted=%s",
                                 token_id, percent, negative)
@@ -107,7 +137,7 @@ class AllowanceCache:
             percent = row.get("percent")
             stale = time.monotonic() - row.get("at", -1e9) >= 300
             low = row.get("is_negative") is True or (percent is not None and percent < threshold)
-            nps = row.get("next_percent_seconds")
+            nps = self.period(token.token_id) or row.get("next_percent_seconds")
             accounts.append(dict(account=index + 1, percent=percent,
                 recharge_per_day=round(86400 / nps, 1) if nps else None,
                 is_negative=row.get("is_negative"), checked_at=row.get("checked_at"),
