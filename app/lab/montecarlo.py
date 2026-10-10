@@ -41,11 +41,14 @@ INNER = 10                 # 每组（同一份重抽数据）模拟的天数
 DEFAULT_SCALES = (0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3, 3.5, 4, 5, 6, 7, 8, 10, 12, 15, 20)
 EXPERT_RANGE = (55, 70)
 EXPERIENCE = {"member_reject_rate": (0.10, ">"), "first_to_image_p90": (60.0, ">"), "share_members_rej3": (0.20, ">")}
-SAFETY_FIXED = {"full_load_run_hours": (4, ">"), "v5_slope_min": (0.0, "<")}
+# V5 剩余斜率 < 0 不再算失控（10/10 修正）：网关有全站每日 V5 上限兜底，账号余量高时按设计消耗存量（公益版借用），
+# 斜率为负是计划内行为；原判定让「1×（80 人）就失控」，与线上不符。斜率仍作为描述指标输出。
+SAFETY_FIXED = {"full_load_run_hours": (4, ">")}
 LABELS = {"member_reject_rate": "按人计新请求失败率", "first_to_image_p90": "首次请求到出图 p90",
           "share_members_rej3": "被拒 ≥3 次的成员比例", "daily_total_max": "日成功总量",
           "full_load_run_hours": "连续满载小时", "v5_slope_min": "V5 剩余斜率"}
-NOT_MODELED = ["上游 429 / 5xx 尖峰（回放无法模拟，只看真实日志）"]
+NOT_MODELED = ["上游 429 / 5xx 尖峰（回放无法模拟，只看真实日志）",
+               "V5 账号余量耗尽（网关有全站每日 V5 上限兜底；斜率只描述，不判失控）"]
 SUMMARY_KEYS = ("member_reject_rate", "first_to_image_p90", "share_members_rej3", "daily_total_max",
                 "full_load_run_hours", "v5_slope_min", "wait_p90", "reject_rate", "images_ok", "new_requests", "retries")
 

@@ -221,10 +221,16 @@ def make_figure(an: dict, path: str) -> dict:
     if any(c for c in cap_line):
         a.step(np.arange(25) - 0.5, cap_line + [cap_line[-1]], where="post", color=ACC, lw=0.8, ls=":",
                label="每小时上限（文案 / 设置）")
-    for c in an["changepoints"]:
-        a.axvline(c["hour"] - 0.5, color=ACC if c["kind"] != "param" else MID, lw=0.7, ls="--" if c["kind"] != "param" else "-.")
-        a.text(c["hour"] - 0.4, a.get_ylim()[1] * 0.98, {"deploy": "部署", "rule": "规则", "param": "参数"}[c["kind"]],
-               fontsize=5.5, va="top", color=ACC)
+    cps_all = an["changepoints"]
+    if len(cps_all) <= 6:
+        for c in cps_all:
+            a.axvline(c["hour"] - 0.5, color=ACC if c["kind"] != "param" else MID, lw=0.7, ls="--" if c["kind"] != "param" else "-.")
+            a.text(c["hour"] - 0.4, a.get_ylim()[1] * 0.98, {"deploy": "部署", "rule": "规则", "param": "参数"}[c["kind"]],
+                   fontsize=5.5, va="top", color=ACC)
+    else:
+        # 变更太密（10/10 一天约 60 次部署）：逐条画线会糊满整图，改成按小时浅色底纹标出「有变更的小时」
+        for h in sorted({int(c["hour"]) for c in cps_all}):
+            a.axvspan(h - 0.5, h + 0.5, color=ACC, alpha=0.07, lw=0)
     top = max(float(bottom.max()) if len(bottom) else 0, max([c or 0 for c in cap_line] + [0]))
     a.set_ylim(0, max(10, top) * 1.5)
     a.set_xlim(-0.6, 23.6)
@@ -233,7 +239,14 @@ def make_figure(an: dict, path: str) -> dict:
     a.set_ylabel("请求 / 张数")
     a.set_title("(a) 每小时成功与拒绝（计数）", loc="left")
     a.legend(loc="upper left", ncol=2)
-    cp_txt = "；".join(f"{c['hour']:.1f} 时 {c['label']}" for c in an["changepoints"]) or "无"
+    if len(an["changepoints"]) <= 6:
+        cp_txt = "；".join(f"{c['hour']:.1f} 时 {c['label']}" for c in an["changepoints"]) or "无"
+    else:
+        kinds = {"deploy": "部署", "rule": "规则变更", "param": "参数调整"}
+        cnt = {}
+        for c in an["changepoints"]:
+            cnt[kinds[c["kind"]]] = cnt.get(kinds[c["kind"]], 0) + 1
+        cp_txt = "、".join(f"{k} {v} 次" for k, v in cnt.items()) + "（浅色底纹 = 有变更的小时；变更过密，当天不适合做对照）"
     cap.append(f"(a) 今天成功 {an['ok_images']} 张、建模原因拒绝 {an['rejected']} 次（其中客户端自动重试请求 {an['retries']} 个，"
                f"新请求 {an['new_requests']} 个）；只给计数，不做检验。当天变更：{cp_txt}"
                + (f"（前后 30 分钟的 {an['excluded_requests_today']} 个请求不计入 (b)–(c) 的区间估计）" if an["excluded_requests_today"] else "") + "。")
@@ -413,7 +426,9 @@ def make_summary(an: dict, mc: Optional[dict], calib: Optional[dict], sweep: Opt
         L.append(f"· 等待 > 5 秒占 {_ci(wt['p_slow'], '.0%')}，p90 {_ci(wt['p90'], '.0f')} 秒（按成员 bootstrap）"
                  + ("" if wt["sufficient"] else "，样本不足，不下结论") + "。")
     if an["changepoints"]:
-        L.append("· 当天有变更：" + "；".join(c["label"] for c in an["changepoints"][:3]) + "，前后数据不可直接比较。")
+        n_cp = len(an["changepoints"])
+        L.append(("· 当天有变更：" + "；".join(c["label"] for c in an["changepoints"][:3]) if n_cp <= 3 else
+                  f"· 当天变更 {n_cp} 次（部署 / 规则 / 参数）") + "，前后数据不可直接比较。")
     if mc and mc.get("scales"):
         f = mc["failure"]["overall"]
         if f["scale"] is not None:
