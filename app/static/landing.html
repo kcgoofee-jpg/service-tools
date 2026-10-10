@@ -378,6 +378,17 @@ body.authed #board{margin-top:22px}
 @keyframes chipIn{from{opacity:0;transform:translateY(-4px) scale(.98)}to{opacity:1;transform:none}}
 .chip-menu .danger{color:var(--bad)}
 .chip-menu .sep{height:1px;background:var(--border);margin:4px 0}
+.btn.sm{min-height:32px;padding:6px 12px;font-size:13px}
+.me-coupons{display:flex;flex-direction:column;gap:8px;margin-top:14px}
+.coupon{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:12px 14px;border-radius:var(--radius-sm,10px);
+  border:1px dashed color-mix(in srgb,var(--accent) 45%,transparent);background:var(--accent-soft)}
+.cp-l{display:flex;gap:10px;align-items:flex-start;min-width:0;flex:1 1 220px}
+.cp-ic{font-size:22px;line-height:1.2}
+.cp-l b{display:block;color:var(--accent-text)}
+.cp-d{display:block;font-size:12.5px;color:var(--text-2)}
+.cp-note{display:block;font-size:12.5px;color:var(--text);margin-top:2px}
+.cp-a{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.cp-q{font-size:13px;color:var(--text-2)}
 </style>
 </head>
 <body>
@@ -818,6 +829,7 @@ function renderMe(d){
       + '<div><span>今日 V5（张）</span><b>' + (t.v5 || 0) + ' / ' + (t.daily_v5 || 0) + '</b></div>'
       + '<div><span>出图状态</span><b>' + pos + '</b></div>'
       + '<div><span>有效期</span><b>' + (d.expires_at ? '至 ' + fmtDate(d.expires_at) : '长期') + '</b></div></div>'
+      + couponsHtml(d.coupons || [])
       + '<div class="me-export"><div class="me-export-h">' + icon('archive') + '作品备份<span class="beta">beta</span></div>'
       + (d.images_stored
         ? '<p class="muted sm">服务器上有你最近 ' + d.images_stored + ' 张原图，只保留 ' + (d.image_retention_days||3) + ' 天，到期自动删除。喜欢的请及时打包带走；打包较重，每分钟限 1 次。</p>'
@@ -826,6 +838,7 @@ function renderMe(d){
         : '<p class="muted sm">最近 ' + (d.image_retention_days||3) + ' 天还没有可备份的原图。出图后会出现在这里。</p>')
       + '</div>';
     var ck = $('copyKeyBtn'); if(ck) ck.onclick = function(){ copyText(d.key, '已复制 Key'); };
+    bindCoupons(me);
     Array.prototype.forEach.call(me.querySelectorAll('a.exp'), function(a){
       a.onclick = function(){
         if(a.getAttribute('aria-disabled') === 'true') return false;
@@ -838,6 +851,35 @@ function renderMe(d){
     });
   }
   hydrate(me);
+}
+/* 重置券：站长 / 奶妹发的，7 天内自己点一下就能重置今天的 V5 额度（先在页面里确认一次，不弹窗） */
+function couponsHtml(list){
+  if(!list.length) return '';
+  return '<div class="me-coupons">' + list.map(function(c){
+    var left = Math.max(0, c.expires_at - Date.now()/1000), days = Math.floor(left / 86400), hrs = Math.ceil((left % 86400) / 3600);
+    var exp = days >= 1 ? days + ' 天' + (hrs ? ' ' + hrs + ' 小时' : '') : hrs + ' 小时';
+    return '<div class="coupon" data-cid="' + Number(c.id) + '"><div class="cp-l"><span class="cp-ic" aria-hidden="true">🎟️</span><div><b>重置券</b>'
+      + '<span class="cp-d">重置今天的 V5 额度，一张用一次 · 还有 ' + exp + '过期</span>'
+      + (c.note ? '<span class="cp-note">「' + esc(c.note) + '」</span>' : '') + '</div></div>'
+      + '<div class="cp-a"><button class="btn primary sm cp-use" type="button">使用</button></div></div>';
+  }).join('') + '</div>';
+}
+function bindCoupons(root){
+  Array.prototype.forEach.call(root.querySelectorAll('.coupon'), function(box){
+    var act = box.querySelector('.cp-a'), cid = box.getAttribute('data-cid');
+    function idle(){ act.innerHTML = '<button class="btn primary sm cp-use" type="button">使用</button>'; act.querySelector('.cp-use').onclick = ask; }
+    function ask(){
+      act.innerHTML = '<span class="cp-q">现在重置今天的 V5 额度？</span><button class="btn primary sm" type="button" data-y>确定</button><button class="btn ghost sm" type="button" data-n>取消</button>';
+      act.querySelector('[data-n]').onclick = idle;
+      act.querySelector('[data-y]').onclick = function(){
+        act.innerHTML = '<span class="cp-q">正在重置…</span>';
+        fetch('/public/me/coupons/' + encodeURIComponent(cid) + '/use', {method:'POST', credentials:'include', cache:'no-store'})
+          .then(function(r){ return r.json().catch(function(){ return {}; }).then(function(b){ if(!r.ok) throw new Error((b.error && b.error.message) || b.detail || '没有成功，请稍后再试'); }); })
+          .then(function(){ toast('已重置，今天的 V5 额度满血回来了 🎉'); loadMe(); }, function(e){ toast(e.message || '没有成功'); idle(); });
+      };
+    }
+    idle();
+  });
 }
 function loadMe(){ fetch('/public/me', {cache:'no-store', credentials:'include'}).then(function(r){ return r.ok ? r.json() : null; }).then(renderMe, function(){ renderMe(null); }); }
 (function(){

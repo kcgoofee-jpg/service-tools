@@ -141,6 +141,17 @@ CREATE TABLE IF NOT EXISTS upstream_snapshots (   -- 每小时记一次上游真
     anlas REAL,                   -- 账号 Anlas 余额
     fresh INTEGER NOT NULL DEFAULT 0   -- 1 = 这次是主动刚读的（不是出图时留下的旧缓存），才能拿来算恢复速度
 );
+CREATE TABLE IF NOT EXISTS coupons (       -- 成员的券（现在只有「重置券」：在首页自己点一下，重置当天的 V5 / Anlas 额度）
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key_id INTEGER NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'reset',
+    note TEXT NOT NULL DEFAULT '',       -- 发券理由，成员能看到（如「唱得真好听」）
+    by TEXT NOT NULL DEFAULT '',
+    created_at REAL NOT NULL,
+    expires_at REAL NOT NULL,
+    used_at REAL
+);
+CREATE INDEX IF NOT EXISTS idx_coupons_key ON coupons(key_id, used_at);
 CREATE TABLE IF NOT EXISTS req_features (      -- 出图请求的特征（只存哈希），给防分享回测用；长期保留
     ts REAL NOT NULL,
     key_id INTEGER NOT NULL,
@@ -700,6 +711,36 @@ class Database:
             result["v5"] = max(0, result["v5"] - result.pop("_quota_offset_v5"))
             return result
         return {"images": 0, "legacy_free_images": 0, "anlas": 0.0, "text_tokens": 0, "requests": 0, "v5": 0}
+
+    # ---------- 券 ----------
+    async def add_coupon(self, key_id: int, kind: str, days: float, note: str = "", by: str = "") -> dict[str, Any]:
+        now = time.time()
+        cur = await self._db.execute(
+            "INSERT INTO coupons(key_id, kind, note, by, created_at, expires_at) VALUES (?,?,?,?,?,?)",
+            (key_id, kind, note[:200], by[:40], now, now + days * 86400))
+        await self._db.commit()
+        return {"id": cur.lastrowid, "key_id": key_id, "kind": kind, "note": note[:200], "created_at": now,
+                "expires_at": now + days * 86400, "used_at": None}
+
+    async def list_coupons(self, key_id: int, active_only: bool = True) -> list[dict[str, Any]]:
+        sql = "SELECT id, kind, note, by, created_at, expires_at, used_at FROM coupons WHERE key_id=?"
+        args: tuple = (key_id,)
+        if active_only:
+            sql += " AND used_at IS NULL AND expires_at>?"
+            args = (key_id, time.time())
+        return [dict(r) for r in await self._db.execute_fetchall(sql + " ORDER BY expires_at", args)]
+
+    async def use_coupon(self, coupon_id: int, key_id: int) -> Optional[dict[str, Any]]:
+        """标记用掉（只能用一次、要没过期、要是自己的）。成功返回这张券，否则 None。"""
+        now = time.time()
+        cur = await self._db.execute(
+            "UPDATE coupons SET used_at=? WHERE id=? AND key_id=? AND used_at IS NULL AND expires_at>?",
+            (now, coupon_id, key_id, now))
+        await self._db.commit()
+        if cur.rowcount != 1:
+            return None
+        rows = await self._db.execute_fetchall("SELECT id, kind, note, expires_at, used_at FROM coupons WHERE id=?", (coupon_id,))
+        return dict(rows[0]) if rows else None
 
     async def reset_daily_image_quota(self, key_id: int, day: str) -> None:
         """重置单个 Key 当日的 V5 与 Anlas 可用额度基线。

@@ -642,6 +642,33 @@ async def reset_daily_image_quota(request: Request, key_id: int):
     return {"ok": True, "key": _key_json(row, counter, totals.get(key_id, 0))}
 
 
+@router.post("/keys/{key_id}/coupons")
+async def give_coupon(request: Request, key_id: int):
+    """给成员发一张券（现在只有重置券）：{"kind": "reset", "days": 7, "note": "唱得真好听"}。成员在首页自己使用。"""
+    require_admin(request)
+    body = await read_json_body(request)
+    if not isinstance(body, dict):
+        raise HTTPException(422, "参数必须是对象")
+    kind = body.get("kind", "reset")
+    days = body.get("days", 7)
+    if kind != "reset":
+        raise HTTPException(422, "目前只有重置券（reset）")
+    if type(days) not in (int, float) or not 0 < days <= 30:
+        raise HTTPException(422, "有效期 days 必须在 1～30 天之间")
+    st = request.app.state.gate
+    if not await st.db.get_key(key_id):
+        raise HTTPException(404, "key 不存在")
+    note = str(body.get("note") or "")[:200]
+    c = await st.db.add_coupon(key_id, kind, float(days), note, str(body.get("by") or "站长")[:40])
+    return {"ok": True, "coupon": c}
+
+
+@router.get("/keys/{key_id}/coupons")
+async def list_key_coupons(request: Request, key_id: int):
+    require_admin(request)
+    return {"coupons": await request.app.state.gate.db.list_coupons(key_id, active_only=False)}
+
+
 @router.delete("/keys/{key_id}")
 async def delete_key(request: Request, key_id: int, ban: bool = False):
     """删除成员 / Key。Discord 自助领取的成员会同时清掉领取记录并摘除身份组；ban=true 则永久禁止该账号再次领取。"""
