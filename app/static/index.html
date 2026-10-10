@@ -552,11 +552,12 @@ details.neg div{margin-top:6px;white-space:pre-wrap;overflow-wrap:anywhere;max-h
 .jt .jt-st{position:absolute;top:6px;right:6px}
 .jt.none{display:grid;place-items:center;color:rgba(255,255,255,.5);cursor:pointer}
 .jt.none .ic{width:28px;height:28px}
-#lightbox .lb{display:grid;grid-template-columns:minmax(0,1fr) 360px;width:min(96vw,1400px);height:min(92vh,1000px);background:#0b0d14;border-radius:14px;overflow:hidden;box-shadow:var(--shadow-lg)}
+#lightbox .lb{display:grid;grid-template-columns:minmax(0,1fr) 360px;grid-template-rows:minmax(0,1fr);width:min(96vw,1400px);height:min(92vh,1000px);background:#0b0d14;border-radius:14px;overflow:hidden;box-shadow:var(--shadow-lg)}
 #lightbox .lb-img{position:relative;display:grid;place-items:center;background:#000;min-height:0}
-#lightbox .lb-img img{width:100%;height:100%;max-height:none;object-fit:contain;border-radius:0;box-shadow:none}
+/* 图片绝对定位铺满格子再 contain：原来行高随图片撑开，竖图被上下裁掉（10/10 站长反馈） */
+#lightbox .lb-img img{position:absolute;inset:0;width:100%;height:100%;max-height:none;object-fit:contain;border-radius:0;box-shadow:none}
 #lightbox .lb-none{color:rgba(255,255,255,.6)}
-#lightbox .lb-nav{position:absolute;top:50%;transform:translateY(-50%);background:rgba(255,255,255,.12);color:#fff;border:0;font-size:22px;width:40px;height:40px}
+#lightbox .lb-nav{position:absolute;z-index:1;top:50%;transform:translateY(-50%);background:rgba(255,255,255,.12);color:#fff;border:0;font-size:22px;width:40px;height:40px}
 #lightbox .lb-nav.prev{left:10px}#lightbox .lb-nav.next{right:10px}
 #lightbox .lb-nav:hover{background:rgba(255,255,255,.24)}
 #lightbox .lb-info{overflow:auto;padding:20px;color:#d6dbe8;font-size:13px;display:flex;flex-direction:column;gap:12px;border-left:1px solid rgba(255,255,255,.08)}
