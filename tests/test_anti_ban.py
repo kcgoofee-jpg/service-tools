@@ -210,22 +210,36 @@ def test_parameter_preflight_bracket_nesting_nan_prevention():
     assert prob is not None
     assert "权重括号嵌套过深" in prob
 
-    # Down-weighting square brackets with >= 8 levels causes FP16 underflow / NaN
-    body["input"] = "1girl, [[[[[[[[downweight]]]]]]]], best quality"
-    prob = upstream_parameter_problem(body)
-    assert prob is not None
-    assert "权重括号嵌套过深" in prob
+    # Down-weighting square brackets with >= 8 levels is legitimate artist downweighting and must pass
+    body["input"] = "1girl, [[[[[[[[artist:xxx]]]]]]]], best quality"
+    assert upstream_parameter_problem(body) is None
 
-    # Spaced brackets (e.g. { { { or ( ( ( or [ [ [) parsed as repeated modifiers
+    # Spaced brackets (e.g. { { { or ( ( () parsed as repeated modifiers
     for spaced in [
         "1girl, { { { { { { { { masterpiece } } } } } } } }, best quality",
         "1girl, ( ( ( ( ( ( ( ( masterpiece ) ) ) ) ) ) ) ), best quality",
-        "1girl, [ [ [ [ [ [ [ [ downweight ] ] ] ] ] ] ] ], best quality",
     ]:
         body["input"] = spaced
         prob = upstream_parameter_problem(body)
         assert prob is not None, f"Spaced bracket should be caught: {spaced}"
         assert "权重括号嵌套过深" in prob
+
+    # Abnormal numeric weights (> 100::) cause upstream NaN overflow
+    # bm94199:: is blocked
+    body["input"] = "artist:bm94199::, 1girl, best quality"
+    prob = upstream_parameter_problem(body)
+    assert prob is not None
+    assert "检测到异常权重 94199::" in prob
+
+    # Valid weights pass: 1.2::xxx::, -3::xxx::, 30::xxx::
+    for valid_weight in [
+        "1.2::test_tag::, 1girl",
+        "-3::test_tag::, 1girl",
+        "30::test_tag::, 1girl",
+        "artist_94199, ::, 1girl",
+    ]:
+        body["input"] = valid_weight
+        assert upstream_parameter_problem(body) is None, f"Should be valid: {valid_weight}"
 
     # Nested brackets inside characterPrompts (prompt or uc)
     body = {
@@ -240,27 +254,17 @@ def test_parameter_preflight_bracket_nesting_nan_prevention():
     assert "权重括号嵌套过深" in prob
 
     body["parameters"]["characterPrompts"] = [
-        {"prompt": "char1", "uc": "lowres, [[[[[[[[worst_quality]]]]]]]]"}
+        {"prompt": "char1", "uc": "lowres, char_tag94199::"}
     ]
     prob = upstream_parameter_problem(body)
     assert prob is not None
-    assert "权重括号嵌套过深" in prob
+    assert "检测到异常权重 94199::" in prob
 
     # characterPrompts oversized text (> 51200 bytes)
     body["parameters"]["characterPrompts"] = [{"prompt": "a" * 52000, "uc": "lowres"}]
     prob = upstream_parameter_problem(body)
     assert prob is not None
     assert "提示词过长" in prob
-
-    # Negative prompt with square brackets and spaced brackets
-    body = {
-        "model": "nai-diffusion-4-5",
-        "input": "1girl, best quality",
-        "parameters": {"negative_prompt": "lowres, [[[[[[[[worst_quality]]]]]]]]"}
-    }
-    prob = upstream_parameter_problem(body)
-    assert prob is not None
-    assert "权重括号嵌套过深" in prob
 
     # v4_negative_prompt structure with spaced brackets
     body = {

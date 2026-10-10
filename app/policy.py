@@ -269,9 +269,16 @@ def upstream_parameter_problem(body: dict) -> Optional[str]:
             if size >= MAX_PROMPT_BYTES:
                 return f"提示词过长：{path} 有 {size} 字节（中文每字 3 字节），上游上限 {MAX_PROMPT_BYTES} 字节"
             # 权重括号嵌套过深（>=8层），会导致上游 Attention FP16 计算溢出报错 NaN
-            # 支持花括号 {}、圆括号 () 与方括号 []（NovelAI 权重下调），支持括号间含空白字符
-            if re.search(r"(?:\{\s*){8,}|(?:\}\s*){8,}|(?:\(\s*){8,}|(?:\)\s*){8,}|(?:\[\s*){8,}|(?:\]\s*){8,}", text):
-                return "提示词中权重括号嵌套过深（超过 7 层），会导致上游显卡浮点溢出（NaN）；请减少花括号、圆括号或方括号数量"
+            if re.search(r"(?:\{\s*){8,}|(?:\}\s*){8,}|(?:\(\s*){8,}|(?:\)\s*){8,}", text):
+                return "提示词中权重括号嵌套过深（超过 7 层），会导致上游显卡浮点溢出（NaN）；请减少花括号或圆括号数量"
+            # 异常数值权重（如画师名带数字紧挨着 :: 导致超大权重与 NaN 计算溢出）
+            for m in re.finditer(r"([-+]?\d+(?:\.\d+)?)::", text):
+                try:
+                    val = float(m.group(1))
+                except ValueError:
+                    continue
+                if abs(val) > 100:
+                    return f"检测到异常权重 {m.group(1)}::（可能是画师名里的数字紧挨着 ::），请在 :: 前加逗号或空格"
     p = body.get("parameters") if isinstance(body.get("parameters"), dict) else {}
     if body.get("action", "generate") == "generate":
         for key in ("width", "height"):
