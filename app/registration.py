@@ -1,11 +1,12 @@
-"""Discord OAuth self-enrollment for restricted NAI Gate keys (no image requests)."""
+"""Discord /register self-enrollment for restricted NAI Gate keys.
+
+发 Key 只有一条路径：机器人 /register → POST /self-register/issue → issue_direct → _provision。"""
 from __future__ import annotations
 
 from typing import Optional
 
 import asyncio
 import os
-import secrets
 import time
 from collections import deque
 from urllib.parse import urlencode
@@ -76,7 +77,7 @@ WAITLIST_HOLD = 24 * 3600     # 候补被邀请后保留名额的时长
 
 class RegistrationService:
     def __init__(self, db, http: httpx.AsyncClient, *, client_id: str, client_secret: str,
-                 bot_token: str, bridge_secret: str, redirect_uri: str,
+                 bot_token: str, bridge_secret: str,
                  command_guild: str = COMMAND_GUILD, membership_guild: str = MEMBERSHIP_GUILD,
                  membership_role: str = MEMBERSHIP_ROLE, site_url: str = SITE_URL,
                  key_daily_images: int = 100, key_daily_v5: int = 50,
@@ -96,8 +97,6 @@ class RegistrationService:
         self.db, self.http = db, http
         self.client_id, self.client_secret = client_id, client_secret
         self.bot_token, self.bridge_secret = bot_token, bridge_secret
-        self.redirect_uri = redirect_uri
-        self.pending: dict[str, tuple[str, float]] = {}
         self.lock = asyncio.Lock()
         self._dm_sent: deque = deque()             # 最近 24 小时成功发出的私信时间（进程内）
         self.last_dm_block = ""                     # 最近一次被闸门拦下的原因，供调用方写日志
@@ -198,7 +197,7 @@ class RegistrationService:
     async def ban(self, discord_id: str) -> None:
         """永久禁止该 Discord 账号领取：写入封禁表，并撤销其现有 Key 与身份组。
 
-        与 finish 共用 self.lock：否则在对方 OAuth 回调进行中封禁，回调仍会发出有效 Key。
+        与 issue_direct 共用 self.lock：否则在发 Key 进行中（身份组核验等网络等待）封禁，仍会发出有效 Key。
         """
         async with self.lock:
             await self.db._db.execute("INSERT OR IGNORE INTO discord_bans(discord_id, created_at) VALUES (?,?)",
@@ -351,39 +350,12 @@ class RegistrationService:
             await log_action(self.db, "系统", "每日清空自助注册", "", f"清空 {len(rows)} 人（REGISTER_RESET_AT）")
         return len(rows)
 
-    async def begin(self, user_id: str, guild_id: str, name: str = "") -> str:
-        if guild_id != self.command_guild or not user_id.isdecimal():
-            raise RegistrationError("请在指定服务器使用 /register。")
-        if self.min_account_days:
-            age_days = (time.time() * 1000 - ((int(user_id) >> 22) + 1420070400000)) / 86_400_000
-            if age_days < self.min_account_days:
-                raise RegistrationError(f"Discord 账号创建满 {self.min_account_days} 天后才能领 Key，请稍后再来。")
-        if await self.is_banned(user_id):
-            raise RegistrationError("这个 Discord 账号已被站长停用，无法领取 Key。")
-        await self._release_if_expired(user_id)
-        if (await self.db._db.execute_fetchall(
-            "SELECT 1 FROM discord_registrations WHERE discord_id=?", (user_id,)
-        )):
-            raise RegistrationError("这个 Discord 账号已经领取过 Key，可用 /quota 查看、/resetkey 重置。")
-        await self._check_capacity(user_id, name)
-        self.pending = {k: v for k, v in self.pending.items() if v[1] > time.time()}
-        if sum(u == user_id for u, _ in self.pending.values()) >= 2:
-            raise RegistrationError("授权链接已发送，请先完成授权或稍后重试。")
-        state = secrets.token_urlsafe(32)
-        self.pending[state] = (user_id, time.time() + 600)
-        # 只请求 identify：身份组门槛（若启用）改用机器人 Token 核验，不再要敏感的 guilds.members.read。
-        # 过去申请该敏感权限 + 短时间大量授权，是本应用被 Discord 反滥用标记（680009）的主因之一。
-        return "https://discord.com/oauth2/authorize?" + urlencode({
-            "client_id": self.client_id, "redirect_uri": self.redirect_uri,
-            "response_type": "code", "scope": self._oauth_scope(), "state": state,
-        })
-
     def _oauth_scope(self) -> str:
-        """默认只要 identify；只有后台配了跨服身份组门槛时才追加 guilds.members.read。"""
+        """网页登录 OAuth 的 scope：只要 identify（不再申请敏感的 guilds.members.read）。"""
         return "identify"
 
     def web_login_url(self, state: str) -> str:
-        """网页「用 Discord 登录」的授权链接（回调到 /login/callback，与机器人领取用的回调分开）。"""
+        """网页「用 Discord 登录」的授权链接（回调到 /login/callback）。只用于登录看状态，不发 Key。"""
         return "https://discord.com/oauth2/authorize?" + urlencode({
             "client_id": self.client_id, "redirect_uri": self.site_url + "login/callback",
             "response_type": "code", "scope": self._oauth_scope(), "state": state,
@@ -404,8 +376,9 @@ class RegistrationService:
                            global_name: str = "", avatar: str = "", name: str = "") -> dict:
         """/register 直接发 Key：斜杠命令的 interaction 已被 Discord 签名验明发起人身份，
         不必再走 OAuth 授权（应用被标记审查期间 OAuth 被封；这条通路同时去掉了批量私信）。
-        校验（限服务器 / 账号年龄 / 封禁 / 去重 / 名额 / 可选身份组）与 OAuth 路径一致；
-        身份组门槛用机器人 Token 核验。返回 {"key","message"}；不通过抛 RegistrationError。"""
+        这是唯一的发 Key 入口（旧的 OAuth 领取 begin/finish 已删除，不能再恢复）。
+        校验：限服务器 / 账号年龄 / 封禁 / 去重 / 每小时上限 / 名额与候补 / 可选身份组（机器人 Token 核验）；
+        通过后交给 _provision 落库。返回 {"key","message"}；不通过抛 RegistrationError。"""
         user_id = str(user_id)
         if guild_id != self.command_guild or not user_id.isdecimal():
             raise RegistrationError("请在指定服务器使用 /register。")
@@ -436,42 +409,49 @@ class RegistrationService:
                 if role_id not in (member.get("roles") or []):
                     raise RegistrationError(f"目前只开放给「{note}」，没有检测到这个身份组，暂时不能领取 Key。")
             user = {"id": user_id, "username": username, "global_name": global_name, "avatar": avatar}
-            key = gen_key("nai")
-            row = await self.db.create_key({
-                "name": "Discord:" + user_id, "token": key,
-                "daily_images": cfg["daily_images"], "daily_v5": cfg["daily_v5"],
-                "features": features.dump(cfg["features"]) if cfg["features"] is not None else None,
-                "daily_anlas": 0, "monthly_anlas": 0, "daily_text_tokens": 0,
-                "rpm": self.key_rpm, "allow_anlas": False, "allow_img2img": False,
-                "exclude_global_v5": False, "image_model_scope": cfg["image_scope"],
-                "expires_at": (time.time() + cfg["expires_days"] * 86400) if cfg["expires_days"] > 0 else None,
-            })
-            await self.db._db.execute(
-                "INSERT INTO discord_registrations(discord_id,key_id,created_at,username,display_name,avatar) "
-                "VALUES (?,?,?,?,?,?)",
-                (user_id, row["id"], time.time(), _clip(username), _clip(global_name), _clip(avatar)))
-            await self.db.update_key(row["id"], {"name": member_label(user)})
-            if self.member_role_id:
-                await self.db._db.execute("DELETE FROM pending_role_removals WHERE discord_id=?", (user_id,))
-                await self.db._db.execute("UPDATE discord_registrations SET role_granted=1 WHERE discord_id=?", (user_id,))
-            await self.db._db.execute("DELETE FROM waitlist WHERE discord_id=?", (user_id,))
-            await self.db._db.commit()
-            if self.member_role_id:
-                try:
-                    await self._set_role(user_id, True)
-                except Exception:
-                    pass
-            from .audit import audit_disclosure
-            from .ops import env_audit_defaults
-            notice = await audit_disclosure(self.db, env_audit_defaults())
-            base = await site_flags.get(self.db, site_flags.GUARD_BASE)
-            legacy = (f"V4.5 及以下保底 {base} 张、全站空闲时最多 {cfg['daily_images']} 张"
-                      if base and cfg["daily_images"] and base < cfg["daily_images"]
-                      else f"V4.5 及以下 {cfg['daily_images']} 张")
-            quota = legacy + (f"；V5 {cfg['daily_v5']} 张" if cfg["daily_v5"] else "")
-            opened = ("、".join(features.FEATURES[f] for f in cfg["features"])
-                      if cfg["features"] is not None else "全部已开放功能")
-            message = welcome_dm(key, self.site_url, quota, cfg["expires_days"], self.idle_days, notice, opened)
+            return await self._provision(user_id, cfg, user)
+
+    async def _provision(self, user_id: str, cfg: dict, user: dict) -> dict:
+        """唯一发 Key 的地方：建 api_keys 行、写 discord_registrations、按成员名改 Key 名、
+        身份组标志 / 清掉旧的待摘除、移出候补、提交、挂身份组、生成欢迎消息。
+        调用方（issue_direct）必须已持有 self.lock 并完成全部校验。返回 {"key","message"}。"""
+        key = gen_key("nai")
+        row = await self.db.create_key({
+            "name": "Discord:" + user_id, "token": key,
+            "daily_images": cfg["daily_images"], "daily_v5": cfg["daily_v5"],
+            "features": features.dump(cfg["features"]) if cfg["features"] is not None else None,
+            "daily_anlas": 0, "monthly_anlas": 0, "daily_text_tokens": 0,
+            "rpm": self.key_rpm, "allow_anlas": False, "allow_img2img": False,
+            "exclude_global_v5": False, "image_model_scope": cfg["image_scope"],
+            "expires_at": (time.time() + cfg["expires_days"] * 86400) if cfg["expires_days"] > 0 else None,
+        })
+        await self.db._db.execute(
+            "INSERT INTO discord_registrations(discord_id,key_id,created_at,username,display_name,avatar) "
+            "VALUES (?,?,?,?,?,?)",
+            (user_id, row["id"], time.time(), _clip(user.get("username")), _clip(user.get("global_name")),
+             _clip(user.get("avatar"))))
+        await self.db.update_key(row["id"], {"name": member_label(user)})
+        if self.member_role_id:
+            await self.db._db.execute("DELETE FROM pending_role_removals WHERE discord_id=?", (user_id,))
+            await self.db._db.execute("UPDATE discord_registrations SET role_granted=1 WHERE discord_id=?", (user_id,))
+        await self.db._db.execute("DELETE FROM waitlist WHERE discord_id=?", (user_id,))
+        await self.db._db.commit()
+        if self.member_role_id:
+            try:
+                await self._set_role(user_id, True)
+            except Exception:
+                pass
+        from .audit import audit_disclosure
+        from .ops import env_audit_defaults
+        notice = await audit_disclosure(self.db, env_audit_defaults())
+        base = await site_flags.get(self.db, site_flags.GUARD_BASE)
+        legacy = (f"V4.5 及以下保底 {base} 张、全站空闲时最多 {cfg['daily_images']} 张"
+                  if base and cfg["daily_images"] and base < cfg["daily_images"]
+                  else f"V4.5 及以下 {cfg['daily_images']} 张")
+        quota = legacy + (f"；V5 {cfg['daily_v5']} 张" if cfg["daily_v5"] else "")
+        opened = ("、".join(features.FEATURES[f] for f in cfg["features"])
+                  if cfg["features"] is not None else "全部已开放功能")
+        message = welcome_dm(key, self.site_url, quota, cfg["expires_days"], self.idle_days, notice, opened)
         return {"key": key, "message": message}
 
     async def web_identify(self, code: str) -> dict:
@@ -536,103 +516,6 @@ class RegistrationService:
             raise RegistrationError("Discord 身份核验或私信失败，请检查授权和私信设置后重试。")
         return response.json()
 
-    async def finish(self, code: str, state: str) -> str:
-        pending = self.pending.pop(state, None)
-        if not pending or pending[1] <= time.time() or not code:
-            raise RegistrationError("授权链接无效或已过期，请重新使用 /register。")
-        expected_id = pending[0]
-        # The state is one-use; no OAuth token is persisted.
-        async with self.lock:
-            if await self.is_banned(expected_id):
-                raise RegistrationError("这个 Discord 账号已被站长停用，无法领取 Key。")
-            await self._release_if_expired(expected_id, defer_role=True)
-            if (await self.db._db.execute_fetchall(
-                "SELECT 1 FROM discord_registrations WHERE discord_id=?", (expected_id,)
-            )):
-                raise RegistrationError("这个 Discord 账号已经领取过 Key，可用 /quota 查看、/resetkey 重置。")
-            cfg = await self._check_capacity(expected_id)
-            try:
-                response = await self.http.post("https://discord.com/api/oauth2/token", data={
-                    "client_id": self.client_id, "client_secret": self.client_secret,
-                    "grant_type": "authorization_code", "code": code,
-                    "redirect_uri": self.redirect_uri,
-                }, timeout=12)
-                if response.status_code != 200:
-                    raise RegistrationError("Discord 授权失败，请重新使用 /register。")
-                token = response.json()["access_token"]
-                user = await self._discord("GET", "/users/@me", bearer="Bearer " + token)
-                if str(user.get("id")) != expected_id:
-                    raise RegistrationError("授权的 Discord 账号与命令发起者不一致。")
-                # 限定身份组（后台「领 Key」可设，可以是别的社区的服务器）优先于启动配置
-                guild_id = cfg.get("role_guild") or self.membership_guild
-                role_id = cfg.get("role_id") if cfg.get("role_guild") else self.membership_role
-                note = cfg.get("role_note") or "指定身份组"
-                response = await self.http.get(f"https://discord.com/api/users/@me/guilds/{guild_id}/member",
-                                               headers={"Authorization": "Bearer " + token}, timeout=12)
-                if response.status_code == 404:
-                    raise RegistrationError(f"目前只开放给「{note}」：请先加入对应的社区服务器后再用 /register。")
-                if response.status_code >= 400:
-                    raise RegistrationError("Discord 身份核验失败，请重新使用 /register 并同意授权。")
-                if role_id and role_id not in response.json().get("roles", []):
-                    raise RegistrationError(f"目前只开放给「{note}」，没有检测到这个身份组，暂时不能领取 Key。")
-                channel = await self._discord("POST", "/users/@me/channels",
-                    bearer="Bot " + self.bot_token, json={"recipient_id": expected_id})
-                if await self.is_banned(expected_id):      # 网络等待期间可能刚被封禁
-                    raise RegistrationError("这个 Discord 账号已被站长停用，无法领取 Key。")
-                if await self._issue_rate_blocked():
-                    raise RegistrationError("本小时领取人数较多，为保护服务稳定已暂时限流，请过几分钟再重试。")
-                key = gen_key("nai")
-                row = await self.db.create_key({
-                    "name": "Discord:" + expected_id, "token": key,
-                    "daily_images": cfg["daily_images"], "daily_v5": cfg["daily_v5"],
-                    "features": features.dump(cfg["features"]) if cfg["features"] is not None else None,
-                    "daily_anlas": 0, "monthly_anlas": 0, "daily_text_tokens": 0,
-                    "rpm": self.key_rpm,
-                    "allow_anlas": False, "allow_img2img": False,
-                    "exclude_global_v5": False, "image_model_scope": cfg["image_scope"],
-                    "expires_at": (time.time() + cfg["expires_days"] * 86400)
-                                  if cfg["expires_days"] > 0 else None,
-                })
-                await self.db._db.execute(
-                    "INSERT INTO discord_registrations(discord_id,key_id,created_at,username,display_name,avatar) VALUES (?,?,?,?,?,?)",
-                    (expected_id, row["id"], time.time(), _clip(user.get("username")), _clip(user.get("global_name")),
-                     _clip(user.get("avatar"))))
-                await self.db.update_key(row["id"], {"name": member_label(user)})
-                await self.db._db.commit()
-                from .audit import audit_disclosure
-                from .ops import env_audit_defaults
-                notice = await audit_disclosure(self.db, env_audit_defaults())
-                base = await site_flags.get(self.db, site_flags.GUARD_BASE)
-                legacy = (f"V4.5 及以下保底 {base} 张、全站空闲时最多 {cfg['daily_images']} 张"
-                          if base and cfg["daily_images"] and base < cfg["daily_images"]
-                          else f"V4.5 及以下 {cfg['daily_images']} 张")
-                quota = legacy + (f"；V5 {cfg['daily_v5']} 张" if cfg["daily_v5"] else "")
-                opened = ("、".join(features.FEATURES[f] for f in cfg["features"])
-                          if cfg["features"] is not None else "全部已开放功能")
-                try:
-                    await self._discord("POST", f"/channels/{channel['id']}/messages",
-                        bearer="Bot " + self.bot_token,
-                        json={"content": welcome_dm(key, self.site_url, quota, cfg["expires_days"], self.idle_days, notice, opened),
-                              "allowed_mentions": {"parse": []}})
-                except Exception:
-                    await self.db._db.execute("DELETE FROM discord_registrations WHERE discord_id=?", (expected_id,))
-                    await self.db.delete_key(row["id"])
-                    raise
-                if self.member_role_id:
-                    # 先记标志再调用 Discord：即使中途崩溃，到期同步也会尝试摘除，不会残留。
-                    # 同时清掉此前失败遗留的“待摘除”记录，否则下一轮同步会摘掉刚发的新身份组。
-                    await self.db._db.execute("DELETE FROM pending_role_removals WHERE discord_id=?", (expected_id,))
-                    await self.db._db.execute("UPDATE discord_registrations SET role_granted=1 WHERE discord_id=?",
-                                              (expected_id,))
-                    await self.db._db.commit()
-                    await self._set_role(expected_id, True)
-                await self.db._db.execute("DELETE FROM waitlist WHERE discord_id=?", (expected_id,))
-                await self.db._db.commit()
-                return "sent"
-            except (httpx.HTTPError, KeyError, ValueError) as exc:
-                raise RegistrationError("Discord 服务暂时不可用，请稍后重试。") from exc
-
-
 async def count_registered(db) -> int:
     rows = await db.execute_fetchall_compat(
         """SELECT COUNT(*) FROM discord_registrations r JOIN api_keys k ON k.id=r.key_id
@@ -661,7 +544,7 @@ def configured_service(db, http: httpx.AsyncClient) -> RegistrationService | Non
 
     return RegistrationService(db, http, client_id=os.environ["DISCORD_CLIENT_ID"],
         client_secret=os.environ["DISCORD_CLIENT_SECRET"], bot_token=os.environ["DISCORD_BOT_TOKEN"],
-        bridge_secret=os.environ["REGISTRATION_BRIDGE_SECRET"], redirect_uri=site + "self-register/callback",
+        bridge_secret=os.environ["REGISTRATION_BRIDGE_SECRET"],
         command_guild=guild, membership_guild=guild, membership_role=os.getenv("DISCORD_ROLE_ID", "").strip(),
         site_url=site, key_daily_images=number("REGISTER_DAILY_IMAGES", 30),
         key_daily_v5=number("REGISTER_DAILY_V5", 0),

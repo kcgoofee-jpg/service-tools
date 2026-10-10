@@ -67,7 +67,7 @@
 | 网页 Key 登录 | `POST /login/key`：粘贴 `/register` 领到的 Key 换取同一个成员会话（按 discord_id 签发，30 天）；后台手建、未绑定 Discord 的 Key 不行；每 IP 10 分钟错 8 次锁定；校验 Origin 防登录 CSRF。不受 `web_login_paused` 影响 |
 | 作品备份（beta） | 首页登录后「作品备份」：EPUB 画册（一图一页 + 提示词/参数）或原图 ZIP（+ prompts.txt），每人 60 秒 1 次，只含仍在保留期内的原图 |
 | 后台 Key 额度 | 后台新建的 Key 为手动额度（算法不覆盖）；编辑 Key 只提交改动过的字段，只有改了额度才转为手动 |
-| `/register` | 由斜杠命令直接发 Key，回复只有本人可见，不走 OAuth、不私信 |
+| `/register` | **唯一的发 Key 路径**：斜杠命令 → `POST /self-register/issue` → `issue_direct` → `_provision`；回复只有本人可见，不走 OAuth、不私信。旧的 OAuth 领取（`/self-register/intent` + `/self-register/callback`，`begin`/`finish`）已删除，不要恢复 |
 | 免费规格 | V4.5 ≤ 1024×1024；V5 用预设尺寸（如 832×1216）；≤ 28 步；每次 1 张；图生图 / Vibe 关闭 |
 
 ## 6. 数据与备份

@@ -1,10 +1,9 @@
-"""No billable upstream calls: Discord OAuth enrollment contract."""
-import asyncio
+"""No billable upstream calls: Discord /register enrollment contract (issue_direct is the only provisioning path)."""
+import re
 import tempfile
 import time
 import unittest
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
 
 import httpx
 from fastapi import FastAPI
@@ -13,6 +12,9 @@ from app.database import Database
 from app.registration import RegistrationService, RegistrationError
 from app.registration_routes import router
 
+GUILD = "1480185480048808009"        # 发 /register 的服务器
+MEMBER_PATH = re.compile(r"^/api/guilds/(\d+)/members/\d+$")     # 机器人 Token 查成员身份组
+
 
 class RegistrationTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -20,95 +22,78 @@ class RegistrationTests(unittest.IsolatedAsyncioTestCase):
         self.db = Database(str(Path(self.tmp.name) / "gate.sqlite"))
         await self.db.connect()
         self.calls = []
-        self.dm_fails = False
         self.roles = ["1335363403870502912"]
         self.other_roles = None
 
         def discord(request):
             self.calls.append((request.method, request.url.path))
-            if request.url.path == "/api/oauth2/token":
-                return httpx.Response(200, json={"access_token": "temporary-user-token"})
-            if request.url.path == "/api/users/@me":
-                return httpx.Response(200, json={"id": "777"})
-            if request.url.path == "/api/users/@me/guilds/1134557553011998840/member":
-                return httpx.Response(200, json={"roles": self.roles})
-            if request.url.path == "/api/users/@me/guilds/222222222222222222/member":      # 别的社区
-                return httpx.Response(200, json={"roles": self.other_roles}) if self.other_roles is not None \
-                    else httpx.Response(404, json={})
+            member = MEMBER_PATH.match(request.url.path)
+            if member and request.method == "GET":
+                assert request.headers["authorization"] == "Bot fake-bot-token"     # 身份组门槛用机器人 Token 核验
+                if member.group(1) == "1134557553011998840":
+                    return httpx.Response(200, json={"roles": self.roles})
+                if member.group(1) == "222222222222222222":                         # 别的社区
+                    return httpx.Response(200, json={"roles": self.other_roles}) if self.other_roles is not None \
+                        else httpx.Response(404, json={})
             if request.url.path == "/api/users/@me/channels":
                 return httpx.Response(200, json={"id": "dm-1"})
             if request.url.path == "/api/channels/dm-1/messages":
-                self.dm_body = request.content.decode()
-                return httpx.Response(403 if self.dm_fails else 200, json={})
+                return httpx.Response(200, json={})
             raise AssertionError(f"Unexpected Discord request {request.method} {request.url}")
         await self.db.set_setting("register_open", "1")        # registration is closed by default (safe default)
         self.http = httpx.AsyncClient(transport=httpx.MockTransport(discord), base_url="https://discord.com")
         self.service = RegistrationService(self.db, self.http, client_id="client-id", client_secret="client-secret",
-            bot_token="fake-bot-token", bridge_secret="bridge-secret",
-            redirect_uri="https://novelai.fangchen2003.asia/self-register/callback")
+            bot_token="fake-bot-token", bridge_secret="bridge-secret")
 
     async def asyncTearDown(self):
         await self.http.aclose()
         await self.db.close()
         self.tmp.cleanup()
 
-    async def begin(self, user="777", guild="1480185480048808009"):
-        link = await self.service.begin(user, guild)
-        return parse_qs(urlparse(link).query)["state"][0]
+    async def mint(self, user="777"):
+        return await self.service.issue_direct(user, GUILD)
 
-    async def test_valid_role_receives_key_and_site_in_dm_once(self):
-        state = await self.begin()
-        result = await self.service.finish("auth-code", state)
-        self.assertEqual(result, "sent")
-        self.assertEqual((await self.db._db.execute_fetchall("SELECT count(*) FROM api_keys"))[0][0], 1)
+    async def count(self, table):
+        return (await self.db._db.execute_fetchall(f"SELECT count(*) FROM {table}"))[0][0]
+
+    async def test_valid_role_receives_key_in_reply_once(self):
+        result = await self.mint()
+        self.assertIn("nai-", result["key"])
+        self.assertIn(result["key"], result["message"])
+        self.assertIn("https://novelai.fangchen2003.asia/", result["message"])
+        self.assertIn(("GET", "/api/guilds/1134557553011998840/members/777"), self.calls)   # 机器人核验身份组
+        self.assertEqual(await self.count("api_keys"), 1)
         row = (await self.db._db.execute_fetchall("SELECT daily_v5,daily_images,allow_anlas,allow_img2img,exclude_global_v5,image_model_scope FROM api_keys"))[0]
         self.assertEqual(tuple(row), (50, 100, 0, 0, 0, "all"))
         self.assertEqual((await self.db._db.execute_fetchall("SELECT discord_id FROM discord_registrations"))[0][0], "777")
-        self.assertIn(("POST", "/api/channels/dm-1/messages"), self.calls)
-        self.assertIn("https://novelai.fangchen2003.asia/", self.dm_body)
-        self.assertIn("nai-", self.dm_body)
+        self.assertNotIn(("POST", "/api/channels/dm-1/messages"), self.calls)   # Key 只在临时回复里，不私信
         with self.assertRaises(RegistrationError):
-            await self.service.finish("auth-code", state)
-        with self.assertRaises(RegistrationError):
-            await self.begin()
+            await self.mint()                                                   # 已领过
+        self.assertEqual(await self.count("api_keys"), 1)
 
     async def test_wrong_server_and_role_never_mint(self):
         with self.assertRaises(RegistrationError):
-            await self.begin(guild="1134557553011998840")
+            await self.service.issue_direct("777", "1134557553011998840")
         self.roles = []
-        with self.assertRaises(RegistrationError):
-            await self.service.finish("auth-code", await self.begin())
-        self.assertEqual((await self.db._db.execute_fetchall("SELECT count(*) FROM api_keys"))[0][0], 0)
+        with self.assertRaisesRegex(RegistrationError, "身份组"):
+            await self.mint()
+        self.assertEqual(await self.count("api_keys"), 0)
 
     async def test_admin_role_gate_in_other_community(self):
         from app import ops
         await ops.set_registration(self.db, {"role_guild": "222222222222222222", "role_id": "1461731450058575986",
                                              "role_note": "创作者"})
         with self.assertRaisesRegex(RegistrationError, "先加入"):           # 不在那个服务器
-            await self.service.finish("auth-code", await self.begin())
+            await self.mint()
         self.other_roles = ["1"]
         with self.assertRaisesRegex(RegistrationError, "创作者"):           # 在服务器但没有身份组
-            await self.service.finish("auth-code", await self.begin())
-        self.assertEqual((await self.db._db.execute_fetchall("SELECT count(*) FROM api_keys"))[0][0], 0)
+            await self.mint()
+        self.assertEqual(await self.count("api_keys"), 0)
         self.other_roles = ["1461731450058575986"]
-        self.assertEqual(await self.service.finish("auth-code", await self.begin()), "sent")
+        self.assertIn("nai-", (await self.mint())["key"])
+        self.assertIn(("GET", "/api/guilds/222222222222222222/members/777"), self.calls)
         with self.assertRaises(ValueError):
             await ops.set_registration(self.db, {"role_id": "abc"})
-
-    async def test_dm_failure_rolls_back_key_and_allows_retry(self):
-        self.dm_fails = True
-        with self.assertRaises(RegistrationError):
-            await self.service.finish("auth-code", await self.begin())
-        self.assertEqual((await self.db._db.execute_fetchall("SELECT count(*) FROM api_keys"))[0][0], 0)
-        self.assertEqual((await self.db._db.execute_fetchall("SELECT count(*) FROM discord_registrations"))[0][0], 0)
-        self.dm_fails = False
-        self.assertEqual(await self.service.finish("auth-code", await self.begin()), "sent")
-
-    async def test_oauth_user_mismatch_never_mint(self):
-        state = await self.begin(user="778")
-        with self.assertRaises(RegistrationError):
-            await self.service.finish("auth-code", state)
-        self.assertEqual((await self.db._db.execute_fetchall("SELECT count(*) FROM api_keys"))[0][0], 0)
 
     async def test_issue_direct_mints_key_without_oauth_or_dm(self):
         # 生产同款：无身份组门槛 → /register 直发 Key，不走 OAuth、不私信
@@ -138,22 +123,23 @@ class RegistrationTests(unittest.IsolatedAsyncioTestCase):
         await self.db.set_setting("issue_hourly_cap", "0")                       # 关闭后恢复
         self.assertIn("nai-", (await self.service.issue_direct("779", "1480185480048808009"))["key"])
 
-    async def test_http_intent_requires_bridge_secret_and_callback_only_reports_status(self):
+    async def test_http_issue_requires_bridge_secret_and_oauth_routes_are_gone(self):
         app = FastAPI()
         app.include_router(router)
         app.state.registrar = self.service
+        body = {"discord_id": "777", "guild_id": GUILD}
+        auth = {"Authorization": "Bearer bridge-secret"}
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="https://novelai.fangchen2003.asia") as client:
-            denied = await client.post("/self-register/intent", json={"discord_id": "777", "guild_id": "1480185480048808009"})
-            self.assertEqual(denied.status_code, 401)
-            allowed = await client.post("/self-register/intent", headers={"Authorization": "Bearer bridge-secret"},
-                json={"discord_id": "777", "guild_id": "1480185480048808009"})
+            self.assertEqual((await client.post("/self-register/issue", json=body)).status_code, 401)
+            allowed = await client.post("/self-register/issue", headers=auth, json=body)
             self.assertEqual(allowed.status_code, 200)
-            state = parse_qs(urlparse(allowed.json()["url"]).query)["state"][0]
-            done = await client.get("/self-register/callback", params={"code": "auth-code", "state": state})
-            self.assertEqual(done.status_code, 200)
-            self.assertNotIn("nai-", done.text)
-            self.assertEqual(done.headers["cache-control"], "no-store")
-            self.assertEqual(done.headers["referrer-policy"], "no-referrer")
+            self.assertIn("nai-", allowed.json()["key"])
+            self.assertEqual(allowed.headers["cache-control"], "no-store")
+            # 旧的 OAuth 领取流程（/intent → Discord 授权 → /callback 私信发 Key）已删除，不能再恢复
+            self.assertIn((await client.post("/self-register/intent", headers=auth, json=body)).status_code, (404, 405))
+            self.assertIn((await client.get("/self-register/callback", params={"code": "c", "state": "s"})).status_code,
+                          (404, 405))
+        self.assertFalse(hasattr(self.service, "begin") or hasattr(self.service, "finish"))
 
 
 class ConfiguredServiceTests(unittest.IsolatedAsyncioTestCase):
@@ -180,9 +166,8 @@ class ConfiguredServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(svc.site_url, "https://gate.example.com/")
         self.assertEqual((svc.key_daily_images, svc.key_daily_v5, svc.key_image_scope, svc.key_expires_days),
                          (30, 0, "legacy", 30))
-        self.assertEqual(svc.redirect_uri, "https://gate.example.com/self-register/callback")
         with self.assertRaises(RegistrationError):
-            await svc.begin("777", "1480185480048808009")   # the original author's guild is not accepted
+            await svc.issue_direct("777", GUILD)            # the original author's guild is not accepted
 
 
 class CapacityAndAdminTests(RegistrationTests):
@@ -190,20 +175,18 @@ class CapacityAndAdminTests(RegistrationTests):
 
     async def mint(self, user="777"):
         self.service.max_users = 0
-        link = await self.service.begin(user, "1480185480048808009")
-        state = parse_qs(urlparse(link).query)["state"][0]
-        return await self.service.finish("auth-code", state)
+        return await self.service.issue_direct(user, GUILD)
 
     async def test_capacity_blocks_new_registrations_and_revoke_frees_slot(self):
         await self.mint()
         self.assertEqual(await self.service.count_active(), 1)
         self.service.max_users = 1
         with self.assertRaises(RegistrationError):
-            await self.service.begin("888", "1480185480048808009")
+            await self.service.issue_direct("888", GUILD)
         self.assertTrue(await self.service.revoke("777"))
         self.assertEqual(await self.service.count_active(), 0)
-        link = await self.service.begin("888", "1480185480048808009")   # slot is free again
-        self.assertIn("state=", link)
+        self.assertIn("nai-", (await self.service.issue_direct("888", GUILD))["key"])   # slot is free again
+        self.assertEqual(await self.service.count_active(), 1)
         self.assertFalse(await self.service.revoke("777"))
 
     async def test_reset_all_removes_keys_and_registrations_so_users_can_return(self):
@@ -211,7 +194,7 @@ class CapacityAndAdminTests(RegistrationTests):
         self.assertEqual(await self.service.reset_all(), 1)
         self.assertEqual((await self.db._db.execute_fetchall("SELECT count(*) FROM api_keys"))[0][0], 0)
         self.assertEqual((await self.db._db.execute_fetchall("SELECT count(*) FROM discord_registrations"))[0][0], 0)
-        self.assertEqual(await self.mint(), "sent")
+        self.assertIn("nai-", (await self.mint())["key"])
 
     async def test_quota_and_resetkey_endpoints_need_secret_and_right_guild(self):
         await self.mint()
@@ -241,30 +224,28 @@ class CapacityAndAdminTests(RegistrationTests):
 class OpenRegistrationTests(RegistrationTests):
     """First-come-first-served registration: no role needed, expired members rotate out, young accounts blocked."""
 
-    async def mint(self, user="777"):
-        link = await self.service.begin(user, "1480185480048808009")
-        return await self.service.finish("auth-code", parse_qs(urlparse(link).query)["state"][0])
-
     async def test_no_role_required_when_role_is_empty(self):
         self.service.membership_role = ""
         self.roles = []
-        self.assertEqual(await self.mint(), "sent")
+        self.assertIn("nai-", (await self.mint())["key"])
+        self.assertFalse(any(MEMBER_PATH.match(p) for _, p in self.calls))     # 没有门槛就不查身份组
 
     async def test_expired_key_frees_slot_and_member_can_register_again(self):
         self.service.max_users = 1
         await self.mint()
         self.assertEqual(await self.service.count_active(), 1)
         with self.assertRaises(RegistrationError):
-            await self.service.begin("888", "1480185480048808009")      # full
+            await self.service.issue_direct("888", GUILD)               # full
         await self.db._db.execute("UPDATE api_keys SET expires_at=?", (time.time() - 5,))
         await self.db._db.commit()
         self.assertEqual(await self.service.count_active(), 0)           # expired key no longer holds the slot
         self.assertEqual([w["discord_id"] for w in await self.service.waitlist()], ["888"])   # 名额满时进了候补
         with self.assertRaises(RegistrationError) as caught:
-            await self.service.begin("777", "1480185480048808009")      # 候补排在前面，后来者不能插队
+            await self.service.issue_direct("777", GUILD)               # 候补排在前面，后来者不能插队
         self.assertIn("第 2 位", str(caught.exception))
-        self.assertIn("state=", await self.service.begin("888", "1480185480048808009"))   # 排第一的候补可以领
-        self.assertEqual([w["discord_id"] for w in await self.service.waitlist()], ["888", "777"])
+        self.assertIn("nai-", (await self.service.issue_direct("888", GUILD))["key"])   # 排第一的候补可以领
+        self.assertEqual([w["discord_id"] for w in await self.service.waitlist()], ["777"])   # 领到后移出候补
+        self.assertEqual(await self.service.count_active(), 1)
 
     async def test_waitlist_invites_in_order_and_holds_slot_24h(self):
         from unittest.mock import AsyncMock
@@ -275,7 +256,7 @@ class OpenRegistrationTests(RegistrationTests):
         await self.mint()
         for who in ("901", "902"):
             with self.assertRaises(RegistrationError):
-                await self.service.begin(who, "1480185480048808009", name="u" + who)
+                await self.service.issue_direct(who, GUILD, name="u" + who)
         self.assertEqual([w["name"] for w in await self.service.waitlist()], ["u901", "u902"])
         self.assertEqual(await self.service.invite_waitlist(), 0)                     # 没有空位
         await self.db._db.execute("UPDATE api_keys SET expires_at=?", (time.time() - 5,))
@@ -283,12 +264,14 @@ class OpenRegistrationTests(RegistrationTests):
         self.assertEqual(await self.service.invite_waitlist(), 1)                     # 只邀请第一位
         self.assertEqual(self.service.send_dm.await_args.args[0], "901")
         with self.assertRaises(RegistrationError):
-            await self.service.begin("903", "1480185480048808009")                    # 名额为 901 保留
-        self.assertIn("state=", await self.service.begin("901", "1480185480048808009"))
+            await self.service.issue_direct("903", GUILD)                             # 名额为 901 保留
+        await self.service._check_capacity("901")                                     # 901 可以领（这里只探测，不真领）
         later = time.time() + WAITLIST_HOLD + 1
         self.assertEqual(await self.service.invite_waitlist(now=later), 1)            # 901 过期 → 邀请 902
         self.assertEqual(self.service.send_dm.await_args.args[0], "902")
         self.assertEqual([w["discord_id"] for w in await self.service.waitlist()], ["902", "903"])
+        self.assertIn("nai-", (await self.service.issue_direct("902", GUILD))["key"])  # 被邀请的 902 真的领到
+        self.assertEqual([w["discord_id"] for w in await self.service.waitlist()], ["903"])
 
     async def test_waitlist_without_dm_holds_slot_and_posts_one_announcement(self):
         # 申诉期：waitlist_dm=0 → 不私信，照样保留名额，公告频道只发一条汇总
@@ -305,8 +288,8 @@ class OpenRegistrationTests(RegistrationTests):
         self.assertEqual(len(posts), 1)
         self.assertIn("候补前 1 位", posts[0])
         with self.assertRaises(RegistrationError):
-            await self.service.begin("902", "1480185480048808009")                       # 名额为 901 保留
-        self.assertIn("state=", await self.service.begin("901", "1480185480048808009"))
+            await self.service.issue_direct("902", GUILD)                                # 名额为 901 保留
+        self.assertIn("nai-", (await self.service.issue_direct("901", GUILD))["key"])
 
     async def test_web_login_paused_by_default_never_starts_oauth(self):
         # 默认暂停：GET /login 必须跳回首页，不能把人送进 Discord 授权（应用审核期间）；设 0 才开放
@@ -355,7 +338,7 @@ class OpenRegistrationTests(RegistrationTests):
         self.service.max_users = 1
         await self.db._db.execute("INSERT INTO waitlist(discord_id, name, joined_at) VALUES ('777','',0), ('999','',1)")
         await self.db._db.commit()
-        self.assertEqual(await self.mint("777"), "sent")
+        self.assertIn("nai-", (await self.mint("777"))["key"])
         await self.service.ban("999")
         self.assertEqual(await self.service.waitlist(), [])
 
@@ -363,9 +346,10 @@ class OpenRegistrationTests(RegistrationTests):
         self.service.min_account_days = 7
         young = str(((int(time.time() * 1000) - 86_400_000) - 1420070400000) << 22)   # created yesterday
         with self.assertRaises(RegistrationError):
-            await self.service.begin(young, "1480185480048808009")
+            await self.service.issue_direct(young, GUILD)
+        self.assertEqual(await self.count("api_keys"), 0)
         old = str(((int(time.time() * 1000) - 30 * 86_400_000) - 1420070400000) << 22)
-        self.assertIn("state=", await self.service.begin(old, "1480185480048808009"))
+        self.assertIn("nai-", (await self.service.issue_direct(old, GUILD))["key"])
 
 
 class MemberRoleTests(RegistrationTests):
@@ -386,12 +370,8 @@ class MemberRoleTests(RegistrationTests):
         self.service.http = self.http
         self.service.member_role_id = "555"
 
-    async def mint(self, user="777"):
-        link = await self.service.begin(user, "1480185480048808009")
-        return await self.service.finish("auth-code", parse_qs(urlparse(link).query)["state"][0])
-
     async def test_role_granted_on_success_and_removed_on_revoke(self):
-        self.assertEqual(await self.mint(), "sent")
+        self.assertIn("nai-", (await self.mint())["key"])
         self.assertEqual(self.role_calls[0][0], "PUT")
         flag = (await self.db._db.execute_fetchall("SELECT role_granted FROM discord_registrations"))[0][0]
         self.assertEqual(flag, 1)
@@ -400,7 +380,7 @@ class MemberRoleTests(RegistrationTests):
 
     async def test_discord_role_failure_does_not_break_registration(self):
         self.role_status = 403
-        self.assertEqual(await self.mint(), "sent")
+        self.assertIn("nai-", (await self.mint())["key"])
         flag = (await self.db._db.execute_fetchall("SELECT role_granted FROM discord_registrations"))[0][0]
         self.assertEqual(flag, 1)                    # marked first so a later expiry sync always tries to remove it
 
@@ -436,19 +416,20 @@ class HardeningTests(MemberRoleTests):
         await self.service.ban("777")
         self.assertEqual((await self.db._db.execute_fetchall("SELECT count(*) FROM api_keys"))[0][0], 0)
         with self.assertRaises(RegistrationError):
-            await self.service.begin("777", "1480185480048808009")
+            await self.mint("777")
         await self.service.reset_all()
         with self.assertRaises(RegistrationError):
-            await self.service.begin("777", "1480185480048808009")            # still banned
+            await self.mint("777")                                              # still banned
+        self.assertEqual(await self.count("api_keys"), 0)
         self.assertTrue(await self.service.unban("777"))
-        self.assertIn("state=", await self.service.begin("777", "1480185480048808009"))
+        self.assertIn("nai-", (await self.mint("777"))["key"])
 
     async def test_disabled_member_is_not_released_by_expiry_or_reset_all(self):
         await self.mint("777")
         await self.db._db.execute("UPDATE api_keys SET enabled=0, expires_at=?", (time.time() - 5,))
         await self.db._db.commit()
         with self.assertRaises(RegistrationError):
-            await self.service.begin("777", "1480185480048808009")            # suspended, not auto-released
+            await self.mint("777")                                              # suspended, not auto-released
         self.assertEqual(await self.service.reset_all(), 0)
         self.assertEqual((await self.db._db.execute_fetchall("SELECT count(*) FROM discord_registrations"))[0][0], 1)
         self.assertEqual(await self.db.inactive_key_ids(time.time() + 10 * 86400), [])   # inactivity cleanup skips it too
@@ -463,10 +444,12 @@ class HardeningTests(MemberRoleTests):
         self.assertEqual(await self.service.sync_roles(), 1)                    # retried successfully
         self.assertEqual(await self.db._db.execute_fetchall("SELECT 1 FROM pending_role_removals"), [])
 
-    async def test_expiry_release_inside_finish_defers_role_http(self):
+    async def test_expiry_release_inside_issue_defers_role_http(self):
         await self.mint("777")
         await self.db._db.execute("UPDATE api_keys SET expires_at=?", (time.time() - 5,))
         await self.db._db.commit()
         before = len(self.role_calls)
-        link = await self.service.begin("777", "1480185480048808009")           # outside lock: removes now
-        self.assertGreater(len(self.role_calls), before)
+        self.assertIn("nai-", (await self.mint("777"))["key"])                 # 到期自动释放后重新领取
+        self.assertEqual([c[0] for c in self.role_calls[before:]], ["PUT"])     # 锁内不去摘身份组，只重新挂上
+        self.assertEqual(await self.db._db.execute_fetchall("SELECT 1 FROM pending_role_removals"), [])
+        self.assertEqual(await self.count("api_keys"), 1)

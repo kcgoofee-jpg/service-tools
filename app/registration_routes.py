@@ -1,4 +1,4 @@
-"""Private bot bridge and public OAuth callback; never render API keys to a browser."""
+"""Private bot bridge (/self-register/*) and member web login; never render API keys to a browser except the member's own."""
 from __future__ import annotations
 
 from typing import Any, Optional
@@ -6,7 +6,7 @@ from typing import Any, Optional
 import hmac
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 from . import site_flags
@@ -18,7 +18,7 @@ from .registration import RegistrationError
 router = APIRouter(prefix="/self-register")
 
 
-class Intent(BaseModel):
+class IssueRequest(BaseModel):
     discord_id: str
     guild_id: str
     name: str = ""          # Discord 用户名，仅用于候补名单展示
@@ -216,27 +216,10 @@ async def slots(request: Request, body: Who):
                         headers={"Cache-Control": "no-store"})
 
 
-@router.post("/intent")
-async def intent(request: Request, body: Intent):
-    service = getattr(request.app.state, "registrar", None)
-    if service is None:
-        raise HTTPException(503, "自助领 Key 尚未配置")
-    given = request.headers.get("Authorization", "")
-    # 用 bytes 比较：非 ASCII 的 Authorization 头在 str 上会让 compare_digest 抛 TypeError → 500
-    if not hmac.compare_digest(given.encode("utf-8", "ignore"), ("Bearer " + service.bridge_secret).encode("utf-8")):
-        raise HTTPException(401, "未授权")
-    try:
-        url = await service.begin(body.discord_id, body.guild_id, body.name[:80])
-    except RegistrationError as exc:
-        await _log_bot(request, body.discord_id, "领取 Key 失败（/register）", "", str(exc)[:200])
-        raise HTTPException(403, str(exc)) from exc
-    return JSONResponse({"url": url}, headers={"Cache-Control": "no-store"})
-
-
 @router.post("/issue")
-async def issue(request: Request, body: Intent):
+async def issue(request: Request, body: IssueRequest):
     """/register 直发 Key：斜杠命令已验明身份，直接发 Key（不走 OAuth、不私信），
-    临时消息里回给本人。鉴权同 /intent（桥接密钥）。"""
+    临时消息里回给本人。鉴权：桥接密钥。这是唯一的发 Key 路径（旧的 /intent + /callback OAuth 领取已删除）。"""
     service = getattr(request.app.state, "registrar", None)
     if service is None:
         raise HTTPException(503, "自助领 Key 尚未配置")
@@ -252,24 +235,6 @@ async def issue(request: Request, body: Intent):
         raise HTTPException(403, str(exc)) from exc
     await _log_bot(request, body.discord_id, "领取 Key（/register 直发）", "")
     return JSONResponse(result, headers={"Cache-Control": "no-store"})
-
-
-@router.get("/callback")
-async def callback(request: Request, code: str = "", state: str = "", error: str = ""):
-    service = getattr(request.app.state, "registrar", None)
-    if service is None:
-        raise HTTPException(503, "自助领 Key 尚未配置")
-    headers = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer",
-               "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'"}
-    if error:
-        return HTMLResponse("Discord 授权未完成，请重新使用 /register。", status_code=400, headers=headers)
-    who = (service.pending.get(state) or ("未知",))[0]
-    try:
-        await service.finish(code, state)
-    except RegistrationError as exc:
-        await _log_bot(request, who, "领取 Key 失败（授权回调）", "", str(exc)[:200])
-        return HTMLResponse(str(exc), status_code=403, headers=headers)
-    return HTMLResponse("领取成功。Key 和网址已发送到你的 Discord 私信，请勿分享 Key。", headers=headers)
 
 
 class BotReport(BaseModel):
