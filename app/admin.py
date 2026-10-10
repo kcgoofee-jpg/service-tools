@@ -664,6 +664,14 @@ async def give_coupon(request: Request, key_id: int):
     return {"ok": True, "coupon": c}
 
 
+@router.get("/status-codes")
+async def status_codes(request: Request, hours: int = 24):
+    """成员接口 HTTP 状态码分布（最近 1 / 24 / 168 小时）。"""
+    require_admin(request)
+    from . import status_stats
+    return await status_stats.distribution(request.app.state.gate.db, max(1, min(int(hours), 24 * 30)))
+
+
 @router.post("/gift")
 async def gift_member(request: Request):
     """奖励一位 Discord 用户（站长手动触发，先做成接口，以后机器人夸人也走这里）：

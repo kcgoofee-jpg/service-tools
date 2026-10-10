@@ -288,6 +288,22 @@ td .tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
 .mod-params{margin-top:10px}.mod-params>summary{list-style:none;display:inline-flex}.mod-params>summary::-webkit-details-marker{display:none}
 .mod-params[open]>summary .ic{transform:rotate(90deg)}.mod-params .table-wrap{margin-top:8px}
 .warn-text{color:var(--warn)}
+/* 状态码分布：2xx 绿、4xx 琥珀、5xx 红；每行一个状态码 + 次数 + 含义 + 占比 */
+.sc-list{display:flex;flex-direction:column;gap:4px}
+.sc-row{display:grid;grid-template-columns:56px minmax(0,1fr) auto;gap:4px 14px;align-items:center;padding:8px 4px;border-bottom:1px solid var(--border)}
+.sc-row:last-child{border-bottom:0}
+.sc-pill{justify-self:start;min-width:48px;text-align:center;font:600 13px var(--mono);padding:4px 10px;border-radius:999px;font-variant-numeric:tabular-nums}
+.sc-pill.c2{background:var(--ok);color:#fff}.sc-pill.c4{background:var(--warn);color:#fff}.sc-pill.c5{background:var(--bad);color:#fff}
+:root[data-theme="dark"] .sc-pill.c2,:root[data-theme="dark"] .sc-pill.c4,:root[data-theme="dark"] .sc-pill.c5{color:#10131c}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .sc-pill.c2,:root:not([data-theme="light"]) .sc-pill.c4,:root:not([data-theme="light"]) .sc-pill.c5{color:#10131c}}
+.sc-main{min-width:0}
+.sc-n{font-size:15px;font-weight:600;font-variant-numeric:tabular-nums}
+.sc-m{font-size:12.5px;color:var(--muted);margin-left:8px}
+.sc-pct{font-size:14px;color:var(--text-2);font-variant-numeric:tabular-nums;text-align:right;min-width:52px}
+.sc-bar{grid-column:2/4;height:4px;border-radius:2px;background:var(--surface-3);overflow:hidden;margin-top:-2px}
+.sc-bar i{display:block;height:100%;border-radius:2px}
+.sc-bar i.c2{background:var(--ok)}.sc-bar i.c4{background:var(--warn)}.sc-bar i.c5{background:var(--bad)}
+@media (max-width:560px){.sc-m{display:block;margin-left:0}}
 /* 总览：结论卡 */
 .ovv{display:flex;flex-direction:column;gap:14px;margin-bottom:20px}
 .ovv-h{display:flex;gap:12px;align-items:flex-start}
@@ -784,6 +800,12 @@ td.note{min-width:220px}
             <div class="tools"><button class="btn" id="econBtn" data-act="toggle-economy" title="节约模式：全站免费档统一 14 步 + Euler-a，省约 42% 额度、出图更快；开 / 关都会在公告频道通知成员">节约模式</button><button class="btn rf" data-act="refresh-ov" aria-label="刷新" title="刷新"><span data-ic="refresh"></span><span class="lbl">刷新</span></button></div></div>
           <div class="card panel ovv" id="ovVerdict"><div class="skel" style="height:64px"></div></div>
           <div class="stats" id="ovCards"></div>
+          <div class="card panel" id="scPanel">
+            <div class="panel-head"><div><h2>状态码分布</h2><div class="desc" id="scSum">成员接口（出图、查额度等）返回的 HTTP 状态码</div></div>
+              <div class="seg-ic" role="group" aria-label="时间范围">
+                <button class="btn mini" data-sc="1">1 小时</button><button class="btn mini on" data-sc="24">24 小时</button><button class="btn mini" data-sc="168">7 天</button></div></div>
+            <div class="sc-list" id="scList"><div class="skel" style="height:160px"></div></div>
+          </div>
           <div class="card panel"><div class="panel-head"><div><h2 id="chartLabel">今日生成图片</h2>
               <div class="v num" id="chartToday" style="font-size:26px;font-weight:600">—</div><div class="hint" id="chartSub" style="margin:0"></div></div>
               <div class="seg-ic" role="group" aria-label="指标">
@@ -1617,7 +1639,7 @@ async function loadOverview(){
   try{
     const d = await api('/admin/api/overview');
     const t = d.today;
-    ovData = d; renderOverviewTop(d);
+    ovData = d; renderOverviewTop(d); loadStatusCodes();
     if(d.log_since){ const days = (Date.now()/1000 - d.log_since) / 86400; $('#featDesc').textContent = '只算成员，不含站长 / 测试 Key' + (days < 7 ? ` · 记录从 ${new Date(d.log_since*1000).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})} 开始，「近 7 天」还不满 7 天` : '') + ' · 点功能名查看日志'; }
     $('#featUsage').innerHTML = (d.feature_usage||[]).map(f=>{
       const cnt = b => `<span class="tri"><span class="num">${b.ok}</span> / <span class="num ${b.error?'bad':''}">${b.error}</span> / <span class="num ${b.rejected?'warn':''}">${b.rejected}</span></span>`;
@@ -1711,6 +1733,22 @@ async function renderOverviewTop(d){
     statCard('近 60 分钟出图', g.hour ?? '—', g.hour_cap ? '/ ' + g.hour_cap : '', g.hour_cap && g.hour >= g.hour_cap ? '已到上限，新请求要等几分钟' : '每小时上限用来保护上游账号', g.hour_cap && g.hour >= g.hour_cap * 0.95 ? 'hot' : '') +
     statCard('今日被拒 / 失败', fmtNum(reqs.rej), '/ ' + fmtNum(reqs.err), `本月 Anlas ${fmtNum(d.month.anlas)}${d.anlas_budget > 0 ? ' / ' + fmtNum(d.anlas_budget) : ''}`);
 }
+
+/* 状态码分布（/admin/api/status-codes） */
+let scHours = 24;
+async function loadStatusCodes(){
+  try{
+    const d = await api('/admin/api/status-codes?hours=' + scHours);
+    const ok = (d.codes.find(c => c.code === 200) || {}).pct || 0;
+    $('#scSum').textContent = d.total ? `成员接口共 ${fmtNum(d.total)} 次请求，成功 ${ok}%` : '这段时间还没有请求（统计从 2.15.32 上线开始）';
+    $('#scList').innerHTML = d.codes.length ? d.codes.map(c => { const k = 'c' + String(c.code)[0];
+      return `<div class="sc-row"><span class="sc-pill ${k}">${c.code}</span><div class="sc-main"><span class="sc-n">${fmtNum(c.n)} 次</span><span class="sc-m">${esc(c.meaning)}</span></div>
+        <span class="sc-pct">${c.pct}%</span><div class="sc-bar"><i class="${k}" style="width:${c.pct}%"></i></div></div>`; }).join('')
+      : '<div class="muted sm">还没有数据</div>';
+    document.querySelectorAll('[data-sc]').forEach(b => b.classList.toggle('on', +b.dataset.sc === scHours));
+  }catch(e){ $('#scList').innerHTML = '<div class="muted sm">读取失败</div>'; }
+}
+document.addEventListener('click', e => { const b = e.target.closest('[data-sc]'); if(b){ scHours = +b.dataset.sc; loadStatusCodes(); } });
 
 async function loadStatus(){
   const box = $('#statusPanel');

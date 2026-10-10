@@ -55,6 +55,7 @@ from .policy import (
 from .state import GateState
 from . import features
 from .policy import ECONOMY_STEPS, REFERENCE_FIELDS, economy_trim
+from . import status_stats
 from .key_sources import RETENTION_SECONDS as KEY_SOURCE_RETENTION
 from .action_log import RETENTION_DAYS as ADMIN_ACTION_RETENTION_DAYS, log_action
 from .audit import audit_flags, audit_disclosure, audit_image_days, capture_prompts, full_image
@@ -173,7 +174,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "2.15.31"
+__version__ = "2.15.32"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -257,6 +258,32 @@ class RequestContextMiddleware:
 
 
 app.add_middleware(RequestContextMiddleware)
+
+
+class StatusStatsMiddleware:
+    """成员接口的状态码计数（后台「状态码分布」）。没发响应就断开 = 499，抛异常 = 500。"""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or not status_stats.tracked(scope.get("path", "")):
+            return await self.app(scope, receive, send)
+        seen: dict[str, int] = {}
+
+        async def send_status(message):
+            if message["type"] == "http.response.start":
+                seen["code"] = int(message.get("status", 0))
+            await send(message)
+        try:
+            await self.app(scope, receive, send_status)
+        except BaseException:
+            status_stats.record(seen.get("code") or 500)
+            raise
+        status_stats.record(seen.get("code") or 499)
+
+
+app.add_middleware(StatusStatsMiddleware)
 if SETTINGS.cors_origins:
     app.add_middleware(CORSMiddleware, allow_origins=SETTINGS.cors_origins,
                        allow_methods=["*"], allow_headers=["*"], allow_credentials=False)
@@ -484,6 +511,9 @@ async def maintenance_loop() -> None:
             await STATE.db.purge_usage_log(time.time() - max(7, keep) * 86400)
         await STATE.db.purge_key_sources(time.time() - KEY_SOURCE_RETENTION)
         await STATE.db.purge_admin_actions(time.time() - ADMIN_ACTION_RETENTION_DAYS * 86400)
+        await status_stats.flush(STATE.db)
+        await STATE.db._db.execute("DELETE FROM status_hourly WHERE hour<?", (time.time() - 30 * 86400,))
+        await STATE.db._db.commit()
         if getattr(STATE, "bugs", None) is not None:
             await STATE.bugs.purge(time.time() - 30 * 86400)
         # 原图只保留最近几天（缩略图、提示词、参数长期留）；天数可在设置里调
