@@ -199,101 +199,31 @@ def test_parameter_preflight_sampler_validation():
     assert upstream_parameter_problem(body) is None
 
 
-def test_parameter_preflight_bracket_nesting_nan_prevention():
-    # Prompt with >= 8 continuous brackets causes FP16 attention overflow / NaN
-    body = {
-        "model": "nai-diffusion-4-5",
-        "input": "1girl, {{{{{{{{masterpiece}}}}}}}}, best quality",
-        "parameters": {}
-    }
+def test_parameter_preflight_bracket_depth_not_blocked_but_huge_weight_is():
+    # 括号层数不拦：NAI 花括号每层只 ×1.05（8 层≈1.48 倍），圆括号不是权重语法；10/11 曾误拦成员 V5 请求
+    for deep in ["1girl, {{{{{{{{masterpiece}}}}}}}}, best quality",
+                 "1girl, { { { { { { { { masterpiece } } } } } } } }",
+                 "1girl, ((((((((masterpiece))))))))",
+                 "1girl, [[[[[[[[artist:xxx]]]]]]]], best quality"]:
+        body = {"model": "nai-diffusion-4-5", "input": deep, "parameters": {}}
+        assert upstream_parameter_problem(body) is None, deep
+
+    # 超大数值权重（画师名里的数字紧挨 ::）会让上游 NaN：拦
+    body = {"model": "nai-diffusion-4-5", "input": "artist:bm94199::, 1girl, best quality", "parameters": {}}
     prob = upstream_parameter_problem(body)
-    assert prob is not None
-    assert "权重括号嵌套过深" in prob
-
-    # Down-weighting square brackets with >= 8 levels is legitimate artist downweighting and must pass
-    body["input"] = "1girl, [[[[[[[[artist:xxx]]]]]]]], best quality"
-    assert upstream_parameter_problem(body) is None
-
-    # Spaced brackets (e.g. { { { or ( ( () parsed as repeated modifiers
-    for spaced in [
-        "1girl, { { { { { { { { masterpiece } } } } } } } }, best quality",
-        "1girl, ( ( ( ( ( ( ( ( masterpiece ) ) ) ) ) ) ) ), best quality",
-    ]:
-        body["input"] = spaced
-        prob = upstream_parameter_problem(body)
-        assert prob is not None, f"Spaced bracket should be caught: {spaced}"
-        assert "权重括号嵌套过深" in prob
-
-    # Abnormal numeric weights (> 100::) cause upstream NaN overflow
-    # bm94199:: is blocked
-    body["input"] = "artist:bm94199::, 1girl, best quality"
-    prob = upstream_parameter_problem(body)
-    assert prob is not None
-    assert "检测到异常权重 94199::" in prob
-
-    # Valid weights pass: 1.2::xxx::, -3::xxx::, 30::xxx::
-    for valid_weight in [
-        "1.2::test_tag::, 1girl",
-        "-3::test_tag::, 1girl",
-        "30::test_tag::, 1girl",
-        "artist_94199, ::, 1girl",
-    ]:
+    assert prob is not None and "检测到异常权重 94199::" in prob
+    for valid_weight in ["1.2::test_tag::, 1girl", "-3::test_tag::, 1girl", "30::test_tag::, 1girl", "artist_94199, ::, 1girl"]:
         body["input"] = valid_weight
-        assert upstream_parameter_problem(body) is None, f"Should be valid: {valid_weight}"
+        assert upstream_parameter_problem(body) is None, valid_weight
 
-    # Nested brackets inside characterPrompts (prompt or uc)
-    body = {
-        "model": "nai-diffusion-4-5",
-        "input": "1girl, best quality",
-        "parameters": {
-            "characterPrompts": [{"prompt": "char1, {{{{{{{{deep_weight}}}}}}}}", "uc": "lowres"}]
-        }
-    }
+    # 角色提示词也参与检查
+    body = {"model": "nai-diffusion-4-5", "input": "1girl",
+            "parameters": {"characterPrompts": [{"prompt": "char1", "uc": "lowres, char_tag94199::"}]}}
     prob = upstream_parameter_problem(body)
-    assert prob is not None
-    assert "权重括号嵌套过深" in prob
-
-    body["parameters"]["characterPrompts"] = [
-        {"prompt": "char1", "uc": "lowres, char_tag94199::"}
-    ]
-    prob = upstream_parameter_problem(body)
-    assert prob is not None
-    assert "检测到异常权重 94199::" in prob
-
-    # characterPrompts oversized text (> 51200 bytes)
+    assert prob is not None and "检测到异常权重 94199::" in prob
     body["parameters"]["characterPrompts"] = [{"prompt": "a" * 52000, "uc": "lowres"}]
-    prob = upstream_parameter_problem(body)
-    assert prob is not None
-    assert "提示词过长" in prob
-
-    # v4_negative_prompt structure with spaced brackets
-    body = {
-        "model": "nai-diffusion-4-5",
-        "input": "1girl, best quality",
-        "parameters": {
-            "v4_negative_prompt": {
-                "caption": {
-                    "base_caption": "lowres, { { { { { { { { bad_anatomy } } } } } } } }"
-                }
-            }
-        }
-    }
-    prob = upstream_parameter_problem(body)
-    assert prob is not None
-    assert "权重括号嵌套过深" in prob
-
-    # Interleaved / mixed brackets <= 7 each pass without false positives
-    body = {
-        "model": "nai-diffusion-4-5",
-        "input": "1girl, {{{[[[(((masterpiece)))]]]}}}, best quality",
-        "parameters": {
-            "characterPrompts": [
-                {"prompt": "char1, {{{{blue hair}}}}, [[[[small]]]]", "uc": "lowres, ((((sketch))))"},
-                {"prompt": None, "uc": None},
-                "not-a-dict",
-            ]
-        }
-    }
+    assert "提示词过长" in upstream_parameter_problem(body)
+    body["parameters"]["characterPrompts"] = [{"prompt": "char1, {{{{{{{{blue hair}}}}}}}}", "uc": None}, "not-a-dict"]
     assert upstream_parameter_problem(body) is None
 
 
