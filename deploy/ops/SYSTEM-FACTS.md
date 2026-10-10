@@ -111,6 +111,7 @@
 
 | 键 | 类型 | 默认 | 范围 | 归属 | 说明 |
 |---|---|---|---|---|---|
+| `waitlist_enabled` | flag | False |  | registration | 候补排队（关 = 名额满了直接提示，有空位先到先得；机器人不能私信时候补只会空占名额） |
 | `member_sweep` | flag | True |  | registration | 退群回收：每人每天核对一次是否还在服务器，不在就删 Key |
 | `web_login_paused` | flag | True |  | registration_routes | 网页 Discord OAuth 登录暂停（申诉期间）。Key 登录不受影响 |
 | `economy_mode` | onoff | False |  | ops / autopilot | 节约模式：免费档统一 14 步 + Euler-a |
