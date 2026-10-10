@@ -6,7 +6,7 @@ docker compose --profile discord build 2>&1 | tail -2              # 先构建�
 # 最多等 5 分钟到队列空闲再重启：旧容器要把生成中 / 排队中的图跑完才退出，这段时间新请求只能挂在 Caddy 里等
 for i in $(seq 1 60); do q=$(curl -s -m 5 127.0.0.1:3003/queue-status); echo "$q" | grep -q '"active":0,"waiting":0' && break; [ $((i % 6)) = 1 ] && echo "busy: $q"; sleep 5; done
 B=/opt/backups/pre-deploy-$(date +%Y%m%d-%H%M%S); mkdir -p $B
-ionice -c3 nice -n19 /usr/local/bin/naigate-snapshot $B/nai_gate.db.gz    # 失败（含完整性校验失败）会中止部署：没有可用备份就不部署
+/usr/local/bin/naigate-snapshot $B/nai_gate.db.gz    # 失败（含完整性校验失败）会中止部署：没有可用备份就不部署
 cp -a data/secret_key data/discord_layout.json $B/ 2>/dev/null || true; cp -a .env $B/env; chmod -R go-rwx $B; echo "backup $B"
 ls -1dt /opt/backups/pre-deploy-* | tail -n +11 | xargs -r rm -rf          # 部署前快照只留最近 10 份
 # 旧容器最后几分钟和关停过程的日志存进备份目录：容器一删日志就没了（10/10 19:07 部署时有 28 个 500 只剩计数）

@@ -136,7 +136,9 @@ async def run(state, registrar=None, now: Optional[float] = None) -> dict[str, A
                                    start, start + 86400, QUEUE_BUSY_REJECTS))
     slots, why = slots_rule(cap_now, active, waitlist, day_util, int(last.get("hourly_blocks", 0)), queue_hours)
     if last.get("coverage_hours", 0) < 20:                 # 昨天数据不完整：不据此加名额
-        slots, why = cap_now, f"昨天只有 {last.get('coverage_hours', 0)} 小时数据，名额不变"
+        cov = last.get("coverage_hours")
+        slots, why = cap_now, (f"昨天只有 {cov} 小时数据，名额不变" if cov is not None
+                               else f"{last.get('day', '昨天')} 的数据不完整（系统从那天中途开始记录），名额不变")
     mode = await _mode(db, "slots")
     out["rules"]["slots"] = {"mode": mode, "value": slots, "why": why}
     if mode == "enforce" and slots > cap_now and registrar is not None:
