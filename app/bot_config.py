@@ -13,8 +13,8 @@ from typing import Any
 # 名称 → (默认值, 类型, 下限, 上限)；字符串的上下限是长度
 FIELDS: dict[str, tuple[Any, type, int, int]] = {
     "gallery_forum": ("跑图分享", str, 1, 50),       # 论坛频道名包含这几个字就算跑图分享
-    "gallery_like": (1, int, 0, 1),                 # 新帖自动点 ❤️
-    "gallery_ai": (1, int, 0, 1),                   # 新帖 AI 看图写评论
+    "gallery_like": (0, int, 0, 1),                 # 新帖自动点 ❤️（默认关：机器人自动互动是 Discord 标记的信号之一）
+    "gallery_ai": (0, int, 0, 1),                   # 新帖 AI 看图写评论（默认关）
     "gallery_ai_daily": (30, int, 0, 500),          # AI 评论每天最多几条
     "gallery_ai_model": ("LongCat-2.5-Preview", str, 1, 80),
 }

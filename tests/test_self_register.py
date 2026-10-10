@@ -271,6 +271,7 @@ class OpenRegistrationTests(RegistrationTests):
         from app.registration import WAITLIST_HOLD
         self.service.max_users = 1
         self.service.send_dm = AsyncMock(return_value=True)
+        await self.db.set_setting("waitlist_dm", "1")          # 这个测试测的是私信邀请模式（默认已改为不私信）
         await self.mint()
         for who in ("901", "902"):
             with self.assertRaises(RegistrationError):

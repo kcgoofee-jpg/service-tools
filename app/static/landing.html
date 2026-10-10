@@ -11,12 +11,15 @@
 (function(page){ var sent = 0;
   function report(msg, src, line, stack){
     if(sent >= 5 || (src && src.indexOf(location.origin) !== 0)) return;
+    // 堆栈里没有本站地址 = 手机浏览器 / 插件往页面里注入的脚本（如 hit_test、native_call_*），不是我们的代码，修不了也不上报
+    var st = String(stack || ''); if(st && st.indexOf(location.origin) < 0) return;
     sent++;
     try{ navigator.sendBeacon ? navigator.sendBeacon('/public/client-error', JSON.stringify({page:page, msg:String(msg).slice(0,200), src:String(src||'').replace(location.origin,''), line:line||0, stack:String(stack||'').slice(0,1500)}))
       : fetch('/public/client-error', {method:'POST', body:JSON.stringify({page:page, msg:String(msg).slice(0,200)}), keepalive:true}); }catch(_){}
   }
   window.__owlReport = function(e, where){ report((where ? where + ': ' : '') + (e && e.message || e), location.href, 0, e && e.stack); };
-  window.addEventListener('error', function(e){ if(e.message) report(e.message, e.filename, e.lineno, e.error && e.error.stack); });
+  // 没有来源文件的「Script error.」来自浏览器注入的跨域脚本（插件、手机自带浏览器），我们既看不到也修不了，不上报
+  window.addEventListener('error', function(e){ if(e.message && !(e.message === 'Script error.' && !e.filename)) report(e.message, e.filename, e.lineno, e.error && e.error.stack); });
   window.addEventListener('unhandledrejection', function(e){ var r = e.reason; report('Promise: ' + (r && r.message || r), location.href, 0, r && r.stack); });
 })('landing');
 try{var t=localStorage.getItem('nai-gate-theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t;}catch(_){}

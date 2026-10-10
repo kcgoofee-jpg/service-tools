@@ -348,7 +348,7 @@ class GateState:
             return 0
         due = await self.db.keys_due_for_idle_reminder(time.time() - max(days - 1, 0.5) * 86400)
         sent = 0
-        for row in due:
+        for row in due[:3]:      # 每轮（每小时）最多处理 3 个，避免同一批注册的人在同一小时集中收到私信
             if row["ever_used"]:
                 text = (f"🦉 猫头鹰公益站提醒：你的 Key 已经有一段时间没有使用了，再过约 24 小时仍没有请求就会自动回收，"
                         f"名额会让给其他人。随便生成一张图即可重新计时；回收后有名额时可以再用 /register 领取。")
@@ -359,10 +359,12 @@ class GateState:
                         f"可以先在 {site} 的「查看我的额度」里粘贴 Key 测试。\n"
                         f"遇到问题可在 🛠️｜问题反馈 发截图；Key 丢了用 /resetkey 重新获取。")
             ok = await send_dm(row["discord_id"], text)
+            blocked = getattr(getattr(send_dm, "__self__", None), "last_dm_block", "") if not ok else ""
             await self.db.mark_idle_reminded(row["key_id"], row["activity"])
             await log_action(self.db, "系统", "闲置回收前提醒", f"Key #{row['key_id']} {row['name']}",
-                             ("从未使用；" if not row["ever_used"] else "") + ("已私信" if ok else "私信失败（对方可能关闭了私信）"),
-                             ok=ok)
+                             ("从未使用；" if not row["ever_used"] else "")
+                             + ("已私信" if ok else f"未私信：{blocked}" if blocked else "私信失败（对方可能关闭了私信）"),
+                             ok=ok or bool(blocked))
             sent += int(ok)
         return sent
 

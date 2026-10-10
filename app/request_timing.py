@@ -42,6 +42,19 @@ def end(token) -> None:
     _TIMING.reset(token)
 
 
+def mark_logged() -> None:
+    """本请求已经写过用量日志。放在共享 dict 里：子任务里记的日志外层也能看到（普通 ContextVar 布尔值传不回来，
+    以前上游 4xx 会先在子任务里记一行 error、再被外层异常处理器补记一行 rejected）。"""
+    holder = _TIMING.get()
+    if holder is not None:
+        holder["logged"] = True
+
+
+def logged() -> bool:
+    holder = _TIMING.get()
+    return bool(holder is not None and holder.get("logged"))
+
+
 def mark_sent() -> None:
     """第一次真正把请求发往上游时调用；重试不覆盖。"""
     holder = _TIMING.get()

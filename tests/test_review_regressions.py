@@ -1455,3 +1455,20 @@ async def test_admin_thumb_is_generated_from_original(tmp_path):
     thumb = make_thumbnail(buf.getvalue())
     assert thumb and thumb[:2] == b"\xff\xd8"                    # JPEG
     assert max(Image.open(io.BytesIO(thumb)).size) <= 512
+
+
+@pytest.mark.asyncio
+async def test_upstream_4xx_is_logged_once_not_also_as_rejected(state, monkeypatch):
+    """上游 4xx：子任务里已记一行 error，外层异常处理器不能再补一行 rejected（以前会，多出的 rejected 推高 Key 限流计数）。"""
+    async def bad_request(*args, **kwargs):
+        from app import request_timing
+        request_timing.mark_sent()
+        request_timing.mark_status(400)
+        return httpx.Response(400, text='{"message":"bad params"}')
+    monkeypatch.setattr(state.nai, "request", bad_request)
+    before = len(state.db.logs)
+    r = await post("/ai/generate-image", image_body())
+    assert r.status_code == 400
+    await asyncio.sleep(0)
+    rows = [a[4] for a, kw in state.db.logs[before:]]
+    assert rows.count("rejected") == 0 and rows.count("error") == 1, rows

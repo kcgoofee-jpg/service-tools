@@ -35,7 +35,7 @@ def test_save_load_and_snapshot():
         assert (await bot_config.load(db))["gallery_forum"] == "跑图分享"
         await bot_config.save(db, bot_config.validate({"gallery_ai": 0, "gallery_forum": "作品墙"}))
         cfg = await bot_config.load(db)
-        assert cfg["gallery_ai"] == 0 and cfg["gallery_forum"] == "作品墙" and cfg["gallery_like"] == 1
+        assert cfg["gallery_ai"] == 0 and cfg["gallery_forum"] == "作品墙" and cfg["gallery_like"] == 0     # 默认关（fail-closed）
         await bot_config.report(db, {"user": "奶妹", "ai_ready": True, "token": "secret"}, None, now=1000)
         for i in range(60):
             await bot_config.report(db, None, {"kind": "like", "title": f"t{i}"}, now=1000 + i)

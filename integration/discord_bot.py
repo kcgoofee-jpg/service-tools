@@ -21,7 +21,8 @@ SITE = os.getenv("SITE_URL", "").rstrip("/")
 
 
 # 后台「Discord」页的配置；每分钟从网关读一次（读不到时沿用上一次 / 默认值）
-CONFIG = {"gallery_forum": os.getenv("GALLERY_FORUM_NAME", "跑图分享"), "gallery_like": 1, "gallery_ai": 1,
+# 拉不到后台配置时一律按「关」处理（fail-closed）：以前默认 1，后台连不上就会自动点赞 / AI 评论
+CONFIG = {"gallery_forum": os.getenv("GALLERY_FORUM_NAME", "跑图分享"), "gallery_like": 0, "gallery_ai": 0,
           "gallery_ai_daily": gallery_praise.DAILY_LIMIT, "gallery_ai_model": gallery_praise.MODEL}
 
 

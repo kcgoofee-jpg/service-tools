@@ -57,8 +57,12 @@ async def test_breaker_enforce_trips_site_pause(tmp_path):
     await db.connect()
     try:
         await db.set_setting("autopilot_breaker", "enforce")
+        for _ in range(8):          # 本地拦截（冷却 / 上限，up_status=0）不算上游失败，不能触发熔断
+            await db.add_log(None, "m", "image", "nai-diffusion-5-full", "error", detail="上游限流冷却中")
+        assert not (await autopilot.run(SimpleNamespace(db=db, guard=Guard(db), share=None,
+                                                        sources=SimpleNamespace(events=[])), None))["rules"]["breaker"]["value"]
         for _ in range(6):
-            await db.add_log(None, "m", "image", "nai-diffusion-5-full", "error")
+            await db.add_log(None, "m", "image", "nai-diffusion-5-full", "error", up_status=500)
         guard = Guard(db)
         st = SimpleNamespace(db=db, guard=guard, share=None, sources=SimpleNamespace(events=[]))
         now = time.time()

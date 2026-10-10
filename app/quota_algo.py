@@ -140,10 +140,11 @@ async def _yesterday(db, day: str, members: list[int]) -> dict[str, int]:
     start = time.mktime(time.strptime(day, "%Y-%m-%d"))
     end = start + 86400
     rows = await db._db.execute_fetchall(
-        "SELECT c.key_id, c.images, k.daily_images FROM counters c JOIN api_keys k ON k.id=c.key_id "
-        "WHERE c.day=? AND k.is_test=0 AND k.is_admin=0", (day,))
-    used = sum(r[1] for r in rows)
-    hits = sum(1 for r in rows if r[2] and r[1] >= r[2])
+        "SELECT c.key_id, c.images, k.daily_images, c.legacy_free_images, k.quota_auto FROM counters c "
+        "JOIN api_keys k ON k.id=c.key_id WHERE c.day=? AND k.is_test=0 AND k.is_admin=0", (day,))
+    used = sum(r[1] for r in rows)                      # 账号总量：全部出图（和账号日上限比）
+    # 顶格：V4.5 上限 A 管的是 V4.5 免费图（legacy_free_images），不能拿含 V5 的总张数去比；手动额度的 Key 不参与
+    hits = sum(1 for r in rows if r[2] and r[4] == 1 and (r[3] or 0) >= r[2])
 
     # 只统计成员（不含测试号、站长号）被拦的记录
     member_rejects = ("FROM usage_log u JOIN api_keys k ON k.id=u.key_id WHERE u.ts>=? AND u.ts<? "

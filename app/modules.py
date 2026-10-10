@@ -194,13 +194,15 @@ def integrity(state) -> Module:
         return await state.share.mode() != "off"
 
     async def set_enabled(k: Kernel, on: bool):
-        await state.db.set_setting(sg.MODE_SETTING, "enforce" if on else "off")
+        # 重新打开只回到 observe（校准前不处罚）；要真的处罚需在后台单独切 enforce
+        await state.db.set_setting(sg.MODE_SETTING, "observe" if on else "off")
 
     async def checks(k: Kernel):
         now = time.time()
         db = state.db
         rows = await db._db.execute_fetchall(
-            "SELECT key_id FROM share_state WHERE paused_until>? OR strikes>0", (now,))
+            # 自动驾驶的 1 小时限流（pause_key）不写 paused_ts、也不算违规，不属于防分享处罚，不要求强证据
+            "SELECT key_id FROM share_state WHERE (paused_until>? AND paused_ts>0) OR strikes>0", (now,))
         unsupported = []
         for (kid,) in rows:
             strong = await _q1(db, f"SELECT COUNT(*) FROM share_evidence WHERE key_id=? AND kind IN "
@@ -293,6 +295,8 @@ def scheduling(state) -> Module:
         r = getattr(state, "sched").report()
         if r["shadow_decisions"] < 20:
             return [Check("公平性（影子）", True, f"样本不足（{r['shadow_decisions']} 次多人排队）")]
+        if r["active_keys"] < 2:          # 只有一个人在用时他占 100% 是必然的，谈不上垄断（以前每晚都误报）
+            return [Check("没有 Key 垄断队列", True, f"近 10 分钟只有 {r['active_keys']} 把 Key 在用")]
         # 影子观察：没有人被明显垄断、也没人被饿着时算健康；FIFO 下不公平率高 = DRR 值得开
         return [Check("没有 Key 垄断队列", r["monopoly"] <= 0.6,
                       f"近 10 分钟最高一把 Key 占 {r['monopoly']:.0%}，出图差距 {r['skew']}，"
