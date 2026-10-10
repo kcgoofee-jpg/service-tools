@@ -41,6 +41,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from datetime import datetime, timedelta
 from typing import Any, Optional
@@ -231,12 +232,19 @@ async def _yesterday(db, day: str, members: list[int]) -> dict[str, int]:
 
 
 async def _v5_used_equiv(db, day: str) -> float:
-    """这一天全站用掉的 V5，折成 28 步的张数（节约模式 14 步的图按账号当天的折算比例算）。"""
-    (v5,), = await db._db.execute_fetchall("SELECT COALESCE(SUM(v5),0) FROM counters WHERE day=?", (day,))
-    (imgs, units), = await db._db.execute_fetchall(
-        "SELECT COALESCE(SUM(images),0), COALESCE(SUM(COALESCE(units, images)),0) FROM upstream_token_counters WHERE day=?", (day,))
-    ratio = (units / imgs) if imgs else 1.0
-    return float(v5) * ratio
+    """这一天全站用掉的 V5，折成 28 步的张数：按每张 V5 图自己的步数（日志 detail 里的「/NNstep」）折算。
+    原来用全站所有图片（大部分是 28 步的 V4.5）的平均折算比例，节约模式那天 V5 多是 14 步，
+    V5 用量被高估约 20%，实测恢复速度算成 15.5%（超出合理范围被丢弃），退回保守值 5%（2026-10-10 演练发现）。"""
+    start = time.mktime(time.strptime(day, "%Y-%m-%d"))
+    rows = await db._db.execute_fetchall(
+        "SELECT detail, images FROM usage_log WHERE ts>=? AND ts<? AND status='ok' AND model LIKE '%diffusion-5%'",
+        (start, start + 86400))
+    total = 0.0
+    for detail, images in rows:
+        m = re.search(r"/(\d+)step", detail or "")
+        steps = int(m.group(1)) if m else 28
+        total += (images or 1) * min(max(steps, 1), 28) / 28
+    return total
 
 
 async def _members(db) -> list[int]:
