@@ -45,6 +45,7 @@ from .policy import (
     estimate_image_cost,
     image_model_tier,
     is_v5_medium,
+    fill_v4_prompt,
     medium_normalize,
     to_medium,
     legacy_normal_free_eligible,
@@ -179,7 +180,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "2.16.1"
+__version__ = "2.16.2"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -1238,6 +1239,8 @@ async def _generate_image(request: Request, *, streaming: bool):
         body, notes = economy_trim(body)      # 算法分到的 Anlas 不应让人在节约模式下还按 28 步出图
     else:
         notes = []
+    body, more = fill_v4_prompt(body)          # V4 / V4.5 缺结构化提示词时上游回 500：照官方网页端补上
+    notes = list(notes) + more
     if model_tier == "v5":
         # 节约模式下 V5 Full 改走官方 Medium 档（不再是「High 压到 14 步」：用量差不多，但画质差很多，10/10 修正）
         if not key["is_admin"] and await site_flags.get(STATE.db, site_flags.ECONOMY):

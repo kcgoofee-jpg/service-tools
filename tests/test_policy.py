@@ -346,3 +346,21 @@ def test_medium_is_v5_tier():
     from app.policy import image_model_tier, is_v5_medium
     assert image_model_tier("nai-diffusion-5-full-medium") == "v5" and is_v5_medium("nai-diffusion-5-full-medium")
     assert not is_v5_medium("nai-diffusion-5-full")
+
+
+def test_fill_v4_prompt_builds_official_structure_only_when_missing():
+    # 10/10：只发 input + negative_prompt 的客户端，V4.5 上游回 500；补上结构后 200（测试 Key 复现）
+    from app.policy import fill_v4_prompt
+    body = {"model": "nai-diffusion-4-5-full", "input": "1girl", "parameters": {
+        "negative_prompt": "lowres", "characterPrompts": [{"prompt": "a", "uc": "b", "center": {"x": 0.3, "y": 0.5}}]}}
+    out, notes = fill_v4_prompt(body)
+    p = out["parameters"]
+    assert p["v4_prompt"]["caption"]["base_caption"] == "1girl" and p["v4_negative_prompt"]["caption"]["base_caption"] == "lowres"
+    assert p["v4_prompt"]["caption"]["char_captions"] == [{"char_caption": "a", "centers": [{"x": 0.3, "y": 0.5}]}]
+    assert "v4_prompt" not in body["parameters"] and len(notes) == 2
+    kept = {"caption": {"base_caption": "x", "char_captions": []}, "use_coords": True, "use_order": True}
+    out2, n2 = fill_v4_prompt({"model": "nai-diffusion-4-5-full", "input": "y", "parameters": {"v4_prompt": kept, "v4_negative_prompt": {"caption": {}}}})
+    assert out2["parameters"]["v4_prompt"] is kept and n2 == []
+    for model in ("nai-diffusion-5-full", "nai-diffusion-3"):
+        same, n = fill_v4_prompt({"model": model, "input": "z", "parameters": {}})
+        assert "v4_prompt" not in same["parameters"] and n == []

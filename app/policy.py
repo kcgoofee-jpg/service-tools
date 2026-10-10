@@ -549,6 +549,36 @@ def economy_trim(payload: dict) -> Tuple[dict, list[str]]:
     return out, notes
 
 
+# ------------------------------------------------------------ V4 结构化提示词 ----
+def fill_v4_prompt(payload: dict) -> Tuple[dict, list[str]]:
+    """V4 / V4.5 必须带 v4_prompt / v4_negative_prompt 结构，缺了上游直接回 500、不说原因
+    （2026-10-10 成员「心事全在脸上」的 OpenAI 兼容类客户端只发 input + negative_prompt，连续 11 次 500；
+    同参数补上结构后 200，已用测试 Key 复现）。官方网页端用 input / negative_prompt / characterPrompts 拼出这两个结构，这里照做。"""
+    model = str(payload.get("model", ""))
+    p = payload.get("parameters")
+    if not model.startswith("nai-diffusion-4") or not isinstance(p, dict):
+        return payload, []
+    notes: list[str] = []
+    out = dict(payload)
+    p = dict(p)
+    out["parameters"] = p
+    chars = [c for c in (p.get("characterPrompts") or []) if isinstance(c, dict)] if isinstance(p.get("characterPrompts"), list) else []
+    def centers(c):
+        cen = c.get("center") if isinstance(c.get("center"), dict) else {"x": 0.5, "y": 0.5}
+        return [{"x": cen.get("x", 0.5), "y": cen.get("y", 0.5)}]
+    if not isinstance(p.get("v4_prompt"), dict):
+        p["v4_prompt"] = {"caption": {"base_caption": str(out.get("input", "") or ""),
+                                      "char_captions": [{"char_caption": str(c.get("prompt", "")), "centers": centers(c)} for c in chars]},
+                          "use_coords": bool(p.get("use_coords", False)), "use_order": True}
+        notes.append("已按官方格式补上 v4_prompt")
+    if not isinstance(p.get("v4_negative_prompt"), dict):
+        p["v4_negative_prompt"] = {"caption": {"base_caption": str(p.get("negative_prompt", "") or ""),
+                                               "char_captions": [{"char_caption": str(c.get("uc", "")), "centers": centers(c)} for c in chars]},
+                                   "legacy_uc": False}
+        notes.append("已按官方格式补上 v4_negative_prompt")
+    return out, notes
+
+
 # ------------------------------------------------------------ V5 Medium ----
 # 官方 2026-10-08 给 V5 Full 加了 Medium 档（蒸馏模型，锁 14 步 / Euler-a / Heavy 负面预设，不支持自定义负面词和
 # rescale；官方公告：比 23 步 High 省约 42%，盲测画质大致相当）。模型名与固定设置取自官方前端代码（2026-10-10 核对）。
