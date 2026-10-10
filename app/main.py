@@ -173,7 +173,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "2.15.4"
+__version__ = "2.15.5"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -1230,6 +1230,9 @@ async def _generate_image(request: Request, *, streaming: bool):
 
     async def resolve_v5_cost(exhausted: bool):
         nonlocal est, detail
+        if exhausted and not key["allow_anlas"]:
+            # 账号的 V5 免费额度刚用完：直说原因，不要报成「你的 Key 没开通付费权限」（审查 P2）
+            raise err(402, "账号今天的 V5 免费额度刚用完（不是你的个人额度）。可以先改用 V4.5，额度恢复后再用 V5", reasons.V5_EXHAUSTED)
         updated = estimate_image_cost(body, is_opus=True, v5_allowance_available=not exhausted)
         await reservation.update(key, updated, legacy_free_images)
         est = updated

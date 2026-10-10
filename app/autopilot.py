@@ -93,13 +93,18 @@ def key_guard_rule(alternate: int, clients: int, allday: int, rejects_1h: int) -
     return None
 
 
+ECON_ON_KEYS = 3           # 且来自至少这么多把不同的 Key（审查 P2：防止一个客户端重试就把全站切到节约模式）
 ECON_ON_REJECTS = 8        # 最近 15 分钟「排队的人太多」≥ 这么多次 → 拥挤，开节约模式
 ECON_OFF_REJECTS = 1       # 最近 30 分钟 ≤ 这么多次 → 不拥挤，关节约模式
 ECON_DWELL = 3600          # 两次切换至少间隔 1 小时，避免公告刷屏
 
 
-def economy_rule(on_now: bool, queue_rejects_15m: int, queue_rejects_30m: int) -> tuple[bool, str]:
-    """拥挤（排队被拒多）时建议开节约模式让更多人出到图；持续空闲时建议关掉恢复高质量。带滞回。"""
+def economy_rule(on_now: bool, queue_rejects_15m: int, queue_rejects_30m: int,
+                 keys_15m: int = ECON_ON_KEYS) -> tuple[bool, str]:
+    """拥挤（排队被拒多）时建议开节约模式让更多人出到图；持续空闲时建议关掉恢复高质量。带滞回。
+    开启还要求被拒的来自至少 ECON_ON_KEYS 把不同的 Key：一个客户端连续重试刷出来的拒绝不算全站拥挤。"""
+    if not on_now and queue_rejects_15m >= ECON_ON_REJECTS and keys_15m < ECON_ON_KEYS:
+        return False, f"最近 15 分钟排队被拒 {queue_rejects_15m} 次，但只来自 {keys_15m} 把 Key：不算全站拥挤"
     if not on_now and queue_rejects_15m >= ECON_ON_REJECTS:
         return True, f"最近 15 分钟 {queue_rejects_15m} 次因排队拥挤被拒：建议开节约模式（14 步）多服务些人"
     if on_now and queue_rejects_30m <= ECON_OFF_REJECTS:
@@ -198,11 +203,12 @@ async def run(state, registrar=None, now: Optional[float] = None) -> dict[str, A
 
     # 6 节约模式：拥挤（排队被拒多）时统一 14 步让更多人出到图，空闲时恢复高质量。切换都会公告。
     econ_now = await site_flags.get(db, site_flags.ECONOMY)
-    qr15 = int((await _q(db, "SELECT COUNT(*) FROM usage_log WHERE ts>=? AND status='rejected' "
-                             f"AND reason='{reasons.QUEUE_FULL}'", now - 900))[0][0] or 0)
+    r15 = (await _q(db, "SELECT COUNT(*), COUNT(DISTINCT key_id) FROM usage_log WHERE ts>=? AND status='rejected' "
+                        f"AND reason='{reasons.QUEUE_FULL}'", now - 900))[0]
+    qr15, keys15 = int(r15[0] or 0), int(r15[1] or 0)
     qr30 = int((await _q(db, "SELECT COUNT(*) FROM usage_log WHERE ts>=? AND status='rejected' "
                              f"AND reason='{reasons.QUEUE_FULL}'", now - 1800))[0][0] or 0)
-    econ_target, econ_why = economy_rule(econ_now, qr15, qr30)
+    econ_target, econ_why = economy_rule(econ_now, qr15, qr30, keys15)
     out["rules"]["economy"] = {"mode": await _mode(db, "economy"), "value": econ_target, "why": econ_why}
     if econ_target != econ_now and out["rules"]["economy"]["mode"] == "enforce":
         last_flip = float(await db.get_setting("autopilot_economy_at", 0) or 0)

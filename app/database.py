@@ -269,7 +269,7 @@ class Database:
                                  if path == ":memory:" else path)
 
     def _open_connection(self):
-        return aiosqlite.connect(self._connection_path, uri=self.path == ":memory:")
+        return aiosqlite.connect(self._connection_path, uri=self.path == ":memory:", timeout=15)   # 锁等待 15 秒（默认 5）
 
     async def connect(self) -> None:
         self._db = await self._open_connection()
@@ -725,7 +725,22 @@ class Database:
         legacy_free_images: int = 0, detail: str = "", unconfirmed_anlas: float = 0.0,
         wait_ms: int = 0, dur_ms: int = 0, client: str = "", up_status: int = 0, rid: str = "", src: str = "",
     ) -> None:
-        """成功日志、额度与使用时间一起提交；写入失败时整笔回退。"""
+        """成功日志、额度与使用时间一起提交；写入失败时整笔回退。
+        数据库被别的写入（清理原图、存大图）短暂锁住时重试几次：这时图已经出了、上游可能已经扣了，
+        记账失败会让成员拿不到图、计数也丢（2026-10-10 审查 F5）。"""
+        args = (key_id, key_name, kind, model, day, images, anlas, tokens, v5, legacy_free_images, detail,
+                unconfirmed_anlas, wait_ms, dur_ms, client, up_status, rid, src)
+        for attempt in range(4):
+            try:
+                return await self._record_success_once(*args)
+            except aiosqlite.OperationalError as exc:
+                if attempt == 3 or not any(w in str(exc).lower() for w in ("locked", "busy")):
+                    raise
+                await asyncio.sleep(0.5 * 2 ** attempt)
+
+    async def _record_success_once(self, key_id, key_name, kind, model, day, images, anlas, tokens, v5,
+                                   legacy_free_images, detail, unconfirmed_anlas, wait_ms, dur_ms, client,
+                                   up_status, rid, src) -> None:
         # 不使用共享连接，避免其他请求的 commit 提前保存半笔记账。
         async with self._record_lock, self._open_connection() as db:
             try:

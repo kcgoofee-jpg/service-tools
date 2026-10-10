@@ -41,7 +41,10 @@ class AllowanceCache:
             if now < row.get("retry_at", 0):
                 raise AllowanceUnavailable("V5 额度暂时无法确认，请稍后重试；未发送生图，未扣积分")
             threshold = await self.threshold()
-            ttl = 60 if row.get("percent", 0) < threshold else 300
+            pct = row.get("percent", 0)
+            # 剩 ≤2%（约 30 张）时缓存只用 15 秒（≈ 一次出图间隔）：缓存说「还有」但其实刚用完，
+            # 这几十秒里发出去的 V5 会被 NovelAI 按 Anlas 收费、账上却记成免费（2026-10-10 审查 F7）
+            ttl = 15 if pct <= 2 else 60 if pct < threshold else 300
             # Never use an old exhausted result to switch a new image to paid.
             if (not row.get("error") and row.get("is_negative") is False
                     and row.get("percent", 0) > 0 and now - row.get("at", -1e9) < ttl):
