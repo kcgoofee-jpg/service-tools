@@ -18,11 +18,13 @@ from zoneinfo import ZoneInfo
 
 HOUR = 3600
 WINDOW_3H = 3 * HOUR
+PACING_FLOOR = 20                                      # 摊开后每小时至少放行几张
 HOURLY_MIN, HOURLY_MAX, HOURLY_STEP = 100, 160, 10     # 上限 ≤ 0.8 × 单线程物理极限 ≈ 205 张/小时     # 每小时上限的自动调整范围（加性增、乘性减）
 # 名称: (默认值, 最小, 最大, 说明)
 FIELDS: dict[str, tuple[int, int, int, str]] = {
     "account_daily_cap": (1000, 0, 20000, "每个上游账号每天最多出图张数"),
     "account_hourly_cap": (150, 0, 240, "每个上游账号每小时最多出图张数（自动调整：上游 429 减半；前一天顶到过上限且没有 429 才 +10，范围 100～160）"),
+    "daily_pacing": (0, 0, 1, "1=把每日上限按剩余时间摊开：每小时最多出 剩余张数÷到 0 点的剩余小时数（不低于 20），避免上午用光、下午全站停图（默认关，开启要站长同意）"),
     "account_3h_cap": (400, 0, 720, "每个上游账号连续 3 小时最多出图张数（防止连续几小时都在冲）"),
     "quiet_start": (0, 0, 23, "安静时段开始（北京时间，整点）；与结束相同 = 不启用（2026-10-10 起不启用：夜里不限速）"),
     "quiet_end": (0, 0, 23, "安静时段结束（北京时间，整点；与开始相同表示不设安静时段）"),
@@ -129,13 +131,13 @@ class Guard:
     def count_3h(self, token_id: str, now: Optional[float] = None) -> int:
         return len(self._window(token_id, time.time() if now is None else now, WINDOW_3H))
 
-    def minutes_until_free(self, token_id: str, now: Optional[float] = None) -> int:
+    def minutes_until_free(self, token_id: str, now: Optional[float] = None, cap: Optional[int] = None) -> int:
         """到计数降回上限以下要等多久：超了 n 张就要等第 n+1 早的那张滑出 60 分钟窗口（不是最早那一张）。"""
         now = time.time() if now is None else now
         q = self._window(token_id, now, HOUR)
         if not q:
             return 1
-        cap = self.hourly_cap(now)
+        cap = self.hourly_cap(now) if cap is None else cap
         idx = max(0, min(len(q) - 1, len(q) - cap)) if cap else 0
         return max(1, math.ceil((q[idx] + HOUR - now) / 60))
 
@@ -204,6 +206,17 @@ class Guard:
         self.breaker_until = now + max(0.0, seconds)
         self._breaker_reason = reason or f"上游连续出错，已暂停出图 {int(seconds)} 秒，到点自动恢复"
 
+    async def paced_cap(self, db, token_id: str, day: str, now: Optional[float] = None) -> int:
+        """每日上限按剩余时间摊开后的每小时上限：剩余张数 ÷ 到当地 0 点的剩余小时数，向上取整，不低于 PACING_FLOOR。"""
+        now = time.time() if now is None else now
+        daily = self.values["account_daily_cap"]
+        c = await db.get_upstream_counter(token_id, day)
+        left = max(0.0, daily - c.get("units", c["images"]))
+        local = datetime.fromtimestamp(now, self.tz)
+        midnight = local.replace(hour=0, minute=0, second=0, microsecond=0).timestamp() + 86400
+        hours = max(1.0, (midnight - now) / HOUR)
+        return max(PACING_FLOOR, math.ceil(left / hours))
+
     async def token_block_reason(self, db, token_id: str, day: str, now: Optional[float] = None) -> Optional[str]:
         """这个上游账号现在不能再接新的出图任务时，返回给成员看的原因。"""
         now = time.time() if now is None else now
@@ -217,6 +230,11 @@ class Guard:
             if used >= daily:
                 return Reason(f"本站今天的出图总量已达上限（每个账号 {daily} 张/天，按算力折算，用来保护上游账号），明天 0 点恢复", DAILY_CAP)
         cap = self.hourly_cap(now)
+        paced = await self.paced_cap(db, token_id, day, now) if daily and self.values["daily_pacing"] else 0
+        if paced and (not cap or paced < cap) and self.hour_count(token_id, now) >= paced:
+            wait = self.minutes_until_free(token_id, now, paced)
+            return Reason(f"为了让今天的出图量撑到 0 点，现在每小时最多出 {paced} 张（按剩余额度摊开），约 {wait} 分钟后有空位",
+                          HOURLY_CAP)
         if cap and self.hour_count(token_id, now) >= cap:
             wait = self.minutes_until_free(token_id, now)
             if self.in_quiet(now):
