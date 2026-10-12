@@ -8,6 +8,7 @@
 | `lab-daily.sh` | 实验室日报：`sqlite3 .backup` 出副本到 /tmp → `docker compose --profile lab run --rm lab`（回放校准 + 蒙特卡洛 + 日报图，结果在 `data/lab/<日期>/`）→ `post_report.py` 默认 dry-run；`LAB_POST=1` 才真的发到公告频道 |
 | `post_report.py` | 把 `report.png` + `summary.md` 以 multipart 发到 `ANNOUNCE_CHANNEL_ID`（`allowed_mentions` 为空）；默认 `--dry-run` 只打印，`--send` 才发 |
 | `announce.py` | 往公告频道发一条消息（正文从 stdin 读）：`docker cp announce.py nai-gate:/tmp/ && docker exec -i -u 0 nai-gate python /tmp/announce.py` |
+| `incident.py` | 状态页事件（Statuspage 流程）：`open --title "出图接口例行维护"` / `update <id> --status monitoring --body "…"` / `resolve <id>` / `list`。走容器内的应用模块，不需要后台密码 |
 
 ## 7×24 监控（systemd）
 
