@@ -54,7 +54,9 @@ def capacity(state) -> Module:
         if not tokens:
             return [Check("有可用的上游账号", False, "没有可用的上游账号，无法核对每小时计数")]
         mem = max(g.hour_count(t, now) for t in tokens)
-        cap = g.hourly_cap(now) * len(tokens)
+        # 用「窗口内出现过的最高上限」比：上限刚被 429 减半 / 刚进安静时段时，
+        # 窗口里那些按当时更高上限放行的图不该算超限（见 guard.hourly_cap_ceiling）
+        cap = g.hourly_cap_ceiling(now) * len(tokens)
         # 独立来源：上游报告的 V5 剩余变化 ↔ 我们日志里数到的 V5 张数（同时校准「每 1% ≈ 14.2 张」）
         snaps = await state.db._db.execute_fetchall(
             "SELECT ts, v5_percent, v5_rate FROM upstream_snapshots WHERE ts>? AND v5_percent IS NOT NULL ORDER BY ts",
