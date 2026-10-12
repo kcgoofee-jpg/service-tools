@@ -72,7 +72,8 @@ def _request_shape(body: dict) -> str:
                 f"图={1 if p.get('image') else 0} 蒙版={1 if p.get('mask') else 0} "
                 f"参考={len(refs) if isinstance(refs, list) else 0} "
                 f"vibe={1 if (p.get('director_reference_images') or p.get('director_reference_images_cached')) else 0} "
-                f"原图={1 if p.get('add_original_image') else 0}")
+                f"原图={1 if p.get('add_original_image') else 0} · "
+                f"keys={','.join(sorted(str(k) for k in p))[:220]}")
     except Exception:                     # noqa: BLE001
         return "?"
 
