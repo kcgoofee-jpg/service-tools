@@ -59,8 +59,16 @@ def _request_shape(body: dict) -> str:
     try:
         p = body.get("parameters") or {}
         refs = p.get("reference_image_multiple") or []
+        v4 = p.get("v4_prompt") or {}
+        chars = (v4.get("caption") or {}).get("char_captions") or []
+        prompt = str(body.get("input", "") or "")
+        negative = str(p.get("negative_prompt", "") or "")
         return (f"{body.get('model', '?')} · {p.get('width')}x{p.get('height')} · "
                 f"{p.get('steps')}步 · n={p.get('n_samples', 1)} · action={body.get('action', 'generate')} · "
+                f"prompt={len(prompt)}字 uc={len(negative)}字 角色={len(chars)} · "
+                f"sampler={p.get('sampler')} v={p.get('params_version')} "
+                f"sm={1 if p.get('sm') else 0}/{1 if p.get('sm_dyn') else 0} "
+                f"qt={1 if p.get('qualityToggle') else 0} ucPreset={p.get('ucPreset')} · "
                 f"图={1 if p.get('image') else 0} 蒙版={1 if p.get('mask') else 0} "
                 f"参考={len(refs) if isinstance(refs, list) else 0} "
                 f"vibe={1 if (p.get('director_reference_images') or p.get('director_reference_images_cached')) else 0} "
