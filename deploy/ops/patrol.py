@@ -424,6 +424,24 @@ def check_channels(rep: Report, cur) -> None:
         rep.add(OK if ip_ok == ip_total else WARN, "通道",
                 f"局部重绘 1 小时：{ip_ok}/{ip_total} 成功", key="inpaint")
 
+    # 上游 429 = 账号级红线（2026-10-13 01:30 第一次遇到）：一定要让站长立刻知道。
+    # 我们的限流器只能挡住自己放行出去的量，挡不住「绕过网关直连上游」的突发。
+    last_429 = num(read_setting(cur, "guard_last_upstream_429"))
+    if last_429 and now - last_429 < 3600:
+        rep.add(RED, "通道", f"上游 {max(1, int((now - last_429) / 60))} 分钟前返回 429（限流）："
+                             "上限已自动减半并进入冷却，请确认没有额外突发打到上游", key="upstream-429")
+    n429 = num(q1(cur, "SELECT COUNT(*) FROM usage_log WHERE ts>? AND up_status=429", (now - 3600,)))
+    if n429:
+        rep.add(RED, "通道", f"近 60 分钟上游 429 × {n429}（账号级限流，必须立刻降速）", key="upstream-429-count")
+    # 余量：离当前每小时上限还有多少 —— 决定要不要再往下降一档
+    cap = num(read_setting(cur, "guard_account_hourly_cap"), 0)
+    used = num(q1(cur, "SELECT COALESCE(SUM(images),0) FROM usage_log WHERE ts>? AND status='ok' "
+                       "AND kind LIKE 'image%'", (now - 3600,)))
+    rep.data.update(hourly_cap=cap, hourly_used=used)
+    if cap:
+        rep.add(OK if used < cap * 0.9 else WARN, "通道",
+                f"近 60 分钟 {used} 张 / 每小时上限 {cap} 张（余量 {max(0, cap - used)}）", key="hourly-headroom")
+
 
 # ---------------------------------------------------------------- 告警
 def send_alert(text: str) -> bool:
