@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timedelta
+import random
 import shutil
 import time
 
@@ -19,6 +20,12 @@ from .audit import (
 )
 
 ANLAS_REBALANCE_SECONDS = 600
+
+
+def jittered(seconds: float, ratio: float = 0.2) -> float:
+    """周期任务的固定节拍（每 300 / 600 秒整）是最容易被识别的机器特征之一：加 ±ratio 抖动。
+    上游看到的订阅查询、状态轮询因此不再是「每 600.0 秒一次」的精确网格。"""
+    return max(30.0, seconds * (1 + random.uniform(-ratio, ratio)))
 
 
 def _main():
@@ -110,7 +117,7 @@ async def maintenance_loop() -> None:
                 await job()
             except Exception as exc:
                 main.bug(f"maintenance:{name}", exc)
-        await asyncio.sleep(300)
+        await asyncio.sleep(jittered(300))
 
 
 async def inactive_key_cleanup_loop() -> None:
@@ -140,7 +147,9 @@ async def anlas_rebalance_loop() -> None:
                 await kernel.tick_all()
             except Exception as exc:
                 main.bug("kernel", exc)
-        await asyncio.sleep(ANLAS_REBALANCE_SECONDS)
+        # 抖动的意义：一个 tick 里会向上游发订阅 / V5 额度查询，精确的 600 秒网格是最容易被
+        # 上游识别为自动化调度的形态（2026-10-12 反封号审查）。
+        await asyncio.sleep(jittered(ANLAS_REBALANCE_SECONDS))
 
 
 async def registration_reset_loop() -> None:

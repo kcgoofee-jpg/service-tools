@@ -86,7 +86,8 @@ class TokenState:
         "admin_enabled",
         "dispatch_lock", "image_slots",
         "fails", "blocked_until", "disabled", "last_ok", "image_next_at",
-        "browser_profile", "forbidden_streak", "forbidden_trips",
+        "browser_profile", "forbidden_streak", "forbidden_trips", "forbidden_last",
+        "text_blocked_until", "text_forbidden",
     )
 
     def __init__(self, token: str, index: int, v5_daily_limit: int,
@@ -107,7 +108,10 @@ class TokenState:
         self.last_ok = 0.0
         self.image_next_at = 0.0
         self.forbidden_streak = 0          # 连续 403 次数（和 429 分开计）
-        self.forbidden_trips = 0           # 冷却触发了几轮（成功一次清零）→ 5 / 15 / 45 / 60 分钟退避
+        self.forbidden_trips = 0           # 冷却触发了几轮 → 5 / 15 / 45 / 60 分钟退避（24 小时没有 403 才归零）
+        self.forbidden_last = 0.0          # 最近一次 403 的时间（用于退避档位衰减）
+        self.text_blocked_until = 0.0      # 文本 / 语音通道单独限流冷却：不冻结图片通道
+        self.text_forbidden = 0            # 文本 / 语音连续 403 次数（只告警，不熔断生图）
         profile = BROWSER_PROFILES[index % len(BROWSER_PROFILES)].copy()
         if custom_user_agent:
             profile["user_agent"] = custom_user_agent
@@ -134,11 +138,33 @@ def clamp_retry_after(value: Any) -> float:
 
 
 def parse_retry_after(header: Optional[str]) -> float:
-    """只接受十进制秒数；HTTP 日期等其它格式按默认 20 秒处理。"""
+    """十进制秒数或 RFC 7231 HTTP 日期（Cloudflare / WAF 常用后者）；其它格式按默认 20 秒处理。
+
+    只认数字会让「Retry-After: Wed, 21 Oct 2026 07:28:00 GMT」退化成 20 秒，
+    在真实限流窗口内提前重试 —— 这正是最容易被上游升级封控的行为。
+    """
     value = (header or "").strip()
-    if not value or len(value) > 10 or not value.isascii() or not value.isdigit():
+    if not value:
         return 20.0
-    return clamp_retry_after(int(value))
+    if value.isascii() and value.isdigit():
+        return clamp_retry_after(int(value))
+    # 允许多个日期值（RFC 允许逗号分隔），取第一个能解析的
+    for part in value.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            from email.utils import parsedate_to_datetime
+            when = parsedate_to_datetime(part)
+        except (TypeError, ValueError, IndexError):
+            continue
+        if when is None:
+            continue
+        if when.tzinfo is None:
+            from datetime import timezone
+            when = when.replace(tzinfo=timezone.utc)
+        return clamp_retry_after(when.timestamp() - time.time())
+    return 20.0
 
 
 async def _wait_cleanup(task: asyncio.Task) -> Any:
@@ -351,16 +377,25 @@ class NaiClient:
             return True
 
     async def pick_token(self, *, requires_anlas: bool = False,
-                         v5_free: bool = False, image_job: bool = False) -> Optional[TokenState]:
+                         v5_free: bool = False, image_job: bool = False,
+                         text_job: bool = False) -> Optional[TokenState]:
         """选取符合该图片费用策略的令牌；V5 限额在这里原子预留。
 
         image_job：出图类任务还要经过账号保护（每日 / 每小时上限、安静时段）；全部账号都被挡住时返回 429 和原因。
+        text_job：文本 / 语音通道单独限流（上游 429 后只冷却文本，不冻结生图）。
         """
         async with self._lock:
             usable = [t for t in self.pool if t.usable and
                       (not requires_anlas or t.allow_anlas)]
             if not usable:
                 return None
+            if text_job:
+                now = time.time()
+                open_text = [t for t in usable if t.text_blocked_until <= now]
+                if not open_text:
+                    wait = max(1, int(min(t.text_blocked_until for t in usable) - now))
+                    raise UpstreamError(503, f"上游文本通道限流冷却中，约 {wait} 秒后恢复（生图不受影响）")
+                usable = open_text
             if image_job and self.guard is not None:
                 reasons = []
                 open_tokens = []
@@ -444,8 +479,14 @@ class NaiClient:
 
         不设 disabled：只有一把 Token 时永久停用等于全站停摆，且只能重启恢复。
         冷却按轮次指数退避（5 → 15 → 45 → 60 分钟），被封期间不会每 5 分钟去试一次；403 和 429 分开计数。
+        退避档位只在「24 小时内没有出现过 403」时归零：间歇性 403（WAF 抽检）反复出现时，
+        档位不会被一次成功重置回 5 分钟，否则账号会被以 5 分钟为周期持续试探。
         """
         ts.fails += 1
+        now = time.time()
+        if ts.forbidden_last and now - ts.forbidden_last > 86400:
+            ts.forbidden_trips = 0
+        ts.forbidden_last = now
         ts.forbidden_streak += 1
         if ts.forbidden_streak >= 3:
             minutes = min(60, 5 * 3 ** ts.forbidden_trips)
@@ -477,8 +518,9 @@ class NaiClient:
     def mark_ok(self, ts: TokenState) -> None:
         ts.fails = 0
         ts.forbidden_streak = 0
-        ts.forbidden_trips = 0
         ts.last_ok = time.time()
+        # forbidden_trips（退避档位）在这里故意不清零：清零会把 15/45/60 分钟的退避
+        # 打回 5 分钟，间歇性 403 就会变成「每 5 分钟试一次」的固定节拍。由 mark_forbidden 按时间衰减。
 
     @property
     def configured(self) -> bool:
@@ -509,10 +551,13 @@ class NaiClient:
         return result
 
     # ---------------- requests ----------------
-    def _headers(self, ts: TokenState, accept: str = "*/*") -> dict[str, str]:
+    def _headers(self, ts: TokenState, accept: str = "*/*", *, method: str = "POST") -> dict[str, str]:
         profile = getattr(ts, "browser_profile", None) or BROWSER_PROFILES[0]
         headers = default_browser_headers(ts.token, accept=accept, profile=profile)
-        headers["Content-Type"] = "application/json"
+        # 无 body 的 GET 不带 Content-Type：官方前端不会给 suggest-tags 这类查询带上它，
+        # 多余的请求头是现成的指纹差异（HTTP/1.1 与 h2 下都一样）。
+        if method.upper() not in ("GET", "HEAD"):
+            headers["Content-Type"] = "application/json"
         return headers
 
     def _unavailable(self, requires_anlas: bool, v5_free: bool) -> UpstreamError:
@@ -606,11 +651,11 @@ class NaiClient:
                         self.guard.record_start(ts.token_id)
                     if max_response_bytes is None:
                         resp = await self._client.request(
-                            method, url, json=json_body, headers=self._headers(ts, accept))
+                            method, url, json=json_body, headers=self._headers(ts, accept, method=method))
                     else:
                         async with asyncio.timeout(300):
                             async with self._client.stream(
-                                method, url, json=json_body, headers=self._headers(ts, accept)
+                                method, url, json=json_body, headers=self._headers(ts, accept, method=method)
                             ) as stream:
                                 response_status = stream.status_code
                                 data = bytearray()
@@ -805,7 +850,7 @@ class NaiClient:
         """打开文本流，由调用方持有并关闭响应；错误请求不重试。"""
         if self._client is None:
             raise RuntimeError("client not started")
-        ts = await self.pick_token()
+        ts = await self.pick_token(text_job=True)
         if ts is None:
             raise UpstreamError(503, "上游令牌全部被限流或不可用，请稍后再试")
         req = self._client.build_request(
@@ -819,7 +864,8 @@ class NaiClient:
             if resp.status_code == 401:
                 self.mark_unauthorized(ts)
             # 文本 403 不计入熔断：成员反复请求文本不该让生图停摆。
-            # 文本 429 不冻结整把 Token：否则成员刷文本就能让全站生图停摆。
+            # 文本 429 也不冻结整把 Token；但必须有信号与文本通道自己的冷却，
+            # 否则上游开始限流时客户端会以每 Key 的 RPM 上限持续重试（账号级风险）。
             # Error bodies may stall or contain private upstream details.
             # Close before handing the failure back to the route, even on cancel.
             try:
@@ -830,10 +876,20 @@ class NaiClient:
                 self._event("upstream_401", "NovelAI 返回 401：上游 Token 已失效，生图和文本全部不可用，请尽快更换 Token。", 1800)
                 raise UpstreamError(502, "上游令牌已失效（401），请站长更换 NovelAI Token")
             if resp.status_code == 403:
+                ts.fails += 1
+                ts.text_forbidden += 1
+                if ts.text_forbidden >= 3:
+                    ts.text_forbidden = 0
+                    self._event("upstream_403_text", "NovelAI 对文本 / 语音请求连续返回 403。生图仍可用，"
+                                                     "但请检查上游账号状态。", 1800)
                 raise UpstreamError(403, "上游拒绝了请求（HTTP 403），该账号已临时隔离保护")
             if resp.status_code == 429:
-                raise UpstreamError(429, "上游限流(429)，请降低频率后重试")
+                wait = clamp_retry_after(parse_retry_after(resp.headers.get("retry-after")))
+                ts.fails += 1
+                ts.text_blocked_until = max(ts.text_blocked_until, time.time() + wait)
+                raise UpstreamError(429, f"上游限流(429)，文本 / 语音通道暂停约 {int(wait)} 秒，请稍后再试")
             status = resp.status_code if resp.status_code in (400, 422, 503) else 502
             raise UpstreamError(status, f"上游文本请求失败（HTTP {resp.status_code}）")
+        ts.text_forbidden = 0
         self.mark_ok(ts)
         return resp

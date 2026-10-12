@@ -22,7 +22,7 @@ HOURLY_MIN, HOURLY_MAX, HOURLY_STEP = 100, 160, 10     # 上限 ≤ 0.8 × 单�
 # 名称: (默认值, 最小, 最大, 说明)
 FIELDS: dict[str, tuple[int, int, int, str]] = {
     "account_daily_cap": (1000, 0, 20000, "每个上游账号每天最多出图张数"),
-    "daily_cap_fallback": (1500, 0, 20000, "试探期的安全档：上游 1 小时内 ≥3 次 429 或连续 403 冷却时，每日上限自动退回这个数（只降不升；0 = 不自动退）"),
+    "daily_cap_fallback": (800, 0, 20000, "试探期的安全档：上游 1 小时内 ≥3 次 429 或连续 403 冷却时，每日上限自动退回这个数（必须低于每日上限，否则保险丝失效；只降不升；0 = 不自动退）"),
     "daily_burst": (150, 0, 20000, "每日上限按时段放行：0 点先放出这么多张，之后每小时补「每日上限 ÷ 24」张，没用完的留到后面；0 = 不分时段（整天先到先得）"),
     "account_hourly_cap": (150, 0, 240, "每个上游账号每小时最多出图张数（自动调整：上游 429 减半；前一天顶到过上限且没有 429 才 +10，范围 100～160）"),
     "account_3h_cap": (400, 0, 720, "每个上游账号连续 3 小时最多出图张数（防止连续几小时都在冲）"),
@@ -86,7 +86,17 @@ class Guard:
     def describe(self) -> dict[str, Any]:
         return {"values": dict(self.values),
                 "fields": {k: {"default": v[0], "min": v[1], "max": v[2], "label": v[3]} for k, v in FIELDS.items()},
-                "quiet_now": self.in_quiet(), "hourly_cap_now": self.hourly_cap()}
+                "quiet_now": self.in_quiet(), "hourly_cap_now": self.hourly_cap(),
+                "fallback_effective": self.fallback_effective()}
+
+    def fallback_effective(self) -> bool:
+        """安全档是否真的能在上游告警时兜住：必须 0 < 安全档 < 每日上限。
+
+        只降不升的设计（fall_back_daily 的 old <= safe 直接返回）意味着
+        安全档 ≥ 每日上限时，429 / 403 保险丝静默失效（历史默认 1000 / 1500 就是这种状态）。
+        """
+        old, safe = self.values["account_daily_cap"], self.values["daily_cap_fallback"]
+        return bool(safe and old and old > safe)
 
     # ---------- 安静时段与每小时上限 ----------
     def in_quiet(self, now: Optional[float] = None) -> bool:
