@@ -371,7 +371,7 @@ def check_data(rep: Report, cur) -> None:
         if not known_why and title.startswith("live:") and hit:
             # 前端每秒轮询 /public/live，网关重启那十几秒必然失败 —— 我们自己的部署不算故障
             rep.known("数据", f"{title}（{count} 次）— 最近一次在网关重启（{time.strftime('%H:%M', time.localtime(hit))}）"
-                              "后 10 分钟内，部署窗口的正常失败")
+                              "后 3 分钟内，部署窗口的正常失败")
             continue
         if known_why:
             rep.known("数据", f"[{level}] {title}（{count} 次）— {known_why}")

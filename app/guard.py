@@ -39,7 +39,7 @@ FIELDS: dict[str, tuple[int, int, int, str]] = {
     "base_daily_images": (100, 0, 100000, "V4.5 每人每天保底张数；超过后只在全站空闲时放行，直到 Key 的每日上限"),
 }
 IDLE_SHARE = 0.6
-from .reasons import BREAKER, CAP_3H, DAILY_CAP, HOURLY_CAP, PACED, KEY_BUSY, QUEUE_FULL, QUIET_CAP, Reason
+from .reasons import BREAKER, BURST_CAP, CAP_3H, DAILY_CAP, HOURLY_CAP, PACED, KEY_BUSY, QUEUE_FULL, QUIET_CAP, Reason
 from .params import P           # 本小时用量低于上限的 60% 且没人排队，算「空闲」，允许借用
 
 
@@ -134,9 +134,16 @@ class Guard:
         recent = [cap for ts, cap in self._cap_marks if now - ts <= HOUR]
         return max(recent + [current])
 
-    def record_start(self, token_id: str, now: Optional[float] = None) -> None:
+    def record_start(self, token_id: str, now: Optional[float] = None, images: int = 1) -> None:
+        """记一次「开始发往上游」。images = 这批实际会出几张（n_samples）。
+
+        按**张数**记而不是按请求记：一次请求带 n_samples=4 就是 4 张，
+        只记一次的话突发窗口和每小时上限都能被批量请求绕过（独立架构师 review 指出）。
+        """
         q = self._starts.setdefault(token_id, deque())
-        q.append(time.time() if now is None else now)
+        stamp = time.time() if now is None else now
+        for _ in range(max(1, int(images))):
+            q.append(stamp)
 
     async def seed_hour(self, db, token_ids: list[str], now: Optional[float] = None) -> int:
         """启动时从用量日志补回最近 3 小时的出图，避免重启（部署）把每小时计数清零、绕过上限。
@@ -217,7 +224,10 @@ class Guard:
         await self._set_adaptive(new, now, last_429=now)
         # 记下「挨限流时的上限」（只在真的降档时记：站长手动压过的低值不该污染这个天花板，
         # 否则加窗会被永久锁在 100）。取历次里更小的那个 —— 越低的水平也挨过限流就越不该再上去。
-        if self.db is not None and new != old:
+        floor = P("capacity.hourly_min", HOURLY_MIN)
+        # 只记录「高于下限」的水平：站长手动压低的低值不算；已经在下限（100）时也不记——
+        # 那时再记会把加窗天花板永久冻在 100（越低越保守是好事，但那意味着再也不会恢复速度）。
+        if self.db is not None and old > floor:
             prev = float(await self.db.get_setting("guard_429_cap_at", 0) or 0)
             await self.db.set_setting("guard_429_cap_at", min(prev, old) if prev else old)
         return (old, new) if new != old else None
@@ -274,7 +284,7 @@ class Guard:
         seen_at = float(await self.db.get_setting("guard_429_cap_at", 0) or 0)
         if seen_at:
             wanted = min(wanted, max(P("capacity.hourly_min", HOURLY_MIN), int(seen_at * 0.8)))
-        new = wanted
+        new = max(old, wanted)       # 加窗只升不降：天花板低于当前值时也不能反向降档
         await self._set_adaptive(new, now)
         return (old, new) if new != old else None
 
@@ -348,14 +358,18 @@ class Guard:
                 return Reason(f"现在是安静时段（{self.values['quiet_start']}:00–{self.values['quiet_end']}:00），"
                               f"出图放慢到每小时 {cap} 张，约 {wait} 分钟后有空位", QUIET_CAP)
             return Reason(f"本小时出图量已达上限（每小时 {cap} 张，用来保护上游账号），约 {wait} 分钟后有空位", HOURLY_CAP)
-        # 突发保护（2026-10-13 第一次被上游 429 之后加）：小时的额度可以挤在十分钟里发完，
-        # 上游看到的就是 6 倍速率 —— 那正是 429 的触发方式。这里把额度分摊到 10 分钟窗口，
-        # 总量不变，只是不能一口气冲完。
+        # 突发保护（2026-10-13 第一次被上游 429 之后加）：小时的额度可以被挤在十分钟里一口气发完，
+        # 上游看到的就是 6 倍速率 —— 那正是 429 的触发方式。
+        # 只在两种情况下抹平（独立架构师 review 后改：小时额度还很宽裕时不能因为突发窗口拒人）：
+        #   ① 真的在冲：10 分钟里已发出去两倍的突发额度；
+        #   ② 小时额度快见底了：剩下的不够一个突发窗口，那就摊到窗口里慢慢放。
         burst = self.burst_cap(now)
-        if burst and self.count_10m(token_id, now) >= burst:
+        n10 = self.count_10m(token_id, now)
+        left = (cap - self.hour_count(token_id, now)) if cap else 0
+        if burst and (n10 >= burst * 2 or (n10 >= burst and left <= burst)):
             wait = self.minutes_until_free_10m(token_id, now)
             return Reason(f"本时段出图已达上限（每 10 分钟 {burst} 张，用来抹平突发、保护上游账号），"
-                          f"约 {wait} 分钟后可继续", HOURLY_CAP)
+                          f"约 {wait} 分钟后可继续", BURST_CAP)
         cap3 = self.values["account_3h_cap"]
         if cap3 and self.count_3h(token_id, now) >= cap3:
             wait = self.minutes_until_free_3h(token_id, now)
