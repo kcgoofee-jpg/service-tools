@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import AsyncExitStack, asynccontextmanager
 import json
+import re
 import time
 from urllib.parse import urlencode
 
@@ -47,6 +48,25 @@ from ..policy import (
 from ..upstream_errors import upstream_error_message
 
 VIBE_ENCODING_ANLAS = 2
+
+def _request_shape(body: dict) -> str:
+    """这次请求的**形态**摘要（只用我们自己的数据，绝不碰上游响应体）。
+
+    项目政策是「不回显上游内容」：上游错误体里可能有 token、账号信息（有回归测试盯着）。
+    所以 5xx 时不记上游说了什么，只记我们发了什么 —— 判断「是这位成员的请求特征还是上游抽风」，
+    这比上游那句 500 有用得多（2026-10-13 半夜一位成员连着 5 次 500，同窗口其它 60 次全成功）。
+    """
+    try:
+        p = body.get("parameters") or {}
+        refs = p.get("reference_image_multiple") or []
+        return (f"{body.get('model', '?')} · {p.get('width')}x{p.get('height')} · "
+                f"{p.get('steps')}步 · n={p.get('n_samples', 1)} · action={body.get('action', 'generate')} · "
+                f"图={1 if p.get('image') else 0} 蒙版={1 if p.get('mask') else 0} "
+                f"参考={len(refs) if isinstance(refs, list) else 0} "
+                f"vibe={1 if (p.get('director_reference_images') or p.get('director_reference_images_cached')) else 0} "
+                f"原图={1 if p.get('add_original_image') else 0}")
+    except Exception:                     # noqa: BLE001
+        return "?"
 
 
 def _main():
@@ -734,8 +754,13 @@ async def _generate_image(request: Request, *, streaming: bool):
             main.upstream_outcome(False)
             raise
         if resp.status_code not in (200, 201):
-            await main.record(key, "image", model, "error", detail=f"upstream {resp.status_code}",
-                         unconfirmed_anlas=est["anlas"] if resp.status_code >= 500 else 0)
+            # 5xx 时记下请求形态（不碰上游响应体）：下次要判断「成员特征 vs 上游抽风」才有依据
+            shape = _request_shape(body) if resp.status_code >= 500 else ""
+            if shape:
+                print(f"[upstream-5xx] rid={request_timing.rid()} status={resp.status_code} {shape}", flush=True)
+            await main.record(key, "image", model, "error",
+                              detail=(f"upstream {resp.status_code}" + (f"（{shape[:110]}）" if shape else "")),
+                              unconfirmed_anlas=est["anlas"] if resp.status_code >= 500 else 0)
             await main.audit_generation(key, "image", model, "error", body)
             main.upstream_outcome(resp.status_code < 500)
             if resp.status_code >= 500:
