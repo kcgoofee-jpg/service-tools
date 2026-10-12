@@ -60,7 +60,7 @@ async def test_real_modules_build_tick_and_check(state):
     from app import modules
     bugs = []
     k = modules.build(state, bug=lambda src, exc=None, **kw: bugs.append((src, kw.get("title"))))
-    assert list(k.modules) == ["observation", "capacity", "allocation", "scheduling", "anlas", "autopilot", "integrity", "risk", "registration"]
+    assert list(k.modules) == ["observation", "capacity", "allocation", "scheduling", "anlas", "autopilot", "integrity", "risk", "registration", "registration_ready"]
     await k.tick_all()
     snap = {m["name"]: m for m in await k.snapshot()}
     assert snap["capacity"]["params"] and all("读取失败" not in str(p["value"]) for m in snap.values() for p in m["params"])

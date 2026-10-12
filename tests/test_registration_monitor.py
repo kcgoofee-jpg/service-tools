@@ -55,7 +55,7 @@ async def state():
 
 
 async def _registration_checks(state, kernel):
-    module = kernel.modules["registration"]
+    module = kernel.modules["registration_ready"]
     return {c.name: c for c in await module.checks(kernel)}
 
 
@@ -63,7 +63,7 @@ async def _registration_checks(state, kernel):
 async def test_unconfigured_service_blocks_open_switch(state):
     """服务没配起来时：开关关着没事，开着就是「开放了却领不到」。"""
     k = Kernel(state, bug=lambda *a, **kw: None)
-    k.register(modules.registration(state))
+    k.register(modules.registration_ready(state))
     k.extra["registrar"] = None
 
     checks = await _registration_checks(state, k)
@@ -80,17 +80,16 @@ async def test_promise_vs_capacity_is_the_real_limit(state):
     """线上口径：每人 79 张 × 138 人 vs 1 个账号 1700 张/天 —— 必须标出来。"""
     reg = FakeRegistrar(daily_images=79, max_users=0, active=138, cfg={"daily_images": 79, "max_users": 0})
     k = Kernel(state, bug=lambda *a, **kw: None)
-    k.register(modules.registration(state))
+    k.register(modules.registration_ready(state))
     k.extra["registrar"] = reg
 
     checks = await _registration_checks(state, k)
-    assert checks["已领人数 ≤ 名额"].ok                     # 名额不限（0）时这条照旧通过
     promise = checks["每人承诺 ≤ 全站日容量"]
     assert not promise.ok and promise.level == "warn"
     assert "10902" in promise.detail and "1700" in promise.detail
     assert "只有前约 21 个名额能拿满 79 张" in promise.detail
 
-    seats = next(p for p in k.modules["registration"].params if p.name == "容量能兑现的名额")
+    seats = next(p for p in k.modules["registration_ready"].params if p.name == "容量能兑现的名额")
     assert "约 21 人" in await seats.value()
 
 
@@ -101,7 +100,7 @@ async def test_ramp_limit_and_env_drift(state):
     reg = FakeRegistrar(daily_images=300, daily_v5=15, max_users=10, active=50,
                         cfg={"daily_images": 79, "daily_v5": 10, "max_users": 0})
     k = Kernel(state, bug=lambda *a, **kw: None)
-    k.register(modules.registration(state))
+    k.register(modules.registration_ready(state))
     k.extra["registrar"] = reg
 
     checks = await _registration_checks(state, k)
@@ -113,7 +112,7 @@ async def test_ramp_limit_and_env_drift(state):
     assert "每人张数 后台 79 / 环境变量 300" in drift.detail
     assert "每人 V5 后台 10 / 环境变量 15" in drift.detail
 
-    hourly = next(p for p in k.modules["registration"].params if p.name == "每小时最多发放")
+    hourly = next(p for p in k.modules["registration_ready"].params if p.name == "每小时最多发放")
     assert await hourly.value() == "12 个名额/小时"
 
 
@@ -122,7 +121,7 @@ async def test_ramp_over_capacity_is_reported(state):
     """把每小时领取上限调大（模拟一次公告带来的领取高峰）→ 边际需求超过一天容量时报警。"""
     reg = FakeRegistrar(daily_images=79, max_users=0, active=100, cfg={"daily_images": 79, "max_users": 0})
     k = Kernel(state, bug=lambda *a, **kw: None)
-    k.register(modules.registration(state))
+    k.register(modules.registration_ready(state))
     k.extra["registrar"] = reg
     await site_flags.put(state.db, site_flags.ISSUE_HOURLY_CAP, 100)      # 100 个名额/小时
 

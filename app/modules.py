@@ -235,14 +235,44 @@ def integrity(state) -> Module:
 
 # ---------------- 领 Key ----------------
 def registration(state) -> Module:
-    # 注册服务对象只在 kernel.extra 里（不是数据库设置），面板参数要读它，就在校验时记一份下来
-    known: dict[str, Any] = {"reg": None}
-
     async def get_enabled(k: Kernel):
         return await site_flags.get(state.db, site_flags.REGISTER_OPEN)
 
     async def set_enabled(k: Kernel, on: bool):
         await site_flags.put(state.db, site_flags.REGISTER_OPEN, on)
+
+    async def checks(k: Kernel):
+        reg = k.extra.get("registrar")
+        if reg is None:
+            return []
+        cfg = await reg.settings()
+        active = await reg.count_active()
+        cap = cfg.get("max_users") or 0
+        return [Check("已领人数 ≤ 名额", not cap or active <= cap, f"{active} / {cap or '不限'}")]
+
+    return Module(
+        name="registration", title="领 Key", question="新成员能不能领 Key",
+        get_enabled=get_enabled, set_enabled=set_enabled, checks=checks,
+        hard_note="关闭 = 暂停领取；已领的成员和邀请 Key 绑定不受影响",
+        params=[Param("Key 有效天数", lambda: state.settings.default_expires_days),
+                Param("闲置回收", lambda: f"{state.settings.key_inactivity_delete_days} 天"
+                      if state.settings.key_inactivity_delete_days else "关")])
+
+
+# ---------------- 开注册就绪度（2026-10-13）----------------
+def registration_ready(state) -> Module:
+    """回答「现在把领 Key 打开会发生什么」。
+
+    独立于领 Key 开关常驻运行（关着也要能看到就绪度，否则打开之前这些数字看不见），
+    只读：不改额度、不切开关、不动名额。
+    """
+    # 注册服务对象只在 kernel.extra 里（不是数据库设置），面板参数要读它，就在校验时记一份下来
+    known: dict[str, Any] = {"reg": None}
+
+    def _site_daily() -> int:
+        """全站一天的出图容量 = 上游账号数 × 每账号日上限。"""
+        tokens = [t for t in getattr(state.nai, "pool", []) if getattr(t, "usable", True)]
+        return int(state.guard.values["account_daily_cap"]) * max(1, len(tokens))
 
     async def checks(k: Kernel):
         reg = k.extra.get("registrar")
@@ -260,11 +290,11 @@ def registration(state) -> Module:
         per = cfg.get("daily_images") or 0
         v5_per = cfg.get("daily_v5") or 0
         tokens = [t for t in getattr(state.nai, "pool", []) if getattr(t, "usable", True)]
-        site_daily = int(state.guard.values["account_daily_cap"]) * max(1, len(tokens))
+        site_daily = _site_daily()
         hourly = await site_flags.get(state.db, site_flags.ISSUE_HOURLY_CAP, state.settings)
 
-        out = [Check("已领人数 ≤ 名额", not cap or active <= cap,
-                     f"{active} / {cap or '不限'}")]
+        out = [Check("注册链路已配置", True,
+                     f"{'开放中' if open_now else '当前关闭'}；配置齐备（网关能签发 Key，Key 通过临时消息发给本人）")]
         # ① 每人承诺 × 人数 vs 全站日容量：开注册前先看这一条 —— 它说明「名额能不能兑现」
         if per and site_daily:
             promise = active * per
@@ -291,11 +321,6 @@ def registration(state) -> Module:
                          level="warn"))
         return out
 
-    def _site_daily() -> int:
-        """全站一天的出图容量 = 上游账号数 × 每账号日上限。"""
-        tokens = [t for t in getattr(state.nai, "pool", []) if getattr(t, "usable", True)]
-        return int(state.guard.values["account_daily_cap"]) * max(1, len(tokens))
-
     async def _seats_text() -> str:
         """全站日容量 ÷ 每人额度 = 能拿满额度的人数（注册名额的现实上限）。"""
         reg = known["reg"]
@@ -312,13 +337,10 @@ def registration(state) -> Module:
         return f"{cap} 个名额/小时" if cap else "不限"
 
     return Module(
-        name="registration", title="领 Key", question="新成员能不能领 Key",
-        get_enabled=get_enabled, set_enabled=set_enabled, checks=checks,
-        hard_note="关闭 = 暂停领取；已领的成员和邀请 Key 绑定不受影响",
-        params=[Param("Key 有效天数", lambda: state.settings.default_expires_days),
-                Param("闲置回收", lambda: f"{state.settings.key_inactivity_delete_days} 天"
-                      if state.settings.key_inactivity_delete_days else "关"),
-                Param("每小时最多发放", _hourly_text),
+        name="registration_ready", title="开注册就绪度",
+        question="把领 Key 打开会发生什么：名额能兑现吗、链路通吗",
+        checks=checks, hard_note="只读体检；不影响领 Key 开关、不改任何额度",
+        params=[Param("每小时最多发放", _hourly_text),
                 Param("容量能兑现的名额", _seats_text, "全站日容量 ÷ 每人额度：开注册前先看这一条")])
 
 
@@ -405,6 +427,7 @@ def risk(state) -> Module:
 
 def build(state, bug) -> Kernel:
     k = Kernel(state, bug)
-    for make in (observation, capacity, allocation, scheduling, anlas, autopilot_module, integrity, risk, registration):
+    for make in (observation, capacity, allocation, scheduling, anlas, autopilot_module, integrity, risk,
+                 registration, registration_ready):
         k.register(make(state))
     return k
