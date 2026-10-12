@@ -746,8 +746,14 @@ def medium_normalize(payload: dict) -> Tuple[dict, list[str]]:
 
 # ------------------------------------------------------------ 文本钳制 ----
 
+TEXT_CONTEXT_TOKENS = 8192          # 上游真值（2026-10-13 实测报错信息里给的）
+TEXT_MAX_GENERATION_TOKENS = 250    # 上游单次最大生成长度（真值：超过就 400 "maximum generation length, 250 tokens"）
+TEXT_INPUT_BUDGET_TOKENS = 7000     # 默认留给输入的预算（其余给输出与安全余量）
+
+
 def clamp_text_params(payload: dict, *, max_output_tokens: int,
-                      max_input_chars: int) -> Tuple[dict, list[str], Optional[str]]:
+                      max_input_chars: int,
+                      max_input_tokens: int = TEXT_INPUT_BUDGET_TOKENS) -> Tuple[dict, list[str], Optional[str]]:
     notes: list[str] = []
     out = dict(payload)
     p = dict(out["parameters"]) if isinstance(out.get("parameters"), dict) else {}
@@ -757,16 +763,69 @@ def clamp_text_params(payload: dict, *, max_output_tokens: int,
     if len(input_text) > max_input_chars:
         return out, notes, f"输入过长（{len(input_text)} 字符，上限 {max_input_chars}）"
 
+    # 上游单次生成上限就是 250 token（2026-10-13 实测：max_length=300 被 400 拒绝，
+    # 报 "Requested length (300) exceeds model's maximum generation length, 250 tokens"）。
+    # 站长把 max_text_output_tokens 设成 300，于是**每一次**文本请求都失败 —— 这里兜住它。
+    cap = max(1, min(int(max_output_tokens), TEXT_MAX_GENERATION_TOKENS))
     ml = int(p.get("max_length", 0) or 0)
     if ml <= 0:
-        p["max_length"] = min(150, max_output_tokens)
-    elif ml > max_output_tokens:
-        p["max_length"] = max_output_tokens
-        notes.append(f"max_length 已钳制到 {max_output_tokens}")
+        p["max_length"] = min(150, cap)
+    elif ml > cap:
+        p["max_length"] = cap
+        notes.append(f"max_length 已按上游上限钳制到 {cap}" if ml <= max_output_tokens
+                     else f"max_length 已钳制到 {cap}")
     min_l = int(p.get("min_length", 1) or 1)
     if min_l > p["max_length"]:
         p["min_length"] = p["max_length"]
+
+    # 上游 NovelAI 文本模型的硬上限是「输入 + 输出 ≤ 8192 token」，超了直接 400
+    # （Invalid request: Requested length exceeds model's maximum context size, 8192 tokens）。
+    # 按字符限流挡不住它：中文大约 1 字 1 token，而世界书 / 场景提示词动辄上万字。
+    # 这里按 token 预算做「中间省略」截断 —— 保留开头（人设 / 规则 / 指令）与结尾（最近的对话），
+    # 截掉中间。宁可我们这边多截一点，也不要让成员收到上游那句看不懂的 400。
+    budget = max(256, min(max_input_tokens, TEXT_CONTEXT_TOKENS - int(p["max_length"]) - 64))
+    if estimate_text_tokens(input_text) > budget:
+        truncated, cut_chars = _truncate_middle(input_text, budget)
+        out["input"] = truncated
+        notes.append(f"输入超出 {TEXT_CONTEXT_TOKENS} token 上下文，已省略中间 {cut_chars} 字符"
+                     f"（保留开头与最近的结尾）")
     return out, notes, None
+
+
+def estimate_text_tokens(text: str) -> int:
+    """保守估算 token 数：中日韩按 1 token/字，其余按 0.34 token/字符。
+
+    上游用真 tokenizer 算，我们只能估。估高 = 我们多截一点（安全）；估低 = 成员收到 400（糟）。
+    """
+    cjk = 0
+    for ch in text:
+        code = ord(ch)
+        if 0x2E80 <= code <= 0x9FFF or 0xAC00 <= code <= 0xD7AF or 0xF900 <= code <= 0xFAFF \
+                or 0xFF00 <= code <= 0xFFEF or 0x3000 <= code <= 0x303F:
+            cjk += 1
+    other = len(text) - cjk
+    return cjk + int(other * 0.34) + 8
+
+
+def _truncate_middle(text: str, budget: int, *, head_ratio: float = 0.35) -> Tuple[str, int]:
+    """把文本截到 token 预算内：保留开头 head_ratio 与结尾其余，中间用一行省略号替代。
+
+    估算与实际有偏差，所以按比例缩了再复核，最多迭代 4 次（真实文本 1~2 次就够）。
+    """
+    marker = "\n…（中间省略）…\n"
+    current = text
+    for _ in range(4):
+        est = estimate_text_tokens(current)
+        if est <= budget:
+            break
+        keep = int(len(current) * budget / est * 0.92)
+        keep = max(240, keep)
+        if keep >= len(current):
+            break
+        head = max(120, int(keep * head_ratio))
+        tail = max(80, keep - head)
+        current = current[:head] + marker + (current[-tail:] if tail else "")
+    return current, max(0, len(text) - (len(current) - len(marker)))
 
 
 def text_model_host(model: str, modern_host: str, legacy_host: str) -> str:
