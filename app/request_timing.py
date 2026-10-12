@@ -159,12 +159,20 @@ def refine_client_from_payload(body: dict) -> None:
     # 小白盒 LittleWhiteBox（RT15548/LittleWhiteBox，酒馆插件）：2026-10-13 按它的源码加的指纹。
     # 它的请求「前端直连」时用的是宿主浏览器 UA（和柏宝绘之类完全一样），只能靠请求体认：
     # · ucPresetId / qualityPresetId 是它自有的字段名（官方 SDK 用 ucPreset / qualityToggle）；
-    # · 兜底组合：顶层 use_new_shared_trial + params_version 4 + stream msgpack + image_format png。
+    # · 兜底组合：顶层 use_new_shared_trial + params_version 4 + stream msgpack + image_format png；
+    # · 「测试连接」探针（非 V5 路径固定发这个）：input=test + nai-diffusion-3 + 64x64 + 1 step + 1 张。
     if any(marker in params for marker in ("ucPresetId", "qualityPresetId")) or (
         body.get("use_new_shared_trial") is True
         and params.get("params_version") == 4
         and params.get("stream") == "msgpack"
         and params.get("image_format") == "png"
+    ) or (
+        body.get("input") == "test"
+        and body.get("action") == "generate"
+        and params.get("model") in (None, "nai-diffusion-3")
+        and (params.get("width"), params.get("height")) == (64, 64)
+        and params.get("steps") == 1
+        and params.get("n_samples") == 1
     ):
         holder["client"] = f"LittleWhiteBox{suffix}"[:CLIENT_MAX]
         return
