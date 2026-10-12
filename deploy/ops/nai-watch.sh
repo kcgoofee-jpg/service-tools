@@ -5,6 +5,19 @@ q(){ sqlite3 -readonly -separator ' ' "$DB" "$1" 2>/dev/null; }
 last=$(date +%s); hour=$(date +%H); shared_prev=""; down_prev=""; cool_prev=0
 summary(){
   echo "📊 $(date +%H:%M) 汇总：今日请求 $(q "SELECT COALESCE(SUM(requests),0) FROM counters WHERE day=date('now','+8 hours')") · 图片 $(q "SELECT COALESCE(SUM(images),0) FROM counters WHERE day=date('now','+8 hours')") 张 · Anlas $(q "SELECT COALESCE(SUM(anlas),0) FROM counters WHERE day=date('now','+8 hours')") · 已领 Key $(q "SELECT COUNT(*) FROM discord_registrations")/$(q "SELECT CASE WHEN CAST(value AS INT)>0 THEN value ELSE '不限' END FROM site_settings WHERE key='register_max_users'") · 今日拒绝 $(q "SELECT COUNT(*) FROM usage_log WHERE status='rejected' AND ts>strftime('%s','now','+8 hours','start of day','-8 hours')")"
+  # 注册就绪度：开关 / 每人额度 / 承诺总量 vs 全站日容量（开注册前先看这条）
+  reg_open=$(q "SELECT CASE WHEN value IN ('1','true','yes','on') THEN '开放' ELSE '关闭' END FROM site_settings WHERE key='register_open'"); reg_open=${reg_open:-关闭}
+  reg_per=$(q "SELECT COALESCE(value,30) FROM site_settings WHERE key='register_daily_images'"); reg_per=${reg_per:-30}
+  reg_seats=$(q "SELECT COUNT(*) FROM discord_registrations r JOIN api_keys k ON k.id=r.key_id WHERE k.expires_at IS NULL OR k.expires_at>strftime('%s','now')")
+  reg_hr=$(q "SELECT COALESCE(value,12) FROM site_settings WHERE key='issue_hourly_cap'"); reg_hr=${reg_hr:-12}
+  reg_new1h=$(q "SELECT COUNT(*) FROM discord_registrations WHERE created_at>strftime('%s','now')-3600")
+  cap_daily=$(q "SELECT COALESCE(value,1000) FROM site_settings WHERE key='guard_account_daily_cap'"); cap_daily=${cap_daily:-1000}
+  accts=$(q "SELECT COUNT(DISTINCT token_id) FROM upstream_token_counters WHERE day>=date('now','+8 hours','-1 day')"); accts=${accts:-1}
+  [ "${accts:-0}" -lt 1 ] && accts=1
+  [ "${reg_per:-0}" -lt 1 ] && reg_per=1
+  site_daily=$((cap_daily*accts))
+  echo "🆕 注册：${reg_open} · 每人 ${reg_per} 张 · 每小时最多发 ${reg_hr} 个（本小时 ${reg_new1h}）· 承诺 $((reg_seats*reg_per)) 张 vs 日容量 ${site_daily} 张（${accts} 账号 × ${cap_daily}）→ 每人实际约 $((site_daily/(reg_seats>0?reg_seats:1))) 张"
+  [ "$((reg_seats*reg_per))" -gt "$site_daily" ] && echo "⚠ 名额承诺超过全站日容量：只有前约 $((site_daily/reg_per)) 个名额能拿满 ${reg_per} 张，其余先到先得"
   mem=$(free -m | awk '/Mem:/{print $7}'); disk=$(df / | awk 'NR==2{print $5+0}')
   echo "🖥 服务器：负载 $(cut -d' ' -f1-3 /proc/loadavg) · 可用内存 ${mem}MB · 磁盘已用 ${disk}%"
   [ "$mem" -lt 300 ] && echo "🚨 服务器可用内存只剩 ${mem}MB，考虑升级配置"
@@ -12,9 +25,11 @@ summary(){
   dbmb=$(du -m /opt/service-tools/data/nai_gate.db 2>/dev/null | cut -f1)
   imgmb=$(q "SELECT CAST(COALESCE(SUM(LENGTH(image)),0)/1048576 AS INT) FROM generation_audit")
   imgn=$(q "SELECT COUNT(*) FROM generation_audit WHERE image IS NOT NULL")
-  irdays=$(q "SELECT COALESCE(value,3) FROM site_settings WHERE key=\"audit_image_retention_days\""); irdays=${irdays:-3}
-  echo "💾 数据库 ${dbmb}MB · 原图 ${imgmb}MB（${imgn} 张，约 ${irdays} 天后自动清）"
-  [ "${imgmb:-0}" -gt 5000 ] && echo "🚨 原图已占 ${imgmb}MB，考虑调小保留天数"
+  # 原图现在按「容量上限 + 保留小时」清（audit_image_retention_days 已停用，10-11 站长决定）
+  capmb=$(q "SELECT COALESCE(value,8192) FROM site_settings WHERE key='audit_image_cap_mb'"); capmb=${capmb:-8192}
+  keep=$(q "SELECT COALESCE(value,24) FROM site_settings WHERE key='audit_image_keep_hours'"); keep=${keep:-24}
+  echo "💾 数据库 ${dbmb}MB · 原图 ${imgmb}MB（${imgn} 张，保留 ${keep} 小时或占满 ${capmb}MB 后清最旧的）"
+  [ "${imgmb:-0}" -gt "$((capmb*9/10))" ] && echo "🚨 原图已占 ${imgmb}MB（上限 ${capmb}MB），最旧的会被删"
 }
 
 algo(){
