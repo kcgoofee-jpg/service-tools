@@ -114,26 +114,26 @@ def docker_running() -> dict[str, bool]:
     return out
 
 
-_DOCKER_TIME = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?)(Z|[+-]\d{2}:?\d{2})$")
+_DOCKER_TIME = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:?\d{2})$")
 
 
 def parse_docker_time(text: str) -> float:
-    """docker 的 StartedAt 是 RFC3339Nano（9 位小数纳秒），Python 的 fromisoformat 只吃 6 位。
-    2026-10-13 踩到：直接解析抛 ValueError → 重启历史永远是空的 → 部署窗口里的前端失败又被当故障。
+    """docker 的 StartedAt 是 RFC3339Nano（最多 9 位小数纳秒）。
+
+    2026-10-13 踩到两次：Python 3.10 的 fromisoformat 既不认 'Z'，也只吃 6 位小数；
+    3.11+ 才放宽。线上巡检跑的是系统 python3（3.10），直接解析抛 ValueError →
+    重启历史永远为空 → 部署窗口里的前端失败还是被当成故障。
     """
     text = (text or "").strip()
     if not text:
         return 0.0
-    try:
-        return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
-    except ValueError:
-        pass
     match = _DOCKER_TIME.match(text)
     if not match:
         return 0.0
-    stamp, offset = match.group(1), "+00:00" if match.group(2) == "Z" else match.group(2)
+    seconds, frac, offset = match.group(1), match.group(2) or "", match.group(3)
+    stamp = seconds + ("." + frac[:6] if frac else "")          # 纳秒截到微秒
     try:
-        return datetime.fromisoformat(stamp + offset).timestamp()
+        return datetime.fromisoformat(stamp + ("+00:00" if offset == "Z" else offset)).timestamp()
     except ValueError:
         return 0.0
 
