@@ -533,7 +533,8 @@ def main() -> int:
                          ensure_ascii=False, indent=2))
     elif args.oneline:
         icon = {OK: "OK", WARN: "WARN", RED: "RED"}[worst]
-        head = "；".join(f"{a}: {t}" for s, a, t in rep.problems()[:3]) or "全部正常"
+        # 按严重度排序再截取：RED 不能被排在前面的 warn 挤出头条（2026-10-13 凌晨，429 的 RED 就被挤掉了）
+        head = "；".join(f"{a}: {t}" for s, a, t in sorted(rep.problems(), key=lambda r: -RANK[r[0]])[:3]) or "全部正常"
         print(f"[patrol {icon}] {time.strftime('%m-%d %H:%M')} {head}")
     else:
         print(f"=== 巡检 {time.strftime('%Y-%m-%d %H:%M:%S')} → {worst.upper()} ===")
@@ -544,8 +545,9 @@ def main() -> int:
         problems = rep.problems()
         print(f"=== 结论：{worst.upper()}（{len(problems)} 项需要关注）===")
     if args.alert and rep.problems():
+        ranked = sorted(rep.problems(), key=lambda r: -RANK[r[0]])
         body = "🔎 **巡检** " + time.strftime("%m-%d %H:%M") + "\n" + "\n".join(
-            f"{'❗' if s == RED else '⚠'} {a}：{t}" for s, a, t in rep.problems()[:12])
+            f"{'❗' if s == RED else '⚠'} {a}：{t}" for s, a, t in ranked[:12])
         maybe_alert(rep, body)
     return RANK[worst]
 
