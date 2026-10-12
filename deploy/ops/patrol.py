@@ -413,8 +413,10 @@ def check_channels(rep: Report, cur) -> None:
     five = num(q1(cur, "SELECT COUNT(*) FROM usage_log WHERE ts>? AND kind LIKE 'image%' "
                        "AND (detail LIKE '%upstream 500%' OR up_status=500)", (now - 1800,)))
     if five:
+        # 别在告警里猜原因：今晚这批 500 全是「最普通的 V4.5 文生图」，
+        # 而局部重绘缺蒙版只是已知的一种形态。写清楚怎么查（rid → 日志里的请求形态）就行。
         rep.add(WARN if five < 5 else RED, "通道",
-                f"近 30 分钟出图上游 500 × {five}（局部重绘缺蒙版 / 图生图带 SMEA 会这样，查 rid）",
+                f"近 30 分钟出图上游 500 × {five}（上游没给原因：按 rid 查 [upstream-5xx] 日志里的请求形态）",
                 key="image-500")
     ip = cur.execute("SELECT COUNT(*), SUM(status='ok') FROM usage_log WHERE ts>? AND model LIKE '%inpainting%'",
                      (now - 3600,)).fetchone()
