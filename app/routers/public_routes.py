@@ -10,7 +10,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, HTTPException, Request, Response
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from .. import live, request_timing, site_flags
 from ..audit import audit_disclosure
@@ -34,10 +34,30 @@ LANDING_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
     "Cache-Control": "no-cache",
+    # 首页 HTML 现在按登录态不同（<body class="authed haskey">）：共享缓存不能把成员的版本发给你
+    "Vary": "Cookie",
 }
 
 _STATIC_DIR = Path(__file__).parent.parent / "static"
 _FAVICON = (_STATIC_DIR / "favicon.svg").read_bytes()
+
+# 首页首屏模板（只读一次）：成员版本把登录态与骨架屏直接写进 HTML
+_LANDING_HTML: dict = {"text": None}
+_ME_CARD = '<div class="me" id="meCard" hidden></div>'
+_ME_CARD_SKELETON = ('<div class="me" id="meCard"><div class="me-tiles">'
+                     '<div class="me-tile skel-tile"></div><div class="me-tile skel-tile"></div>'
+                     '</div></div>')
+
+
+def landing_html(body_class: str) -> str:
+    """成员版首屏：先写 class，再放额度骨架屏，避免刷新时闪一下新用户教程。"""
+    if _LANDING_HTML["text"] is None:
+        _LANDING_HTML["text"] = (_STATIC_DIR / "landing.html").read_text(encoding="utf-8")
+    page = _LANDING_HTML["text"]
+    if not body_class:
+        return page
+    page = page.replace(_ME_CARD, _ME_CARD_SKELETON, 1)
+    return page.replace("<body>", f'<body class="{body_class}">', 1)
 
 _PUBLIC_STATUS_CACHE: dict = {"at": 0.0, "body": None}
 _CLIENT_ERR: dict = {"window": 0.0, "total": 0, "ip": {}}
@@ -74,9 +94,18 @@ async def healthz():
 
 
 @router.get("/")
-async def index():
-    """成员落地页：自包含的静态页面，数据来自 /public/status 与 /v1/me。"""
-    return FileResponse(_STATIC_DIR / "landing.html", headers=LANDING_HEADERS)
+async def index(request: Request):
+    """成员落地页：自包含的静态页面，数据来自 /public/status 与 /public/me。
+
+    登录态在服务端就写进 `<body class="authed haskey">`：否则成员每次刷新都会先渲染
+    「三步上手 / 使用须知」，等 /public/me 回来才被 JS 隐藏 —— 就是成员反馈的那一下闪烁。
+    游客仍然直接送静态文件（不查库、不多做事）。"""
+    from ..registration_routes import member_state
+    who, key = await member_state(request)
+    if who is None:
+        return FileResponse(_STATIC_DIR / "landing.html", headers=LANDING_HEADERS)
+    body_class = "authed haskey" if key is not None else "authed"
+    return HTMLResponse(landing_html(body_class), headers=LANDING_HEADERS)
 
 
 @router.get("/favicon.ico", include_in_schema=False)

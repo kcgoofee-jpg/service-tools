@@ -381,6 +381,23 @@ async def upstream_call(url: str, payload: dict, accept: str = "*/*", *,
                              billing_uncertain=e.billing_uncertain) from None
 
 
+def normalize_wire_format(raw) -> str:
+    """流式格式容错：返回 "sse" 或 "msgpack"；认不出的写法抛 400。
+
+    端点本身已经是流式端点，所以 `stream: true/false`（有些客户端这么写）与常见别名都按默认格式处理，
+    不再一刀切 400 —— 小白盒插件固定发 'msgpack'，别的客户端写法五花八门（2026-10-13 逐行挑战）。
+    """
+    if isinstance(raw, bool) or raw is None:
+        return "sse"
+    token = str(raw).strip().lower()
+    if token in ("msgpack", "messagepack", "binary"):
+        return "msgpack"
+    if token in ("", "sse", "text/event-stream", "event-stream", "stream"):
+        return "sse"
+    from .. import main                      # 本模块一贯的懒加载写法（避免循环导入）
+    raise main.err(400, "stream 仅支持 sse 或 msgpack")
+
+
 async def refund_local_reject(key) -> None:
     """请求还没发到上游就被本地拒绝（排队满 / 熔断 / 冷却 / 额度 / 超时）时，归还 Key 的出图间隔占用。
 
@@ -726,9 +743,7 @@ async def _generate_image(request: Request, *, streaming: bool):
 
     if streaming:
         # Existing panels default to SSE; Launcher explicitly requests MessagePack.
-        wire_format = p.get("stream", "sse")
-        if wire_format not in ("sse", "msgpack"):
-            raise main.err(400, "stream 仅支持 sse 或 msgpack")
+        wire_format = normalize_wire_format(p.get("stream", "sse"))
         body.setdefault("parameters", {})["stream"] = wire_format
         dispatched = False
         delivered = False          # 全部最终图都已推给客户端（之后客户端断开不算「没拿到图」）
