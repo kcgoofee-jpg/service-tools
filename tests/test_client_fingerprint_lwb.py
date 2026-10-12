@@ -50,6 +50,29 @@ def test_littlewhitebox_by_fallback_combination():
     request_timing.end(token)
 
 
+def test_littlewhitebox_connection_probe():
+    """「测试连接」探针：非 V5 路径固定发 input=test + nai-diffusion-3 + 64x64 + 1 step。
+
+    2026-10-13 站长用小白盒测试时，日志里这两条（探针与实际出图）都落成了裸 Chrome UA —— 认不出来。
+    """
+    probe = {"input": "test", "model": "nai-diffusion-3", "action": "generate",
+             "parameters": {"width": 64, "height": 64, "steps": 1, "n_samples": 1}}
+    token = _begin("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/154.0.0.0 Safari/537.36")
+    request_timing.refine_client_from_payload(probe)
+    assert request_timing.snapshot()["client"].startswith("LittleWhiteBox")
+    request_timing.end(token)
+
+
+def test_probe_signature_does_not_swallow_real_small_requests():
+    """别把真的 64x64 出图（步数不是 1，或 input 不是 test）也认成小白盒。"""
+    token = _begin("Mozilla/5.0 Chrome/154")
+    request_timing.refine_client_from_payload(
+        {"input": "1girl", "model": "nai-diffusion-4-5-full", "action": "generate",
+         "parameters": {"width": 64, "height": 64, "steps": 28, "n_samples": 1}})
+    assert "LittleWhiteBox" not in request_timing.snapshot()["client"]
+    request_timing.end(token)
+
+
 def test_littlewhitebox_by_user_agent():
     """「后端发送」模式带自己的 UA。"""
     token = _begin("LittleWhiteBox/1.2 (SillyTavern)")
