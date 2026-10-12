@@ -1,0 +1,13 @@
+[Unit]
+Description=猫头鹰公益站巡检（patrol.py：只读体检 + 有问题时告警）
+Documentation=https://github.com/kcgoofee-jpg/service-tools/blob/main/deploy/ops/README.md
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/service-tools
+# 退出码 0 正常 / 1 注意 / 2 危险：都算「执行成功」，告警已由脚本自己发出
+ExecStart=/usr/bin/python3 /opt/service-tools/deploy/ops/patrol.py --oneline --alert
+SuccessExitStatus=0 1 2
+SyslogIdentifier=nai-patrol
