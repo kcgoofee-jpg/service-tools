@@ -276,14 +276,15 @@ CREATE TABLE IF NOT EXISTS daily_quota_offsets (
 );
 CREATE TABLE IF NOT EXISTS deleted_key_usage_flags (
     key_id INTEGER PRIMARY KEY,
-    exclude_global_v5 INTEGER NOT NULL
+    exclude_global_v5 INTEGER NOT NULL,
+    is_test INTEGER NOT NULL DEFAULT 0
 );
 CREATE TRIGGER IF NOT EXISTS preserve_deleted_key_usage
 BEFORE DELETE ON api_keys
 BEGIN
-    INSERT INTO deleted_key_usage_flags(key_id, exclude_global_v5)
-        VALUES (OLD.id, OLD.exclude_global_v5)
-        ON CONFLICT(key_id) DO NOTHING;
+    INSERT INTO deleted_key_usage_flags(key_id, exclude_global_v5, is_test)
+        VALUES (OLD.id, OLD.exclude_global_v5, OLD.is_test)
+        ON CONFLICT(key_id) DO UPDATE SET is_test=MAX(is_test, OLD.is_test);
     DELETE FROM daily_quota_offsets WHERE key_id=OLD.id;
 END;
 CREATE TRIGGER IF NOT EXISTS prevent_deleted_key_quota_reset
@@ -294,8 +295,11 @@ BEGIN
 END;
 """
 
-# 统计成员用量 / 上游表现时排除测试 Key 的日志。删除测试 Key 前先删它的日志，否则这些日志会重新算进成员统计。
-NOT_TEST = "COALESCE(key_id, 0) NOT IN (SELECT id FROM api_keys WHERE is_test=1)"
+# 统计成员用量 / 上游表现时排除测试 Key 的日志。删除 Key 时触发器会把 is_test 记进墓碑表：
+# 否则「删掉测试 Key」这一动作会让它历史的日志/计数重新变成「成员用量」（子查询里已经没有这条 id 了），
+# 站长的冒烟、压测、防分享对照流量会被算进成员统计与上游表现基线。
+NOT_TEST = ("COALESCE(key_id, 0) NOT IN (SELECT id FROM api_keys WHERE is_test=1) "
+            "AND COALESCE(key_id, 0) NOT IN (SELECT key_id FROM deleted_key_usage_flags WHERE is_test=1)")
 HAS_IMAGE = "(image IS NOT NULL OR image_file IS NOT NULL)"          # 原图在 BLOB（老记录）或文件里
 IMAGE_SIZE = "COALESCE(image_size, LENGTH(image), 0)"
 
@@ -410,12 +414,24 @@ class Database:
             "ALTER TABLE discord_bans ADD COLUMN display_name TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE discord_bans ADD COLUMN avatar TEXT NOT NULL DEFAULT ''",
             "ALTER TABLE discord_bans ADD COLUMN banned_by TEXT NOT NULL DEFAULT '系统'",
+            # 删除 Key 的墓碑表加上 is_test：见 NOT_TEST 的说明（删除测试 Key 不能让它历史的用量变成成员用量）
+            "ALTER TABLE deleted_key_usage_flags ADD COLUMN is_test INTEGER NOT NULL DEFAULT 0",
         ):
             try:
                 await self._db.execute(ddl)
                 await self._db.commit()
             except aiosqlite.OperationalError:
                 pass  # 列已存在
+        # 老库里的触发器还是旧定义（不写 is_test），而 CREATE TRIGGER IF NOT EXISTS 不会更新它：这里重建。
+        # 幂等：每次启动都重建同一份定义。
+        await self._db.execute("DROP TRIGGER IF EXISTS preserve_deleted_key_usage")
+        await self._db.execute(
+            "CREATE TRIGGER preserve_deleted_key_usage BEFORE DELETE ON api_keys BEGIN "
+            "INSERT INTO deleted_key_usage_flags(key_id, exclude_global_v5, is_test) "
+            "VALUES (OLD.id, OLD.exclude_global_v5, OLD.is_test) "
+            "ON CONFLICT(key_id) DO UPDATE SET is_test=MAX(is_test, OLD.is_test); "
+            "DELETE FROM daily_quota_offsets WHERE key_id=OLD.id; END")
+        await self._db.commit()
         # units 列刚加上时为 NULL：老数据按 1 张 = 1 份回填（偏保守，不会让升级当天突然多出额度）
         await self._db.execute("UPDATE upstream_token_counters SET units=images WHERE units IS NULL")
         # 2026-10-11：手动额度就是精确值，「V5 基础值」不再用；旧数据一次性清掉（daily_v5 保留当前实际值）

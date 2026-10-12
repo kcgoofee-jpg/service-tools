@@ -26,6 +26,8 @@ from ..image_tools import MAX_RESPONSE_BYTES, prepare_tool, validate_result
 from ..image_payload import read_image_body
 from ..nai import UpstreamError
 from ..policy import (
+    FREE_BURST,
+    FREE_REFILL_PER_HOUR,
     REFERENCE_FIELDS,
     clamp_image_params,
     estimate_image_cost,
@@ -168,7 +170,7 @@ async def _acquire_slots(key, *, image: bool):
                 if not image:
                     await resources.enter_async_context(state.global_sem)
         except TimeoutError:
-            raise _main().err(429, "排队等待超时，当前站点繁忙，请稍后再试")
+            raise _main().err(429, "排队等待超时，当前站点繁忙，请稍后再试", reasons.QUEUE_TIMEOUT)
         finally:
             state.global_waiting -= 1
         state.global_active += 1
@@ -195,7 +197,8 @@ async def quota_image_check(key, est: dict, *, legacy_free_images: int = 0,
     if legacy_free_images and key["daily_images"] > 0:
         used_legacy = c["legacy_free_images"] + sum(r.legacy for r in own_day)
         if used_legacy + legacy_free_images > key["daily_images"]:
-            raise main.err(402, f"今日 V4.5 免费图额度已用完（{key['daily_images']} 张/天），明日恢复")
+            raise main.err(402, f"今日 V4.5 免费图额度已用完（{key['daily_images']} 张/天），明日恢复",
+                           reasons.MEMBER_QUOTA)
         # 平滑注水令牌桶机制：底仓 30 张，每小时自动注水恢复 4 张，全天恢复上限为 key['daily_images']。
         # 手动 Key（_manual(key) 为 True）不走注水限制，直接使用静态额度。
         if not _manual(key):
@@ -208,8 +211,8 @@ async def quota_image_check(key, est: dict, *, legacy_free_images: int = 0,
                 hours_today = max(0.0, (now_ts - midnight_ts) / 3600.0)
             except Exception:
                 hours_today = 24.0
-            burst_base = min(30.0, float(key["daily_images"]))
-            refill_rate = 4.0  # 张/小时
+            burst_base = min(FREE_BURST, float(key["daily_images"]))
+            refill_rate = FREE_REFILL_PER_HOUR  # 张/小时
             refilled_today = min(float(key["daily_images"]), burst_base + hours_today * refill_rate)
             if used_legacy + legacy_free_images > refilled_today:
                 needed = (used_legacy + legacy_free_images) - burst_base
@@ -241,14 +244,14 @@ async def quota_image_check(key, est: dict, *, legacy_free_images: int = 0,
         borrow = quota_algo.borrow_for(key["id"]) if key["daily_v5"] > 0 and not manual else 0    # 手动 Key 填多少就是多少，不借
         if key["daily_v5"] > 0 and c["v5"] + sum(r.v5 for r in own_day) + est["v5"] > key["daily_v5"] + borrow:
             raise main.err(402, f"今日 V5 额度已用完（{key['daily_v5']} 张/天" + (f"，含空闲借用 {borrow} 张" if borrow else "")
-                      + "），明天恢复后再用")
+                      + "），明天恢复后再用", reasons.MEMBER_QUOTA)
         g = await site_flags.get(state.db, site_flags.GLOBAL_DAILY_V5, state.settings)
         if g > 0 and quota_algo.BORROW.get("open"):
             g = int(g * (1 + quota_algo.BORROW_GLOBAL_RATIO))
         if g > 0 and not key["exclude_global_v5"]:
             total = await state.db.day_v5_total(state.day())
             if total + sum(r.v5 for r in global_day if not r.exclude_global_v5) + est["v5"] > g:
-                raise main.err(402, f"全站今日 V5 额度已用完（{int(g)} 张/天），明天再来")
+                raise main.err(402, f"全站今日 V5 额度已用完（{int(g)} 张/天），明天再来", reasons.SITE_QUOTA)
     if est["anlas"] > 0:
         is_vibe = bool(est.get("is_vibe"))
         until = await site_flags.get(state.db, site_flags.GLOBAL_DAILY_ANLAS_UNTIL, state.settings)
@@ -258,31 +261,33 @@ async def quota_image_check(key, est: dict, *, legacy_free_images: int = 0,
             vibe_daily_cap = await site_flags.get(state.db, site_flags.GLOBAL_DAILY_ANLAS, state.settings)
         if is_vibe and not key["allow_anlas"]:
             if vibe_daily_cap <= 0:
-                raise main.err(402, "该请求会消耗 Anlas，全站 Vibe 每日额度暂未开放")
+                raise main.err(402, "该请求会消耗 Anlas，全站 Vibe 每日额度暂未开放", reasons.SITE_QUOTA)
             day_used = await state.db.day_anlas_total(state.day())
             in_flight = sum(r.anlas for r in global_day)
             if day_used + in_flight + est["anlas"] > vibe_daily_cap:
-                raise main.err(402, f"全站今日 Vibe 额度已抢完（{int(vibe_daily_cap)} Anlas/天），明日 0 点恢复")
+                raise main.err(402, f"全站今日 Vibe 额度已抢完（{int(vibe_daily_cap)} Anlas/天），明日 0 点恢复",
+                               reasons.SITE_QUOTA)
         elif not key["allow_anlas"]:
-            raise main.err(402, "该请求会消耗 Anlas，此 Key 未开通付费额度权限")
+            raise main.err(402, "该请求会消耗 Anlas，此 Key 未开通付费额度权限", reasons.MEMBER_QUOTA)
         elif vibe_daily_cap > 0:
             day_used = await state.db.day_anlas_total(state.day())
             in_flight = sum(r.anlas for r in global_day)
             if day_used + in_flight + est["anlas"] > vibe_daily_cap:
-                raise main.err(402, f"全站今日 Anlas 额度已抢完（{int(vibe_daily_cap)} Anlas/天），明日 0 点恢复")
+                raise main.err(402, f"全站今日 Anlas 额度已抢完（{int(vibe_daily_cap)} Anlas/天），明日 0 点恢复",
+                               reasons.SITE_QUOTA)
         # 2026-10-10 站长：放开 Anlas。只用于 NovelAI 一定按 Anlas 收费的操作（超规格尺寸 / 步数、一次多张、
         # Vibe、放大、导演工具）：这些不占 V5 免费额度（官方 FAQ #38），也不影响 V4.5（Opus 不限）。每人仍受每日 Anlas 上限约束。
         if key["daily_anlas"] > 0 and c["anlas"] + sum(r.anlas for r in own_day) + est["anlas"] > key["daily_anlas"]:
             raise main.err(402, f"今日 Anlas 额度不足（已用 {c['anlas']:.0f} / 上限 "
-                           f"{key['daily_anlas']:.0f}），明日恢复")
+                           f"{key['daily_anlas']:.0f}），明日恢复", reasons.MEMBER_QUOTA)
         used = await state.db.month_anlas(key["id"], state.month())
         if key["monthly_anlas"] > 0 and used + sum(r.anlas for r in own_month) + est["anlas"] > key["monthly_anlas"]:
-            raise main.err(402, f"本月 Anlas 额度不足（已用 {used:.0f}/{key['monthly_anlas']:.0f}）")
+            raise main.err(402, f"本月 Anlas 额度不足（已用 {used:.0f}/{key['monthly_anlas']:.0f}）", reasons.MEMBER_QUOTA)
         budget = await site_flags.get(state.db, site_flags.GLOBAL_MONTHLY_ANLAS, state.settings)
         if budget > 0:
             all_used = await state.db.month_anlas_all(state.month())
             if all_used + sum(r.anlas for r in global_month) + est["anlas"] > budget:
-                raise main.err(402, f"全站本月 Anlas 预算已耗尽（{budget:.0f}）")
+                raise main.err(402, f"全站本月 Anlas 预算已耗尽（{budget:.0f}）", reasons.SITE_QUOTA)
 
 
 class ImageReservation:
@@ -322,7 +327,7 @@ async def reserve_image_budget(key, est, *, legacy_free_images=0):
         if refund is not None and not key["is_admin"]:
             await refund(key["id"])
         if isinstance(exc, TimeoutError):
-            raise main.err(429, "图片预算核对排队超时，请稍后再试") from None
+            raise main.err(429, "图片预算核对排队超时，请稍后再试", reasons.QUEUE_TIMEOUT) from None
         raise
     try:
         yield reservation
@@ -376,13 +381,30 @@ async def upstream_call(url: str, payload: dict, accept: str = "*/*", *,
                              billing_uncertain=e.billing_uncertain) from None
 
 
+async def refund_local_reject(key) -> None:
+    """请求还没发到上游就被本地拒绝（排队满 / 熔断 / 冷却 / 额度 / 超时）时，归还 Key 的出图间隔占用。
+
+    没有这一步时，被拒的一次也要白等 15 秒（每把 Key 每 15 秒只能试一次），
+    忙时全站冷却 + 成员重试就会把所有人的重试节奏拖慢一倍。幂等：重复调用是空操作。
+    """
+    if key["is_admin"] or request_timing.was_sent():
+        return
+    refund = getattr(_state(), "refund_key_image_slot", None)
+    if refund is None:
+        return
+    try:
+        await refund(key["id"])
+    except Exception as exc:            # 退款失败不能影响给成员的错误响应
+        _bug("refund_slot", exc)
+
+
 async def wait_for_user_image_slot(key) -> None:
     if key["is_admin"]:
         return
     try:
         await _state().wait_for_key_image_slot(key["id"])
     except TimeoutError:
-        raise _main().err(429, "图片任务排队超时，请稍后再试") from None
+        raise _main().err(429, "图片任务排队超时，请稍后再试", reasons.QUEUE_TIMEOUT) from None
 
 
 async def image_tool(request: Request, operation: str):
@@ -818,17 +840,22 @@ async def _generate_image(request: Request, *, streaming: bool):
                                                        delivered=lambda: delivered)
             except main.GateError as exc:
                 # 和非流式一样记「拒绝」：自动驾驶（节约模式 / Key 限流）、AIMD、每日微调都靠这些记录感知拥挤
+                await refund_local_reject(key)
                 main.record(key, "image_stream", model, "rejected", detail=f"{exc.status} {exc.message}"[:160], reason=exc.code)
                 await response.error(exc.status, exc.message)
 
         return ImageStreamResponse(run_stream, wire_format)
 
-    await wait_for_user_image_slot(key)
-    async with acquire_concurrency(key, image=True):
-        # Recheck both cooldown and quota after any queue/budget wait.
-        main.check_image_cooldown()
-        async with reserve_image_budget(key, est, legacy_free_images=legacy_free_images) as reservation:
-            return await complete_image_operation(perform_generation())
+    try:
+        await wait_for_user_image_slot(key)
+        async with acquire_concurrency(key, image=True):
+            # Recheck both cooldown and quota after any queue/budget wait.
+            main.check_image_cooldown()
+            async with reserve_image_budget(key, est, legacy_free_images=legacy_free_images) as reservation:
+                return await complete_image_operation(perform_generation())
+    except main.GateError:
+        await refund_local_reject(key)
+        raise
 
 
 async def suggest_tags(request: Request):

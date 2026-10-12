@@ -294,7 +294,37 @@ async def test_403_cooldown_backs_off_and_resets(fake_db):
         ts.blocked_until = 0
     assert waits == [5, 15, 45, 60]
     client.mark_ok(ts)
-    assert ts.forbidden_trips == 0 and ts.forbidden_streak == 0
+    # 2026-10-12（反封号审查）：一次成功只清连续计数，不清退避档位。
+    # 清档位会把 15/45/60 分钟打回 5 分钟 —— 间歇性 403（WAF 抽检）时账号就会被
+    # 以每 5 分钟一次的固定节奏持续试探，是最容易被升级封控的形态。档位由
+    # mark_forbidden 按「24 小时内没有 403」衰减（见 test_403_trips_decay_after_quiet_day）。
+    assert ts.forbidden_streak == 0 and ts.forbidden_trips == 4
+
+
+@pytest.mark.asyncio
+async def test_403_trips_decay_after_quiet_day(fake_db):
+    """安静 24 小时后，退避档位衰减回第一档；期间的成功不会提前衰减。"""
+    import time as _t
+    client = NaiClient(
+        tokens=["token-1"], image_host="https://image.novelai.net", text_host="https://text.novelai.net",
+        legacy_text_host="https://api.novelai.net", db=fake_db, day_fn=lambda: "2026-10-11",
+        v5_daily_limits=[100], allow_anlas=[True],
+    )
+    client.on_event = lambda *a, **k: None
+    ts = client.pool[0]
+    for _ in range(3):
+        client.mark_forbidden(ts)
+    assert ts.forbidden_trips == 1
+    client.mark_ok(ts)
+    ts.blocked_until = 0
+    for _ in range(3):
+        client.mark_forbidden(ts)          # 同一天再来一轮：档位继续往上走，不回到第一档
+    assert ts.forbidden_trips == 2
+    ts.forbidden_last = _t.time() - 25 * 3600
+    ts.blocked_until = 0
+    for _ in range(3):
+        client.mark_forbidden(ts)          # 安静一天后：档位归零，重新从 5 分钟开始
+    assert ts.forbidden_trips == 1
 
 
 def test_name_digit_weight_is_auto_fixed_not_rejected():

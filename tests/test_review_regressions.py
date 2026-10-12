@@ -217,11 +217,27 @@ async def test_text_stream_429_does_not_freeze_token_for_images():
 
 
 @pytest.mark.parametrize("header,expected", [
-    ("inf", 20.0), ("nan", 20.0), ("1e9", 20.0), ("-5", 20.0), ("Wed, 21 Oct 2015 07:28:00 GMT", 20.0),
-    ("1", 5.0), ("30", 30.0), ("99999999", 3600.0), (None, 20.0),
+    ("inf", 20.0), ("nan", 20.0), ("1e9", 20.0), ("-5", 20.0), ("1", 5.0), ("30", 30.0),
+    ("99999999", 3600.0), (None, 20.0), ("", 20.0), ("tomorrow", 20.0),
+    # 超长数字以前因「长度 > 10」退回默认 20 秒（比上游要的还短）：现在按「非常大的冷却」钳到上限 1 小时
+    ("999999999999999999999", 3600.0),
 ])
 def test_retry_after_is_parsed_and_clamped(header, expected):
     assert parse_retry_after(header) == expected
+
+
+def test_retry_after_accepts_http_date():
+    """RFC 7231 的 HTTP 日期（Cloudflare / WAF 会用）：过去的时间 = 现在就能重试（取下限 5 秒），
+    未来的时间按真实差值（钳制到 5..3600）。以前一律退化成 20 秒，会在真实限流窗口内提前重试。"""
+    from email.utils import format_datetime
+    from datetime import datetime, timedelta, timezone
+
+    past = format_datetime(datetime.now(timezone.utc) - timedelta(hours=2))
+    assert parse_retry_after(past) == 5.0
+    future = format_datetime(datetime.now(timezone.utc) + timedelta(seconds=120))
+    assert 110 <= parse_retry_after(future) <= 121
+    far = format_datetime(datetime.now(timezone.utc) + timedelta(days=30))
+    assert parse_retry_after(far) == 3600.0
 
 
 @pytest.mark.parametrize("value", [float("inf"), float("nan"), 1e30, -1])

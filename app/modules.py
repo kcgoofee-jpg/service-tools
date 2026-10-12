@@ -74,6 +74,11 @@ def capacity(state) -> Module:
             Check("内存每小时计数 ↔ 用量日志", mem >= logged - 2,
                   f"内存 {mem} 张，日志 {logged} 张" + ("" if mem >= logged - 2 else "：内存计数偏少，上限可能被绕过（重启清零？）")),
             Check("实际每小时出图 ≤ 上限", logged <= cap * 1.05 + 2, f"最近 60 分钟 {logged} 张，上限 {cap}"),
+            # 上游 429 / 403 时的保险丝：安全档必须低于每日上限，否则 fall_back_daily 只降不升的判定
+            # 会直接跳过（历史默认 1000 / 1500 就是失效状态，站长也不会收到任何提示）。
+            Check("429 / 403 安全档可用", g.fallback_effective(),
+                  f"每日上限 {g.values['account_daily_cap']} · 安全档 {g.values['daily_cap_fallback']}"
+                  + ("" if g.fallback_effective() else "：安全档不低于每日上限，上游告警时不会自动退档")),
         ]
 
     return Module(
@@ -107,9 +112,26 @@ def allocation(state) -> Module:
             return []
         v5, a = last.get("v5") or {}, last.get("ceiling")
         each = v5.get("each") or 0
+        global_v5 = v5.get("global") or 0
+        keys = int(await _q1(db, "SELECT COUNT(*) FROM api_keys WHERE quota_auto=1 AND is_admin=0 AND is_test=0 "
+                                 "AND enabled=1") or 0)
         drift = int(await _q1(db, "SELECT COUNT(*) FROM api_keys WHERE quota_auto=1 AND is_admin=0 AND is_test=0 "
                                   "AND enabled=1 AND (daily_images<>? OR daily_v5<>?)", a, each) or 0)
-        return [Check("算法管理的 Key 都已同步", drift == 0, f"{drift} 把 Key 的额度和算法结果不一致")]
+        # 每人额度 × 人数 与全站上限的关系：超卖时「每人 M 张」只是个人上限，全站仍是先到先得。
+        # 不改分配结果（要站长确认），但必须在后台看得见，否则首页承诺与成员实际体验长期不一致。
+        sold = each * keys
+        oversell = Check("V5：每人额度 × 人数 ≤ 全站上限", not (global_v5 and sold > global_v5),
+                         f"每人 {each} × {keys} 人 = {sold} 张，全站上限 {global_v5} 张"
+                         + (f"：超卖 {sold - global_v5} 张，先到先得，后到的成员拿不到「每人 {each} 张」"
+                            if global_v5 and sold > global_v5 else ""))
+        # V4.5：保底层（超过保底只在空闲时放行）只在 保底 < 每日上限 时存在；算法把两者设成同一个数后这一层就没了，
+        # SYSTEM-FACTS 里「保底 ≤ 上限、保底 = 算法当前值」两句话需要有代码来核对。
+        g = getattr(state, "guard", None)
+        base = g.values.get("base_daily_images") if g is not None else 0
+        base_check = Check("V4.5：保底 ≤ 每日上限", not base or not a or base <= a,
+                           f"保底 {base} · 每人上限 {a}（两者相等 = 没有保底/空闲借用两层，只有每日上限）")
+        return [Check("算法管理的 Key 都已同步", drift == 0, f"{drift} 把 Key 的额度和算法结果不一致"),
+                oversell, base_check]
 
     cfg = quota_algo.DEFAULTS
     async def current(key: str):
@@ -231,7 +253,7 @@ def registration(state) -> Module:
         name="registration", title="领 Key", question="新成员能不能领 Key",
         get_enabled=get_enabled, set_enabled=set_enabled, checks=checks,
         hard_note="关闭 = 暂停领取；已领的成员和邀请 Key 绑定不受影响",
-        params=[Param("Key 有效天数", lambda: getattr(state.settings, "default_key_expires_days", 30)),
+        params=[Param("Key 有效天数", lambda: state.settings.default_expires_days),
                 Param("闲置回收", lambda: f"{state.settings.key_inactivity_delete_days} 天" if state.settings.key_inactivity_delete_days else "关")])
 
 

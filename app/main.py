@@ -181,6 +181,10 @@ async def lifespan(app: FastAPI):
         # 关停时还在跑的审计与 Bug 写库任务先写完再关库（10/10 22:55 部署时一条审计写在关库之后丢失）
         if _AUDIT_TASKS:
             await asyncio.wait(list(_AUDIT_TASKS), timeout=10)
+        # 记账任务同理：成员已经拿到图、上游已经扣费，但 usage_log / counters 还没落库就关库，
+        # 对账时会出现「有图无账」的空洞（部署窗口的缺口最难解释）。最多等 10 秒。
+        if _ACCOUNTING_TASKS:
+            await asyncio.wait(list(_ACCOUNTING_TASKS), timeout=10)
         if getattr(STATE, "bugs", None):
             try:
                 await asyncio.wait_for(STATE.bugs.drain(), timeout=5)
@@ -189,7 +193,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "2.22.1"
+__version__ = "2.23.0"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -491,6 +495,7 @@ def notify_owner(kind: str, message: str, cooldown: float = 900) -> None:
 
 
 _AUDIT_TASKS: set = set()
+_ACCOUNTING_TASKS: set = set()          # record() 的 fire-and-forget 记账任务（关停前要等它们写完）
 
 
 def schedule_audit(*args) -> None:
@@ -536,7 +541,7 @@ async def check_rpm(key) -> None:
         return
     ok = await STATE.hit_rpm(key["id"], key["rpm"])
     if not ok:
-        raise err(429, f"请求过于频繁（上限 {key['rpm']} 次/分钟），请稍后再试")
+        raise err(429, f"请求过于频繁（上限 {key['rpm']} 次/分钟），请稍后再试", reasons.KEY_RATE)
 
 
 def check_image_cooldown() -> None:
@@ -565,7 +570,8 @@ def limit_inflight(handler):
             return await handler(request)
         count = _INFLIGHT.get(ident, 0)
         if count >= MAX_INFLIGHT_PER_KEY:
-            raise err(429, f"同时进行中的请求过多（上限 {MAX_INFLIGHT_PER_KEY} 个），请等前面的请求完成")
+            raise err(429, f"同时进行中的请求过多（上限 {MAX_INFLIGHT_PER_KEY} 个），请等前面的请求完成",
+                      reasons.KEY_RATE)
         _INFLIGHT[ident] = count + 1
         released = False
 
@@ -667,14 +673,18 @@ def record(key, kind: str, model: str, status: str, *, images: int = 0,
                                    images=images, anlas=anlas, tokens=tokens, detail=detail,
                                    unconfirmed_anlas=unconfirmed_anlas, reason=reason, **timing)
     task = asyncio.create_task(_go())
-    task.add_done_callback(_log_task_failure)
+    _ACCOUNTING_TASKS.add(task)
+    task.add_done_callback(_ACCOUNTING_TASKS.discard)
+    task.add_done_callback(functools.partial(_log_task_failure, key=key, kind=kind, status=status, images=images))
     return task
 
 
-def _log_task_failure(task: asyncio.Task) -> None:
+def _log_task_failure(task: asyncio.Task, *, key=None, kind="", status="", images=0) -> None:
     if not task.cancelled() and task.exception() is not None:
         print("[error] request accounting failed")
-        bug("accounting", task.exception())
+        # 带上定位信息：这条 Bug 是「成员拿到了图但账没落库」的唯一线索，光有堆栈没法对账
+        bug("accounting", task.exception(),
+            detail=f"key_id={key['id'] if key is not None else '?'} kind={kind} status={status} images={images}")
 
 
 async def settle_record(*args, **kwargs) -> None:

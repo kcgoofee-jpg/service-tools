@@ -111,7 +111,15 @@ async def run(state, registrar=None, now: Optional[float] = None) -> dict[str, A
     from . import quota_algo
     hist = json.loads(await db.get_setting(quota_algo.HISTORY_KEY, "[]") or "[]")
     last = hist[-1] if hist else {}
-    day_util = (last.get("used", 0) / last["cap"]) if last.get("cap") else 0.0
+    # 分母必须与额度算法同一口径：账号日上限里有一部分是留给全站 V5 的，
+    # 直接拿 used/cap 会把 V5 用量算进 V4.5 的拥挤度（同一批 V5 图在额度算法里已被单独扣掉一次），
+    # 于是「V5 用得多」会连带冻结名额增长。用量算法自己记的 budget 优先。
+    budget = last.get("budget")
+    if not budget:
+        from . import site_flags
+        v5_global = int(await site_flags.get(db, site_flags.GLOBAL_DAILY_V5, getattr(state, "settings", None)) or 0)
+        budget = max(0, (last.get("cap") or 0) - v5_global)
+    day_util = (last.get("used", 0) / budget) if budget else 0.0
     cap_now = cfg.get("max_users") or 0
     queue_hours = 0
     if last.get("day"):
