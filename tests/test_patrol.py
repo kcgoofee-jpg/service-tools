@@ -1,5 +1,6 @@
 """巡检脚本的纯逻辑：结论分级、队列判定、告警去重（不碰网络与数据库）。"""
 import importlib.util
+import io
 import json
 import time
 from pathlib import Path
@@ -81,3 +82,59 @@ def test_maybe_alert_skips_when_send_fails(tmp_path, monkeypatch):
 @pytest.mark.parametrize("raw,expected", [("12", 12), ("abc", 0), (None, 0), ("79.6", 79)])
 def test_num_tolerates_junk(raw, expected):
     assert patrol.num(raw, 0) == expected
+
+
+def test_send_alert_uses_discord_compatible_user_agent(monkeypatch):
+    """Discord 前面有 Cloudflare：默认的 Python-urllib UA 会被 403（error code 1010）。
+
+    2026-10-13 线上实测告警发不出去就是这个原因，所以这里把请求头锁死。
+    """
+    captured = []
+
+    class Response:
+        status = 200
+
+        def read(self):
+            return b'{"id": "123"}'
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def fake_urlopen(request, timeout=10):
+        captured.append(request)
+        return Response()
+
+    monkeypatch.setattr(patrol.urllib.request, "urlopen", fake_urlopen)
+    env = {"DISCORD_BOT_TOKEN": "t" * 60, "ALERT_USER_ID": "123456", "ALERT_CHANNEL_ID": ""}
+    monkeypatch.setattr(patrol, "env_value", lambda key: env.get(key, ""))
+
+    assert patrol.send_alert("测试告警") is True
+    assert len(captured) == 2                       # 先建私信频道，再发消息
+    for request in captured:
+        headers = {key.lower(): value for key, value in request.headers.items()}
+        assert headers["user-agent"].startswith("DiscordBot (")
+        assert headers["accept"] == "application/json"
+        assert headers["authorization"].startswith("Bot ")
+
+
+def test_send_alert_reports_cloudflare_block(monkeypatch, capsys):
+    """403 + 1010 要在 stderr 里说清是 UA 被拦，否则下次还会查半天。"""
+    def fake_urlopen(request, timeout=10):
+        raise patrol.urllib.error.HTTPError("https://discord.com", 403, "Forbidden", {},
+                                            io.BytesIO(b"error code: 1010"))
+
+    monkeypatch.setattr(patrol.urllib.request, "urlopen", fake_urlopen)
+    env = {"DISCORD_BOT_TOKEN": "t" * 60, "ALERT_USER_ID": "123456", "ALERT_CHANNEL_ID": ""}
+    monkeypatch.setattr(patrol, "env_value", lambda key: env.get(key, ""))
+
+    assert patrol.send_alert("测试") is False
+    assert "1010" in capsys.readouterr().err
+
+
+def test_send_alert_without_config(monkeypatch, capsys):
+    monkeypatch.setattr(patrol, "env_value", lambda key: "")
+    assert patrol.send_alert("测试") is False
+    assert "未配置告警通道" in capsys.readouterr().err
