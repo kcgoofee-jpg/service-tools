@@ -66,8 +66,23 @@ async def test_burst_does_not_reject_while_the_hour_still_has_room():
 
 
 @pytest.mark.asyncio
+async def test_burst_catches_the_rate_that_got_us_limited():
+    """昨晚挨限流的形态（~40 张/10 分钟 ≈ 240 张/小时）必须被拦住。
+
+    第二轮 review：第一版用 2×burst（50 张/10 分钟 ≈ 300 张/小时）做硬顶，挡不住这个形态。
+    """
+    g = _guard(100)                                           # burst = 25，硬顶 = ceil(25×1.5) = 38
+    now = time.time()
+    token = "tok-lastnight"
+    _fill(g, token, 40, now)                                  # 40 张/10 分钟
+    assert g.hour_count(token, now) < 100                     # 小时额度还很宽裕
+    reason = await g.token_block_reason(_DB(), token, "d", now)
+    assert reason is not None and getattr(reason, "code", "") == BURST_CAP
+
+
+@pytest.mark.asyncio
 async def test_burst_engages_on_a_real_burst_and_uses_its_own_code():
-    """真的在冲（10 分钟内两倍突发额度）→ 拦下，且原因是 burst_cap 不是 hourly_cap。"""
+    """真的在冲 → 拦下，且原因是 burst_cap 不是 hourly_cap。"""
     g = _guard(100)
     now = time.time()
     token = "tok-burst"
@@ -119,3 +134,19 @@ def test_minutes_until_free_10m_is_positive_and_bounded():
     _fill(g, token, 25, now, span=500)
     wait = g.minutes_until_free_10m(token, now)
     assert 1 <= wait <= 10
+
+
+@pytest.mark.asyncio
+async def test_burst_blocked_is_the_single_source_of_truth():
+    """首页状态（burst_wait）与放行判定必须用同一个函数：不能说「已限速」而请求其实能进。"""
+    g = _guard(100)
+    now = time.time()
+    for label, n, hour_extra in (("宽裕", 10, 0), ("踩线", 25, 60), ("真突发", 45, 0)):
+        token = "tok-" + label
+        for i in range(hour_extra):
+            g.record_start(token, now=now - 3000 + i * 30)
+        _fill(g, token, n, now)
+        blocked = g.burst_blocked(token, now)
+        reason = await g.token_block_reason(_DB(), token, "d", now)
+        code = getattr(reason, "code", "") if reason else ""
+        assert (blocked > 0) == (code == BURST_CAP), f"{label}: blocked={blocked} code={code!r}"
