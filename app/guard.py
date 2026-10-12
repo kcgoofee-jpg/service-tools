@@ -54,6 +54,9 @@ class Guard:
         self._seq = 0
         self.breaker_until = 0.0             # 全站熔断到期时间（自动驾驶 breaker 触发；内存态，重启即清）
         self._breaker_reason = ""
+        self._cap_marks: deque = deque(maxlen=64)   # (时间, 该时刻的每小时上限)：上限变过就记一笔
+        # 注意别在这里记初始值：__init__ 跑在 load() 之前，那时拿到的是字段默认值（150），
+        # 会在重启后的第一个小时把上限抬成 150。变化由 hourly_cap() 自己记录。
 
     # ---------- 设置 ----------
     async def load(self) -> None:
@@ -107,7 +110,25 @@ class Guard:
         return start <= hour < end if start < end else (hour >= start or hour < end)
 
     def hourly_cap(self, now: Optional[float] = None) -> int:
-        return self.values["quiet_hourly_cap"] if self.in_quiet(now) else self.values["account_hourly_cap"]
+        now = time.time() if now is None else now
+        cap = self.values["quiet_hourly_cap"] if self.in_quiet(now) else self.values["account_hourly_cap"]
+        marks = self._cap_marks
+        if not marks or marks[-1][1] != cap:
+            marks.append((now, cap))       # 上限变了（429 减半 / 每小时 +10 / 进出安静时段）就记一笔
+        return cap
+
+    def hourly_cap_ceiling(self, now: Optional[float] = None) -> int:
+        """最近 60 分钟窗口里**出现过的最高上限**。
+
+        限流器用的是滚动 60 分钟窗口，而上限本身会变：上游 429 立刻减半、平稳一天 +10、
+        进出安静时段切到 20。上限一降，窗口里那些「按当时更高的上限放行」的图就会显得超限，
+        于是「实际每小时出图 ≤ 上限」这条校验会在深夜/限流时反复误报（2026-10-13 实测：
+        上报 112 张 / 上限 100，其实是上限刚从更高值降下来）。比对上限时用窗口内的最高值。
+        """
+        now = time.time() if now is None else now
+        current = self.hourly_cap(now)
+        recent = [cap for ts, cap in self._cap_marks if now - ts <= HOUR]
+        return max(recent + [current])
 
     def record_start(self, token_id: str, now: Optional[float] = None) -> None:
         q = self._starts.setdefault(token_id, deque())

@@ -25,6 +25,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 
 DB = os.environ.get("NAI_GATE_DB", "/opt/service-tools/data/nai_gate.db")
@@ -32,7 +33,16 @@ ENV_FILE = os.environ.get("NAI_GATE_ENV", "/opt/service-tools/.env")
 HEALTH = os.environ.get("NAI_GATE_HEALTH", "http://127.0.0.1:3003/healthz")
 STATE_DIR = Path(os.environ.get("PATROL_STATE_DIR", "/var/lib/nai-patrol"))
 COOLDOWN = int(os.environ.get("PATROL_COOLDOWN", "1800"))
+STALE_SECONDS = int(os.environ.get("PATROL_STALE", "2700"))    # 45 分钟没再出现 = 旧记录，不告警
 NZ = "+8 hours"                       # 站点按 Asia/Shanghai 记「天」
+
+# 已知 / 按设计的事项：照常显示、不告警。加进来之前先问一句「这是不是要站长改决定」——
+# 是的话就在后台挂一条说明，而不是每分钟响一次（今天真出问题的那次就是这么被淹没的）。
+KNOWN_SIGNATURES = (
+    ("V5：每人额度 × 人数 ≤ 全站上限", "按设计：名额超卖，已在首页写明「先到先得」，改分配结果需站长点头"),
+    ("每人承诺 ≤ 全站日容量", "按设计：开注册就绪度提示，是否收紧名额/额度由站长决定"),
+    ("后台额度与环境变量一致", "配置漂移提示：只在后台值与环境变量不一致时出现，盯 .env 即可"),
+)
 
 OK, WARN, RED = "ok", "warn", "red"
 RANK = {OK: 0, WARN: 1, RED: 2}
@@ -45,10 +55,21 @@ BROWSER_HEADERS = {"User-Agent": "DiscordBot (https://gate.davidzhao.top, 1.0)",
 class Report:
     def __init__(self):
         self.rows: list[tuple[str, str, str]] = []      # (severity, 区域, 文本)
+        self.keys: list[str] = []                       # 非 ok 行的稳定标识（告警去重用，不含会变的数字）
         self.data: dict = {}
 
-    def add(self, severity: str, area: str, text: str) -> None:
+    def add(self, severity: str, area: str, text: str, *, key: str = "") -> None:
         self.rows.append((severity, area, text))
+        if severity != OK:
+            self.keys.append(key or text)
+
+    def known(self, area: str, text: str) -> None:
+        """已知 / 按设计 / 已不再复现的事项：照常显示给人看，但不参与告警。
+
+        2026-10-13 的教训：三条「按设计」的交叉校验（V5 名额超卖、注册承诺、配置漂移）
+        每 10 分钟告警一次，站长只能把告警当背景音 —— 真出问题（局部重绘集体 500）反而被淹没。
+        """
+        self.rows.append((OK, area, "（已知，不告警）" + text))
 
     @property
     def worst(self) -> str:
@@ -91,6 +112,63 @@ def docker_running() -> dict[str, bool]:
     except Exception:                     # noqa: BLE001
         pass
     return out
+
+
+_DOCKER_TIME = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:?\d{2})$")
+
+
+def parse_docker_time(text: str) -> float:
+    """docker 的 StartedAt 是 RFC3339Nano（最多 9 位小数纳秒）。
+
+    2026-10-13 踩到两次：Python 3.10 的 fromisoformat 既不认 'Z'，也只吃 6 位小数；
+    3.11+ 才放宽。线上巡检跑的是系统 python3（3.10），直接解析抛 ValueError →
+    重启历史永远为空 → 部署窗口里的前端失败还是被当成故障。
+    """
+    text = (text or "").strip()
+    if not text:
+        return 0.0
+    match = _DOCKER_TIME.match(text)
+    if not match:
+        return 0.0
+    seconds, frac, offset = match.group(1), match.group(2) or "", match.group(3)
+    stamp = seconds + ("." + frac[:6] if frac else "")          # 纳秒截到微秒
+    try:
+        return datetime.fromisoformat(stamp + ("+00:00" if offset == "Z" else offset)).timestamp()
+    except ValueError:
+        return 0.0
+
+
+def container_started_at(name: str = "nai-gate") -> float:
+    """网关容器的启动时间：用来把「部署重启那十几秒的前端失败」和真故障分开。"""
+    try:
+        out = subprocess.run(["docker", "inspect", "-f", "{{.State.StartedAt}}", name],
+                             capture_output=True, text=True, timeout=10).stdout.strip()
+        return parse_docker_time(out)
+    except Exception:                     # noqa: BLE001
+        return 0.0
+
+
+def restart_history(name: str = "nai-gate") -> list[float]:
+    """网关重启时间的历史（最近 20 次，存在 STATE_DIR）。
+
+    只认「最近一次重启」不够用：今天连发三次版，上一轮窗口里失败的前端请求，
+    到下一轮巡检时已经不算「重启后 10 分钟内」了，于是又被当成故障。
+    """
+    started = container_started_at(name)
+    path = STATE_DIR / "restarts.json"
+    try:
+        hist = [float(x) for x in json.loads(path.read_text())]
+    except Exception:                     # noqa: BLE001
+        hist = []
+    if started and (not hist or started > hist[-1] + 1):
+        hist.append(started)
+    hist = sorted(set(hist))[-20:]
+    try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(hist))
+    except OSError:
+        pass
+    return hist
 
 
 def env_value(key: str) -> str:
@@ -276,19 +354,75 @@ def check_data(rep: Report, cur) -> None:
                           "AND ts>=strftime('%s','now','+8 hours','start of day','-8 hours')"))
     rep.data.update(today_counters=counters, today_logged=logged)
     same = abs(counters - upstream) <= max(2, counters * 0.02)
-    rep.add(OK if same else WARN, "数据", f"今日计数：成员 {counters} · 上游 {upstream} · 日志 {logged} 张")
+    rep.add(OK if same else WARN, "数据", f"今日计数：成员 {counters} · 上游 {upstream} · 日志 {logged} 张",
+            key="counts")
     bugs = dict(cur.execute("SELECT level, COUNT(*) FROM error_events WHERE resolved_at IS NULL GROUP BY level"))
     rep.data["bugs_open"] = bugs
-    rep.add(RED if bugs.get("error") else WARN if num(bugs.get("warn")) > 8 else OK, "数据",
-            f"未解决 Bug：error {bugs.get('error', 0)} · warn {bugs.get('warn', 0)}")
-    recent = cur.execute("SELECT level, substr(title,1,58), count FROM error_events WHERE resolved_at IS NULL "
-                         "ORDER BY last_seen DESC LIMIT 3").fetchall()
-    for level, title, count in recent:
-        rep.add(WARN if level in ("warn", "error") else OK, "数据", f"[{level}] {title}（{count} 次）")
+    # 只有 error 级才告警：warn 级多为「按设计」的交叉校验提示，会长期挂着（见下面 KNOWN_SIGNATURES）
+    rep.add(RED if num(bugs.get("error")) else OK, "数据",
+            f"未解决 Bug：error {bugs.get('error', 0)} · warn {bugs.get('warn', 0)}", key="bug-count")
+    now = time.time()
+    restarts = restart_history()
+    recent = cur.execute("SELECT level, substr(title,1,58), count, last_seen FROM error_events "
+                         "WHERE resolved_at IS NULL ORDER BY last_seen DESC LIMIT 6").fetchall()
+    for level, title, count, last_seen in recent:
+        known_why = next((why for sig, why in KNOWN_SIGNATURES if sig in title), "")
+        hit = next((r for r in restarts if r <= num(last_seen) < r + 600), 0.0)
+        if not known_why and title.startswith("live:") and hit:
+            # 前端每秒轮询 /public/live，网关重启那十几秒必然失败 —— 我们自己的部署不算故障
+            rep.known("数据", f"{title}（{count} 次）— 最近一次在网关重启（{time.strftime('%H:%M', time.localtime(hit))}）"
+                              "后 10 分钟内，部署窗口的正常失败")
+            continue
+        if known_why:
+            rep.known("数据", f"[{level}] {title}（{count} 次）— {known_why}")
+        elif num(last_seen) < now - STALE_SECONDS:
+            # 已不再出现的旧记录：留着给站长看，但不该每 10 分钟吵一次
+            rep.known("数据", f"[{level}] {title}（{count} 次，最近 {int((now - num(last_seen)) / 60)} 分钟没再出现）")
+        else:
+            rep.add(WARN if level in ("warn", "error") else OK, "数据", f"[{level}] {title}（{count} 次）",
+                    key=f"bug:{title}")
     evidence = cur.execute("SELECT kind, COUNT(*) FROM share_evidence WHERE ts>? GROUP BY kind",
                            (time.time() - 86400,)).fetchall()
     if evidence:
         rep.add(OK, "数据", "防分享 24 小时证据：" + "、".join(f"{k} {c}" for k, c in evidence))
+
+
+def check_channels(rep: Report, cur) -> None:
+    """各条业务通道「现在真的能用吗」——今天连续修好文本与局部重绘，回归要立刻看得见。
+
+    - 文本 / 聊天：近 30 分钟成功率（修好之前是 0%，近 7 天一次都没成功过）
+    - 出图上游 500：局部重绘缺蒙版 / 带 SMEA 就是这个签名（上游不给可读原因）
+    - 局部重绘：近 1 小时的成功与失败，重绘坏了要单独一眼看到
+    """
+    now = time.time()
+    row = cur.execute("SELECT COUNT(*), SUM(status='ok') FROM usage_log WHERE ts>? "
+                      "AND kind IN ('chat','text','text_stream','voice')", (now - 1800,)).fetchone()
+    total, ok = num(row[0]), num(row[1])
+    rep.data.update(text_30m=total, text_ok_30m=ok)
+    if total:
+        rate = ok / total
+        rep.add(OK if rate >= 0.9 else WARN if rate >= 0.5 else RED, "通道",
+                f"文本/聊天 30 分钟：{ok}/{total} 成功（{rate:.0%}）", key="text-channel")
+        if rate < 0.9:
+            last = cur.execute("SELECT COALESCE(detail,''), datetime(ts,'unixepoch','localtime'), COALESCE(rid,'') "
+                               "FROM usage_log WHERE ts>? AND kind IN ('chat','text','text_stream') "
+                               "AND status!='ok' ORDER BY ts DESC LIMIT 1", (now - 1800,)).fetchone()
+            if last:
+                rep.add(WARN, "通道", f"最近一条文本失败：{last[1]} {last[0][:50]}（rid {last[2] or '-'}）",
+                        key="text-last-error")
+    five = num(q1(cur, "SELECT COUNT(*) FROM usage_log WHERE ts>? AND kind LIKE 'image%' "
+                       "AND (detail LIKE '%upstream 500%' OR up_status=500)", (now - 1800,)))
+    if five:
+        rep.add(WARN if five < 5 else RED, "通道",
+                f"近 30 分钟出图上游 500 × {five}（局部重绘缺蒙版 / 图生图带 SMEA 会这样，查 rid）",
+                key="image-500")
+    ip = cur.execute("SELECT COUNT(*), SUM(status='ok') FROM usage_log WHERE ts>? AND model LIKE '%inpainting%'",
+                     (now - 3600,)).fetchone()
+    ip_total, ip_ok = num(ip[0]), num(ip[1])
+    if ip_total:
+        rep.data.update(inpaint_1h=ip_total, inpaint_ok_1h=ip_ok)
+        rep.add(OK if ip_ok == ip_total else WARN, "通道",
+                f"局部重绘 1 小时：{ip_ok}/{ip_total} 成功", key="inpaint")
 
 
 # ---------------------------------------------------------------- 告警
@@ -328,8 +462,12 @@ def _safe_read(exc: urllib.error.HTTPError) -> str:
 
 
 def maybe_alert(rep: Report, text: str) -> None:
-    """同一问题在冷却期内只发一次（用问题文本的哈希去重）。"""
-    digest = hashlib.sha1("|".join(f"{s}{a}{t}" for s, a, t in rep.problems()).encode()).hexdigest()[:16]
+    """同一批问题在冷却期内只发一次。
+
+    去重用**检查项标识**（不含次数、张数这些每分钟都在变的数字）：以前用整段文本做哈希，
+    数字一变就被当成新问题，于是「V5 超卖」每 10 分钟响一次。
+    """
+    digest = hashlib.sha1("|".join(sorted(rep.keys)).encode()).hexdigest()[:16]
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     mark = STATE_DIR / "last_alert.json"
     now = time.time()
@@ -366,6 +504,7 @@ def main() -> int:
         per_person, active_members = check_registration(rep, cur)
         check_upstream(rep, cur, per_person, active_members)
         check_members(rep, cur)
+        check_channels(rep, cur)
     finally:
         conn.close()
 
@@ -380,7 +519,7 @@ def main() -> int:
         print(f"[patrol {icon}] {time.strftime('%m-%d %H:%M')} {head}")
     else:
         print(f"=== 巡检 {time.strftime('%Y-%m-%d %H:%M:%S')} → {worst.upper()} ===")
-        for area in ("系统", "上游", "注册", "成员", "数据"):
+        for area in ("系统", "上游", "通道", "注册", "成员", "数据"):
             for severity, row_area, text in rep.rows:
                 if row_area == area:
                     print(f"  [{'ok  ' if severity == OK else 'warn' if severity == WARN else 'RED '}] {text}")
