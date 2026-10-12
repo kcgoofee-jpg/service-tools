@@ -185,6 +185,30 @@ class Guard:
         cap = self.hourly_cap(now)
         return max(1, math.ceil(cap / BURST_DIVISOR)) if cap else 0
 
+    def burst_blocked(self, token_id: str, now: Optional[float] = None) -> int:
+        """突发窗口是否被拦：0 = 放行；>0 = 还要等几分钟。
+
+        放行判定（token_block_reason）和首页状态（/public/live 的 burst_wait）必须用它，
+        否则首页会显示「已限速」而请求其实能进（第二轮 review 指出的问题）。
+
+        两档：
+        ① 真·突发：10 分钟内已出到 1.5 倍额度（例：额度 25 → 38 张/10 分钟 ≈ 228 张/小时）。
+           昨晚挨限流的形态是 ~40 张/10 分钟 ≈ 240 张/小时，所以硬顶必须压在它下面
+           （第一版用 2 倍 = 50 张/10 分钟 ≈ 300 张/小时，挡不住）。
+        ② 小时额度快见底：剩余不足一个突发窗口，那就摊到窗口里慢慢放，别一口气冲完。
+        """
+        now = time.time() if now is None else now
+        burst = self.burst_cap(now)
+        if not burst:
+            return 0
+        n10 = self.count_10m(token_id, now)
+        cap = self.hourly_cap(now)
+        left = (cap - self.hour_count(token_id, now)) if cap else burst + 1
+        hard = max(burst + 1, math.ceil(burst * 1.5))
+        if n10 >= hard or (n10 >= burst and left <= burst):
+            return self.minutes_until_free_10m(token_id, now)
+        return 0
+
     def minutes_until_free_10m(self, token_id: str, now: Optional[float] = None) -> int:
         """到 10 分钟窗口降回上限以下要等多久（同 minutes_until_free 的口径）。"""
         now = time.time() if now is None else now
@@ -363,13 +387,10 @@ class Guard:
         # 只在两种情况下抹平（独立架构师 review 后改：小时额度还很宽裕时不能因为突发窗口拒人）：
         #   ① 真的在冲：10 分钟里已发出去两倍的突发额度；
         #   ② 小时额度快见底了：剩下的不够一个突发窗口，那就摊到窗口里慢慢放。
-        burst = self.burst_cap(now)
-        n10 = self.count_10m(token_id, now)
-        left = (cap - self.hour_count(token_id, now)) if cap else 0
-        if burst and (n10 >= burst * 2 or (n10 >= burst and left <= burst)):
-            wait = self.minutes_until_free_10m(token_id, now)
-            return Reason(f"本时段出图已达上限（每 10 分钟 {burst} 张，用来抹平突发、保护上游账号），"
-                          f"约 {wait} 分钟后可继续", BURST_CAP)
+        blocked = self.burst_blocked(token_id, now)
+        if blocked:
+            return Reason(f"本时段出图已达上限（每 10 分钟 {self.burst_cap(now)} 张，用来抹平突发、保护上游账号），"
+                          f"约 {blocked} 分钟后可继续", BURST_CAP)
         cap3 = self.values["account_3h_cap"]
         if cap3 and self.count_3h(token_id, now) >= cap3:
             wait = self.minutes_until_free_3h(token_id, now)

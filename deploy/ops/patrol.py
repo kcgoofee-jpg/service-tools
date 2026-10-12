@@ -367,7 +367,7 @@ def check_data(rep: Report, cur) -> None:
                          "WHERE resolved_at IS NULL ORDER BY last_seen DESC LIMIT 6").fetchall()
     for level, title, count, last_seen in recent:
         known_why = next((why for sig, why in KNOWN_SIGNATURES if sig in title), "")
-        hit = next((r for r in restarts if r <= num(last_seen) < r + 600), 0.0)
+        hit = next((r for r in restarts if r <= num(last_seen) < r + 180), 0.0)
         if not known_why and title.startswith("live:") and hit:
             # 前端每秒轮询 /public/live，网关重启那十几秒必然失败 —— 我们自己的部署不算故障
             rep.known("数据", f"{title}（{count} 次）— 最近一次在网关重启（{time.strftime('%H:%M', time.localtime(hit))}）"
