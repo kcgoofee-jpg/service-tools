@@ -1,9 +1,9 @@
 [Unit]
-Description=每 10 分钟跑一次巡检（nai-patrol.service）
+Description=每 5 分钟跑一次巡检（nai-patrol.service）
 
 [Timer]
 OnBootSec=3min
-OnUnitActiveSec=10min
+OnUnitActiveSec=5min
 AccuracySec=30s
 Persistent=true
 
