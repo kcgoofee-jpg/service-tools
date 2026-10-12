@@ -167,6 +167,37 @@ def parse_retry_after(header: Optional[str]) -> float:
     return 20.0
 
 
+# NovelAI 用 403 表示两类完全不同的东西：账号/风控被拒（要看账号状态）与「模型不存在」。
+# 2026-10-13 实测：{"statusCode":403,"message":"model 'nai-glm-4-6' doesn't exist"}、
+# {"statusCode":403,"message":"model 'glm-4-6' is only available via OpenAI-compatible API"}。
+# 后者纯粹是成员填错模型，不能报「账号被隔离」，更不能污染账号健康度。
+MODEL_403_MARKERS = ("doesn't exist", "does not exist", "is only available via", "model must be a valid enum")
+
+
+async def _peek_body(response, limit: int = 300, timeout: float = 3.0) -> str:
+    """读上游错误响应体的一小段，**只用来判断 403 属于哪一类**，绝不回显给成员。
+
+    项目原有的政策是不读上游错误体（可能很慢，也可能带账号信息）；这里为 403 破一次例：
+    上游对「模型不存在」也回 403，不区分就会把成员填错模型报成「账号被隔离」，
+    还会污染共享账号的健康度。限制：最多 300 字节、最多 3 秒，读不到就返回空串。
+    """
+    try:
+        async with asyncio.timeout(timeout):
+            chunks = bytearray()
+            async for chunk in response.aiter_bytes(limit):
+                chunks.extend(chunk)
+                if len(chunks) >= limit:
+                    break
+            return bytes(chunks).decode("utf-8", "replace")
+    except Exception:                     # noqa: BLE001  诊断信息拿不到就拿不到，绝不影响主流程
+        return ""
+
+
+def _is_model_level_403(body_text: str) -> bool:
+    low = (body_text or "").lower()
+    return any(marker in low for marker in MODEL_403_MARKERS)
+
+
 async def _wait_cleanup(task: asyncio.Task) -> Any:
     """Finish accounting under ASGI cancel scopes and direct task cancellation."""
     cancelled = False
@@ -686,6 +717,10 @@ class NaiClient:
                         raise UpstreamError(429, "上游限流(429)，全站图片生成已进入冷却")
                     continue
                 if resp.status_code == 403 and image_lane:
+                    # 「模型不存在」也是 403：不算账号被拒（图侧我们本地已校验模型，这里只是保险）
+                    peek = await _peek_body(resp)
+                    if _is_model_level_403(peek):
+                        raise UpstreamError(400, "上游不认识这个模型：请换用本站白名单里的模型")
                     self.mark_forbidden(ts)
                     if image_lane:
                         raise UpstreamError(403, "上游拒绝了请求（HTTP 403），该账号已临时隔离保护")
@@ -816,6 +851,9 @@ class NaiClient:
                 await self._rate_limit(ts, resp, on_rate_limited)
                 raise UpstreamError(429, "上游限流(429)，全站图片生成已进入冷却")
             if resp.status_code == 403:
+                peek = await _peek_body(resp)
+                if _is_model_level_403(peek):
+                    raise UpstreamError(400, "上游不认识这个模型：请换用本站白名单里的模型")
                 self.mark_forbidden(ts)
                 raise UpstreamError(403, "上游拒绝了请求（HTTP 403），该账号已临时隔离保护")
             self._warn_account(resp.status_code)
@@ -863,6 +901,13 @@ class NaiClient:
         if resp.status_code not in (200, 201):
             if resp.status_code == 401:
                 self.mark_unauthorized(ts)
+            request_timing.mark_status(resp.status_code)
+            # NovelAI 对「模型不存在 / 模型只能走别的接口」也回 403（2026-10-13 实测：
+            # {"statusCode":403,"message":"model 'nai-glm-4-6' doesn't exist"}）。
+            # 那是成员填错模型，跟账号没关系：既不能报「账号被隔离」，也不能计入账号健康度，
+            # 否则一个不存在的模型名就能把共享账号的熔断/隔离逻辑搞坏，连累所有人的生图。
+            model_level = resp.status_code == 403
+            body_peek = await _peek_body(resp) if model_level else ""
             # 文本 403 不计入熔断：成员反复请求文本不该让生图停摆。
             # 文本 429 也不冻结整把 Token；但必须有信号与文本通道自己的冷却，
             # 否则上游开始限流时客户端会以每 Key 的 RPM 上限持续重试（账号级风险）。
@@ -876,6 +921,8 @@ class NaiClient:
                 self._event("upstream_401", "NovelAI 返回 401：上游 Token 已失效，生图和文本全部不可用，请尽快更换 Token。", 1800)
                 raise UpstreamError(502, "上游令牌已失效（401），请站长更换 NovelAI Token")
             if resp.status_code == 403:
+                if _is_model_level_403(body_peek):
+                    raise UpstreamError(400, "上游不认识这个文本模型；本站可用的文本模型：llama-3-erato-v1、kayra-v1")
                 ts.fails += 1
                 ts.text_forbidden += 1
                 if ts.text_forbidden >= 3:
