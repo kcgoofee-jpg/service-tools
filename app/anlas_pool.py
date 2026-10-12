@@ -33,6 +33,8 @@ DEFAULTS = {
     "anlas_min_key_age_days": 3,
 }
 STATE_KEY = "anlas_pool_last"
+ACCOUNT_CACHE_SECONDS = 900      # 上游订阅查询的复用窗口（见 rebalance）
+_ACCOUNT_CACHE: dict[str, Any] = {"at": 0.0, "key": "", "data": None}
 
 
 async def _setting(db, name: str) -> int:
@@ -42,13 +44,22 @@ async def _setting(db, name: str) -> int:
         return DEFAULTS[name]
 
 
-async def fetch_account(host: str, token: str) -> Optional[dict]:
-    """读上游账号的剩余 Anlas 和订阅到期（= 下次补满）时间；失败返回 None。"""
+async def fetch_account(host: str, token: str,
+                        client: Optional[httpx.AsyncClient] = None) -> Optional[dict]:
+    """读上游账号的剩余 Anlas 和订阅到期（= 下次补满）时间；失败返回 None。
+
+    client 传入时复用网关的共享连接：它会继承 UPSTREAM_PROXY。临时新建的客户端会走服务器直连出口，
+    同一把上游 Token 于是同时从「代理 IP」和「服务器 IP」出现 —— 这是共享账号最明显的特征之一。
+    """
     from .nai import default_browser_headers  # 和生图同一套浏览器请求头
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        if client is not None:
             r = await client.get(host.rstrip("/") + "/user/subscription",
-                                 headers=default_browser_headers(token))
+                                 headers=default_browser_headers(token), timeout=10)
+        else:
+            async with httpx.AsyncClient(timeout=10) as own:
+                r = await own.get(host.rstrip("/") + "/user/subscription",
+                                  headers=default_browser_headers(token))
         data = r.json() if r.status_code == 200 else None
         steps = data["trainingStepsLeft"]
         return {"anlas": int(steps["fixedTrainingStepsLeft"]) + int(steps.get("purchasedTrainingSteps") or 0),
@@ -93,7 +104,16 @@ async def rebalance(state, now: Optional[float] = None, account: Optional[dict] 
     else:
         if account is None:
             pool = [t for t in getattr(state.nai, "pool", []) if t.usable and t.allow_anlas]
-            account = await fetch_account(state.nai.image_host, pool[0].token) if pool else None
+            if pool:
+                # 同一把 Token 15 分钟内只查一次上游：每 10 分钟的维护 tick 都精确打一次
+                # /user/subscription 是很容易被识别的机器节拍，结果也不会在 10 分钟内变得有意义。
+                if _ACCOUNT_CACHE["key"] == pool[0].token_id and now - _ACCOUNT_CACHE["at"] < ACCOUNT_CACHE_SECONDS:
+                    account = _ACCOUNT_CACHE["data"]
+                else:
+                    account = await fetch_account(state.nai.image_host, pool[0].token,
+                                                  getattr(state.nai, "_client", None))
+                    if account is not None:
+                        _ACCOUNT_CACHE.update(at=now, key=pool[0].token_id, data=account)
         if account is None:
             prev = await db.get_setting(STATE_KEY, None)
             return json.loads(prev) if prev else {"enabled": True, "error": "无法读取上游 Anlas"}

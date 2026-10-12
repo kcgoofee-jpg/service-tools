@@ -157,7 +157,12 @@ async def _concentration_item(state, now: float) -> dict:
             "SELECT key_id, key_name, COUNT(*) AS c FROM usage_log "
             f"WHERE ts>=? AND kind IN ('image','image_stream') AND status='ok' AND {NOT_TEST} "
             "GROUP BY key_id ORDER BY c DESC LIMIT 6", (now - DAY,))
-        total = sum(r[2] for r in rows)
+        # 分母必须是全站总量：以前用 Top-6 之和当分母，占比被系统性放大，
+        # 证据行却写「占全站 X%」—— 47 人时会把正常的重度成员误报成「独吃全站产能」。
+        station = await state.db._db.execute_fetchall(
+            "SELECT COUNT(*) FROM usage_log "
+            f"WHERE ts>=? AND kind IN ('image','image_stream') AND status='ok' AND {NOT_TEST}", (now - DAY,))
+        total = int(station[0][0] or 0)
     except Exception as exc:
         return _item("concentration", "用量集中度（24 小时）", NA, f"读取失败：{exc}")
     if not rows or not total:

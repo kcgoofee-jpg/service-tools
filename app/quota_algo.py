@@ -51,6 +51,8 @@ from typing import Any, Optional
 from .action_log import log_action
 from . import quota_policies
 from .params import P
+from .policy import FREE_BURST, FREE_REFILL_PER_HOUR, free_paced_cap
+from .reasons import PACED
 
 V5_IMAGES_PER_PERCENT = 14.2      # 官方 17.3 张/1% 按 23 步估算；成员多用 28 步，按步数折算 17.3×23/28
 V5_FALLBACK_RATE = 5.0            # 拿不到读数时用的恢复速度（%/天）。原来的 11 来自一次错误的单次读数（2026-10-10）
@@ -258,6 +260,14 @@ async def _yesterday(db, day: str, members: list[int]) -> dict[str, int]:
         r = await db._db.execute_fetchall("SELECT COUNT(*) " + member_rejects, (start, end, pattern))
         return int(r[0][0])
 
+    async def count_reason(code: str) -> int:
+        """按原因码数（不依赖中文文案）：文案一改 LIKE 就静默失效。"""
+        r = await db._db.execute_fetchall(
+            "SELECT COUNT(*) FROM usage_log u JOIN api_keys k ON k.id=u.key_id "
+            "WHERE u.ts>=? AND u.ts<? AND u.status='rejected' AND k.is_test=0 AND k.is_admin=0 AND u.reason=?",
+            (start, end, code))
+        return int(r[0][0])
+
     async def hours(*patterns: str) -> int:
         """出现过拦截的不同小时数。"""
         seen: set[int] = set()
@@ -269,7 +279,11 @@ async def _yesterday(db, day: str, members: list[int]) -> dict[str, int]:
     return {"used": used, "ceiling_hits": hits,
             # 只数「每小时上限」：按时段放行 / 每日上限是总量本来就这么多，不说明每人给多了（否则上限 A 每天 −25，几天后 A=保底）
             "hourly_blocks": await hours("%本小时出图量已达上限%"),
-            "base_blocks": await count("%保底%其他人在排队%")}
+            "base_blocks": await count("%保底%其他人在排队%"),
+            # 每人额度被「平滑注水桶」卡住的次数：只记录、不参与每日微调（改动额度分配需要站长确认）；
+            # 它的意义是：A 比注水桶全天能放出的量还大时（A > 30 + 4×24 = 126），成员其实到不了 A，
+            # 只靠成功张数看不到这个上限，页面上的「每人 A 张」会长期虚高。
+            "paced_blocks": await count_reason(PACED)}
 
 
 async def _v5_used_equiv(db, day: str) -> float:
@@ -367,6 +381,31 @@ async def _allowance(state) -> tuple[Optional[float], Optional[float]]:
     return pct, (sum(rates) / len(rates) if rates else None)
 
 
+def quota_notice(a: int, v5: dict[str, Any], members: int, *, today: str, pct: Optional[float],
+                 review: Optional[dict[str, Any]] = None) -> str:
+    """首页那句「今日额度」。单独成函数是为了能用同一组常量核对文案与判定：
+    以前写死「蓄水池 A 张（每小时恢复 4 张，全天上限 96 张）」，与 quota_image_check 的
+    30 底仓 + 4/小时（全天最多 126 张）不是同一个数，也和「极简模式每人固定 A 张」矛盾。
+    """
+    each, global_v5 = int(v5.get("each") or 0), int(v5.get("global") or 0)
+    oversell = bool(global_v5 and each * max(1, members) > global_v5)
+    v5_status = f" · V5 每人 {each} 张"
+    if oversell:
+        v5_status += f"（全站今日共 {global_v5} 张，先到先得）"
+    elif pct and pct >= 85 and each >= 10:
+        v5_status += f"（当前电池充沛 {pct:.0f}%，额度放宽）"
+    paced_cap = free_paced_cap(a)
+    if a > paced_cap:
+        # 判定里有「0 点底仓 + 每小时注水」，全天实到张数比每日上限小：文案必须用同一组常量推导。
+        note = (f"今日额度：V4.5 每人 {a} 张/天（每小时自动恢复 {int(FREE_REFILL_PER_HOUR)} 张，"
+                f"当天最多约 {int(paced_cap)} 张，次日 0 点恢复）{v5_status}")
+    else:
+        note = f"今日额度：V4.5 每人 {a} 张/天（次日 0 点恢复）{v5_status}"
+    if review and review.get("from") != review.get("to"):
+        note = f"{today[5:].replace('-', '月')}日 算法调整：" + "；".join(review["reasons"]) + "。" + note
+    return note
+
+
 async def run(state, now: Optional[float] = None) -> dict[str, Any]:
     """重算并应用。每 10 分钟调用一次；每天第一次调用时先做「每日微调」。"""
     db = state.db
@@ -403,7 +442,8 @@ async def run(state, now: Optional[float] = None) -> dict[str, Any]:
             reasons = [f"{why}（可分 = 账号日上限 {cap} − 全站 V5 {v5_global}）"]
         a2 = b2 = n
         stats["coverage_hours"] = round(covered, 1)
-        review = {"day": yday, **stats, "cap": cap, "from": [a, b], "to": [a2, b2], "reasons": reasons}
+        # budget = 账号日上限 − 全站 V5：自动驾驶判名额拥挤度时要用同一个分母（否则 V5 用量被算两次）
+        review = {"day": yday, **stats, "cap": cap, "budget": budget, "from": [a, b], "to": [a2, b2], "reasons": reasons}
         history = json.loads(await db.get_setting(HISTORY_KEY, "[]") or "[]")[-29:] + [review]
         await db.set_settings_bulk({"quota_ceiling": a2, "quota_base_now": b2, DAY_KEY: today,
                                     HISTORY_KEY: json.dumps(history, ensure_ascii=False)})
@@ -494,11 +534,13 @@ async def run(state, now: Optional[float] = None) -> dict[str, Any]:
     if guard is not None and guard.values.get("base_daily_images") != b:
         await guard.save({"base_daily_images": b})
     await db.set_settings_bulk(settings)
+    # 每人 V5 额度 × 参与人数 > 全站 V5 上限时，个人额度是「先到先得」的上限而不是承诺：
+    # 40 人 × 每人 18 张 = 720 ≫ 全站 130，前几个人就能把全站额度分完，后面的人拿不到「每人 18 张」。
+    # 这里不改分配（改额度结果需要站长确认），但必须让首页和后台说实话。
+    oversell = bool(v5["global"] and v5["each"] * max(1, len(members)) > v5["global"])
+    v5["oversell"] = {"each": v5["each"], "members": len(members), "global": v5["global"]} if oversell else None
     # 首页提醒（站长要求：算法调整只在网站首页提示，不发 Discord）
-    v5_status = f" · V5 每人 {v5['each']} 张" + (f"（当前电池充沛 {pct:.0f}%，额度放宽）" if pct and pct >= 85 and v5['each'] >= 10 else "")
-    note = f"今日额度：V4.5 免费图蓄水池 {a} 张（每小时自动恢复 4 张，全天上限 96 张）{v5_status}"
-    if review and review["from"] != review["to"]:
-        note = f"{today[5:].replace('-', '月')}日 算法调整：" + "；".join(review["reasons"]) + "。" + note
+    note = quota_notice(a, v5, len(members), today=today, pct=pct, review=review)
     await db.set_setting(NOTICE_KEY, note)
     result = {"enabled": True, "ceiling": a, "base": b, "v5": v5, "members": len(members), "cap": cap,
               "updated_at": now, "changed_keys": changed, "review": review}
