@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import time
+from typing import Any
 
 from . import site_flags
 from .kernel import Check, Kernel, Module, Param
@@ -247,14 +248,100 @@ def registration(state) -> Module:
         cfg = await reg.settings()
         active = await reg.count_active()
         cap = cfg.get("max_users") or 0
-        return [Check("已领人数 ≤ 名额", not cap or active <= cap, f"{active} / {cap}")]
+        return [Check("已领人数 ≤ 名额", not cap or active <= cap, f"{active} / {cap or '不限'}")]
 
     return Module(
         name="registration", title="领 Key", question="新成员能不能领 Key",
         get_enabled=get_enabled, set_enabled=set_enabled, checks=checks,
         hard_note="关闭 = 暂停领取；已领的成员和邀请 Key 绑定不受影响",
         params=[Param("Key 有效天数", lambda: state.settings.default_expires_days),
-                Param("闲置回收", lambda: f"{state.settings.key_inactivity_delete_days} 天" if state.settings.key_inactivity_delete_days else "关")])
+                Param("闲置回收", lambda: f"{state.settings.key_inactivity_delete_days} 天"
+                      if state.settings.key_inactivity_delete_days else "关")])
+
+
+# ---------------- 开注册就绪度（2026-10-13）----------------
+def registration_ready(state) -> Module:
+    """回答「现在把领 Key 打开会发生什么」。
+
+    独立于领 Key 开关常驻运行（关着也要能看到就绪度，否则打开之前这些数字看不见），
+    只读：不改额度、不切开关、不动名额。
+    """
+    # 注册服务对象只在 kernel.extra 里（不是数据库设置），面板参数要读它，就在校验时记一份下来
+    known: dict[str, Any] = {"reg": None}
+
+    def _site_daily() -> int:
+        """全站一天的出图容量 = 上游账号数 × 每账号日上限。"""
+        tokens = [t for t in getattr(state.nai, "pool", []) if getattr(t, "usable", True)]
+        return int(state.guard.values["account_daily_cap"]) * max(1, len(tokens))
+
+    async def checks(k: Kernel):
+        reg = k.extra.get("registrar")
+        known["reg"] = reg
+        open_now = await site_flags.get(state.db, site_flags.REGISTER_OPEN)
+        if reg is None:
+            # 服务没配起来：开关是关的就没事；开着的话成员会看到「领 Key 暂不可用」
+            return [Check("注册链路已配置", not open_now,
+                          "领 Key 开关是打开的，但网关没有注册服务配置（DISCORD_CLIENT_ID / "
+                          "DISCORD_CLIENT_SECRET / DISCORD_BOT_TOKEN / REGISTRATION_BRIDGE_SECRET / "
+                          "DISCORD_GUILD_ID / SITE_URL 缺项）：成员用 /register 只会看到「暂不可用」")]
+        cfg = await reg.settings()
+        active = await reg.count_active()
+        cap = cfg.get("max_users") or 0
+        per = cfg.get("daily_images") or 0
+        v5_per = cfg.get("daily_v5") or 0
+        tokens = [t for t in getattr(state.nai, "pool", []) if getattr(t, "usable", True)]
+        site_daily = _site_daily()
+        hourly = await site_flags.get(state.db, site_flags.ISSUE_HOURLY_CAP, state.settings)
+
+        out = [Check("注册链路已配置", True,
+                     f"{'开放中' if open_now else '当前关闭'}；配置齐备（网关能签发 Key，Key 通过临时消息发给本人）")]
+        # ① 每人承诺 × 人数 vs 全站日容量：开注册前先看这一条 —— 它说明「名额能不能兑现」
+        if per and site_daily:
+            promise = active * per
+            out.append(Check("每人承诺 ≤ 全站日容量", promise <= site_daily,
+                             f"每人 {per} 张 × {active} 人 = {promise} 张 vs 全站 {site_daily} 张/天"
+                             f"（{len(tokens)} 个上游账号）：平分下来每人每天约 {site_daily // max(1, active)} 张，"
+                             f"先到先得；只有前约 {site_daily // max(1, per)} 个名额能拿满 {per} 张",
+                             level="warn"))
+        # ② 领取速度 × 每人额度 = 每小时新增的边际需求，不能超过全站一天的量
+        if hourly and per and site_daily:
+            ramp = hourly * per
+            out.append(Check("每小时领取上限 ≤ 全站日容量", ramp <= site_daily,
+                             f"每小时最多发 {hourly} 个名额 × 每人 {per} 张 = {ramp} 张/小时的边际需求"
+                             f"（全站 {site_daily} 张/天，约占 {round(ramp / site_daily * 100)}%）"))
+        # ③ 后台额度 vs 环境变量：后台值被清掉时会跳回环境变量（可能是很早前写的大数）
+        drift = []
+        for label, db_value, env_value in (("每人张数", per, getattr(reg, "key_daily_images", 0)),
+                                           ("每人 V5", v5_per, getattr(reg, "key_daily_v5", 0)),
+                                           ("名额上限", cap, getattr(reg, "max_users", 0))):
+            if env_value and db_value != env_value:
+                drift.append(f"{label} 后台 {db_value} / 环境变量 {env_value}")
+        out.append(Check("后台额度与环境变量一致", not drift,
+                         "；".join(drift) + ("（后台值被清掉会跳到环境变量那个数）" if drift else ""),
+                         level="warn"))
+        return out
+
+    async def _seats_text() -> str:
+        """全站日容量 ÷ 每人额度 = 能拿满额度的人数（注册名额的现实上限）。"""
+        reg = known["reg"]
+        try:
+            cfg = await reg.settings() if reg is not None else {}
+            per = cfg.get("daily_images") or getattr(reg, "key_daily_images", 0) or 0
+            daily = _site_daily()
+            return f"约 {daily // per} 人（{daily} 张/天 ÷ 每人 {per} 张）" if per else "—"
+        except Exception:
+            return "—"
+
+    async def _hourly_text() -> str:
+        cap = await site_flags.get(state.db, site_flags.ISSUE_HOURLY_CAP, state.settings)
+        return f"{cap} 个名额/小时" if cap else "不限"
+
+    return Module(
+        name="registration_ready", title="开注册就绪度",
+        question="把领 Key 打开会发生什么：名额能兑现吗、链路通吗",
+        checks=checks, hard_note="只读体检；不影响领 Key 开关、不改任何额度",
+        params=[Param("每小时最多发放", _hourly_text),
+                Param("容量能兑现的名额", _seats_text, "全站日容量 ÷ 每人额度：开注册前先看这一条")])
 
 
 # ---------------- ⑥ 观测 ----------------
@@ -340,6 +427,7 @@ def risk(state) -> Module:
 
 def build(state, bug) -> Kernel:
     k = Kernel(state, bug)
-    for make in (observation, capacity, allocation, scheduling, anlas, autopilot_module, integrity, risk, registration):
+    for make in (observation, capacity, allocation, scheduling, anlas, autopilot_module, integrity, risk,
+                 registration, registration_ready):
         k.register(make(state))
     return k
