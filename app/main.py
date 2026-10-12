@@ -193,7 +193,7 @@ async def lifespan(app: FastAPI):
         await STATE.db.close()
 
 
-__version__ = "2.24.1"
+__version__ = "2.24.3"
 
 app = FastAPI(title="猫头鹰公益站", version=__version__, docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 
@@ -704,7 +704,16 @@ def _text_url(model: str, stream: bool = True) -> str:
 
 
 def _require_text_model(key, model: str, kind: str) -> None:
-    """原生文本入口只放行白名单模型，避免任意 model 字符串打到上游。"""
+    """原生文本入口只放行白名单模型，避免任意 model 字符串打到上游。
+
+    已知上游不认的名字（TEXT_MODELS_RETIRED）对任何 Key 都直接拒绝 —— 包括站长号：
+    上游对「模型不存在」回的是 403，那条 403 会被当成账号被拒（还会记进账号健康度），
+    所以连站长测试也应该在本地就拿到明确原因，而不是往上打一枪。
+    """
+    retired = getattr(text_routes, "TEXT_MODELS_RETIRED", {})
+    if model in retired:
+        record(key, kind, model, "rejected", detail="model retired upstream")
+        raise err(400, f"{model}：{retired[model]}；可用：" + "、".join(TEXT_MODELS))
     if key["is_admin"] or model in TEXT_MODELS:
         return
     record(key, kind, model, "rejected", detail="model not allowed")

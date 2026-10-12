@@ -280,8 +280,10 @@ def test_clamp_text():
                "parameters": {"max_length": 999, "min_length": 999}}
     out, notes, err = clamp_text_params(payload, max_output_tokens=300, max_input_chars=1000)
     assert err is None
-    assert out["parameters"]["max_length"] == 300
-    assert out["parameters"]["min_length"] <= 300
+    # 上游单次生成上限就是 250 token：配置里写 300 也要按 250 钳（2026-10-13 实测，
+    # 以前按 max_output_tokens=300 放行 → 每次文本请求都被上游 400 拒绝）
+    assert out["parameters"]["max_length"] == 250
+    assert out["parameters"]["min_length"] <= 250
 
 
 def test_clamp_text_rejects_long_input():

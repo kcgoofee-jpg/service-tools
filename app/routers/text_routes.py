@@ -19,10 +19,20 @@ from ..sse import encode_sse
 from ..policy import clamp_text_params, estimate_tokens
 from ..upstream_errors import text_stream_events, upstream_error_message
 
-TEXT_MODELS = [
-    "llama-3-erato-v1", "kayra-v1", "clio-v1",
-    "nai-glm-4-6", "nai-xialong",
-]
+# 上游真正存在的文本模型：2026-10-13 用网关自己的请求形态（明文 input + use_string）
+# 逐个实测 /ai/generate-stream 得到 200 的只有这两个。以前这份名单里还写着 clio-v1 /
+# nai-glm-4-6 / nai-xialong，上游回的是 403 {"message":"model '…' doesn't exist"} ——
+# 被当成「账号被拒」报给成员，还会污染共享账号的健康度（详见 nai.py 的 MODEL_403_MARKERS）。
+TEXT_MODELS = ["llama-3-erato-v1", "kayra-v1"]
+
+# 曾经出现在名单里、但上游不认的模型名：本地直接给出诚实原因，不要打到上游换一个 403。
+TEXT_MODELS_RETIRED = {
+    "clio-v1": "上游已没有这个模型（NovelAI 老模型 clio 已下线）",
+    "nai-glm-4-6": "上游没有这个模型名；GLM-4.6 只能走 NovelAI 的 OpenAI 兼容接口，本站暂未开放",
+    "glm-4-6": "GLM-4.6 只能走 NovelAI 的 OpenAI 兼容接口，本站暂未开放",
+    "nai-xialong": "上游没有这个模型名；Xialong 只能走 NovelAI 的 OpenAI 兼容接口，本站暂未开放",
+    "xialong": "上游没有这个模型名；Xialong 只能走 NovelAI 的 OpenAI 兼容接口，本站暂未开放",
+}
 
 
 def _main():
@@ -216,6 +226,8 @@ async def v1_chat(request: Request):
         str(m.get("content", "")) for m in msgs if isinstance(m, dict)
     ).strip()
     model_in = str(body.get("model", ""))
+    if model_in in TEXT_MODELS_RETIRED:        # 已知上游不认的名字：直接说清楚，别让上游用 403 回复
+        raise main.err(400, f"{model_in}：{TEXT_MODELS_RETIRED[model_in]}；可用：" + "、".join(TEXT_MODELS))
     model = model_in if model_in in TEXT_MODELS else "llama-3-erato-v1"
     ml = int(body.get("max_tokens") or 150)
     payload = {

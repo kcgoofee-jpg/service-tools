@@ -62,7 +62,13 @@ async def test_upstream_rejections_are_not_success_streams(state, chat, status, 
         assert response.status_code == expected
         assert response.headers["content-type"] == "application/json"
         assert "private" not in response.text
-        assert frames.closed and not frames.read
+        assert frames.closed
+        # 403 例外：上游用 403 表示「模型不存在」（2026-10-13 实测），我们要读一小段
+        # 才能把它和「账号被拒」区分开；读到的内容不会回显给成员（见 test_text_models.py）。
+        if status == 403:
+            assert frames.read is True
+        else:
+            assert not frames.read
         assert nai.pool[0].last_ok == 0
         assert nai.pool[0].disabled is (status == 401)
         assert state.global_active == 0 and state.global_sem._value == 3
@@ -87,6 +93,7 @@ async def test_cancel_during_rejection_close_finishes_cleanup():
         frames.release.set()
         with pytest.raises(asyncio.CancelledError):
             await task
+        # 503 这类错误体我们仍然不读（只有 403 会读一小段用于区分「模型不存在」，见上面的用例）
         assert frames.closed and not frames.read
 
 
