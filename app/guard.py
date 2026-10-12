@@ -18,6 +18,8 @@ from zoneinfo import ZoneInfo
 
 HOUR = 3600
 WINDOW_3H = 3 * HOUR
+WINDOW_10M = 600                       # 突发窗口：一小时的额度挤在十分钟里发完，上游看到的就是 6 倍速率
+BURST_DIVISOR = 4                      # 未单独设置时：每 10 分钟上限 = 每小时上限 ÷ 4
 HOURLY_MIN, HOURLY_MAX, HOURLY_STEP = 100, 160, 10     # 上限 ≤ 0.8 × 单线程物理极限 ≈ 205 张/小时     # 每小时上限的自动调整范围（加性增、乘性减）
 # 名称: (默认值, 最小, 最大, 说明)
 FIELDS: dict[str, tuple[int, int, int, str]] = {
@@ -26,6 +28,8 @@ FIELDS: dict[str, tuple[int, int, int, str]] = {
     "daily_burst": (150, 0, 20000, "每日上限按时段放行：0 点先放出这么多张，之后每小时补「每日上限 ÷ 24」张，没用完的留到后面；0 = 不分时段（整天先到先得）"),
     "account_hourly_cap": (150, 0, 240, "每个上游账号每小时最多出图张数（自动调整：上游 429 减半；前一天顶到过上限且没有 429 才 +10，范围 100～160）"),
     "account_3h_cap": (400, 0, 720, "每个上游账号连续 3 小时最多出图张数（防止连续几小时都在冲）"),
+    "account_10m_cap": (0, 0, 500, "每个上游账号每 10 分钟最多出图张数（抹平突发：2026-10-13 第一次被上游 429，"
+                                   "一小时的额度被挤在十分钟内发完，上游看到的是 6 倍速率）；0 = 按每小时上限 ÷ 4 自动分摊"),
     "quiet_start": (0, 0, 23, "安静时段开始（北京时间，整点）；与结束相同 = 不启用（2026-10-10 起不启用：夜里不限速）"),
     "quiet_end": (0, 0, 23, "安静时段结束（北京时间，整点；与开始相同表示不设安静时段）"),
     "quiet_hourly_cap": (20, 0, 240, "安静时段每个账号每小时最多出图张数"),
@@ -162,6 +166,28 @@ class Guard:
     def count_3h(self, token_id: str, now: Optional[float] = None) -> int:
         return len(self._window(token_id, time.time() if now is None else now, WINDOW_3H))
 
+    def count_10m(self, token_id: str, now: Optional[float] = None) -> int:
+        return len(self._window(token_id, time.time() if now is None else now, WINDOW_10M))
+
+    def burst_cap(self, now: Optional[float] = None) -> int:
+        """每 10 分钟最多出几张：没单独设置就按每小时上限 ÷ 4（不减少总量，只抹平突发）。"""
+        now = time.time() if now is None else now
+        explicit = self.values["account_10m_cap"]
+        if explicit:
+            return explicit
+        cap = self.hourly_cap(now)
+        return max(1, math.ceil(cap / BURST_DIVISOR)) if cap else 0
+
+    def minutes_until_free_10m(self, token_id: str, now: Optional[float] = None) -> int:
+        """到 10 分钟窗口降回上限以下要等多久（同 minutes_until_free 的口径）。"""
+        now = time.time() if now is None else now
+        q = self._window(token_id, now, WINDOW_10M)
+        if not q:
+            return 1
+        cap = self.burst_cap(now)
+        idx = max(0, min(len(q) - 1, len(q) - cap)) if cap else 0
+        return max(1, math.ceil((q[idx] + WINDOW_10M - now) / 60))
+
     def minutes_until_free(self, token_id: str, now: Optional[float] = None) -> int:
         """到计数降回上限以下要等多久：超了 n 张就要等第 n+1 早的那张滑出 60 分钟窗口（不是最早那一张）。"""
         now = time.time() if now is None else now
@@ -189,6 +215,11 @@ class Guard:
         # min(old, …)：上限已经被手动调到下限以下时，429 只能维持或降低，绝不能反而把它抬回下限
         new = min(old, max(P("capacity.hourly_min", HOURLY_MIN), int(old * P("capacity.hourly_decrease", 0.5))))
         await self._set_adaptive(new, now, last_429=now)
+        # 记下「挨限流时的上限」（只在真的降档时记：站长手动压过的低值不该污染这个天花板，
+        # 否则加窗会被永久锁在 100）。取历次里更小的那个 —— 越低的水平也挨过限流就越不该再上去。
+        if self.db is not None and new != old:
+            prev = float(await self.db.get_setting("guard_429_cap_at", 0) or 0)
+            await self.db.set_setting("guard_429_cap_at", min(prev, old) if prev else old)
         return (old, new) if new != old else None
 
     async def fall_back_daily(self, why: str, now: Optional[float] = None) -> Optional[tuple[int, int]]:
@@ -237,7 +268,13 @@ class Guard:
             await self.db.set_setting("guard_hourly_adapted_at", now)
             return None
         old = self.values["account_hourly_cap"]
-        new = min(P("capacity.hourly_max", HOURLY_MAX), old + P("capacity.hourly_step", HOURLY_STEP))
+        wanted = min(P("capacity.hourly_max", HOURLY_MAX), old + P("capacity.hourly_step", HOURLY_STEP))
+        # 挨过 429 的话，加窗的天花板压到「当时上限的 80%」：AIMD 的乘性减是 /2，
+        # 但加性增会一路加回原来的水平（150），于是每过一两天又撞同一个红线。
+        seen_at = float(await self.db.get_setting("guard_429_cap_at", 0) or 0)
+        if seen_at:
+            wanted = min(wanted, max(P("capacity.hourly_min", HOURLY_MIN), int(seen_at * 0.8)))
+        new = wanted
         await self._set_adaptive(new, now)
         return (old, new) if new != old else None
 
@@ -311,6 +348,14 @@ class Guard:
                 return Reason(f"现在是安静时段（{self.values['quiet_start']}:00–{self.values['quiet_end']}:00），"
                               f"出图放慢到每小时 {cap} 张，约 {wait} 分钟后有空位", QUIET_CAP)
             return Reason(f"本小时出图量已达上限（每小时 {cap} 张，用来保护上游账号），约 {wait} 分钟后有空位", HOURLY_CAP)
+        # 突发保护（2026-10-13 第一次被上游 429 之后加）：小时的额度可以挤在十分钟里发完，
+        # 上游看到的就是 6 倍速率 —— 那正是 429 的触发方式。这里把额度分摊到 10 分钟窗口，
+        # 总量不变，只是不能一口气冲完。
+        burst = self.burst_cap(now)
+        if burst and self.count_10m(token_id, now) >= burst:
+            wait = self.minutes_until_free_10m(token_id, now)
+            return Reason(f"本时段出图已达上限（每 10 分钟 {burst} 张，用来抹平突发、保护上游账号），"
+                          f"约 {wait} 分钟后可继续", HOURLY_CAP)
         cap3 = self.values["account_3h_cap"]
         if cap3 and self.count_3h(token_id, now) >= cap3:
             wait = self.minutes_until_free_3h(token_id, now)

@@ -489,8 +489,8 @@ body.haskey #algoNote,html.haskey #algoNote{display:none!important}
       <!-- 全站大盘：左右两端对齐 + 单行双色堆叠条 -->
       <div class="board-quota">
         <div class="board-quota-txt">
-          <span class="q-total">全站今日 <b id="dTotal">0</b> / <span id="dTotalCap">0</span></span>
-          <span class="q-v5">V5 <b id="dV5">0</b> / <span id="dV5Cap">0</span></span>
+          <span class="q-total">全站今日已用 <b id="dTotal">0</b> / <span id="dTotalCap">0</span></span>
+          <span class="q-v5">V5 已用 <b id="dV5">0</b> / <span id="dV5Cap">0</span></span>
         </div>
         <div class="board-bar">
           <div id="barTotal" class="bar-total" style="width: 0%;"></div>
@@ -989,6 +989,18 @@ function fmtDate(sec){
       }
     }
     else if(qcap && w >= qcap){ tone = 'warn'; val = '排队已满'; sub = '队伍最多 ' + qcap + ' 张，请稍后再试'; step = 'queue'; }
+    else if(g.burst_wait > 0){
+      /* 2026-10-13 加的 10 分钟分摊：到点前这里必须说「限速中」，不能承诺「即发即画」——
+         否则成员照着面板发请求，拿到的却是 429，界面和接口各说各话 */
+      tone = 'warn'; val = '本时段已到限速';
+      sub = '每 10 分钟 ' + (g.burst_cap || '—') + ' 张（抹平突发、保护上游账号），约 ' + g.burst_wait + ' 分钟后可继续';
+      step = 'pace';
+    }
+    else if(hcap && hour >= hcap){
+      tone = 'warn'; val = '本小时已到上限';
+      sub = '每小时 ' + hcap + ' 张（保护上游账号），额度随时间滑动恢复，稍等再试';
+      step = 'pace';
+    }
     else if(w + run > 0){ 
       tone = 'busy'; 
       var estSec = getEstimatedSec(w + run, iv);
@@ -1032,9 +1044,13 @@ function fmtDate(sec){
     if($id('dV5Cap')) $id('dV5Cap').textContent = cap5 > 0 ? cap5 : '不限';
 
     var pctTotal = cap45 > 0 ? Math.min(100, Math.round((used45 / cap45) * 100)) : 0;
-    var pctV5 = cap5 > 0 ? Math.min(100, Math.round((used5 / cap5) * 100)) : 0;
-    if($id('barTotal')) $id('barTotal').style.width = Math.max(0, pctTotal - (pctV5 * 0.2)) + '%';
-    if($id('barV5')) $id('barV5').style.width = Math.min(100, pctV5 * 0.3) + '%';
+    /* V5 的图是今天总量的一部分：青色段画「V5 占今天出图的比例」，而不是自己乘一个系数——
+       以前 barV5 = pctV5×0.3、barTotal = pctTotal − pctV5×0.2，两段的比例和真实占比对不上
+       （51/260=20% 的 V5 在条上看起来跟 178/1700=10% 的总量一样宽）。 */
+    var v5Share = used45 > 0 ? Math.min(1, used5 / used45) : 0;
+    var wV5 = Math.round(pctTotal * v5Share * 10) / 10;
+    if($id('barTotal')) $id('barTotal').style.width = Math.max(0, pctTotal - wV5) + '%';
+    if($id('barV5')) $id('barV5').style.width = Math.min(100, wV5) + '%';
   }
   /* 只用查询成功过的 Key，避免输错的 Key 每秒请求一次触发防暴力破解 */
   function poll(){
