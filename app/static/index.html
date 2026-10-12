@@ -3288,46 +3288,57 @@ function shortModel(m){
   if(!base) return m.length > 18 ? m.slice(0, 16) + '…' : m;
   return base + (/curated/.test(m) ? ' Curated' : '') + (/inpainting/.test(m) ? ' 重绘' : '');
 }
-/* 客户端摘要：从 User-Agent 识别操作系统与软件（例如「Windows · Edge」「SillyTavern」「Android · App 内置」） */
+/* 客户端摘要：先认「客户端家族」（自报 UA 或按参数指纹识别），再补系统与软件细节。
+   例：「DSH Tavern 配图插件 · Android · App 内置页」。
+   注意：插件带括号的那种 client 是**按参数指纹**认出来的（括号里是它所在浏览器/App 的 UA），
+   不是它自报的名字，所以一定要把系统/外壳一并显示，别只说「插件」。
+   踩过的坑：undici 是 Node 自带的 fetch 标识，不是酒馆专属 —— DSH 插件在 2.5.2 之前就用它。*/
+function clientShell(ua){
+  const os = (() => {
+    if(/Windows/i.test(ua)) return 'Windows';
+    if(/Android/i.test(ua)) return 'Android';
+    if(/iPhone|iPad|iOS/i.test(ua)) return 'iOS';
+    if(/Macintosh|Mac OS X/i.test(ua)) return 'Mac';
+    if(/Linux/i.test(ua)) return 'Linux';
+    return '';
+  })();
+  const shell = (() => {
+    if(/Edg[A-Z]?\//i.test(ua)) return 'Edge';
+    if(/MicroMessenger/i.test(ua)) return '微信内置';
+    if(/HeyTapBrowser/i.test(ua)) return 'OPPO 浏览器';
+    if(/Quark/i.test(ua)) return '夸克';
+    if(/MiuiBrowser/i.test(ua)) return '小米浏览器';
+    if(/; wv\)|Version\/[0-9]/i.test(ua)) return 'App 内置页';
+    if(/Chrome\//i.test(ua)) return 'Chrome';
+    if(/Firefox\//i.test(ua)) return 'Firefox';
+    if(/Safari\//i.test(ua)) return 'Safari';
+    if(/Dalvik/i.test(ua)) return '安卓 App 直连';
+    if(/CFNetwork|^App\//i.test(ua)) return 'iOS App';
+    return '';
+  })();
+  return [os, shell].filter(Boolean).join(' · ');
+}
 function formatClient(ua){
   ua = String(ua || '').trim();
   if(!ua) return '';
-  if(/Aaalice|Aaalice_NAI_Launcher/i.test(ua)) return 'Aaalice NAI 启动器';
-  if(/Luker/i.test(ua)) return 'Luker 酒馆客户端';
-  if(/TauriTavern|Tauri/i.test(ua)) return 'TauriTavern';
-  if(/NAI-Workbench|workbench/i.test(ua)) return 'NAI 工作台 (官方)';
-  if(/DSH-Tavern|dsh-tavern-image|dsh-tavern/i.test(ua)) return 'DSH Tavern 配图插件';
-  if(/SillyTavern/i.test(ua)) return 'SillyTavern';
-  if(/undici/i.test(ua)) return 'SillyTavern (酒馆/智绘姬)';
-  if(/axios/i.test(ua)) return 'axios (聊天前端/脚本)';
-  if(/NAI-Launcher/i.test(ua)) return 'NAI-Launcher';
-  if(/python-requests|urllib|python/i.test(ua)) return 'Python 脚本';
+  const tail = clientShell(ua);
+  const named = name => tail ? `${name} · ${tail}` : name;
+  if(/Aaalice|Aaalice_NAI_Launcher/i.test(ua)) return named('Aaalice NAI 启动器');
+  if(/Luker/i.test(ua)) return named('Luker 酒馆客户端');
+  if(/TauriTavern|Tauri/i.test(ua)) return named('TauriTavern');
+  if(/NAI-Workbench|workbench/i.test(ua)) return named('NAI 工作台');
+  if(/DSH-Tavern|dsh-tavern-image|dsh-tavern/i.test(ua)) return named('DSH Tavern 配图插件');
+  if(/SillyTavern/i.test(ua)) return named('SillyTavern');
+  if(/undici/i.test(ua)) return 'Node 脚本（undici，未自报客户端）';
+  if(/^node(\/|$)/i.test(ua)) return 'Node 脚本（未自报客户端）';
+  if(/axios/i.test(ua)) return 'axios（聊天前端 / 脚本）';
+  if(/NAI-Launcher/i.test(ua)) return named('NAI-Launcher');
+  if(/python-requests|python-httpx|urllib|python/i.test(ua)) return 'Python 脚本（工具 / 巡检）';
   if(/curl/i.test(ua)) return 'curl';
   if(/Postman/i.test(ua)) return 'Postman';
   if(/ComfyUI/i.test(ua)) return 'ComfyUI';
-
-  let os = '';
-  if(/Windows/i.test(ua)) os = 'Windows';
-  else if(/Android/i.test(ua)) os = 'Android';
-  else if(/iPhone|iPad|iOS/i.test(ua)) os = 'iOS';
-  else if(/Macintosh|Mac OS X/i.test(ua)) os = 'Mac';
-  else if(/Linux/i.test(ua)) os = 'Linux';
-
-  let app = '';
-  if(/Edg[A-Z]?\//i.test(ua)) app = 'Edge';
-  else if(/MicroMessenger/i.test(ua)) app = '微信内置';
-  else if(/HeyTapBrowser/i.test(ua)) app = 'OPPO 浏览器';
-  else if(/Quark/i.test(ua)) app = '夸克';
-  else if(/MiuiBrowser/i.test(ua)) app = '小米浏览器';
-  else if(/Chrome\//i.test(ua)){
-    if(/; wv\)|Version\/[0-9]/i.test(ua)) app = 'App 内置';
-    else app = 'Chrome';
-  } else if(/Firefox\//i.test(ua)) app = 'Firefox';
-  else if(/Safari\//i.test(ua)) app = 'Safari';
-
-  if(os && app) return `${os} · ${app}`;
-  if(app) return app;
-  if(os) return os;
+  if(/^Mozilla\/5\.0$/i.test(ua)) return '通用 UA（客户端没填完整）';
+  if(tail) return tail;
   return ua.length > 28 ? ua.slice(0, 26) + '…' : ua;
 }
 /* 手机上筛选收进「筛选」折叠，桌面上始终展开 */

@@ -828,6 +828,35 @@ def _truncate_middle(text: str, budget: int, *, head_ratio: float = 0.35) -> Tup
     return current, max(0, len(text) - (len(current) - len(marker)))
 
 
+def guard_image_action(body: dict) -> Tuple[dict, list[str], Optional[str]]:
+    """图生图 / 局部重绘的两条上游地雷（2026-10-13 逐组合实测）。
+
+    上游对这两种情况都只回 **500 Internal Server Error**，成员完全看不出原因：
+
+    1. `action=infill`（局部重绘）**不带 parameters.mask** → 500。
+       实测 10 种参数组合，只有缺蒙版和带 SMEA 会崩；带 mask 全部 200（V4 / V4.5 / V5 / V5 Medium 都一样）。
+    2. `action=infill` 或 `img2img` 带 `sm` / `sm_dyn`（SMEA）→ 500。
+       官方前端在 img2img / 局部重绘一律发 `sm=false`、`sm_dyn=false`，这里照做（本地改掉比让成员吃 500 强）。
+
+    普通出图（action=generate）不受影响：SMEA 是合法参数，原样放行。
+    """
+    out = dict(body)
+    p = dict(out.get("parameters")) if isinstance(out.get("parameters"), dict) else {}
+    out["parameters"] = p
+    notes: list[str] = []
+    action = str(out.get("action", "") or "").strip().lower()
+    if action not in ("infill", "img2img"):
+        return out, notes, None
+    if action == "infill" and not p.get("mask"):
+        return out, notes, ("局部重绘（infill）必须带 parameters.mask 蒙版：上游对缺蒙版的请求只会回 500，"
+                            "请在客户端里画好蒙版后再提交")
+    if p.get("sm") or p.get("sm_dyn"):
+        p["sm"] = False
+        p["sm_dyn"] = False
+        notes.append("局部重绘 / 图生图不接受 SMEA，已按官方前端置为 false（否则上游 500）")
+    return out, notes, None
+
+
 def text_model_host(model: str, modern_host: str, legacy_host: str) -> str:
     """Kayra/Erato/GLM/Xialong 等新模型走 text.novelai.net，老模型走 api.novelai.net。"""
     m = (model or "").lower()

@@ -286,6 +286,14 @@ async def user_subscription(request: Request):
     return await subscription_payload(_state(), key)
 
 
+def _virtual_priority() -> dict:
+    """官方 /user/priority 的形状（2026-10-13 实测 image.novelai.net 返回 200）：
+    {maxPriorityActions, nextRefillAt, taskPriority}。本站没有「买优先队列」这回事，
+    如实回 0 次优先操作、下个整点刷新，别编造余额。"""
+    now = int(time.time())
+    return {"maxPriorityActions": 0, "nextRefillAt": now + (3600 - now % 3600), "taskPriority": 10}
+
+
 @router.get("/user/data")
 @router.get("/ai/user/data")
 async def user_data(request: Request):
@@ -293,8 +301,31 @@ async def user_data(request: Request):
     key = await main.authenticate(request)
     sub = await subscription_payload(_state(), key)
     public_sub = {name: value for name, value in sub.items() if name != "naiGate"}
-    return {"subscription": public_sub, "trainingStepsLeft": sub["trainingStepsLeft"],
+    return {"subscription": public_sub, "priority": _virtual_priority(),
+            "trainingStepsLeft": sub["trainingStepsLeft"],
             "anlas": sub["trainingStepsLeft"]["fixedTrainingStepsLeft"]}
+
+
+@router.get("/user/priority")
+@router.get("/ai/user/priority")
+async def user_priority(request: Request):
+    """原生客户端（NAI-Workbench 等）会探这个端点；404 会被当成「渠道不支持」。
+    官方是 200，我们也回同样的形状。"""
+    from .. import main
+    await main.authenticate(request)
+    return _virtual_priority()
+
+
+@router.get("/user/keystore")
+@router.get("/ai/user/keystore")
+async def user_keystore(request: Request):
+    """官方这个端点只允许浏览器会话（2026-10-13 实测：
+    api.novelai.net → 403「Persistent access token is not allowed to access this endpoint.」）。
+    以前我们回 404，客户端会以为「网关缺端点」。照官方的说法回 403，客户端就知道这是
+    「令牌无权访问」而不是「网关坏了」。"""
+    from .. import main
+    await main.authenticate(request)
+    raise main.err(403, "该项目仅限浏览器会话访问（NovelAI 官方对持久令牌同样返回 403）")
 
 
 @router.get("/user/information")
