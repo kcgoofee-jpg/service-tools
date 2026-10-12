@@ -11,6 +11,8 @@ KEY_BUSY = "key_busy"         # 这把 Key 上一张还没出完
 HOURLY_CAP = "hourly_cap"     # 账号每小时上限（AIMD 按它判断「顶到过上限」）
 QUIET_CAP = "quiet_cap"       # 安静时段的每小时上限
 CAP_3H = "cap_3h"             # 账号 3 小时上限
+BURST_CAP = "burst_cap"       # 账号每 10 分钟突发窗口（抹平突发用；不能复用 hourly_cap：
+                              # AIMD 拿 hourly_cap 判断「需求顶到过上限」，突发拒绝不算需求）
 DAILY_CAP = "daily_cap"       # 账号每日上限
 PACED = "paced"               # 每日上限按时段放行：这个时段的份额用完了
 OVER_BASE = "over_base"       # 用完保底后，全站不空闲 / 时段份额不多，暂时不放行（站点原因，不是成员客户端的问题）
@@ -27,8 +29,8 @@ PARAM = "param"                  # 参数不被支持（模型、采样器、角
 
 # 全站层面的拒绝：原因在站点（排队满、账号上限、熔断、冷却），不是这个成员的客户端出了问题。
 # 自动驾驶的「单 Key 被拒 ≥60 次 → 暂停」不能数这些，否则忙时自动重试的正常成员会被误判为死循环。
-SITE_LEVEL = (QUEUE_FULL, HOURLY_CAP, QUIET_CAP, CAP_3H, DAILY_CAP, PACED, OVER_BASE, BREAKER, COOLDOWN,
-              V5_EXHAUSTED, QUEUE_TIMEOUT, SITE_QUOTA)
+SITE_LEVEL = (QUEUE_FULL, HOURLY_CAP, QUIET_CAP, BURST_CAP, CAP_3H, DAILY_CAP, PACED, OVER_BASE, BREAKER,
+              COOLDOWN, V5_EXHAUSTED, QUEUE_TIMEOUT, SITE_QUOTA)
 
 
 class Reason(str):
@@ -49,6 +51,7 @@ def code_of(text) -> str:
 BACKFILL = (
     (QUEUE_FULL, "%排队的人太多%"),
     (HOURLY_CAP, "%本小时出图量已达上限%"),
+    (BURST_CAP, "%本时段出图已达上限%"),
     (KEY_PAUSED, "%暂停%"),
     # 站点级在前：全站额度用完的文案里也含「额度已用完」，不能被个人额度那条先吃掉
     (SITE_QUOTA, "%全站今日 V5 额度已用完%"),
@@ -88,7 +91,7 @@ BACKFILL = (
 
 
 LABELS = {
-    KEY_PAUSED: "Key 被暂停", QUEUE_FULL: "排队满", KEY_BUSY: "上一张没出完就重发", HOURLY_CAP: "本小时全站上限",
+    KEY_PAUSED: "Key 被暂停", QUEUE_FULL: "排队满", KEY_BUSY: "上一张没出完就重发", HOURLY_CAP: "本小时全站上限", BURST_CAP: "突发窗口限速",
     QUIET_CAP: "安静时段上限", CAP_3H: "3 小时全站上限", DAILY_CAP: "全站每日上限", PACED: "全天平滑放行", OVER_BASE: "超出保底暂缓", BREAKER: "全站熔断",
     COOLDOWN: "上游限流暂停", V5_EXHAUSTED: "全站 V5 用完", QUEUE_TIMEOUT: "排队超时", MEMBER_QUOTA: "个人额度用完",
     SITE_QUOTA: "全站额度用完", KEY_RATE: "Key 请求过快", BODY_ABORT: "请求体中断",
