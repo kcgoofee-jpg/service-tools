@@ -114,12 +114,36 @@ def docker_running() -> dict[str, bool]:
     return out
 
 
+_DOCKER_TIME = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?)(Z|[+-]\d{2}:?\d{2})$")
+
+
+def parse_docker_time(text: str) -> float:
+    """docker 的 StartedAt 是 RFC3339Nano（9 位小数纳秒），Python 的 fromisoformat 只吃 6 位。
+    2026-10-13 踩到：直接解析抛 ValueError → 重启历史永远是空的 → 部署窗口里的前端失败又被当故障。
+    """
+    text = (text or "").strip()
+    if not text:
+        return 0.0
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        pass
+    match = _DOCKER_TIME.match(text)
+    if not match:
+        return 0.0
+    stamp, offset = match.group(1), "+00:00" if match.group(2) == "Z" else match.group(2)
+    try:
+        return datetime.fromisoformat(stamp + offset).timestamp()
+    except ValueError:
+        return 0.0
+
+
 def container_started_at(name: str = "nai-gate") -> float:
     """网关容器的启动时间：用来把「部署重启那十几秒的前端失败」和真故障分开。"""
     try:
         out = subprocess.run(["docker", "inspect", "-f", "{{.State.StartedAt}}", name],
                              capture_output=True, text=True, timeout=10).stdout.strip()
-        return datetime.fromisoformat(out.replace("Z", "+00:00")).timestamp() if out else 0.0
+        return parse_docker_time(out)
     except Exception:                     # noqa: BLE001
         return 0.0
 
