@@ -849,7 +849,7 @@ td.note{min-width:220px}
             <div class="table-wrap"><table class="rt"><thead><tr><th>模型</th><th class="nw">时段</th><th class="num">请求 / 成功率</th><th class="num" title="上游返回 429 的次数">限流</th><th class="num" title="上游返回 401/402/403/5xx 或连接失败">其他失败</th><th class="num" title="P50 = 中位数：一半的图比这快，代表典型速度">生成 P50</th><th class="num" title="P90：90% 的图比这快，代表较慢那 10% 有多慢（看卡顿）">生成 P90</th><th class="num" title="收到请求到发往上游：排队 + 冷却">平均排队</th><th class="num" title="实际：这一时段平均每小时出图张数（随负载变化）；上限：min(生成速度/请求间隔, 全站每小时上限)，只在设置或 AIMD 调整时变化">实际 / 上限（张/时）</th></tr></thead><tbody id="perfBody"></tbody></table></div>
           </div>
           <details class="card panel fold">
-            <summary class="panel-head"><h2>排队影子模式</h2><span class="desc" title="用真实请求回放排队：先到先出 vs 成员间轮流；加到 2 / 3 个账号时的等待">只回放计算，不改变实际出图顺序（额度怎么分见「额度与保护 › 算法影子模式」）</span></summary>
+            <summary class="panel-head"><h2>排队影子模式</h2><span class="desc" title="用真实请求回放排队：先到先出 vs 成员间轮流；加到 2 / 3 个账号时的等待">只回放计算，不改变实际出图顺序（额度怎么分见「额度与保护 › 动态额度」）</span></summary>
             <select id="shadowRange" aria-label="回放范围" style="width:140px;margin-bottom:12px"><option value="24">最近 24 小时</option><option value="168">最近 7 天</option></select>
             <div id="shadowBody"><div class="hint">正在回放…</div></div>
           </details>
@@ -1119,7 +1119,7 @@ td.note{min-width:220px}
         </select></div>
       <div class="form-grid">
         <div class="field"><label for="f_daily_images">每日 V4.5 及以下免费图张数</label><input id="f_daily_images" type="number" min="0" step="1" required value="100"><div class="hint">0 = 不限</div></div>
-        <div class="field"><label for="f_daily_v5">每日 V5 张数（走官方周额度）</label><input id="f_daily_v5" type="number" min="0" step="1" required value="0"><div class="hint">0 = 不限</div></div>
+        <div class="field"><label for="f_daily_v5">每日 V5 张数（走官方周额度）</label><input id="f_daily_v5" type="number" min="0" step="1" required value="0"><div class="hint">0 = 不限（仍受全站 V5 总量约束）</div></div>
         <div class="field"><label for="f_daily_anlas">每日 Anlas 上限</label><input id="f_daily_anlas" type="number" min="0" step="1" required value="100"><div class="hint">0 = 不限</div></div>
         <div class="field"><label for="f_monthly_anlas">每月 Anlas 上限</label><input id="f_monthly_anlas" type="number" min="0" step="1" required value="2500"><div class="hint">0 = 不限</div></div>
         <div class="field"><label for="f_daily_text">每日文本 tokens</label><input id="f_daily_text" type="number" min="0" step="1" required value="150000"><div class="hint">0 = 禁止使用文本</div></div>
@@ -1824,8 +1824,13 @@ document.addEventListener('change', e => {
   if(e.target.id === 'bugAll' || e.target.id === 'bugLevel') loadBugs();
   if(e.target.id === 'fbScoreFilter') loadFeedback();
 });
+let fbSearchTimer = 0;
 document.addEventListener('input', e => {
-  if(e.target.id === 'fbSearch') loadFeedback();
+  if(e.target.id === 'fbSearch'){
+    // 防抖：以前每敲一个字符都发一次全量 /admin/api/feedback 并整表重绘（黑名单搜索早就是 250ms 防抖）
+    clearTimeout(fbSearchTimer);
+    fbSearchTimer = setTimeout(loadFeedback, 250);
+  }
 });
 document.addEventListener('click', async e => {
   const b = e.target.closest('[data-bug]');
@@ -2956,10 +2961,15 @@ async function openCreate(){
   editingId = null;
   $('#modalTitle').textContent = '新建 Key';
   $('#modalSave').textContent = '创建';
+  // 默认值跟「新成员默认额度」对齐（以前写死 100 / 0 / 30，其中 V5 的 0 = 不限：
+  // 后端默认是 50，成员实际也拿不到「不限」，默认值误导会让「创建」直接发出一把 V5 不限的 Key）
+  const reg = (opsData && opsData.registration) || {};
+  const dflt = (v, d) => (v === undefined || v === null || v === '' ? d : v);
   $('#f_name').value=''; $('#f_daily_anlas').value=100;
   $('#f_image_model_scope').value='legacy';
-  $('#f_daily_images').value=100; $('#f_daily_v5').value=0; $('#f_monthly_anlas').value=2500;
-  $('#f_daily_text').value=150000; $('#f_rpm').value=10; $('#f_expires').value=30;
+  $('#f_daily_images').value=dflt(reg.daily_images, 100); $('#f_daily_v5').value=dflt(reg.daily_v5, 50);
+  $('#f_monthly_anlas').value=2500;
+  $('#f_daily_text').value=150000; $('#f_rpm').value=10; $('#f_expires').value=dflt(reg.expires_days, 30);
   $('#f_expires').placeholder='';
   $('#f_allow_anlas').checked=false; $('#f_allow_img2img').checked=false;
   $('#f_exclude_global_v5').checked=false;
@@ -3400,15 +3410,23 @@ async function loadActions(){
 function changeLogPage(delta){ logPage=Math.max(1,logPage+delta); loadLogs(); }
 
 /* ---------- settings ---------- */
+let quotaV5Managed = false;      // 全站每日 V5 是否由动态额度算法接管（由 loadSettings 探测后写）
 async function loadSettings(){
   loadGuard(); loadAnlasPool();
   try{
-    const [a, s, o, r] = await Promise.all([
+    const [a, s, o, r, qa] = await Promise.all([
       api('/admin/api/announcement').catch(()=>({})), api('/admin/api/settings'),
-      api('/admin/api/overview').catch(()=>({})), api('/admin/api/runtime-limits')]);
+      api('/admin/api/overview').catch(()=>({})), api('/admin/api/runtime-limits'),
+      api('/admin/api/quota-algo').catch(()=>null)]);
     if($('#announce')) $('#announce').value = a.html || '';
     if($('#s_budget')) $('#s_budget').value = s.global_monthly_anlas;
     if($('#s_v5')) $('#s_v5').value = s.global_daily_v5;
+    // 动态额度开着时，算法每 10 分钟会把 global_daily_v5 写成它算出的全站 V5 值：
+    // 这里手工填的数字会在 10 分钟内被静默覆盖。与其骗站长，不如说清楚并禁用（和领 Key 页的 reg_v5 一致）。
+    quotaV5Managed = !!(qa && String((qa.params||{}).quota_auto_enabled ?? 1) !== '0' && (qa.last||{}).enabled !== false);
+    const v5in = $('#s_v5'), v5hint = v5in ? v5in.parentElement.querySelector('.hint') : null;
+    if(v5in){ v5in.disabled = quotaV5Managed; v5in.title = quotaV5Managed ? '由「额度与保护 › 动态额度」自动设置' : ''; }
+    if(v5hint) v5hint.textContent = quotaV5Managed ? '由「额度与保护 › 动态额度」自动设置（算法每 10 分钟重算）' : '0 = 不限';
     showV5Cap(s.v5_capacity);
     if($('#s_v5_alert')) $('#s_v5_alert').value = s.v5_alert_threshold;
     for(const name of ['queue_timeout','key_image_min_interval','image_min_interval','image_429_cooldown_seconds']){
@@ -3436,9 +3454,7 @@ async function loadSettings(){
         const willShow = box.hidden;
         box.hidden = !willShow;
         btnPrev.textContent = willShow ? '收起预览' : '预览效果';
-        if(willShow){
-          $('#announcePreview').innerHTML = $('#announce').value || '<span class="muted">（公告内容为空）</span>';
-        }
+        if(willShow) renderAnnouncePreview();
       });
     }
   }catch(e){ toastErr(e); }
@@ -3485,12 +3501,15 @@ async function saveBudget(btn){
   const saveBtn = btn || document.querySelector('[data-act="save-budget"]');
   if(saveBtn){ saveBtn.disabled = true; saveBtn.textContent = '保存中…'; }
   try{
-    const d = await api('/admin/api/settings', {method:'PUT', body: JSON.stringify({
+    const body = {
       global_monthly_anlas: readNum('s_budget', '全站月度 Anlas 预算', {max:1000000, int:false}),
-      global_daily_v5: readNum('s_v5', '全站每日 V5 张数', {max:100000}),
       v5_alert_threshold: readNum('s_v5_alert', 'V5 告警阈值', {min:1, max:100}),
-    })});
-    toast('已保存：月预算 ' + d.global_monthly_anlas + ' Anlas，V5 日限 ' + d.global_daily_v5 + ' 张', 'ok');
+    };
+    // 算法接管时不提交 V5 日限：提交了也只会被 10 分钟后的重算覆盖，徒增困惑
+    if(!quotaV5Managed) body.global_daily_v5 = readNum('s_v5', '全站每日 V5 张数', {max:100000});
+    const d = await api('/admin/api/settings', {method:'PUT', body: JSON.stringify(body)});
+    toast('已保存：月预算 ' + d.global_monthly_anlas + ' Anlas'
+      + (quotaV5Managed ? '（V5 日限由动态额度算法管理）' : '，V5 日限 ' + d.global_daily_v5 + ' 张'), 'ok');
     showV5Cap(d.v5_capacity);
     loadAllowance();
     loadQuotaAlgo();
@@ -3824,6 +3843,22 @@ async function saveRuntimeLimits(btn){
     if(saveBtn){ saveBtn.disabled = false; saveBtn.textContent = '保存运行限制'; }
   }
 }
+/* 公告预览：与成员侧同一套隔离（后端 /announcement 也是 sandbox iframe）。
+   后台 CSP 允许内联脚本，直接 innerHTML 把公告写进后台页面，等于把「从别处粘贴来的 HTML」
+   放在已登录的后台会话里执行（可读 Key、删 Key）。sandbox="" 的 iframe + srcdoc 里脚本不会执行。 */
+function renderAnnouncePreview(){
+  const box = $('#announcePreview');
+  if(!box) return;
+  let f = box.querySelector('iframe');
+  if(!f){
+    f = document.createElement('iframe');
+    f.setAttribute('sandbox', '');          // 空 sandbox：不给脚本、不给表单、不同源
+    f.setAttribute('title', '公告预览');
+    f.style.cssText = 'width:100%;min-height:120px;border:1px solid var(--border);border-radius:8px;background:#fff';
+    box.appendChild(f);
+  }
+  f.srcdoc = $('#announce').value || '<p style="font-family:system-ui;color:#888">（公告内容为空）</p>';
+}
 async function saveAnnounce(){
   const btn = $('[data-act="save-announce"]');
   if(btn && btn.disabled) return;
@@ -3832,7 +3867,7 @@ async function saveAnnounce(){
     await api('/admin/api/announcement', {method:'PUT', body: JSON.stringify({html: $('#announce').value})});
     toast('公告已保存', 'ok');
     const box = $('#announcePreviewBox');
-    if(box && !box.hidden) $('#announcePreview').innerHTML = $('#announce').value || '<span class="muted">（公告内容为空）</span>';
+    if(box && !box.hidden) renderAnnouncePreview();
   }catch(e){
     toastErr(e);
   }finally{
@@ -4058,7 +4093,9 @@ document.addEventListener('visibilitychange', ()=>{ if(!document.hidden && allow
 /* 页面不放刷新按钮（10-11 站长）：看数据的页面每 15 秒自动刷新（标签页在后台、弹窗打开或正在输入时暂停）；
    成员、生成记录、领 Key、Discord、系统这几页是表单或长列表，自动刷新会冲掉没保存的输入和滚动位置，切换页面时重新读取。 */
 const AUTO_REFRESH = {
-  ov: () => loadOverview(), up: () => { loadOverview(); loadPerf(); loadShadow(); },
+  // 「上游」页不含 loadShadow：它是 7 天回放（后端每次都要重算全部样本），15 秒一刷纯属浪费；
+  // 算法影子面板由「刷新」按钮 / 切换时间范围时按需加载。
+  ov: () => loadOverview(), up: () => { loadOverview(); loadPerf(); },
   logs: () => loadLogs(),
   actions: () => loadActions(), bugs: () => loadBugs(), feedback: () => loadFeedback(),
   limits: () => { loadQuotaAlgo(); loadAutopilot(); }, modules: () => loadModules(),

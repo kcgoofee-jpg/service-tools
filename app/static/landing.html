@@ -143,6 +143,9 @@ section{margin-top:12px}
 .card.step{transition:border-color .2s,box-shadow .2s}
 .card.step:hover{border-color:var(--border-strong);box-shadow:var(--shadow)}
 .pills{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+.pills:empty{display:none}
+#live .live-h{display:flex;gap:8px;align-items:center;font-weight:600;font-size:14px;margin:0 0 10px}
+#live .live-h:empty{display:none}
 .step-act{margin-top:auto;width:100%}
 .step-act .btn{width:100%;min-height:44px;padding:10px 16px;font-size:14px;font-weight:600;border-radius:10px;display:flex;align-items:center;justify-content:center;gap:6px;box-sizing:border-box}
 .pill{display:inline-flex;align-items:center;gap:8px;padding:4px 12px;border-radius:999px;font-size:13.5px;font-weight:500;
@@ -444,6 +447,10 @@ body.authed #board{margin-top:10px}
 <main>
   <section id="live">
     <div class="card">
+      <!-- 标题与打码 Key：JS 会按登录状态写文案（查额度 / 我的额度）。
+           2026-10-12 修复：这些 id 只出现在 JS 里、页面上不存在，导致 my key / 标题整段不渲染。 -->
+      <div class="live-h" id="liveTitle"><span data-ic="key"></span>查额度</div>
+      <div class="copyline" id="headKey" hidden></div>
       <div class="me" id="meCard" hidden></div>
       <div class="loginrow" id="loginRow" hidden>
         <a class="btn primary dc" id="loginBtn" href="/login" hidden><span data-ic="discord"></span>用 Discord 登录</a>
@@ -457,6 +464,8 @@ body.authed #board{margin-top:10px}
 
   <section id="board" aria-labelledby="stBig">
     <div class="card board-card">
+      <!-- 名额 / 领取状态胶囊：JS（renderStatus）只在元素存在时写入 -->
+      <div class="pills" id="pills" aria-busy="true"></div>
       <!-- 实时状态行：大字 + 单行理由 + 0人排队 -->
       <div class="board-top">
         <div class="board-st">
@@ -497,6 +506,8 @@ body.authed #board{margin-top:10px}
           <div id="barV5" class="bar-v5" style="width: 0%;"></div>
         </div>
       </div>
+      <!-- 今日额度说明（算法每天写的 algo_notice）；有 Key 的成员隐藏，改看自己的数字 -->
+      <p class="algo-note" id="algoNote" hidden></p>
     </div>
   </section>
 
@@ -553,6 +564,8 @@ body.authed #board{margin-top:10px}
       <li><span class="ri" data-ic="info"></span><span><b>查额度、自助换 Key</b>：在 Discord 输入 <code>/quota</code> 随时查看今日剩余免费额度与状态；若怀疑 Key 泄露或遇到配置异常，在 Discord 输入 <code>/resetkey</code> 可一键自助更换新 Key。</span></li>
       <li><span class="ri" data-ic="key"></span><span><b>一人一把，严禁转售与共用</b>：公益资源有限，Key 仅限本人使用（挂梯子换节点、手机电脑多设备正常使用完全不受影响；但多人同时共用或转售会被系统拦截并回收）。退出 Discord 服务器或长期闲置后 Key 会被自动回收<span id="ruleIdle" hidden>（连续 <b id="idleDays"></b> 天不用）</span>。</span></li>
       <li><span class="ri" data-ic="ban"></span><span><b>合规安全，禁止违禁</b>：严禁生成违反法律法规或极端有害的内容，违规账号将被永久封禁并不再恢复。</span></li>
+      <!-- 记录披露（开启「生成记录」时由服务端下发 audit_notice；关着不显示） -->
+      <li id="audit" hidden><span class="ri" data-ic="info"></span><span id="auditTxt"></span></li>
     </ul>
   </section>
 
@@ -1012,15 +1025,16 @@ function fmtDate(sec){
       el.className = 'step-badge' + (s === step ? (step === 'pace' ? ' on' : ' accent') : '');
     });
 
-    /* 额度 */
+    /* 额度：0 = 站长关闭了该上限，必须显示「不限」。以前 q.images_cap 缺失时写死 1700 / 260，
+       那两个数字来自历史配置，改配置后页面就在编数字。 */
     var used45 = (q.units_today !== undefined && q.units_today !== null) ? q.units_today : (q.images_today || 0);
-    var cap45 = q.images_cap || 1700;
+    var cap45 = Number(q.images_cap || 0);
     var used5 = q.v5_today || 0;
-    var cap5 = q.v5_cap || 260;
+    var cap5 = Number(q.v5_cap || 0);
     if($id('dTotal')) $id('dTotal').textContent = Math.round(used45);
-    if($id('dTotalCap')) $id('dTotalCap').textContent = cap45;
+    if($id('dTotalCap')) $id('dTotalCap').textContent = cap45 > 0 ? cap45 : '不限';
     if($id('dV5')) $id('dV5').textContent = used5;
-    if($id('dV5Cap')) $id('dV5Cap').textContent = cap5;
+    if($id('dV5Cap')) $id('dV5Cap').textContent = cap5 > 0 ? cap5 : '不限';
 
     var pctTotal = cap45 > 0 ? Math.min(100, Math.round((used45 / cap45) * 100)) : 0;
     var pctV5 = cap5 > 0 ? Math.min(100, Math.round((used5 / cap5) * 100)) : 0;
