@@ -10,8 +10,8 @@
 （max_input_chars=24000），中文差不多 1 字 1 token，插件的 Agent 又带一大坨系统提示词/世界书，
 必然超。修法是按 token 预算做「中间省略」截断：保留开头（人设/规则）与结尾（最近对话）。
 """
-from app.policy import (TEXT_CONTEXT_TOKENS, estimate_text_tokens, clamp_text_params,
-                        _truncate_middle)
+from app.policy import (TEXT_CONTEXT_TOKENS, TEXT_MAX_GENERATION_TOKENS, estimate_text_tokens,
+                        clamp_text_params, _truncate_middle)
 
 
 def _body(text, max_length=300):
@@ -57,12 +57,28 @@ def test_char_cap_still_rejects_absurd_bodies():
     assert problem is not None and "输入过长" in problem
 
 
-def test_budget_shrinks_when_max_length_is_large():
-    """max_length 越大，留给输入的预算越小（两者相加不能超过 8192）。"""
+def test_generation_length_is_capped_at_upstream_limit():
+    """上游单次生成上限 250 token：以前 max_text_output_tokens=300 让**每一次**文本请求都 400。"""
+    body, notes, problem = clamp_text_params(_body("你好", max_length=300), max_output_tokens=300,
+                                            max_input_chars=24000)
+    assert problem is None
+    assert body["parameters"]["max_length"] == TEXT_MAX_GENERATION_TOKENS == 250
+    assert any("250" in n for n in notes)
+
+    # 插件把 max_tokens 设成 32000 也一样被钳住
+    body, _, _ = clamp_text_params(_body("你好", max_length=32000), max_output_tokens=300,
+                                   max_input_chars=24000)
+    assert body["parameters"]["max_length"] == 250
+
+    # 站长把上限写到环境变量里也兜得住
+    body, _, _ = clamp_text_params(_body("你好", max_length=2000), max_output_tokens=2000,
+                                   max_input_chars=24000)
+    assert body["parameters"]["max_length"] == 250
+
+
+def test_budget_leaves_room_for_upstream_generation_limit():
+    """输入预算 + 生成上限必须留在 8192 上下文里。"""
     text = "设定" * 4000
-    small, _, _ = clamp_text_params(_body(text, max_length=64), max_output_tokens=8192,
-                                    max_input_chars=24000)
-    big, _, _ = clamp_text_params(_body(text, max_length=4096), max_output_tokens=8192,
-                                  max_input_chars=24000)
-    assert len(big["input"]) < len(small["input"])
-    assert estimate_text_tokens(big["input"]) + 4096 <= TEXT_CONTEXT_TOKENS
+    body, _, _ = clamp_text_params(_body(text, max_length=250), max_output_tokens=300,
+                                   max_input_chars=24000)
+    assert estimate_text_tokens(body["input"]) + body["parameters"]["max_length"] <= TEXT_CONTEXT_TOKENS

@@ -113,7 +113,9 @@ class Settings:
     default_expires_days: int = _int("DEFAULT_KEY_EXPIRES_DAYS", 30)
 
     # ---- 文本 ----
-    max_text_output_tokens: int = _int("MAX_TEXT_OUTPUT_TOKENS", 300)
+    # 上游单次最大生成长度真值是 250 token（2026-10-13 实测；以前默认 300 → 每次文本请求都被 400）。
+    # policy.clamp_text_params 还会再按 TEXT_MAX_GENERATION_TOKENS 兜一层，这里只是把默认值改对。
+    max_text_output_tokens: int = _int("MAX_TEXT_OUTPUT_TOKENS", 250)
     max_input_chars: int = _int("MAX_INPUT_CHARS", 24000)
 
     # ---- 其他 ----

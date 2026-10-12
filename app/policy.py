@@ -747,6 +747,7 @@ def medium_normalize(payload: dict) -> Tuple[dict, list[str]]:
 # ------------------------------------------------------------ 文本钳制 ----
 
 TEXT_CONTEXT_TOKENS = 8192          # 上游真值（2026-10-13 实测报错信息里给的）
+TEXT_MAX_GENERATION_TOKENS = 250    # 上游单次最大生成长度（真值：超过就 400 "maximum generation length, 250 tokens"）
 TEXT_INPUT_BUDGET_TOKENS = 7000     # 默认留给输入的预算（其余给输出与安全余量）
 
 
@@ -762,12 +763,17 @@ def clamp_text_params(payload: dict, *, max_output_tokens: int,
     if len(input_text) > max_input_chars:
         return out, notes, f"输入过长（{len(input_text)} 字符，上限 {max_input_chars}）"
 
+    # 上游单次生成上限就是 250 token（2026-10-13 实测：max_length=300 被 400 拒绝，
+    # 报 "Requested length (300) exceeds model's maximum generation length, 250 tokens"）。
+    # 站长把 max_text_output_tokens 设成 300，于是**每一次**文本请求都失败 —— 这里兜住它。
+    cap = max(1, min(int(max_output_tokens), TEXT_MAX_GENERATION_TOKENS))
     ml = int(p.get("max_length", 0) or 0)
     if ml <= 0:
-        p["max_length"] = min(150, max_output_tokens)
-    elif ml > max_output_tokens:
-        p["max_length"] = max_output_tokens
-        notes.append(f"max_length 已钳制到 {max_output_tokens}")
+        p["max_length"] = min(150, cap)
+    elif ml > cap:
+        p["max_length"] = cap
+        notes.append(f"max_length 已按上游上限钳制到 {cap}" if ml <= max_output_tokens
+                     else f"max_length 已钳制到 {cap}")
     min_l = int(p.get("min_length", 1) or 1)
     if min_l > p["max_length"]:
         p["min_length"] = p["max_length"]
