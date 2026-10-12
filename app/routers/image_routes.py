@@ -30,6 +30,7 @@ from ..policy import (
     FREE_REFILL_PER_HOUR,
     REFERENCE_FIELDS,
     clamp_image_params,
+    guard_image_action,
     estimate_image_cost,
     fill_v4_prompt,
     fix_name_digit_weights,
@@ -646,6 +647,13 @@ async def _generate_image(request: Request, *, streaming: bool):
             notes = list(notes) + more
         model = body["model"]
 
+    # 局部重绘缺蒙版 / 图生图带 SMEA → 上游只会回「500 Internal Server Error」（2026-10-13 逐组合实测）：
+    # 缺蒙版本地就说清楚，SMEA 按官方前端置 false。放在费用估算之前，坏请求不占额度。
+    body, more, problem = guard_image_action(body)
+    if problem:
+        main.record(key, "image", model, "rejected", detail=problem)
+        raise main.err(400, problem)
+    notes = list(notes) + more
     p = body.get("parameters", {})
     try:
         image_count = int(p.get("n_samples", 1) or 1)
