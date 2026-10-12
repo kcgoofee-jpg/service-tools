@@ -25,6 +25,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 
 DB = os.environ.get("NAI_GATE_DB", "/opt/service-tools/data/nai_gate.db")
@@ -111,6 +112,16 @@ def docker_running() -> dict[str, bool]:
     except Exception:                     # noqa: BLE001
         pass
     return out
+
+
+def container_started_at(name: str = "nai-gate") -> float:
+    """网关容器的启动时间：用来把「部署重启那十几秒的前端失败」和真故障分开。"""
+    try:
+        out = subprocess.run(["docker", "inspect", "-f", "{{.State.StartedAt}}", name],
+                             capture_output=True, text=True, timeout=10).stdout.strip()
+        return datetime.fromisoformat(out.replace("Z", "+00:00")).timestamp() if out else 0.0
+    except Exception:                     # noqa: BLE001
+        return 0.0
 
 
 def env_value(key: str) -> str:
@@ -304,10 +315,17 @@ def check_data(rep: Report, cur) -> None:
     rep.add(RED if num(bugs.get("error")) else OK, "数据",
             f"未解决 Bug：error {bugs.get('error', 0)} · warn {bugs.get('warn', 0)}", key="bug-count")
     now = time.time()
+    restart = container_started_at()
     recent = cur.execute("SELECT level, substr(title,1,58), count, last_seen FROM error_events "
                          "WHERE resolved_at IS NULL ORDER BY last_seen DESC LIMIT 6").fetchall()
     for level, title, count, last_seen in recent:
         known_why = next((why for sig, why in KNOWN_SIGNATURES if sig in title), "")
+        if not known_why and restart and title.startswith("live:") \
+                and restart <= num(last_seen) < restart + 600:
+            # 前端每秒轮询 /public/live，网关重启那十几秒必然失败 —— 我们自己的部署不算故障
+            rep.known("数据", f"{title}（{count} 次）— 最近一次在网关重启（{time.strftime('%H:%M', time.localtime(restart))}）"
+                              "后 10 分钟内，部署窗口的正常失败")
+            continue
         if known_why:
             rep.known("数据", f"[{level}] {title}（{count} 次）— {known_why}")
         elif num(last_seen) < now - STALE_SECONDS:
