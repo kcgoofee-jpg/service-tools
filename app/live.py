@@ -67,12 +67,10 @@ async def build(state, registrar, now: Optional[float] = None) -> dict[str, Any]
         v5_cap = 0
     # 突发窗口（2026-10-13 加的 10 分钟分摊）：首页状态行必须跟成员拿到的 429 说同一句话。
     # 任一可用账号还有余量就是 0（新请求立刻能进）；全部到顶才报最早空出来的分钟数。
+    # 与放行判定同一个函数（guard.burst_blocked）：首页不能说「已限速」而请求其实能进
     burst_wait = 0
     if guard is not None:
-        waits = [0 if guard.count_10m(t.token_id, now) < guard.burst_cap(now)
-                 else guard.minutes_until_free_10m(t.token_id, now)
-                 for t in pool if t.usable]
-        burst_wait = min(waits, default=0)
+        burst_wait = min((guard.burst_blocked(t.token_id, now) for t in pool if t.usable), default=0)
     body: dict[str, Any] = {
         "t": now,
         "mode": "fifo",                         # 启用轮流出图后为 "drr"

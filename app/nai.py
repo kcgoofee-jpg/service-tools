@@ -213,6 +213,15 @@ async def _wait_cleanup(task: asyncio.Task) -> Any:
     return result
 
 
+def _request_images(body) -> int:
+    """这次请求实际会出几张（n_samples）。记限速计数时按张数记，批量请求才绕不过突发窗口。"""
+    try:
+        params = (body or {}).get("parameters") or {}
+        return max(1, int(params.get("n_samples", 1) or 1))
+    except (TypeError, ValueError):
+        return 1
+
+
 class NaiClient:
     """持有共享 httpx.AsyncClient 与上游令牌池。"""
 
@@ -679,7 +688,7 @@ class NaiClient:
                     send_started = True
                     request_timing.mark_sent()
                     if image_lane and wait_for_image_slot and self.guard is not None:
-                        self.guard.record_start(ts.token_id)
+                        self.guard.record_start(ts.token_id, images=_request_images(json_body))
                     if max_response_bytes is None:
                         resp = await self._client.request(
                             method, url, json=json_body, headers=self._headers(ts, accept, method=method))
@@ -844,7 +853,7 @@ class NaiClient:
                 send_started = True
                 request_timing.mark_sent()
                 if self.guard is not None:
-                    self.guard.record_start(ts.token_id)
+                    self.guard.record_start(ts.token_id, images=_request_images(json_body))
                 resp = await self._client.send(req, stream=True)
                 request_timing.mark_status(resp.status_code)
             if resp.status_code == 429:
