@@ -124,6 +124,29 @@ def container_started_at(name: str = "nai-gate") -> float:
         return 0.0
 
 
+def restart_history(name: str = "nai-gate") -> list[float]:
+    """网关重启时间的历史（最近 20 次，存在 STATE_DIR）。
+
+    只认「最近一次重启」不够用：今天连发三次版，上一轮窗口里失败的前端请求，
+    到下一轮巡检时已经不算「重启后 10 分钟内」了，于是又被当成故障。
+    """
+    started = container_started_at(name)
+    path = STATE_DIR / "restarts.json"
+    try:
+        hist = [float(x) for x in json.loads(path.read_text())]
+    except Exception:                     # noqa: BLE001
+        hist = []
+    if started and (not hist or started > hist[-1] + 1):
+        hist.append(started)
+    hist = sorted(set(hist))[-20:]
+    try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(hist))
+    except OSError:
+        pass
+    return hist
+
+
 def env_value(key: str) -> str:
     try:
         for line in Path(ENV_FILE).read_text(encoding="utf-8", errors="replace").splitlines():
@@ -315,15 +338,15 @@ def check_data(rep: Report, cur) -> None:
     rep.add(RED if num(bugs.get("error")) else OK, "数据",
             f"未解决 Bug：error {bugs.get('error', 0)} · warn {bugs.get('warn', 0)}", key="bug-count")
     now = time.time()
-    restart = container_started_at()
+    restarts = restart_history()
     recent = cur.execute("SELECT level, substr(title,1,58), count, last_seen FROM error_events "
                          "WHERE resolved_at IS NULL ORDER BY last_seen DESC LIMIT 6").fetchall()
     for level, title, count, last_seen in recent:
         known_why = next((why for sig, why in KNOWN_SIGNATURES if sig in title), "")
-        if not known_why and restart and title.startswith("live:") \
-                and restart <= num(last_seen) < restart + 600:
+        hit = next((r for r in restarts if r <= num(last_seen) < r + 600), 0.0)
+        if not known_why and title.startswith("live:") and hit:
             # 前端每秒轮询 /public/live，网关重启那十几秒必然失败 —— 我们自己的部署不算故障
-            rep.known("数据", f"{title}（{count} 次）— 最近一次在网关重启（{time.strftime('%H:%M', time.localtime(restart))}）"
+            rep.known("数据", f"{title}（{count} 次）— 最近一次在网关重启（{time.strftime('%H:%M', time.localtime(hit))}）"
                               "后 10 分钟内，部署窗口的正常失败")
             continue
         if known_why:
