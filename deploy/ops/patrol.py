@@ -37,6 +37,10 @@ NZ = "+8 hours"                       # 站点按 Asia/Shanghai 记「天」
 OK, WARN, RED = "ok", "warn", "red"
 RANK = {OK: 0, WARN: 1, RED: 2}
 
+# Discord 前面有 Cloudflare：用 python 默认的 User-Agent（Python-urllib/3.x）会被判成机器人直接 403 + error code 1010。
+# 2026-10-13 实测：默认 UA → 403；换成下面这组 → 200。别删。
+BROWSER_HEADERS = {"User-Agent": "DiscordBot (https://gate.davidzhao.top, 1.0)", "Accept": "application/json"}
+
 
 class Report:
     def __init__(self):
@@ -285,26 +289,34 @@ def send_alert(text: str) -> bool:
     if not token or not (user or channel):
         print("[patrol] 未配置告警通道（ALERT_USER_ID / ALERT_CHANNEL_ID），只记日志", file=sys.stderr)
         return False
-    base = f"https://discord.com/api/v10/{'users/@me/channels' if not channel else 'channels'}"
+    headers = {"Authorization": "Bot " + token, "Content-Type": "application/json", **BROWSER_HEADERS}
     try:
         if channel:
-            url, method, body = f"{base}/{channel}/messages", "POST", {"content": text[:1900]}
+            url, body = f"https://discord.com/api/v10/channels/{channel}/messages", {"content": text[:1900]}
         else:
-            req = urllib.request.Request("https://discord.com/api/v10/users/@me/channels",
-                                         data=json.dumps({"recipient_id": user}).encode(),
-                                         headers={"Authorization": "Bot " + token, "Content-Type": "application/json"},
-                                         method="POST")
-            with urllib.request.urlopen(req, timeout=10) as response:
+            request = urllib.request.Request("https://discord.com/api/v10/users/@me/channels",
+                                             data=json.dumps({"recipient_id": user}).encode(),
+                                             headers=headers, method="POST")
+            with urllib.request.urlopen(request, timeout=10) as response:
                 channel_id = json.loads(response.read())["id"]
-            url, method, body = f"https://discord.com/api/v10/channels/{channel_id}/messages", "POST", {"content": text[:1900]}
-        request = urllib.request.Request(url, data=json.dumps(body).encode(),
-                                         headers={"Authorization": "Bot " + token, "Content-Type": "application/json"},
-                                         method=method)
+            url, body = f"https://discord.com/api/v10/channels/{channel_id}/messages", {"content": text[:1900]}
+        request = urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers, method="POST")
         with urllib.request.urlopen(request, timeout=10) as response:
             return response.status in (200, 201)
+    except urllib.error.HTTPError as exc:                       # 403 + Cloudflare 1010 = UA 不合规
+        hint = "（Cloudflare 1010：User-Agent 被拦）" if exc.code == 403 and "1010" in _safe_read(exc) else ""
+        print(f"[patrol] 告警发送失败：HTTP {exc.code}{hint}", file=sys.stderr)
+        return False
     except Exception as exc:              # noqa: BLE001
         print(f"[patrol] 告警发送失败：{type(exc).__name__}", file=sys.stderr)
         return False
+
+
+def _safe_read(exc: urllib.error.HTTPError) -> str:
+    try:
+        return exc.read().decode("utf-8", "replace")[:200]
+    except Exception:                     # noqa: BLE001
+        return ""
 
 
 def maybe_alert(rep: Report, text: str) -> None:
