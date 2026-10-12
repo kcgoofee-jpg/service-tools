@@ -47,6 +47,10 @@ def begin(scope) -> object:
     elif "workbench" in ua.lower():
         if not cname.startswith("NAI-Workbench"):
             cname = f"NAI-Workbench ({cname})"[:CLIENT_MAX]
+    elif "littlewhitebox" in ua.lower() or "xiaobaihe" in ua.lower():
+        # 「后端发送」模式会带自己的 UA；前端直连时 UA 是浏览器，只能靠 Payload 指纹（见下）
+        if not cname.startswith("LittleWhiteBox"):
+            cname = f"LittleWhiteBox ({cname})"[:CLIENT_MAX]
 
     return _TIMING.set({"t0": time.monotonic(), "sent": None, "client": cname, "status": 0,
                         "rid": secrets.token_hex(4)})
@@ -140,16 +144,30 @@ def set_source(label: str) -> None:
 
 
 def refine_client_from_payload(body: dict) -> None:
-    """对无明确自报 UA 的客户端，利用 Payload 参数指纹进行精准识别（如 dsh-tavern-image）。"""
+    """对无明确自报 UA 的客户端，利用 Payload 参数指纹进行精准识别（如 dsh-tavern-image、小白盒）。"""
     holder = _TIMING.get()
     if holder is None or not isinstance(body, dict):
         return
     current = holder.get("client", "")
-    if current.startswith(("Aaalice", "Luker", "TauriTavern", "NAI-Workbench", "DSH-Tavern")):
+    if current.startswith(("Aaalice", "Luker", "TauriTavern", "NAI-Workbench", "DSH-Tavern", "LittleWhiteBox")):
         return
 
     params = body.get("parameters") if isinstance(body.get("parameters"), dict) else {}
     v4_prompt = params.get("v4_prompt") if isinstance(params.get("v4_prompt"), dict) else {}
+    suffix = f" ({current})" if current else ""
+
+    # 小白盒 LittleWhiteBox（RT15548/LittleWhiteBox，酒馆插件）：2026-10-13 按它的源码加的指纹。
+    # 它的请求「前端直连」时用的是宿主浏览器 UA（和柏宝绘之类完全一样），只能靠请求体认：
+    # · ucPresetId / qualityPresetId 是它自有的字段名（官方 SDK 用 ucPreset / qualityToggle）；
+    # · 兜底组合：顶层 use_new_shared_trial + params_version 4 + stream msgpack + image_format png。
+    if any(marker in params for marker in ("ucPresetId", "qualityPresetId")) or (
+        body.get("use_new_shared_trial") is True
+        and params.get("params_version") == 4
+        and params.get("stream") == "msgpack"
+        and params.get("image_format") == "png"
+    ):
+        holder["client"] = f"LittleWhiteBox{suffix}"[:CLIENT_MAX]
+        return
 
     # dsh-tavern-image (weixinlll/dsh-tavern-image) 专有特征指纹
     if (
@@ -161,5 +179,4 @@ def refine_client_from_payload(body: dict) -> None:
         and params.get("add_original_image") is True
         and params.get("controlnet_strength") == 1
     ):
-        suffix = f" ({current})" if current else ""
         holder["client"] = f"DSH-Tavern-Image{suffix}"[:CLIENT_MAX]

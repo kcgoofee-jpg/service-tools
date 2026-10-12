@@ -18,3 +18,6 @@ exports/
 
 # 含成员身份的审计报告只放本地 exports/，不进公开仓库
 docs/AUDIT_*
+
+# 浏览器检查工具（playwright-cli）的运行残留
+.playwright-cli/

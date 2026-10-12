@@ -225,6 +225,14 @@ def check_members(rep: Report, cur) -> None:
                 (now - 86400,))
     rep.data["active_members_24h"] = num(active)
 
+    # 客户端分布：能认出来的（小白盒 / 酒馆 / 启动器 / DSH…）与只有浏览器 UA 的分别有多少
+    clients = cur.execute(
+        "SELECT substr(COALESCE(NULLIF(client,''),'(未记录)'),1,34) c, COUNT(*) FROM usage_log "
+        "WHERE ts>? AND kind LIKE 'image%' GROUP BY 1 ORDER BY 2 DESC LIMIT 6", (now - 86400,)).fetchall()
+    if clients:
+        rep.data["clients_24h"] = list(clients)
+        rep.add(OK, "成员", "24 小时客户端：" + "、".join(f"{name} ×{count}" for name, count in clients))
+
 
 def check_registration(rep: Report, cur) -> tuple[int, int]:
     """注册就绪度：开关、名额、链路、领取速度。返回 (每人额度, 报名人数)。"""
