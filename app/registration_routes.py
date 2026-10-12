@@ -338,16 +338,26 @@ def _parse_member(request: Request) -> Optional[tuple[str, str]]:
         return None
 
 
-async def _member_session(request: Request) -> Optional[str]:
-    """有效会话返回 discord_id。会话签发时绑定了当时 Key 的指纹：泄露的 Key 被拿去登录后，
-    成员 /resetkey 换新 Key，攻击者的会话随即失效，看不到新 Key（2026-10-10 审查 P0）。"""
+async def member_state(request: Request) -> tuple[Optional[str], Any]:
+    """有效会话返回 (discord_id, Key 行)。会话签发时绑定了当时 Key 的指纹：泄露的 Key 被拿去登录后，
+    成员 /resetkey 换新 Key，攻击者的会话随即失效，看不到新 Key（2026-10-10 审查 P0）。
+
+    首页首屏渲染也要用它（决定 <body class="authed haskey">），所以单独抽出来，且只查一次 Key。"""
     parsed = _parse_member(request)
     if parsed is None:
-        return None
+        return None, None
     discord_id, tag = parsed
     service = getattr(request.app.state, "registrar", None)
     key = await service.key_row_for(discord_id) if service is not None else None
-    return discord_id if _hmac.compare_digest(tag, _key_tag(key)) else None
+    if not _hmac.compare_digest(tag, _key_tag(key)):
+        return None, None
+    return discord_id, key
+
+
+async def _member_session(request: Request) -> Optional[str]:
+    """只要 discord_id 的调用方用它（内部就是 member_state）。"""
+    discord_id, _key = await member_state(request)
+    return discord_id
 
 
 def _set_cookie(response, name: str, value: str, max_age: int) -> None:
