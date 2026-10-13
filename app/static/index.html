@@ -2906,12 +2906,40 @@ async function putReg(body, okMsg){
   const d = await api('/admin/api/ops/registration', {method:'PUT', body:JSON.stringify(body)});
   opsData = d; toast(okMsg, 'ok'); renderOpsReg();
 }
+/* 三选一确认框：复用确认弹窗，在按钮区临时插入中间选项（取消 / 中间项们 / 主操作）。
+   返回所选 choice 的 value；点「取消」或关掉弹窗返回 null。 */
+async function askChoice(msg, title, choices){
+  const foot = document.querySelector('#confirmModal .dialog-foot');
+  const extra = choices.slice(0, -1).map(c =>
+    `<button class="btn" type="button" data-choice="${esc(c.value)}">${esc(c.label)}</button>`).join('');
+  foot.insertAdjacentHTML('afterbegin', extra);
+  return await new Promise(res => {
+    const done = v => {
+      foot.querySelectorAll('[data-choice]').forEach(b => b.remove());
+      // 走中间按钮时不经过 settleConfirm：要把挂着的 askConfirm 解析器清掉，免得污染下一次确认
+      closeOverlay('#confirmModal'); if(confirmResolve) confirmResolve = null;
+      res(v);
+    };
+    foot.querySelectorAll('[data-choice]').forEach(b =>
+      b.onclick = () => done(b.dataset.choice));
+    askConfirm(msg, title).then(v => done(v ? choices[choices.length-1].value : null));
+  });
+}
 async function toggleRegOpen(input){
   const val = input.checked;
-  if(!await askConfirm(val ? '开放自助领 Key？会在成员公告频道发布一条名额公告。' : '暂停自助领 Key？会在成员公告频道发布一条公告，已领取的成员不受影响。',
-                       val ? '开放并公告' : '暂停并公告')){ input.checked = !val; return; }
+  let notify = true;
+  if(val){
+    const pick = await askChoice('开放自助领 Key。会在成员公告频道发布一条名额公告 —— 也可以只开放、不发公告。',
+                                 '开放领 Key', [
+                                   {label: '仅开放（不公告）', value: 'silent'},
+                                   {label: '开放并公告', value: 'announce'}]);
+    if(!pick){ input.checked = !val; return; }
+    notify = pick === 'announce';
+  }else{
+    if(!await askConfirm('暂停自助领 Key？会在成员公告频道发布一条公告，已领取的成员不受影响。', '暂停并公告')){ input.checked = !val; return; }
+  }
   input.disabled = true;
-  try{ await putReg({open:val}, val?'已开放领 Key':'已关闭领 Key'); }
+  try{ await putReg({open:val, notify}, val?(notify?'已开放领 Key（已公告）':'已开放领 Key（未公告）'):'已关闭领 Key'); }
   catch(e){ input.checked = !val; input.disabled = false; toastErr(e); }
 }
 async function saveReg(btn){
