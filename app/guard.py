@@ -32,7 +32,7 @@ FIELDS: dict[str, tuple[int, int, int, str]] = {
                                    "一小时的额度被挤在十分钟内发完，上游看到的是 6 倍速率）；0 = 按每小时上限 ÷ 4 自动分摊"),
     "quiet_start": (0, 0, 23, "安静时段开始（北京时间，整点）；与结束相同 = 不启用（2026-10-10 起不启用：夜里不限速）"),
     "quiet_end": (0, 0, 23, "安静时段结束（北京时间，整点；与开始相同表示不设安静时段）"),
-    "quiet_hourly_cap": (20, 0, 240, "安静时段每个账号每小时最多出图张数"),
+    "quiet_hourly_cap": (20, 0, 240, "安静时段每小时最多出图张数；0 = 完全暂停出图（2026-10-13 站长：3-7 点停用）"),
     "interval_jitter": (5, 0, 30, "两次出图间隔额外随机增加 0～N 秒"),
     "key_image_queue": (1, 0, 3, "每把 Key 在生成中的那张之外，最多再排几张"),
     "queue_per_account": (5, 0, 100, "每个上游账号全站最多同时排几张图"),
@@ -116,7 +116,12 @@ class Guard:
 
     def hourly_cap(self, now: Optional[float] = None) -> int:
         now = time.time() if now is None else now
-        cap = self.values["quiet_hourly_cap"] if self.in_quiet(now) else self.values["account_hourly_cap"]
+        # 安静时段 quiet_hourly_cap=0 表示完全暂停（不是不限）：配合 3-7 点硬停用
+        cap = self.values["account_hourly_cap"]
+        if self.in_quiet(now):
+            cap = self.values["quiet_hourly_cap"] or 0
+            if cap <= 0:
+                return 0
         marks = self._cap_marks
         if not marks or marks[-1][1] != cap:
             marks.append((now, cap))       # 上限变了（429 减半 / 每小时 +10 / 进出安静时段）就记一笔
@@ -367,6 +372,11 @@ class Guard:
         if self.breaker_until > now:
             return Reason(self._breaker_reason or f"上游连续出错，已暂停出图，约 {int(self.breaker_until - now)} 秒后自动恢复",
                           BREAKER)
+        # 安静时段完全暂停（quiet_hourly_cap=0，2026-10-13 站长：3-7 点硬停用）：
+        # hourly_cap 的 0 是 falsy 会跳过每小时检查，必须在这里显式拦截
+        if self.in_quiet(now) and self.values["quiet_hourly_cap"] <= 0:
+            return Reason(f"现在是安静时段（{self.values['quiet_start']}:00–{self.values['quiet_end']}:00），暂停出图，"
+                          f"{self.values['quiet_end']} 点恢复", QUIET_CAP)
         daily = self.values["account_daily_cap"]
         if daily:
             c = await db.get_upstream_counter(token_id, day)

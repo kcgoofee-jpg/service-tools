@@ -50,3 +50,17 @@ def test_guard_paced_bucket_refills_from_reset_hour(tmp_path):
     g0.values["account_daily_cap"] = 2400
     g0.values["daily_burst"] = 100
     assert abs(g0._day_elapsed(_ts(0, 30)) - 1800) < 5
+
+
+def test_quiet_zero_hard_pauses_generation():
+    """2026-10-13 站长：3-7 点完全暂停。quiet_hourly_cap=0 = 硬停用（不是不限量）。"""
+    import time as _t
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo("Asia/Shanghai")
+    # 构造一个本地 5:00 的时间戳（在 3-7 安静段内）
+    base = datetime.now(tz).replace(hour=5, minute=0, second=0, microsecond=0)
+    ts = base.timestamp()
+    g = Guard(reset_hour=7, tz="Asia/Shanghai")
+    g.values.update(quiet_start=3, quiet_end=7, quiet_hourly_cap=0, account_hourly_cap=100)
+    assert g.in_quiet(ts) and g.hourly_cap(ts) == 0    # token_block_reason 的硬停分支以此为条件
