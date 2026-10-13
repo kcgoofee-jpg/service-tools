@@ -1710,7 +1710,11 @@ async def members(request: Request):
     from datetime import datetime as _dt
     from zoneinfo import ZoneInfo as _ZI
     _tz = getattr(st, "tz", None) or _ZI(st.settings.tz)
-    day_start = _dt.now(_tz).replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+    _reset_h = int(getattr(st.settings, "day_reset_hour", 0) or 0)
+    _now_local = _dt.now(_tz)
+    day_start = (_now_local.replace(hour=0, minute=0, second=0, microsecond=0).timestamp() + _reset_h * 3600
+                 if _now_local.hour < _reset_h
+                 else _now_local.replace(hour=_reset_h, minute=0, second=0, microsecond=0).timestamp())
     reset_map: dict[int, dict] = {}
     for a_ts, a_target in await st.db._db.execute_fetchall(
             "SELECT ts, target FROM admin_actions WHERE action='重置今日额度' AND ok=1 AND ts>=?", (day_start,)):

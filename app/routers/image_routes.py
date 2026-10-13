@@ -256,10 +256,10 @@ async def quota_image_check(key, est: dict, *, legacy_free_images: int = 0,
         if not _manual(key):
             try:
                 now_ts = time.time()
-                day_str = state.day() if callable(getattr(state, "day", None)) else getattr(state, "day", None)
-                if not day_str:
-                    day_str = time.strftime("%Y-%m-%d")
-                midnight_ts = time.mktime(time.strptime(str(day_str), "%Y-%m-%d"))
+                reset_hour = int(getattr(getattr(state, "settings", None), "day_reset_hour", 0) or 0)
+                day_start = getattr(state, "day_start", None)
+                midnight_ts = (day_start(now_ts) if callable(day_start)
+                               else time.mktime(time.strptime(str(state.day()), "%Y-%m-%d")) + reset_hour * 3600)
                 hours_today = max(0.0, (now_ts - midnight_ts) / 3600.0)
             except Exception:
                 hours_today = 24.0
@@ -317,7 +317,7 @@ async def quota_image_check(key, est: dict, *, legacy_free_images: int = 0,
             day_used = await state.db.day_anlas_total(state.day())
             in_flight = sum(r.anlas for r in global_day)
             if day_used + in_flight + est["anlas"] > vibe_daily_cap:
-                raise main.err(402, f"全站今日 Vibe 额度已抢完（{int(vibe_daily_cap)} Anlas/天），明日 0 点恢复",
+                raise main.err(402, f"全站今日 Vibe 额度已抢完（{int(vibe_daily_cap)} Anlas/天），明天服务日重置后恢复",
                                reasons.SITE_QUOTA)
         elif not key["allow_anlas"]:
             raise main.err(402, "该请求会消耗 Anlas，此 Key 未开通付费额度权限", reasons.MEMBER_QUOTA)

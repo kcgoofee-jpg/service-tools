@@ -109,7 +109,7 @@ async def test_daily_review_sets_fair_base(tmp_path, monkeypatch):
             await db._db.execute("INSERT INTO counters (key_id, day, images, legacy_free_images) VALUES (?,?,?,?)",
                                  (k["id"], yday, u, u))
         await db._db.commit()
-        monkeypatch.setattr(quota_algo, "day_coverage", lambda db, day: _async(24.0))
+        monkeypatch.setattr(quota_algo, "day_coverage", lambda db, day, reset_hour=0: _async(24.0))
         guard = Guard(db)
         guard.values["account_daily_cap"] = 1500
         await db.set_settings_bulk({"quota_ceiling": 125, "quota_base_now": 90})
@@ -178,7 +178,7 @@ async def test_simple_mode_one_number_for_everyone(tmp_path, monkeypatch):
                                  (k["id"], yday, u, u))
         await db._db.commit()
         await db.set_settings_bulk({"global_daily_v5": 200})
-        monkeypatch.setattr(quota_algo, "day_coverage", lambda db, day: _async(24.0))
+        monkeypatch.setattr(quota_algo, "day_coverage", lambda db, day, reset_hour=0: _async(24.0))
         guard = Guard(db)
         guard.values["account_daily_cap"] = 1000
         st = SimpleNamespace(db=db, guard=guard, nai=SimpleNamespace(pool=[SimpleNamespace(usable=True)], allowance=None))
