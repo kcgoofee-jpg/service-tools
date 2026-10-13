@@ -48,9 +48,10 @@ def _key(name: str) -> str:
 
 
 class Guard:
-    def __init__(self, db=None, tz: str = "Asia/Shanghai"):
+    def __init__(self, db=None, tz: str = "Asia/Shanghai", reset_hour: int = 0):
         self.db = db
         self.tz = ZoneInfo(tz)
+        self.reset_hour = max(0, min(23, int(reset_hour)))   # 服务日起点（与 state.day() 同一口径）
         self.values: dict[str, int] = {name: spec[0] for name, spec in FIELDS.items()}
         self._starts: dict[str, deque] = {}
         self.image_inflight: dict[int, int] = {}
@@ -333,8 +334,9 @@ class Guard:
 
     # ---------- 每日上限按时段放行（令牌桶：0 点有 burst 张，每小时补 daily/24，当天总量不超过 daily）----------
     def _day_elapsed(self, now: float) -> float:
-        local = datetime.fromtimestamp(now, self.tz)
-        return now - local.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+        shifted = now - self.reset_hour * 3600
+        local = datetime.fromtimestamp(shifted, self.tz)
+        return now - (local.replace(hour=0, minute=0, second=0, microsecond=0).timestamp() + self.reset_hour * 3600)
 
     def paced_allowance(self, now: Optional[float] = None) -> float:
         """到现在为止，这个账号今天最多可以出多少张。"""
@@ -370,7 +372,8 @@ class Guard:
             c = await db.get_upstream_counter(token_id, day)
             used = c.get("units", c["images"])          # 按算力折算：节约模式 14 步的图算半张
             if used >= daily:
-                return Reason(f"本站今天的出图总量已达上限（每个账号 {daily} 张/天，按算力折算，用来保护上游账号），明天 0 点恢复", DAILY_CAP)
+                return Reason(f"本站今天的出图总量已达上限（每个账号 {daily} 张/天，按算力折算，用来保护上游账号），"
+                              f"明天 {self.reset_hour} 点恢复", DAILY_CAP)
             if self.values["daily_burst"] and used >= self.paced_allowance(now):
                 wait = self.minutes_until_paced(used, now)
                 return Reason(f"全站出图按时段放行（每天 {daily} 张平均分到 24 小时，保证晚来的人也有图出），"

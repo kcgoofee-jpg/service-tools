@@ -64,7 +64,7 @@ class GateState:
         )
         self.nai.managed_path = self.token_store_path
         from .guard import Guard
-        self.guard = Guard(self.db, settings.tz)
+        self.guard = Guard(self.db, settings.tz, reset_hour=settings.day_reset_hour)
         self.nai.guard = self.guard
         self.upstream_managed = bool(managed)
         self.alerter = alerts.from_settings(settings)
@@ -151,7 +151,15 @@ class GateState:
 
     # ---------- time ----------
     def day(self, ts: Optional[float] = None) -> str:
-        return datetime.fromtimestamp(ts or time.time(), self.tz).strftime("%Y-%m-%d")
+        ts = (ts or time.time()) - self.settings.day_reset_hour * 3600
+        return datetime.fromtimestamp(ts, self.tz).strftime("%Y-%m-%d")
+
+    def day_start(self, ts: Optional[float] = None) -> float:
+        """服务日（每天 DAY_RESET_HOUR 点重置）的起点时间戳。guard 注水桶 / 统计窗口都用它对齐。"""
+        ts = ts or time.time()
+        shifted = ts - self.settings.day_reset_hour * 3600
+        local = datetime.fromtimestamp(shifted, self.tz)
+        return local.replace(hour=0, minute=0, second=0, microsecond=0).timestamp() + self.settings.day_reset_hour * 3600
 
     def month(self, ts: Optional[float] = None) -> str:
         return datetime.fromtimestamp(ts or time.time(), self.tz).strftime("%Y-%m")

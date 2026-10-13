@@ -90,7 +90,7 @@ def capacity(state) -> Module:
         hard_note="关闭后不再自动调每小时上限；各项上限照常生效",
         params=[
             Param("每天", lambda: f"{g.values['account_daily_cap']}（上游 429 / 403 时自动退到 {g.values.get('daily_cap_fallback')}）"),
-            Param("按时段放行", lambda: f"0 点先放 {g.values['daily_burst']} 张，之后每小时补 "
+            Param("按时段放行", lambda: f"服务日起点先放 {g.values['daily_burst']} 张，之后每小时补 "
                   f"{round(g.values['account_daily_cap'] / 24)} 张" if g.values.get("daily_burst") else "关"),
             Param("每小时", lambda: g.values["account_hourly_cap"], "连续 24 小时没有 429 且顶到过上限时 +10"),
             Param("每 3 小时", lambda: g.values["account_3h_cap"] or "不限"),
@@ -144,7 +144,7 @@ def allocation(state) -> Module:
         name="allocation", title="分配", question="每人每天能出多少张（所有人一样）",
         tick=tick, checks=checks, hard_note="关闭后额度冻结在当前值",
         params=[
-            Param("今天每人 V4.5", lambda: current("ceiling"), "0 点按昨天的用量重算"),
+            Param("今天每人 V4.5", lambda: current("ceiling"), "每天服务日起点后按昨天的用量重算"),
             Param("规则", lambda: "需求接近总量 → 按需求平分；有余量且有人用满 → +"
                   f"{cfg['quota_step']}；否则不变"),
             Param("范围", lambda: f"{cfg['quota_base_min_fair']}～{cfg['quota_ceiling_max']} 张"),
