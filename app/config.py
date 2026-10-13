@@ -73,6 +73,9 @@ class Settings:
     login_max_attempts: int = _int("LOGIN_MAX_ATTEMPTS", 5)
     login_window_seconds: int = _int("LOGIN_WINDOW_SECONDS", 300)
     key_inactivity_delete_days: int = _int("KEY_INACTIVITY_DELETE_DAYS", 3)
+    # 服务日起点：每天这个钟点重置每日额度（0 = 本地午夜）。默认 7 点——0 点刷新正好砸在深夜高峰
+    # （0-2 点是全天用量最高，本身就是"0 点满血复活 + 底仓 burst"引出来的），7 点是使用低谷（2026-10-13 站长）
+    day_reset_hour: int = _int("DAY_RESET_HOUR", 7)
 
     # ---- 告警 / 生成记录 ----
     discord_bot_token: str = os.getenv("DISCORD_BOT_TOKEN", "")
