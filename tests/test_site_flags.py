@@ -36,7 +36,6 @@ def test_specs_are_unique_and_documented():
 def test_fail_closed_defaults():
     assert sf.WEB_LOGIN_PAUSED.default is True        # 不发起 OAuth
     assert sf.DM_ENABLED.default is False             # 不发私信
-    assert sf.WAITLIST_DM.default is False
     assert sf.SHARE_MODE.default == "observe"         # 不处罚
     assert sf.REGISTER_OPEN.default is False
 

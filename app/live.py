@@ -142,10 +142,7 @@ async def build(state, registrar, now: Optional[float] = None) -> dict[str, Any]
     if registrar is not None:
         cfg = await registrar.settings()
         active = await registrar.count_active()
-        wl = await registrar.waitlist()
-        body["members"] = {"max": cfg["max_users"], "active": active, "open": cfg["open"],
-                           "waitlist": [{"name": mask(w["name"]), "invited": bool(w["invited_at"])} for w in wl[:5]],
-                           "waitlist_total": len(wl)}
+        body["members"] = {"max": cfg["max_users"], "active": active, "open": cfg["open"]}
     _cache.update(at=now, body=body)
     return body
 

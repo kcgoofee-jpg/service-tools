@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import time
 from collections import deque
 from datetime import datetime
@@ -305,21 +306,35 @@ class GateState:
         return {"status": status, "recent": len(recent), "failed": failed,
                 "image_cooldown_seconds": self.image_cooldown_remaining()}
 
+    def _bruteforce_bucket(self, client_id: str) -> str:
+        """防爆破桶的键：IPv6 聚合到 /64。同一用户的临时地址都在一个 /64 里轮换，
+        按完整地址计数会被无限重置；IPv4 与无法解析的值原样使用。"""
+        try:
+            addr = ipaddress.ip_address(client_id)
+        except ValueError:
+            return client_id
+        if addr.version == 4:
+            return client_id
+        if addr.ipv4_mapped:
+            return str(addr.ipv4_mapped)
+        return str(ipaddress.ip_network(f"{addr}/64", strict=False).network_address)
+
     def auth_blocked(self, client_id: str) -> int:
         """该 IP 因多次无效 Key 被临时拦截时，返回剩余秒数；否则 0。"""
-        until = self._auth_blocked_until.get(client_id, 0.0)
+        until = self._auth_blocked_until.get(self._bruteforce_bucket(client_id), 0.0)
         return max(0, int(until - time.time()))
 
     def record_auth_failure(self, client_id: str) -> None:
         """记录一次无效 Key；超过阈值则临时拦截该 IP，并告警。"""
         now = time.time()
+        bucket = self._bruteforce_bucket(client_id)
         window = max(1, self.settings.auth_fail_window)
-        win = self._auth_fails.setdefault(client_id, deque())
+        win = self._auth_fails.setdefault(bucket, deque())
         win.append(now)
         while win and now - win[0] > window:
             win.popleft()
         if len(win) >= max(1, self.settings.auth_fail_max):
-            self._auth_blocked_until[client_id] = now + max(1, self.settings.auth_block_seconds)
+            self._auth_blocked_until[bucket] = now + max(1, self.settings.auth_block_seconds)
             win.clear()
             self.alerter.notify(
                 "auth_flood", f"有 IP 在 {window} 秒内用无效 Key 反复请求 {self.settings.auth_fail_max} 次，"
@@ -334,7 +349,7 @@ class GateState:
     async def hit_login(self, client_id: str) -> bool:
         """限制后台口令猜测；True = 放行。"""
         async with self._lock:
-            win = self._login_attempts.setdefault(client_id, deque())
+            win = self._login_attempts.setdefault(self._bruteforce_bucket(client_id), deque())
             now = time.time()
             window = max(1, self.settings.login_window_seconds)
             while win and now - win[0] > window:
@@ -346,33 +361,6 @@ class GateState:
                 for k in [k for k, w in self._login_attempts.items() if not w or now - w[-1] > window]:
                     self._login_attempts.pop(k, None)
             return True
-
-    async def remind_idle_keys(self, send_dm, site: str) -> int:
-        """闲置回收前 24 小时私信提醒（附配置方法）；同一段闲置只提醒一次，之后有活动会重新计时。"""
-        days = max(0, self.settings.key_inactivity_delete_days)
-        if days < 1 or send_dm is None:
-            return 0
-        due = await self.db.keys_due_for_idle_reminder(time.time() - max(days - 1, 0.5) * 86400)
-        sent = 0
-        for row in due[:3]:      # 每轮（每小时）最多处理 3 个，避免同一批注册的人在同一小时集中收到私信
-            if row["ever_used"]:
-                text = (f"🦉 猫头鹰公益站提醒：你的 Key 已经有一段时间没有使用了，再过约 24 小时仍没有请求就会自动回收，"
-                        f"名额会让给其他人。随便生成一张图即可重新计时；回收后有名额时可以再用 /register 领取。")
-            else:
-                text = (f"🦉 猫头鹰公益站提醒：你领取的 Key 还没有成功生成过图片。领取后连续 {days} 天没有使用会自动回收，"
-                        f"你的 Key 还剩约 24 小时。\n"
-                        f"配置方法（以柏宝绘为例）：渠道 → 配置 → 新建接入点，接口地址填 `{site}`，API Key 填私信里 `nai-` 开头的 Key。"
-                        f"可以先在 {site} 首页粘贴 Key 点「用 Key 登录」测试。\n"
-                        f"遇到问题可在 🛠️｜问题反馈 发截图；Key 丢了用 /resetkey 重新获取。")
-            ok = await send_dm(row["discord_id"], text)
-            blocked = getattr(getattr(send_dm, "__self__", None), "last_dm_block", "") if not ok else ""
-            await self.db.mark_idle_reminded(row["key_id"], row["activity"])
-            await log_action(self.db, "系统", "闲置回收前提醒", f"Key #{row['key_id']} {row['name']}",
-                             ("从未使用；" if not row["ever_used"] else "")
-                             + ("已私信" if ok else f"未私信：{blocked}" if blocked else "私信失败（对方可能关闭了私信）"),
-                             ok=ok or bool(blocked))
-            sent += int(ok)
-        return sent
 
     async def delete_inactive_keys(self) -> int:
         """永久回收长期未使用的普通 Key，并拉入黑名单（由站长在后台管理与解封）。0 天表示关闭。"""

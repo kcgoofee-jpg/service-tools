@@ -87,13 +87,9 @@ async def maintenance_loop() -> None:
     async def registrar_jobs():
         registrar = getattr(main.app.state, "registrar", None)
         if registrar is not None:
-            for name in ("sync_roles", "backfill_profiles", "sweep_departed", "invite_waitlist"):
+            for name in ("sync_roles", "backfill_profiles", "sweep_departed"):
                 try:
-                    if name == "invite_waitlist":
-                        ann = getattr(main.STATE, "announcer", None)
-                        await registrar.invite_waitlist(announce=ann.post if ann is not None else None)
-                    else:
-                        await getattr(registrar, name)()
+                    await getattr(registrar, name)()
                 except Exception as exc:
                     main.bug(f"maintenance:{name}", exc)
 
@@ -125,9 +121,7 @@ async def inactive_key_cleanup_loop() -> None:
     main = _main()
     while True:
         try:
-            registrar = getattr(main.app.state, "registrar", None)
-            if registrar is not None:
-                await main.STATE.remind_idle_keys(registrar.send_dm, main.SETTINGS.site_url.rstrip("/"))
+            # 2026-10-13 站长：取消闲置提醒私信。3 天闲置 = 直接删 Key 并拉黑名单，不再提前 24 小时通知。
             removed = await main.STATE.delete_inactive_keys()
             if removed:
                 print(f"[info] deleted {removed} inactive API key(s)")

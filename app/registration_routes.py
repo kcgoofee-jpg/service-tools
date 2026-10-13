@@ -21,7 +21,7 @@ router = APIRouter(prefix="/self-register")
 class IssueRequest(BaseModel):
     discord_id: str
     guild_id: str
-    name: str = ""          # Discord 用户名，仅用于候补名单展示
+    name: str = ""          # Discord 用户名
     username: str = ""      # 直发 Key 用：机器人从 interaction 带来的用户名 / 显示名 / 头像
     global_name: str = ""
     avatar: str = ""
@@ -210,10 +210,8 @@ async def slots(request: Request, body: Who):
     _checked(service, body)
     _admin_actor(service, body)
     cfg = await service.settings()
-    wl = await service.waitlist()
     return JSONResponse({"active": await service.count_active(), "max": cfg["max_users"],
-                         "open": cfg["open"], "reset_at": service.reset_at,
-                         "waitlist": len(wl), "invited": sum(1 for w in wl if w["invited_at"])},
+                         "open": cfg["open"], "reset_at": service.reset_at},
                         headers={"Cache-Control": "no-store"})
 
 

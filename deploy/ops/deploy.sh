@@ -14,7 +14,8 @@ docker logs --since 5m nai-gate > $B/old-before.log 2>&1 || true
 (timeout 150 docker logs -f --since 0s nai-gate > $B/old-shutdown.log 2>&1 &)
 docker compose --profile discord up -d 2>&1 | tail -3
 docker builder prune -f --filter until=72h >/dev/null 2>&1 || true          # 构建缓存只留 3 天内的，保证下次构建仍然快
-for i in $(seq 1 20); do curl -s -m 3 127.0.0.1:3003/healthz | grep -q "\"$VER\"" && break; sleep 2; done
+# healthz 不再回显版本号（防指纹），这里只确认新容器已就绪；版本核对看第 22 行打印的 rules.quota
+for i in $(seq 1 20); do curl -s -m 3 127.0.0.1:3003/healthz | grep -q '"ok":true' && break; sleep 2; done
 curl -s 127.0.0.1:3003/healthz; echo
 curl -s -m 3 -o /dev/null -w "edge 172.30.0.10 %{http_code}\n" 172.30.0.10:8000/healthz   # Caddy 走这个地址
 curl -s -D - -o /dev/null 127.0.0.1:3003/public/live | grep -i x-request-id

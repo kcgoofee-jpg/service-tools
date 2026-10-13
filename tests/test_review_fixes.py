@@ -490,14 +490,13 @@ async def test_feedback_index_and_export_audit(tmp_path, db):
 
 @pytest.mark.asyncio
 async def test_ops_snapshot_fallback_when_service_none(tmp_path, db):
-    # Insert a discord registration and a waitlist record
+    # Insert a discord registration
     key = await db.create_key({
         "name": "Discord:test_user", "token": "test-token-12345", "daily_images": 10,
         "daily_anlas": 0, "daily_v5": 0, "monthly_anlas": 0, "daily_text_tokens": 0,
         "rpm": 10, "allow_anlas": False, "allow_img2img": False, "exclude_global_v5": False, "image_model_scope": "all"
     })
     await db._db.execute("INSERT INTO discord_registrations (discord_id, key_id, created_at, username) VALUES ('123456789012345678', ?, ?, 'test_user')", (key["id"], time.time()))
-    await db._db.execute("INSERT INTO waitlist (discord_id, name, joined_at) VALUES ('987654321098765432', 'wait_user', ?)", (time.time(),))
     await db._db.commit()
 
     settings = Settings(admin_password="a-strong-password-123", secret_key="s", data_dir=tmp_path, admin_cookie_secure=False)
@@ -514,8 +513,6 @@ async def test_ops_snapshot_fallback_when_service_none(tmp_path, db):
         assert res.status_code == 200
         data = res.json()
         assert data["registration"]["active"] == 1
-        assert len(data["registration"]["waitlist"]) == 1
-        assert data["registration"]["waitlist"][0]["discord_id"] == "987654321098765432"
 
 
 @pytest.mark.asyncio
