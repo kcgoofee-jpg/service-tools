@@ -102,54 +102,6 @@ async def _upstream_signals_item(state, now: float) -> dict:
                  [f["text"] for f in flags])
 
 
-async def _share_top_item(state, now: float) -> dict:
-    share = getattr(state, "share", None)
-    if share is None:
-        return _item("share_top", "防分享风险分（谁在多人共用）", NA, "防分享模块未启用。")
-    try:
-        report = await share.report(now)
-    except Exception as exc:
-        return _item("share_top", "防分享风险分（谁在多人共用）", NA, f"读取失败：{exc}")
-    flagged = [r for r in report if r.get("score", 0) > 0 or r.get("strikes", 0) > 0]
-    if not flagged:
-        return _item("share_top", "防分享风险分（谁在多人共用）", OK, "没有 Key 被记风险分。")
-    status = BAD if any(r.get("strikes", 0) or r.get("score", 0) >= 60 for r in flagged) else WARN
-    evidence = [f"{r['name']}：风险分 {r['score']}，违规 {r['strikes']} 次"
-                + (f"，暂停至 {time.strftime('%m-%d %H:%M', time.localtime(r['paused_until']))}" if r.get("paused_until") else "")
-                + (f"｜最近证据：{r['evidence'][0]['label']}" if r.get("evidence") else "")
-                for r in flagged[:5]]
-    return _item("share_top", "防分享风险分（谁在多人共用）", status,
-                 "按风险分排序的前 5 把 Key。",
-                 evidence)
-
-
-async def _net_overlap_item(state, now: float) -> dict:
-    db = state.db
-    try:
-        rows = await db._db.execute_fetchall(
-            "SELECT net_hash, COUNT(DISTINCT key_id) AS c FROM key_sources WHERE last_seen>=? "
-            "GROUP BY net_hash HAVING c>=2 ORDER BY c DESC LIMIT 5", (now - DAY,))
-    except Exception as exc:
-        return _item("net_overlap", "同一网段多把 Key（24 小时）", NA, f"读取失败：{exc}")
-    if not rows:
-        return _item("net_overlap", "同一网段多把 Key（24 小时）", OK,
-                     "近 24 小时没有多把 Key 共用网段。")
-    evidence = []
-    for net_hash, count in rows:
-        try:
-            name_rows = await db._db.execute_fetchall(
-                "SELECT k.name FROM key_sources ks JOIN api_keys k ON k.id=ks.key_id "
-                "WHERE ks.net_hash=? AND ks.last_seen>=? LIMIT 5", (net_hash, now - DAY))
-            names = "、".join(r[0] for r in name_rows)
-        except Exception:
-            names = ""
-        evidence.append(f"{count} 把 Key 共用同一网段：{names}")
-    notable = any(c >= 3 for _, c in rows) or len(rows) >= 3
-    return _item("net_overlap", "同一网段多把 Key（24 小时）", WARN if notable else OK,
-                 "同一宽带出现 2～3 把属正常，仅作线索。",
-                 evidence)
-
-
 async def _concentration_item(state, now: float) -> dict:
     try:
         from .database import NOT_TEST
@@ -219,8 +171,6 @@ async def collect(state, now: Optional[float] = None) -> dict:
         _tls_fingerprint_item(),
         _egress_ip_item(),
         await _upstream_signals_item(state, now),
-        await _share_top_item(state, now),
-        await _net_overlap_item(state, now),
         await _concentration_item(state, now),
         await _burn_today_item(state, now),
     ]

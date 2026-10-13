@@ -12,7 +12,6 @@ import time
 
 from . import status_stats
 from .action_log import RETENTION_DAYS as ADMIN_ACTION_RETENTION_DAYS
-from .key_sources import RETENTION_SECONDS as KEY_SOURCE_RETENTION
 from .audit import (
     audit_flags,
     audit_image_cap_mb,
@@ -61,7 +60,6 @@ async def maintenance_loop() -> None:
         keep = state.settings.usage_log_retention_days
         if keep > 0:
             await state.db.purge_usage_log(time.time() - max(7, keep) * 86400)
-        await state.db.purge_key_sources(time.time() - KEY_SOURCE_RETENTION)
         await state.db.purge_admin_actions(time.time() - ADMIN_ACTION_RETENTION_DAYS * 86400)
         await status_stats.flush(state.db)
         await state.db._db.execute("DELETE FROM status_hourly WHERE hour<?", (time.time() - 30 * 86400,))

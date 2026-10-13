@@ -495,12 +495,6 @@ async def public_me(request: Request):
                 out["invite_unbound"] = True
         except Exception:
             pass
-        try:
-            from . import share_confirm
-            if await share_confirm.pending(gate.db, key["id"]):
-                out["share_check"] = {"options": share_confirm.ANSWERS}
-        except Exception:
-            pass
     return JSONResponse(out, headers={"Cache-Control": "no-store"})
 
 
@@ -522,39 +516,6 @@ async def use_my_coupon(request: Request, coupon_id: int):
     await log_action(gate.db, f"Discord:{discord_id}", "成员使用重置券", key["name"], f"券 #{coupon_id}" + (f"（{c['note']}）" if c.get("note") else ""))
     return JSONResponse({"ok": True}, headers={"Cache-Control": "no-store"})
 
-
-@member_router.post("/public/me/share-confirm")
-async def share_confirm_answer(request: Request):
-    """成员回答「是不是在用 VPN / 代理」。只记录，不改任何处罚；站长在后台核对。"""
-    from . import share_confirm
-    discord_id = await _member_session(request)
-    if discord_id is None:
-        raise HTTPException(401, "请先登录")
-    service = getattr(request.app.state, "registrar", None)
-    key = await service.key_row_for(discord_id) if service is not None else None
-    if key is None or not key["enabled"]:
-        raise HTTPException(404, "你还没有可用的 Key")
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
-    raw = (body or {}).get("answer") or (body or {}).get("answers") or ""
-    if isinstance(raw, list):
-        answer = ",".join(str(x) for x in raw)
-    else:
-        answer = str(raw)
-    from . import share_confirm
-    if not share_confirm.is_valid_answer(answer):
-        raise HTTPException(422, "请选择有效选项")
-    gate = request.app.state.gate
-    if await share_confirm.record(gate.db, key["id"], answer, str((body or {}).get("note") or "")):
-        await log_action(gate.db, f"Discord:{discord_id}", "成员确认网络情况", key["name"], share_confirm.label_for(answer))
-    return JSONResponse({"ok": True}, headers={"Cache-Control": "no-store"})
-
-
-_EXPORT_AT: dict[str, float] = {}      # 每人上次打包时间（内存）：打包较重，限 1 次 / 60 秒
-_EXPORT_LOCK = None                    # 全站同时只打包 1 份：2GB 内存的机器，两个人同时打包几百 MB 原图会被撑爆（审查 F3）
-EXPORT_MAX_BYTES = 200 * 1024 * 1024   # 单次最多打包最新的 200MB 原图
 
 
 @member_router.get("/public/my-export")

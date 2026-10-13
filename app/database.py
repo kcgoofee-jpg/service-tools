@@ -198,26 +198,6 @@ CREATE TABLE IF NOT EXISTS coupons (       -- 成员的券（现在只有「重�
     used_at REAL
 );
 CREATE INDEX IF NOT EXISTS idx_coupons_key ON coupons(key_id, used_at);
-CREATE TABLE IF NOT EXISTS req_features (      -- 出图请求的特征（只存哈希），给防分享回测用；长期保留
-    ts REAL NOT NULL,
-    key_id INTEGER NOT NULL,
-    src TEXT NOT NULL DEFAULT '',          -- 来源网络打码标签
-    fp TEXT NOT NULL DEFAULT '',           -- 客户端指纹（User-Agent）的哈希
-    os TEXT NOT NULL DEFAULT '',
-    sig TEXT NOT NULL DEFAULT '',          -- 参数签名哈希（采样器 / 步数 / CFG / 负面词 …）
-    toks TEXT NOT NULL DEFAULT '',         -- 提示词词条哈希（空格分隔，最多 80 个），不可还原
-    busy INTEGER NOT NULL DEFAULT 0        -- 当时这把 Key 是否还有图在生成
-);
-CREATE INDEX IF NOT EXISTS idx_req_features ON req_features (key_id, ts);
-CREATE TABLE IF NOT EXISTS share_evidence (    -- 防分享证据与处罚记录，后台溯源用
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    ts REAL NOT NULL,
-    key_id INTEGER NOT NULL,
-    kind TEXT NOT NULL,
-    points REAL NOT NULL DEFAULT 0,
-    detail TEXT NOT NULL DEFAULT ''
-);
-CREATE INDEX IF NOT EXISTS idx_share_evidence_key ON share_evidence (key_id, ts DESC);
 CREATE TABLE IF NOT EXISTS error_events (
     sig TEXT PRIMARY KEY,          -- 错误特征：异常类型 + 出错位置（或来源 + 去掉数字的消息）
     source TEXT NOT NULL,          -- request / upstream / maintenance:xxx / web:landing / disconnect ...
@@ -250,16 +230,6 @@ CREATE TABLE IF NOT EXISTS admin_actions (
 );
 CREATE INDEX IF NOT EXISTS idx_admin_actions_ts ON admin_actions (ts DESC);
 CREATE INDEX IF NOT EXISTS idx_admin_actions_action ON admin_actions (action);
-CREATE TABLE IF NOT EXISTS key_sources (
-    key_id INTEGER NOT NULL,
-    net_hash TEXT NOT NULL,       -- 加盐哈希后的来源网段（IPv4 /24、IPv6 /48），不存完整 IP
-    label TEXT NOT NULL DEFAULT '',
-    first_seen REAL NOT NULL,
-    last_seen REAL NOT NULL,
-    hits INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (key_id, net_hash)
-);
-CREATE INDEX IF NOT EXISTS idx_key_sources_seen ON key_sources (last_seen);
 CREATE TABLE IF NOT EXISTS upstream_token_settings (
     token_id TEXT PRIMARY KEY,
     v5_daily_limit INTEGER NOT NULL
@@ -446,6 +416,9 @@ class Database:
         await self._db.execute("UPDATE upstream_token_counters SET units=images WHERE units IS NULL")
         # 2026-10-13：候补功能移除，老库的 waitlist 表一并清掉
         await self._db.execute("DROP TABLE IF EXISTS waitlist")
+        # 2026-10-13：防分享指纹/证据整体移除（误判率高且站规允许挂梯子换节点），老表一并清掉
+        for t in ("key_sources", "share_evidence", "req_features"):
+            await self._db.execute(f"DROP TABLE IF EXISTS {t}")
         # 闲置回收改按生图计时：给存量 Key 回填最后一次成功生图的时间（之后由 _record_success_once 增量维护）。
         # 只填 IS NULL 的行：新 Key 没生过图保持 NULL，按 created 起算闲置；启动时跑一遍成本是每 Key 一次索引扫描。
         await self._db.execute(
@@ -728,7 +701,6 @@ class Database:
     async def delete_key(self, key_id: int) -> None:
         # The trigger archives the V5 flag and removes offsets atomically.
         # Counters/logs also accept late settlement from already admitted work.
-        await self._db.execute("DELETE FROM key_sources WHERE key_id=?", (key_id,))
         await self._db.execute("DELETE FROM key_idle_reminders WHERE key_id=?", (key_id,))
         await self._db.execute("DELETE FROM key_tags WHERE key_id=?", (key_id,))
         await self._db.execute("DELETE FROM discord_registrations WHERE key_id=?", (key_id,))
@@ -1250,38 +1222,6 @@ class Database:
         """只清原图（文件 / BLOB），保留缩略图、提示词、参数。"""
         return await self._drop_images("ts<?", (older_than,))
 
-    async def touch_key_source(self, key_id: int, net_hash: str, label: str,
-                               now: float, window_start: float) -> bool:
-        """记录来源网段；返回该网段在窗口内是否为新出现（用于决定是否检查分享告警）。"""
-        cur = await self._db.execute(
-            "SELECT last_seen FROM key_sources WHERE key_id=? AND net_hash=?", (key_id, net_hash))
-        row = await cur.fetchone()
-        await self._db.execute(
-            """INSERT INTO key_sources (key_id, net_hash, label, first_seen, last_seen, hits)
-               VALUES (?,?,?,?,?,1)
-               ON CONFLICT(key_id, net_hash) DO UPDATE SET last_seen=excluded.last_seen,
-                   label=excluded.label, hits=hits+1""",
-            (key_id, net_hash, label, now, now))
-        await self._db.commit()
-        return row is None or row[0] < window_start
-
-    async def key_source_labels(self, key_id: int, since: float) -> list[str]:
-        # 按打码标签（IPv4 /16、IPv6 /32）去重：WARP、手机运营商等同一网络内频繁换 /24 的不算多个来源
-        cur = await self._db.execute(
-            """SELECT label FROM key_sources WHERE key_id=? AND last_seen>=?
-               GROUP BY label ORDER BY MAX(last_seen) DESC""", (key_id, since))
-        return [r[0] for r in await cur.fetchall()]
-
-    async def key_source_summary(self, since: float) -> dict[int, list[str]]:
-        """每把 Key 在 since 之后出现过的来源网段标签（最近的在前）。"""
-        cur = await self._db.execute(
-            """SELECT key_id, label FROM key_sources WHERE last_seen>=?
-               GROUP BY key_id, label ORDER BY MAX(last_seen) DESC""", (since,))
-        out: dict[int, list[str]] = {}
-        for key_id, label in await cur.fetchall():
-            out.setdefault(int(key_id), []).append(label)
-        return out
-
     async def add_admin_action(self, actor: str, action: str, target: str, detail: str, ok: bool) -> None:
         await self._db.execute(
             "INSERT INTO admin_actions (ts, actor, action, target, detail, ok) VALUES (?,?,?,?,?,?)",
@@ -1303,10 +1243,6 @@ class Database:
         await self._db.commit()
         return cur.rowcount or 0
 
-    async def purge_key_sources(self, older_than: float) -> int:
-        cur = await self._db.execute("DELETE FROM key_sources WHERE last_seen<?", (older_than,))
-        await self._db.commit()
-        return cur.rowcount or 0
 
     async def purge_usage_log(self, older_than: float) -> int:
         """只清理明细日志；每日计数器和账本不受影响。"""
