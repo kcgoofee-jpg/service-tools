@@ -390,6 +390,7 @@ class RegistrationService:
             (user_id, key_id, time.time(), _clip(user.get("username")), _clip(user.get("global_name")),
              _clip(user.get("avatar"))))
         await self.db.update_key(key_id, {"name": member_label(user)})
+        await self.db._db.execute("UPDATE api_keys SET discord_id=? WHERE id=?", (user_id, key_id))
         if self.member_role_id:
             await self.db._db.execute("DELETE FROM pending_role_removals WHERE discord_id=?", (user_id,))
             await self.db._db.execute("UPDATE discord_registrations SET role_granted=1 WHERE discord_id=?", (user_id,))
@@ -484,6 +485,7 @@ class RegistrationService:
         key = gen_key("nai")
         row = await self.db.create_key({
             "name": "Discord:" + user_id, "token": key,
+            "discord_id": user_id,
             "daily_images": cfg["daily_images"], "daily_v5": cfg["daily_v5"],
             "features": features.dump(cfg["features"]) if cfg["features"] is not None else None,
             "daily_anlas": 0, "monthly_anlas": 0, "daily_text_tokens": 0,

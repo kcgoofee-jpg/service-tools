@@ -842,6 +842,7 @@ async def bind_discord(request: Request, key_id: int):
             "VALUES (?,?,?,?,?,?)",
             (discord_id, key_id, time.time(), username, display_name, "")
         )
+    await st.db._db.execute("UPDATE api_keys SET discord_id=? WHERE id=?", (discord_id, key_id))
     await st.db._db.commit()
     await log_action(st.db, "站长", "手动绑定 Discord", f"Key #{key_id} {row['name']}", f"@{username} ({discord_id})")
 
@@ -1718,20 +1719,68 @@ async def members(request: Request):
             "last_client": clients.get(row["id"], ""),
             "hours24": rate_map.get(row["id"], []),
         })
+    # 成员为中心合并（10-14 站长）：同一 Discord 成员重置 / 换 Key 留下的多把 Key 归并成一条，
+    # 用量与统计跨 Key 汇总；key_count / all_key_ids 供前端展示与跨 Key 查生成记录。
+    by_discord: dict[str, list[dict]] = {}
+    singles: list[dict] = []
+    for e in out:
+        did = e.get("discord_id")
+        if not did:
+            singles.append(e)
+            continue
+        by_discord.setdefault(did, []).append(e)
+    merged_members: list[dict] = []
+    for did, entries in by_discord.items():
+        if len(entries) == 1:
+            entries[0]["key_count"] = 1
+            entries[0]["all_key_ids"] = [entries[0]["id"]]
+            singles.append(entries[0])
+            continue
+        entries.sort(key=lambda e: (not e["enabled"], -(e["last_used_at"] or 0)))
+        head = dict(entries[0])
+        head["key_count"] = len(entries)
+        head["all_key_ids"] = [e["id"] for e in entries]
+        for other in entries[1:]:
+            head["enabled"] = head["enabled"] or other["enabled"]
+            for f in ("today", "week"):
+                for k, v in other[f].items():
+                    if isinstance(v, (int, float)) and isinstance(head[f].get(k), (int, float)):
+                        head[f][k] = head[f][k] + v
+            head["total_images"] = head["total_images"] + other["total_images"]
+            head["rejected_24h"] = head["rejected_24h"] + other["rejected_24h"]
+            head["last_used_at"] = max(head["last_used_at"] or 0, other["last_used_at"] or 0)
+            if other["last_image_at"]:
+                head["last_image_at"] = max(head["last_image_at"] or 0, other["last_image_at"])
+            if other["first_image_at"]:
+                head["first_image_at"] = min(head["first_image_at"] or other["first_image_at"], other["first_image_at"])
+            if not head["last_client"]:
+                head["last_client"] = other["last_client"]
+            seen = {t["tag"] for t in head["tags"]}
+            head["tags"] = head["tags"] + [t for t in other["tags"] if t["tag"] not in seen]
+            if other.get("hours24"):
+                hv = head.get("hours24") or [0] * 24
+                head["hours24"] = [(a or 0) + (b or 0) for a, b in zip(hv or [0] * 24, other["hours24"])]
+        merged_members.append(head)
+    out = singles + merged_members
     return {"members": out, "inactivity_days": st.settings.key_inactivity_delete_days}
 
 
 @router.get("/audit")
-async def audit_list(request: Request, key_id: Optional[int] = None, page: int = 1, per_page: int = 24):
+async def audit_list(request: Request, key_id: Optional[str] = None, page: int = 1, per_page: int = 24):
     require_admin(request)
     st = request.app.state.gate
     per_page = per_page if per_page in (24, 48, 96) else 24
     page = max(1, min(int(page), 1_000_000))
-    rows, total = await st.db.list_audit(per_page, (page - 1) * per_page, key_id)
+    key_ids = tuple(int(x) for x in str(key_id).split(",") if x.isdigit()) if key_id is not None and "," in str(key_id) else None
+    async def fetch_audit():
+        if key_ids:
+            return await st.db.list_audit_ids(per_page, (page - 1) * per_page, key_ids)
+        return await st.db.list_audit(per_page, (page - 1) * per_page, key_id)
+    rows, total = await fetch_audit()
     pages = max(1, (total + per_page - 1) // per_page)
     if page > pages:      # 页码超出（跳页太大、或保留期清掉了记录）：回到最后一页，和用量日志 / 操作日志一致
         page = pages
-        rows, total = await st.db.list_audit(per_page, (page - 1) * per_page, key_id)
+        rows, total = await fetch_audit()
     return {"items": [dict(r) for r in rows], "page": page, "per_page": per_page, "total": total, "pages": pages}
 
 
@@ -1777,7 +1826,7 @@ async def audit_image(request: Request, audit_id: int):
 
 
 @router.get("/audit/export")
-async def audit_export(request: Request, key_id: Optional[int] = None):
+async def audit_export(request: Request, key_id: Optional[str] = None):
     """把某成员的全部原图打包成 zip 下载（附 prompts.txt）。"""
     require_admin(request)
     if key_id is None:
