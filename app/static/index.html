@@ -982,6 +982,10 @@ td.note{min-width:220px}
             <div class="panel-head"><h2>自助领 Key</h2><div class="desc">Discord /register 自助领 Key 开放状态、名额限制与新成员默认权限</div></div>
             <div id="opsReg"><div class="skel" style="height:260px"></div></div>
           </div>
+          <div class="card panel"><div class="panel-head"><h2>首页管理</h2><div class="desc">首页「加入 Discord」按钮：关闭注册后按钮置灰、文案变「关闭注册」；领取胶囊已从首页移除。这里保存不在公告频道发通知。</div></div>
+            <div class="big-toggle"><label class="switch big"><input type="checkbox" id="homeJoin"><span></span></label>
+              <div class="body"><div class="t" id="homeJoinText">—</div><div class="hint" style="margin:0">与上方「领 Key 开关」是同一个状态（联动显示），改哪边都一样</div></div></div>
+          </div>
           <div class="card panel"><div class="panel-head"><h2>功能开关</h2><div class="desc">关闭后管理员 Key 仍可使用</div></div><div id="opsFeatures"><div class="skel" style="height:200px"></div></div></div>
         </section>
 
@@ -2987,11 +2991,21 @@ function renderOpsReg(){
     </div>
     <div class="feat-checks ${r.features==null?'off':''}" id="reg_feat_list">${featChecks(r.features,'reg')}</div>
     <div style="margin-top:20px"><button class="btn primary" data-act="save-reg">保存</button></div>`;
+  const hj = $('#homeJoin');
+  if(hj){ hj.checked = !!r.open; $('#homeJoinText').textContent = r.open ? '加入按钮开放（显示邀请链接）' : '已置灰「关闭注册」'; }
 }
 async function putReg(body, okMsg){
   const d = await api('/admin/api/ops/registration', {method:'PUT', body:JSON.stringify(body)});
   opsData = d; toast(okMsg, 'ok'); renderOpsReg();
 }
+/* 首页管理：与「领 Key 开关」同一状态；这里保存不在公告频道发通知（10-14 站长） */
+document.addEventListener('change', async ev => {
+  if(ev.target && ev.target.id === 'homeJoin'){
+    try{ await putReg({open: ev.target.checked, notify: false},
+                      ev.target.checked ? '首页加入按钮已开放' : '首页加入按钮已置灰「关闭注册」'); }
+    catch(e){ toastErr(e); }
+  }
+});
 /* 三选一确认框：复用确认弹窗，在按钮区临时插入中间选项（取消 / 中间项们 / 主操作）。
    返回所选 choice 的 value；点「取消」或关掉弹窗返回 null。 */
 async function askChoice(msg, title, choices){

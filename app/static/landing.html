@@ -426,6 +426,7 @@ body.haskey #algoNote,html.haskey #algoNote{display:none!important}
 #donate textarea,#donate input{width:100%;background:var(--bg-inset,rgba(255,255,255,.04));border:1px solid var(--bd,rgba(255,255,255,.12));border-radius:10px;padding:10px 12px;color:inherit;font:inherit;resize:vertical}
 #donate textarea:focus,#donate input:focus{outline:none;border-color:var(--accent,#8ab4ff)}
 #donate .donate-actions{display:flex;gap:8px}
+.btn.off{opacity:.55;pointer-events:none;filter:grayscale(.4);cursor:default}
 </style>
 </head>
 <body>
@@ -681,8 +682,14 @@ function pill(cls, text, dot){
   p.appendChild(el('span', '', text));
   return p;
 }
-function renderDiscord(inv){
+function renderDiscord(inv, closed){
   var slot = $('discordSlot'); slot.textContent = '';
+  if(closed){
+    var off = el('span', 'btn dc off'); off.title = '注册已关闭，开放时间看站长公告';
+    off.appendChild(ic('discord')); off.appendChild(document.createTextNode('关闭注册'));
+    slot.appendChild(off);
+    return;
+  }
   if(inv && /^https:\/\//i.test(inv)){
     var a = el('a', 'btn dc'); a.href = inv; a.target = '_blank'; a.rel = 'noopener noreferrer';
     a.appendChild(ic('discord')); a.appendChild(document.createTextNode('加入 Discord'));
@@ -709,18 +716,11 @@ function renderStatus(d){
   setSite(d.site);
   var reg = d.registration || {};
   var pills = $('pills');
-  if(pills){
-    pills.textContent = ''; pills.removeAttribute('aria-busy');
-    if(reg.open && (!ME || !ME.has_key)){
-      var full = reg.slots_left === 0, rp = pill(full ? 'warn' : 'info', full ? '已满员' : '可领取', false);
-      rp.title = full ? '名额已满，闲置的 Key 会被自动回收，空出的名额先到先得' : '在 Discord 用 /register 领 Key' + (reg.slots_left != null ? '，剩余名额 ' + reg.slots_left : '');
-      pills.appendChild(rp);
-    }
-  }
+  if(pills){ pills.textContent = ''; pills.removeAttribute('aria-busy'); }   /* 领取胶囊已删（10-14 站长）：注册状态看「加入 Discord」按钮 */
   var idle = Number(d.key_inactivity_delete_days) || 0;
   $('ruleIdle').hidden = !(idle > 0);
   if(idle > 0) $('idleDays').textContent = String(idle);
-  renderDiscord(d.discord_invite);
+  renderDiscord(d.discord_invite, reg.open === false);
   renderAnnouncement(!!d.has_announcement);
   var al = (d.algo_notice || '').trim();
   if($('algoNote')){ $('algoNote').hidden = !al; $('algoNote').textContent = al; }
@@ -982,7 +982,7 @@ function fmtDate(sec){
   function setBar(id, a, b){ var e = $id(id), p = pct(a, b); if(e){ e.style.width = p + '%'; if(e.parentNode) e.parentNode.setAttribute('aria-valuenow', String(p)); } }
   function mark(k){ Array.prototype.forEach.call(steps, function(s){ var on = s.dataset.step === k; s.classList.toggle('on', on); if(on) s.setAttribute('aria-current', 'step'); else s.removeAttribute('aria-current'); }); }
   var BLOCK_TITLE = {paced: '运行正常 · 时段平滑补给中', daily_cap: '今日出图已满', breaker: '暂停出图 · 上游出错',
-    hourly_cap: '本小时出图已满', quiet_cap: '安静时段 · 出图已满', cap_3h: '近 3 小时出图已满'};
+    hourly_cap: '近 60 分钟出图已满', quiet_cap: '安静时段 · 出图已满', cap_3h: '近 3 小时出图已满'};
   var lastQueueCount = -1, lastQueueSec = 0, queueSeenAt = 0;
   function getEstimatedSec(count, iv){
     if(count <= 0) return 0;
@@ -1025,7 +1025,7 @@ function fmtDate(sec){
       } else {
         tone = bk.code === 'breaker' ? 'bad' : 'warn';
         val = bk.code === 'daily_cap' ? '明天 7 点重置后恢复' : bw ? '约 ' + bw[1] + ' 分钟后' : '稍后再试';
-        sub = bk.code === 'daily_cap' ? '全站今日出图已达上限，明日 0 点自动恢复' : bk.text;
+        sub = bk.code === 'daily_cap' ? '全站今日出图已达上限，明天 7 点自动恢复' : bk.text;
         step = 'pace';
       }
     }

@@ -237,19 +237,25 @@ STATUS_TEXT = {0: "#76AD2A", 1: "#FAA72A", 2: "#E86235", 3: "#E04343"}
 CSS = """
 *, *::before, *::after{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
-body{margin:0;background-color:#FAF9F5;color:#141413;font-family:"Atlassian Sans","Helvetica Neue",Helvetica,Arial,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+:root{--bg:#FAF9F5;--fg:#141413;--muted:#87867F;--border:rgba(0,0,0,.1)}
+html[data-theme="dark"]{--bg:#101214;--fg:#e8e8e6;--muted:#9aa0a6;--border:rgba(255,255,255,.16)}
+@media(prefers-color-scheme:dark){html:not([data-theme="light"]){--bg:#101214;--fg:#e8e8e6;--muted:#9aa0a6;--border:rgba(255,255,255,.16)}}
+body{margin:0;background-color:var(--bg);color:var(--fg);font-family:"Atlassian Sans","Helvetica Neue",Helvetica,Arial,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
 font-weight:400;font-size:16px;line-height:24px;-webkit-font-smoothing:antialiased;overflow-x:hidden}
-a{color:inherit;text-decoration:none}
-small{font-size:.875rem;line-height:1.334375rem;color:#87867F}
+a{color:inherit}
+small{font-size:.875rem;line-height:1.334375rem;color:var(--muted)}
 .layout-content{width:100%;max-width:850px;margin:0 auto;padding:0 20px 3rem}
 .font-regular{font-size:1rem;line-height:1.5rem}
 .font-large{font-weight:500;font-size:1.25rem;line-height:1.8125rem}
 .font-largest{font-weight:500;font-size:1.75rem;line-height:2.3625rem}
 .masthead{padding-top:60px;margin-bottom:50px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
 .logo{display:inline-flex;align-items:center;gap:.5rem;font-family:"Copernicus","Tiempos Headline",Georgia,"Songti SC","STSong",serif;
-font-size:2.4rem;line-height:1;letter-spacing:-.02em;color:#141413;white-space:nowrap}
+font-size:2.4rem;line-height:1;letter-spacing:-.02em;color:var(--fg);white-space:nowrap}
 .logo .mark{font-size:2rem}
-.show-updates-dropdown{background:#141413;color:#fff;border-radius:4px;padding:.75rem 1.5rem;font-size:.8125rem;font-weight:600;letter-spacing:.14em;white-space:nowrap;display:inline-block}
+.show-updates-dropdown{background:var(--fg);color:var(--bg);border-radius:4px;padding:.75rem 1.5rem;font-size:.8125rem;font-weight:600;letter-spacing:.14em;white-space:nowrap;display:inline-block}
+.masthead-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.theme-btn{background:transparent;border:1px solid var(--border);color:var(--fg);border-radius:4px;padding:.7rem 1.1rem;font-size:.8125rem;font-weight:600;cursor:pointer}
+.theme-btn:hover{border-color:var(--muted)}
 .page-status{font-weight:500;border-radius:4px;border:1px solid rgba(0,0,0,.1);text-shadow:0 1px 0 rgba(0,0,0,.1);margin-bottom:60px;padding:.75rem 1.25rem;background:#76AD2A;color:#fff;font-size:1.25rem;line-height:1.8125rem}
 .unresolved-incidents{margin-bottom:60px}
 .unresolved-incident{margin-top:25px}.unresolved-incident:first-of-type{margin-top:0}
@@ -321,7 +327,7 @@ def _bars_svg(days: list[dict]) -> str:
             f'viewBox="0 0 {len(days) * 5 - 2} 34">{"".join(rects)}</svg>')
 
 
-def render(snap: dict[str, Any], subscribe_url: str = "/") -> str:
+def render(snap: dict[str, Any], subscribe_url: str = "/status/feed.xml") -> str:
     worst = max((c["level"] for c in snap["components"]), default=0)
     status_cls = ("status-" + max((i["impact"] for i in snap["active"]), key=lambda x: IMPACT_RANK.get(x, 1))
                   if snap["active"] else "status-none" if not worst else "status-minor")
@@ -330,7 +336,8 @@ def render(snap: dict[str, Any], subscribe_url: str = "/") -> str:
              f'<title>猫头鹰公益站 状态</title><style>{CSS}</style></head>'
              f'<body class="status index {status_cls}"><div class="layout-content status status-index">',
              f'<div class="masthead"><a class="logo" href="/status"><span class="mark">🦉</span>猫头鹰公益站 状态</a>'
-             f'<a class="show-updates-dropdown" href="{html.escape(subscribe_url)}" target="_blank" rel="noopener">订阅更新</a></div>']
+             f'<div class="masthead-actions"><button id="themeBtn" class="theme-btn" type="button">🌙 夜间</button>'
+             f'<a class="show-updates-dropdown" href="{html.escape(subscribe_url)}" rel="noopener">订阅更新</a></div></div>']
     if snap["active"]:
         parts.append('<div class="unresolved-incidents">')
         for inc in snap["active"]:
@@ -338,7 +345,7 @@ def render(snap: dict[str, Any], subscribe_url: str = "/") -> str:
             parts.append(f'<div class="unresolved-incident impact-{html.escape(inc["impact"])}">'
                          f'<div class="incident-title font-large" style="background-color:{c}">'
                          f'<span class="whitespace-pre-wrap actual-title">{html.escape(inc["title"])}</span>'
-                         f'<a class="subscribe" href="{html.escape(subscribe_url)}" target="_blank" rel="noopener">订阅</a></div>'
+                         f'<a class="subscribe" href="{html.escape(subscribe_url)}" rel="noopener">订阅</a></div>'
                          f'<div class="updates font-regular" style="border-color:{c}">'
                          + "".join(_update_html(u) for u in inc["updates"]) + '</div></div>')
         parts.append('</div>')
@@ -374,11 +381,50 @@ def render(snap: dict[str, Any], subscribe_url: str = "/") -> str:
                          + "".join(_update_html(u, with_year=False) for u in inc["updates"]) + '</div></div>')
         parts.append('</div>')
     parts.append('</div><div class="page-footer"><small>所有时间均为北京时间（UTC+8）。</small>'
-                 '<small>事件按 调查中 → 已确定 → 监控中 → 已解决 更新</small></div></div></body></html>')
+                 '<small>事件按 调查中 → 已确定 → 监控中 → 已解决 更新</small></div></div>'
+                 '<script>(function(){'
+                 'var b=document.getElementById("themeBtn");if(!b)return;'
+                 'var saved=null;try{saved=localStorage.getItem("owl-status-theme")}catch(e){}'
+                 'function apply(t){document.documentElement.setAttribute("data-theme",t);'
+                 'b.textContent=t==="dark"?"\\u2600\\ufe0f \\u65e5\\u95f4":"\\ud83c\\udf19 \\u591c\\u95f4";}'
+                 'var m=window.matchMedia?matchMedia("(prefers-color-scheme: dark)"):null;'
+                 'apply(saved||(m&&m.matches?"dark":"light"));'
+                 'b.addEventListener("click",function(){'
+                 'var t=document.documentElement.getAttribute("data-theme")==="dark"?"light":"dark";'
+                 'try{localStorage.setItem("owl-status-theme",t)}catch(e){}apply(t);});'
+                 'if(m&&m.addEventListener)m.addEventListener("change",function(e){'
+                 'try{if(localStorage.getItem("owl-status-theme"))return}catch(e){}'
+                 'apply(e.matches?"dark":"light");});})();</script></body></html>')
     return "".join(parts)
 
 
-STATUS_HEADERS = {"Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
+def _atom_feed(snap: dict[str, Any], self_url: str = "/status/feed.xml") -> str:
+    """事件更新的 Atom 订阅源：最近 20 条更新，供「订阅更新」按钮和 RSS 阅读器使用。"""
+    entries = []
+    for inc in snap["incidents"]:
+        for u in inc.get("updates", []):
+            entries.append({"at": u["at"], "title": f'{inc["title"]} · {STATUS_LABEL.get(u["status"], u["status"])}',
+                            "body": u["body"], "id": f'inc-{inc["id"]}-{int(u["at"])}'})
+    entries.sort(key=lambda e: -e["at"])
+    updated = time.strftime("%Y-%m-%dT%H:%M:%S+08:00", time.localtime(entries[0]["at"])) if entries \
+        else time.strftime("%Y-%m-%dT%H:%M:%S+08:00", time.localtime(snap["now"]))
+    out = ['<?xml version="1.0" encoding="utf-8"?>',
+           '<feed xmlns="http://www.w3.org/2005/Atom">',
+           f'<title>猫头鹰公益站 状态</title><id>urn:owl-status:feed</id>',
+           f'<updated>{updated}</updated><link rel="self" href="{html.escape(self_url)}"/>',
+           '<link rel="alternate" href="/status"/>']
+    for e in entries[:20]:
+        ts = time.strftime("%Y-%m-%dT%H:%M:%S+08:00", time.localtime(e["at"]))
+        out.append(f'<entry><id>urn:owl-status:{html.escape(e["id"])}</id>'
+                   f'<title>{html.escape(e["title"])}</title>'
+                   f'<updated>{ts}</updated>'
+                   f'<link rel="alternate" href="/status"/>'
+                   f'<content type="text">{html.escape(e["body"])}</content></entry>')
+    out.append("</feed>")
+    return "".join(out)
+
+
+STATUS_HEADERS = {"Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'",
                   "Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff"}
 
 
@@ -396,10 +442,7 @@ async def _cached_snapshot(db) -> dict[str, Any]:
 @router.api_route("/status", methods=["GET", "HEAD"], response_class=HTMLResponse)
 async def status_page(request: Request):
     snap = await _cached_snapshot(request.app.state.gate.db)
-    import os
-    guild, chan = os.getenv("DISCORD_GUILD_ID", ""), os.getenv("ANNOUNCE_CHANNEL_ID", "")
-    sub = f"https://discord.com/channels/{guild}/{chan}" if guild and chan else "/"
-    return HTMLResponse(render(snap, sub), headers=STATUS_HEADERS)
+    return HTMLResponse(render(snap), headers=STATUS_HEADERS)
 
 
 @router.get("/status.json")
@@ -408,6 +451,15 @@ async def status_json(request: Request):
     return JSONResponse({"components": [{k: c[k] for k in ("key", "name", "status", "uptime")} for c in snap["components"]],
                          "active": snap["active"], "incidents": snap["incidents"][:50]},
                         headers={"Cache-Control": "no-cache"})
+
+
+@router.get("/status/feed.xml")
+async def status_feed(request: Request):
+    """事件更新的 Atom 订阅源（状态页「订阅更新」按钮指向这里）。"""
+    from fastapi.responses import Response
+    snap = await _cached_snapshot(request.app.state.gate.db)
+    return Response(_atom_feed(snap), media_type="application/atom+xml",
+                    headers={"Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff"})
 
 
 # ------------------------------------------------------------------ 后台接口（站长 / Claude 发布事件）
