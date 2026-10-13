@@ -1728,6 +1728,17 @@ async def members(request: Request):
             (today,),
         )).fetchall()
     }
+    # 生图速率：每人最近 24 小时逐小时成功生图数（前端画 24 根小时条；跨天的开头几格是昨天同时段）
+    _tz2 = getattr(st, "tz", None) or _ZI(st.settings.tz)
+    hour0 = int(_dt.now(_tz2).replace(minute=0, second=0, microsecond=0).timestamp()) - 23 * 3600
+    rate_map: dict[int, list[int]] = {}
+    for key_id, bucket, n in await st.db._db.execute_fetchall(
+            "SELECT key_id, CAST((ts - ?) / 3600 AS INT) b, COUNT(*) FROM usage_log "
+            "WHERE ts >= ? AND status='ok' AND (kind LIKE 'image%' OR kind IN ('upscale','augment-image','vibe_encode')) "
+            "GROUP BY key_id, b", (hour0, hour0)):
+        bars = rate_map.setdefault(int(key_id), [0] * 24)
+        if 0 <= int(bucket) < 24:
+            bars[int(bucket)] = int(n)
     default_counter = {"images": 0, "v5": 0, "anlas": 0.0, "text_tokens": 0, "requests": 0}
     for row in await st.db.list_keys():
         counter = today_counters.get(row["id"], default_counter)
@@ -1773,6 +1784,7 @@ async def members(request: Request):
             "tags": manual_tags.get(row["id"], []),
             "auto_tags": auto_tags.get(row["id"], []),
             "last_client": clients.get(row["id"], ""),
+            "hours24": rate_map.get(row["id"], []),
         })
     return {"members": out, "share_alert_nets": st.settings.key_share_alert_nets,
             "inactivity_days": st.settings.key_inactivity_delete_days}
