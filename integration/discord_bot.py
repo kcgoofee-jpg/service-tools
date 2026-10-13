@@ -109,11 +109,14 @@ def build_client() -> tuple[discord.Client, app_commands.CommandTree, discord.Ob
         if status != 200:
             await interaction.followup.send(str(data), ephemeral=True)
             return
-        lines = [f"今日图片：{data['images']} / {data['daily_images']}"]
+        lines = [f"今日图片：{data['images']} / {data['daily_images']}"
+                 + (f"（每天 {data['reset_hour']} 点重置）" if data.get("reset_hour") is not None else "")]
         if data.get("daily_images_base"):
             lines.append(f"（保底 {data['daily_images_base']} 张；超过后在全站空闲时可继续用到 {data['daily_images']} 张）")
         if data["daily_v5"]:
             lines.append(f"今日 V5：{data['v5']} / {data['daily_v5']}")
+        if data.get("quiet_now"):
+            lines.append(f"🌙 安静时段（{data.get('quiet_window', '')}）暂停出图，到点自动恢复")
         scope = "含 V5" if data["image_model_scope"] == "all" else "仅 V4.5 及以下"
         lines.append(f"可用模型：{scope}")
         lines.append("已开通功能：" + ("、".join(f["label"] for f in data["features"] if f["on"]) or "无"))
@@ -182,11 +185,11 @@ def build_client() -> tuple[discord.Client, app_commands.CommandTree, discord.Ob
     async def help_(interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         status, data = await backend("/self-register/info", interaction)
-        lines = [f"`/register` 领取 Key（私信发送，含配置教程）· `/quota` 额度和服务状态 · `/resetkey` 换新 Key · `/反馈` 给站长提意见",
+        lines = [f"`/register` 领取 Key（结果仅你可见，含配置教程）· `/quota` 额度和服务状态 · `/resetkey` 换新 Key · `/反馈` 给站长提意见",
                  f"客户端接口地址填 `{SITE}`（不加 /v1），Key 填 `nai-` 开头的整串。详细说明：{SITE}"]
         if status == 200:
             if not data["open"]:
-                lines.append("⚠ 目前暂未开放领 Key。")
+                lines.append("⚠ 领 Key 当前已关闭，开放时间看站长公告。")
             if data["notice"]:
                 lines.append("📢 " + data["notice"])
         await interaction.followup.send("\n".join(lines), ephemeral=True)

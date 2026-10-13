@@ -164,12 +164,19 @@ async def quota(request: Request, body: Who):
     own = feature_defs.key_features(key)
     granted = set(feature_defs.FEATURES if own is None else own)
     counter = await gate.db.get_counter(key["id"], gate.day())
+    guard = getattr(gate, "guard", None)
+    reset_hour = guard.reset_hour if guard is not None else None
+    quiet_now = bool(guard is not None and guard.in_quiet())
     return JSONResponse({
         "enabled": bool(key["enabled"]), "expires_at": key["expires_at"],
         "daily_images": key["daily_images"], "images": counter["images"],
         "daily_images_base": _base(gate, key),
         "daily_v5": key["daily_v5"], "v5": counter["v5"],
         "image_model_scope": key["image_model_scope"],
+        "reset_hour": reset_hour,
+        "quiet_now": quiet_now,
+        "quiet_window": (f"{guard.values['quiet_start']}:00–{guard.values['quiet_end']}:00"
+                         if guard is not None and quiet_now else ""),
         "features": [{"id": n, "label": feature_defs.FEATURES[n], "on": n in granted and flags[n]}
                      for n in feature_defs.FEATURES],
     }, headers={"Cache-Control": "no-store"})

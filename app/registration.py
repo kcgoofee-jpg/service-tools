@@ -281,7 +281,7 @@ class RegistrationService:
         """名额检查：有空位先到先得，满了直接拒绝（候补排队已移除，2026-10-13）。"""
         cfg = await self.settings()
         if not cfg["open"]:
-            raise RegistrationError("领 Key 暂未开放，请等待站长开放。")
+            raise RegistrationError("领 Key 当前已关闭，开放时间看站长公告。")
         if not cfg["max_users"]:
             return cfg
         if cfg["max_users"] - await self.count_active() > 0:
