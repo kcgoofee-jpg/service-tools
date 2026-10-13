@@ -1936,6 +1936,19 @@ function renderPool(d){
 }
 
 /* 总览：一句话结论 + 要处理的事（每条带「去看看」）+ 4 个关键数字；系统状态折叠在最下面 */
+/* 总览提醒的隐藏记录：key → 隐藏时间；24 小时后自动失效（数据是本机的 localStorage，不进服务器） */
+const OV_HIDDEN_KEY = 'owlOvHidden';
+function ovHiddenMap(){
+  try {
+    const o = JSON.parse(localStorage.getItem(OV_HIDDEN_KEY) || '{}'), now = Date.now();
+    for (const k of Object.keys(o)) if (now - o[k] > 86400e3) delete o[k];
+    return o;
+  } catch(e){ return {}; }
+}
+function ovHideKey(k){
+  const o = ovHiddenMap(); o[k] = Date.now();
+  try { localStorage.setItem(OV_HIDDEN_KEY, JSON.stringify(o)); } catch(e){}
+}
 async function renderOverviewTop(d){
   const [live, bugs, bot, mods, ap] = await Promise.all([
     fetch('/public/live', {cache:'no-store'}).then(r => r.ok ? r.json() : null).catch(() => null),
@@ -1944,41 +1957,51 @@ async function renderOverviewTop(d){
     api('/admin/api/modules').catch(() => null),
     api('/admin/api/autopilot').catch(() => null)]);
   const now = Date.now()/1000, items = [], st = statusCache || {}, up = st.upstream || {};
-  const add = (lv, t, dd, go, label='去看看') => items.push({lv, t, d: dd, go, label});
-  if(up.image_cooldown_seconds > 0) add('bad', `上游限流，全站暂停出图 ${up.image_cooldown_seconds} 秒`, '会自动恢复；频繁出现要降低每小时上限', 'up');
-  else if(up.status === 'degraded') add('bad', '上游不稳定', `最近 ${up.recent} 次请求失败 ${up.failed} 次`, 'up');
-  (d.pool||[]).forEach(p => { if(p.admin_enabled && p.disabled) add('bad', `上游账号 #${p.position} 失效（401）`, 'Token 过期或被改了密码，需要替换', 'up');
-    else if(p.admin_enabled && p.blocked_for > 0) add('warn', `上游账号 #${p.position} 限流中`, `约 ${p.blocked_for} 秒后恢复`, 'up'); });
-  if(!d.pool_configured) add('bad', '还没有配置上游 Token', '现在所有出图请求都会失败', 'up');
+  const add = (lv, t, dd, go, label='去看看', key='') => items.push({lv, t, d: dd, go, label, key: key || go});
+  if(up.image_cooldown_seconds > 0) add('bad', `上游限流，全站暂停出图 ${up.image_cooldown_seconds} 秒`, '会自动恢复；频繁出现要降低每小时上限', 'up', '上游限流', 'up-cooldown');
+  else if(up.status === 'degraded') add('bad', '上游不稳定', `最近 ${up.recent} 次请求失败 ${up.failed} 次`, 'up', '上游不稳', 'up-degraded');
+  (d.pool||[]).forEach(p => { if(p.admin_enabled && p.disabled) add('bad', `上游账号 #${p.position} 失效（401）`, 'Token 过期或被改了密码，需要替换', 'up', '上游账号失效', `up-acct-${p.position}-dead`);
+    else if(p.admin_enabled && p.blocked_for > 0) add('warn', `上游账号 #${p.position} 限流中`, `约 ${p.blocked_for} 秒后恢复`, 'up', '上游限流中', `up-acct-${p.position}-blocked`); });
+  if(!d.pool_configured) add('bad', '还没有配置上游 Token', '现在所有出图请求都会失败', 'up', '未配置上游', 'up-notconfigured');
   if(bot && bot.status){
     const botOnline = !!bot.status.online;
     if(!botOnline) add('bad', '奶妹离线', bot.status.seen_at ? '最近心跳 ' + rel(bot.status.seen_at) : '还没收到心跳', 'discord');
     if($('#navBot')) $('#navBot').hidden = botOnline;
   }
   if(bugs && bugs.open){ const err = bugs.errors.filter(e => !e.resolved_at && e.level === 'error').length;
-    add(err ? 'bad' : 'warn', `${bugs.open} 个 Bug 没处理`, err ? `其中 ${err} 个是错误级别` : '都是「注意」级别，多数是客户端断开之类', 'bugs'); }
+    add(err ? 'bad' : 'warn', `${bugs.open} 个 Bug 没处理`, err ? `其中 ${err} 个是错误级别` : '都是「注意」级别，多数是客户端断开之类', 'bugs', 'Bug 未处理', 'bugs'); }
   const att = (membersCache||[]).filter(m => needsAttention(m, now));
-  if(att.length) add('warn', `${att.length} 个成员要处理`, att.slice(0, 3).map(memberLabel).join('、') + (att.length > 3 ? ' 等' : ''), 'members:attention');
+  if(att.length) add('warn', `${att.length} 个成员要处理`, att.slice(0, 3).map(memberLabel).join('、') + (att.length > 3 ? ' 等' : ''), 'members:attention', '成员要处理', 'members-attention');
   const badMods = mods && mods.modules ? mods.modules.reduce((acc, m) => {
     const L = m.last || {};
     const badChecks = (L.checks || []).filter(c => c.level === 'bad').length;
     return acc + (m.enabled && (L.ok === false || badChecks > 0) ? 1 : 0);
   }, 0) : 0;
-  if(badMods) add('warn', `${badMods} 个模块自检没通过`, '数据对不上或规则没生效', 'modules');
+  if(badMods) add('warn', `${badMods} 个模块自检没通过`, '数据对不上或规则没生效', 'modules', '模块自检', 'modules');
   if($('#navMods')){ $('#navMods').hidden = !badMods; $('#navMods').textContent = badMods || ''; }
-  const dk = st.disk; if(dk && dk.total_mb){ const free = dk.free_mb / dk.total_mb; if(free < 0.2) add(free < 0.1 ? 'bad' : 'warn', `磁盘只剩 ${Math.round(free*100)}%`, '原图和日志会越来越多', 'set'); }
-  if((d.today.unconfirmed_anlas||0) > 0) add('warn', `失败请求可能扣了 ${d.today.unconfirmed_anlas} Anlas`, `今天 ${d.today.unconfirmed_requests} 笔，去上游页对一下官方余额`, 'up');
-  if(d.anlas_budget > 0 && d.month.anlas >= d.anlas_budget * 0.8) add('warn', `本月 Anlas 用了 ${Math.round(d.month.anlas / d.anlas_budget * 100)}%`, `${fmtNum(d.month.anlas)} / ${fmtNum(d.anlas_budget)}`, 'limits');
+  const dk = st.disk; if(dk && dk.total_mb){ const free = dk.free_mb / dk.total_mb; if(free < 0.2) add(free < 0.1 ? 'bad' : 'warn', `磁盘只剩 ${Math.round(free*100)}%`, '原图和日志会越来越多', 'set', '磁盘', 'disk'); }
+  if((d.today.unconfirmed_anlas||0) > 0) add('warn', `失败请求可能扣了 ${d.today.unconfirmed_anlas} Anlas`, `今天 ${d.today.unconfirmed_requests} 笔，去上游页对一下官方余额`, 'up', 'Anlas 待核对', 'unconfirmed-anlas');
+  if(d.anlas_budget > 0 && d.month.anlas >= d.anlas_budget * 0.8) add('warn', `本月 Anlas 用了 ${Math.round(d.month.anlas / d.anlas_budget * 100)}%`, `${fmtNum(d.month.anlas)} / ${fmtNum(d.anlas_budget)}`, 'limits', 'Anlas 预算', 'anlas-budget');
   const g = live && live.guard || {}, q = live && live.quota || {};
   const active = d.today && d.today.active_members != null ? d.today.active_members
     : (membersCache||[]).filter(m => !m.is_admin && !m.is_test && m.today.requests > 0).length;
-  const serious = items.filter(x => x.lv !== 'info').length;
-  const head = serious ? `有 ${serious} 件事要处理` : '一切正常';
-  const tone = items.some(x => x.lv === 'bad') ? 'bad' : serious ? 'warn' : 'ok';
+  /* 站长反馈：这些提醒没法消除。每条可以 ✕ 掉，24 小时内不再出现（localStorage 记录），可一键恢复；
+     数字变了也不会重新冒出来（隐藏按稳定 key 记，不按文案记）。 */
+  const hiddenOv = ovHiddenMap();
+  const visible = items.filter(x => !hiddenOv[x.key]);
+  const hiddenCount = items.length - visible.length;
+  const serious = visible.filter(x => x.lv !== 'info').length;
+  const head = serious ? `有 ${serious} 件事要处理` : (visible.length ? '一切正常' : '全部已隐藏');
+  const tone = visible.some(x => x.lv === 'bad') ? 'bad'
+    : serious ? 'warn'
+    : (hiddenCount && items.some(x => x.lv !== 'info')) ? 'warn'   /* 有被隐藏的提醒：不给绿点 */
+    : 'ok';
   $('#ovVerdict').dataset.tone = tone;
-  $('#ovVerdict').innerHTML = `<div class="ovv-h"><i aria-hidden="true"></i><div><h2>${esc(head)}</h2></div><button class="btn mini ghost" type="button" data-act="ov-refresh" title="立即刷新数据" style="margin-left:auto">${ic('refresh')} 刷新</button></div>
-    ${items.length ? `<div class="issues">${items.map(x => `<div class="issue ${x.lv}"><div class="is-t"><b>${esc(x.t)}</b><span>${esc(x.d||'')}</span></div><div class="is-a">${
-      x.go.startsWith('act:') ? `<button class="btn mini" type="button" data-act="${esc(x.go.slice(4))}">${esc(x.label)}</button>` : `<button class="btn mini" type="button" data-act="ov-go" data-go="${esc(x.go)}">${esc(x.label)}</button>`}</div></div>`).join('')}</div>` : ''}`;
+  const restore = hiddenCount ? `<button class="btn mini ghost" type="button" data-act="ov-restore" title="把隐藏的提醒全部恢复">已隐藏 ${hiddenCount} 条 · 恢复</button>` : '';
+  $('#ovVerdict').innerHTML = `<div class="ovv-h"><i aria-hidden="true"></i><div><h2>${esc(head)}</h2>${restore}</div><button class="btn mini ghost" type="button" data-act="ov-refresh" title="立即刷新数据" style="margin-left:auto">${ic('refresh')} 刷新</button></div>
+    ${visible.length ? `<div class="issues">${visible.map(x => `<div class="issue ${x.lv}"><div class="is-t"><b>${esc(x.t)}</b><span>${esc(x.d||'')}</span></div><div class="is-a">${
+      x.go.startsWith('act:') ? `<button class="btn mini" type="button" data-act="${esc(x.go.slice(4))}">${esc(x.label)}</button>` : `<button class="btn mini" type="button" data-act="ov-go" data-go="${esc(x.go)}">${esc(x.label)}</button>`
+      }<button class="btn mini ghost" type="button" data-act="ov-x" data-k="${esc(x.key)}" title="隐藏这条（24 小时内不再出现）" aria-label="隐藏">✕</button></div></div>`).join('')}</div>` : ''}`;
   const reqs = (d.feature_usage||[]).reduce((a, f) => ({rej: a.rej + (f.today.rejected||0), err: a.err + (f.today.error||0)}), {rej:0, err:0});
   const members = d.members_total != null ? d.members_total : (membersCache||[]).filter(m => !m.is_admin && !m.is_test).length;
   const v5Limit = d.v5_limit || q.v5_cap;
@@ -3918,6 +3941,8 @@ document.addEventListener('click', ev=>{
   switch(el.dataset.act){
     case 'ov-go': { const [t, f] = el.dataset.go.split(':'); if(t === 'members' && f){ memberFilter = f; memberFilterAuto = false; } tab(t); break; }
     case 'ov-refresh': loadOverview(); break;
+    case 'ov-x': if(el.dataset.k){ ovHideKey(el.dataset.k); loadOverview(); } break;
+    case 'ov-restore': try { localStorage.removeItem(OV_HIDDEN_KEY); } catch(e){} loadOverview(); break;
     case 'feat-logs': $('#logFeature').value = el.dataset.feat; $('#logFilter').value = ''; logPage = 1; tab('logs'); break;
     case 'save-bot': saveBot(); break;
     case 'recon-reload': loadReconciliation(); break;
