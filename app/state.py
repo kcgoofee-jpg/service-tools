@@ -15,7 +15,6 @@ from pathlib import Path
 from . import alerts, token_store
 from .config import Settings
 from .database import Database
-from .key_sources import SourceTracker
 from .action_log import log_action
 from .nai import NaiClient, clamp_retry_after
 from .reconciliation import ManualReconciliation
@@ -68,7 +67,6 @@ class GateState:
         self.nai.guard = self.guard
         self.upstream_managed = bool(managed)
         self.alerter = alerts.from_settings(settings)
-        self.sources = SourceTracker(self.db, self.alerter, threshold=settings.key_share_alert_nets)
         from .share_guard import ShareGuard
         self.share = ShareGuard(self.db)
         from .scheduling import FairScheduler

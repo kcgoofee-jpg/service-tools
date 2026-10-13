@@ -545,6 +545,16 @@ body.haskey #algoNote,html.haskey #algoNote{display:none!important}
         <p>只给聊天、写作类客户端用；生图客户端请填步骤 3 里不带 /v1 的地址。</p>
         <div class="copyline"><span class="mono" id="siteTxt2">—</span><button class="btn mini icon" type="button" data-copy="v1" aria-label="复制" title="复制"><span data-ic="copy"></span></button></div>
       </details>
+      <details class="more">
+        <summary><span data-ic="image"></span>智绘姬（st-chatu8）推荐设置</summary>
+        <ol>
+          <li>「站点」选 <b>其他站点</b>，接口地址填<b>完整地址</b>（接口地址后拼 <code>/ai/generate-image</code>，带路径，<b>不要只填根地址</b>）——只填根地址的话，遇到限流插件会多发一个无效请求。</li>
+          <li>「生图间隔时间」从默认 100ms 调到 <b>15000 以上</b>（毫秒）——本站全站每 15 秒放一张，默认值会连续撞限流。</li>
+          <li>一条回复尽量只放 1~2 个 image 标签；「自动点击生成」「永久自动点击」保持关闭（默认已关）。</li>
+          <li>多人共用的高峰时段建议<b>开启「启用云端队列」</b>（默认队列地址即可）——排队由插件的队列服务承担，生图请求会被排好队再发到站里。</li>
+          <li>遇到 429 表示本时段份额用完，<b>等 1~2 分钟再点</b>（插件不会自动重试，也不会自己多发请求）；402 /「需要有效订阅」是额度问题；403 是 Key 被暂停，提示里会写原因。</li>
+        </ol>
+      </details>
     </div>
   </section>
 
