@@ -49,7 +49,8 @@ CREATE TABLE IF NOT EXISTS api_keys (
     quota_auto INTEGER NOT NULL DEFAULT 1,   -- 1 额度由动态额度算法管理（quota_algo.py）；-1 站长手动 -- 1 自动分配管理（只用于 V5 续杯）；0 交给算法；-1 站长手动（关闭或手动额度）
     expires_at REAL,
     created_at REAL NOT NULL,
-    last_used_at REAL
+    last_used_at REAL,
+    last_image_at REAL   -- 最后一次成功生图（含放大 / 导演 / Vibe）：闲置回收只看它，查额度不算活跃（2026-10-13 站长）
 );
 CREATE TABLE IF NOT EXISTS site_settings (
     key TEXT PRIMARY KEY,
@@ -414,6 +415,8 @@ class Database:
             "ALTER TABLE discord_bans ADD COLUMN banned_by TEXT NOT NULL DEFAULT '系统'",
             # 删除 Key 的墓碑表加上 is_test：见 NOT_TEST 的说明（删除测试 Key 不能让它历史的用量变成成员用量）
             "ALTER TABLE deleted_key_usage_flags ADD COLUMN is_test INTEGER NOT NULL DEFAULT 0",
+            # 闲置回收改按「最后一次生图」计时（2026-10-13 站长：查额度不算活跃）；老数据回填见下
+            "ALTER TABLE api_keys ADD COLUMN last_image_at REAL",
         ):
             try:
                 await self._db.execute(ddl)
@@ -434,6 +437,14 @@ class Database:
         await self._db.execute("UPDATE upstream_token_counters SET units=images WHERE units IS NULL")
         # 2026-10-13：候补功能移除，老库的 waitlist 表一并清掉
         await self._db.execute("DROP TABLE IF EXISTS waitlist")
+        # 闲置回收改按生图计时：给存量 Key 回填最后一次成功生图的时间（之后由 _record_success_once 增量维护）。
+        # 只填 IS NULL 的行：新 Key 没生过图保持 NULL，按 created 起算闲置；启动时跑一遍成本是每 Key 一次索引扫描。
+        await self._db.execute(
+            "UPDATE api_keys SET last_image_at="
+            "(SELECT MAX(u.ts) FROM usage_log u WHERE u.key_id=api_keys.id AND u.status='ok' "
+            " AND (u.kind LIKE 'image%' OR u.kind IN ('upscale','augment-image','vibe_encode')))"
+            " WHERE last_image_at IS NULL")
+        await self._db.commit()
         # 2026-10-11：手动额度就是精确值，「V5 基础值」不再用；旧数据一次性清掉（daily_v5 保留当前实际值）
         await self._db.execute("UPDATE api_keys SET v5_pinned=NULL WHERE v5_pinned IS NOT NULL")
         await self._db.commit()
@@ -716,7 +727,10 @@ class Database:
         await self._db.commit()
 
     async def inactive_key_ids(self, cutoff: float) -> list[int]:
-        """Return inactive keys without falsifying their last-used timestamps."""
+        """Return inactive keys without falsifying their last-used timestamps.
+
+        闲置 = 连续没生图（2026-10-13 站长）：查额度 / 文本聊天 / 登录都算活跃的历史口径作废，
+        只看 last_image_at；从没生过图的 Key 从创建时间起算。"""
         raw_grace = await self.get_setting("key_inactivity_grace_started_at", 0)
         try:
             grace_started_at = float(raw_grace)
@@ -726,7 +740,8 @@ class Database:
             return []
         cur = await self._db.execute(
             """SELECT id FROM api_keys
-               WHERE is_admin=0 AND is_test=0 AND enabled=1 AND MAX(COALESCE(last_used_at, created_at), ?) < ?
+               WHERE is_admin=0 AND is_test=0 AND enabled=1
+                 AND MAX(COALESCE(last_image_at, created_at), ?) < ?
                  AND id NOT IN (SELECT key_id FROM key_tags WHERE tag=?)
                ORDER BY id ASC""",
             (grace_started_at, cutoff, INVITE_TAG),
@@ -913,7 +928,11 @@ class Database:
                 await db.execute(_UPSERT_COUNTERS, (
                     key_id, day, images, anlas, tokens, 1, v5, legacy_free_images,
                 ))
-                await db.execute("UPDATE api_keys SET last_used_at=? WHERE id=?", (now, key_id))
+                # 生图类操作同时刷新 last_image_at：闲置回收只认它（查额度 / 文本聊天不算活跃）
+                await db.execute("UPDATE api_keys SET last_used_at=?, "
+                                 "last_image_at=CASE WHEN ? THEN ? ELSE last_image_at END WHERE id=?",
+                                 (now, kind.startswith("image") or kind in ("upscale", "augment-image", "vibe_encode"),
+                                  now, key_id))
                 await db.commit()
             except BaseException:
                 await db.rollback()
