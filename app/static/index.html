@@ -736,6 +736,7 @@ td.note{min-width:220px}
 }
 
 /* 日志页内的标签：生成记录 / 用量日志 / 操作日志 / Bug 追踪 */
+.audit-inline{margin-left:auto;display:flex;align-items:center;gap:10px}
 .subtabs{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 16px;padding:5px;border:1px solid var(--border);background:var(--surface);border-radius:12px;width:max-content;max-width:100%}
 .subtabs button{appearance:none;border:0;background:transparent;color:var(--muted);font:inherit;font-size:13px;line-height:1;padding:8px 14px;border-radius:8px;cursor:pointer;white-space:nowrap;transition:background .15s,color .15s}
 .subtabs button:hover{color:var(--text)}
@@ -958,8 +959,9 @@ td.note{min-width:220px}
               <select id="auditFilter" aria-label="按成员筛选" style="width:180px"><option value="">全部成员</option></select>
               <select id="auditView" aria-label="视图" style="width:110px"><option value="grid">画廊</option><option value="large">大图</option><option value="list">列表</option></select>
               <button class="btn" id="auditExport" data-act="audit-export" disabled title="先选择一个成员">导出该成员全部</button>
+              <div class="audit-inline" id="auditSettings"><span class="skel" style="width:180px;height:18px"></span></div>
             </div></div>
-          <div class="card panel" id="auditSettings"><div class="skel" style="height:56px"></div></div>
+          <div class="card panel" id="auditFormCard" hidden></div>
           <div class="gallery" id="auditGrid"></div>
           <div class="pager" id="auditPager"></div>
         </section>
@@ -2653,12 +2655,13 @@ function renderAuditSettings(){
   const capTxt = a.image_cap_mb > 0 ? `上限 ${gb(a.image_cap_mb * 1048576)}` : '不限';
   const keepTxt = a.image_keep_hours > 0 ? `保存 ${a.image_keep_hours} 小时` : '不按时间删';
   const parts = [a.prompts ? `提示词（${a.retention_days>0 ? a.retention_days+' 天' : '长期'}）` : '', a.thumbs ? `原图（${keepTxt} · 已用 ${gb(a.image_bytes||0)} / ${capTxt} · 成员下载${a.image_retention_days>0?'开':'关'}）` : ''].filter(Boolean).join(' + ');
-  const summary = on ? `记录中：${parts || '无'}` : '记录已关闭：不会保存提示词和原图';
-  const head = `<div class="sumline"><div class="body"><h2 style="font-size:15px;font-weight:600">记录设置</h2>
-      <div class="${on?'':'muted'}" style="margin-top:2px">${esc(summary)}</div></div>
-      ${on?`<button class="btn" type="button" data-act="toggle-audit-set" aria-expanded="${auditSetOpen}">${auditSetOpen?'收起':'修改'}</button>`:''}</div>`;
-  if(!auditSetOpen){ box.innerHTML = head; return; }
-  box.innerHTML = head + `<div style="margin-top:16px">
+  const summary = on ? `记录：${parts || '无'}` : '记录已关闭';
+  box.innerHTML = `<span class="muted sm">${esc(summary)}</span>
+      <button class="btn sm ghost" type="button" data-act="toggle-audit-set" aria-expanded="${auditSetOpen}">${auditSetOpen ? '收起设置' : '记录设置'}</button>`;
+  const form = $('#auditFormCard');
+  if(!auditSetOpen){ form.hidden = true; form.innerHTML = ''; return; }
+  form.hidden = false;
+  form.innerHTML = `<div class="panel-head"><h2>记录设置</h2></div><div style="margin-top:6px">
     <div class="feat-row"><div class="body"><div class="t">记录提示词</div></div><label class="switch"><input type="checkbox" id="aud_prompts" ${a.prompts?'checked':''} aria-label="记录提示词"><span></span></label></div>
     <div class="feat-row"><div class="body"><div class="t">保存原图</div><div class="d">到保存时长就删，另外超过容量上限时删最旧的</div></div><label class="switch"><input type="checkbox" id="aud_thumbs" ${a.thumbs?'checked':''} aria-label="保存原图"><span></span></label></div>
     <div class="feat-row"><div class="body"><div class="t">成员打包下载原图</div><div class="d">开了以后，成员在首页能打包自己最近 2 天的原图（受保存时长限制），用来找回误删的图</div></div><label class="switch"><input type="checkbox" id="aud_download" ${a.image_retention_days>0?'checked':''} aria-label="成员打包下载原图"><span></span></label></div>
@@ -2668,7 +2671,6 @@ function renderAuditSettings(){
       <div class="field" style="max-width:260px;flex:1 1 200px"><label for="aud_img_cap">原图容量上限（MB）</label><input id="aud_img_cap" type="number" min="0" max="500000" value="${esc(a.image_cap_mb ?? 8192)}"><div class="hint">现在已用 ${esc(gb(a.image_bytes||0))}（约 1.3MB/张，存成文件、不进数据库）。超过后删最旧的；0 = 不限</div></div>
     </div>
     <div style="margin-top:12px"><button class="btn danger-text" type="button" data-act="purge-images">清空服务器上的全部原图</button> <span class="muted sm">只删原图，提示词和参数保留；成员就打包不到了</span></div>
-    <label class="check"><input type="checkbox" id="aud_notify" checked><span>记录范围变化时在成员频道发布数据记录说明${a.announce_configured?'':'（公告频道未配置，将不会发布）'}</span></label>
     <div style="margin-top:16px"><button class="btn primary" data-act="save-audit">保存</button></div></div>`;
 }
 function fillMemberFilter(){
@@ -3019,7 +3021,7 @@ async function saveAudit(){
   if(!Number.isInteger(cap) || cap<0 || cap>500000){ toast('原图容量上限须为 0～500000 的整数 MB（0 = 不限）', 'err'); return; }
   if(!Number.isInteger(keepH) || keepH<0 || keepH>8760){ toast('原图保存小时数须为 0～8760 的整数（0 = 只按容量上限删）', 'err'); return; }
   try{
-    opsData = await api('/admin/api/ops/audit', {method:'PUT', body:JSON.stringify({prompts:$('#aud_prompts').checked, thumbs:$('#aud_thumbs').checked, retention_days:days, image_cap_mb:cap, image_keep_hours:keepH, member_download:$('#aud_download').checked, notify:$('#aud_notify').checked})});
+    opsData = await api('/admin/api/ops/audit', {method:'PUT', body:JSON.stringify({prompts:$('#aud_prompts').checked, thumbs:$('#aud_thumbs').checked, retention_days:days, image_cap_mb:cap, image_keep_hours:keepH, member_download:$('#aud_download').checked})});
     statusCache = null;
     toast('生成记录设置已保存', 'ok'); auditSetOpen = null; renderAuditSettings(); loadAudit();
   }catch(e){ toastErr(e); }
