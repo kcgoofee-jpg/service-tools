@@ -745,8 +745,12 @@ function renderMe(d){
   // 登录且已有 Key 时，隐藏「全站算法分配」那句——它和下面你自己的额度数字会打架
   document.body.classList.toggle('haskey', !!(authed && d && d.has_key));
   renderChip(d);
-  /* 站长反馈：登录后「我的额度」几个字多余（下面就是额度数字），只留图标；未登录保留「查额度」引导 */
-  if($('liveTitle')) $('liveTitle').innerHTML = icon('key') + (authed ? '' : '查额度');
+  /* 站长反馈（两轮）：登录后这个标题**整体都不要**（下面就是额度数字），连钥匙图标一起隐藏；
+     未登录时才显示「🔑 查额度」作引导。 */
+  if($('liveTitle')){
+    $('liveTitle').hidden = !!authed;
+    if(!authed) $('liveTitle').innerHTML = icon('key') + '查额度';
+  }
   if(authed && d && d.has_key && $('pills')) $('pills').textContent = '';
   var hk = $('headKey');
   if(hk){ hk.hidden = true; hk.innerHTML = ''; }
