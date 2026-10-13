@@ -1,5 +1,15 @@
 # 准入控制器重构（2026-10-09 评审 §9.1/9.2/9.3 落地 · 安静时段版）
 
+## ⚖️ 对抗审查结论（2026-10-14 01:15，两名独立子代理：范围/公平性 + 正确性/失效模式）
+
+按站长要求做了计划级对抗审查，**A、B 两块被否决，今晚只上 C + D**：
+
+- **B（Token 级 FIFO）前提为假**：`AdjustableLimiter` 本来就是 FIFO——等待队列 deque 按序唤醒、非空队列禁止插队（concurrency.py:13,24,69-75），"竞速后到先得"不存在。且照计划重写会在「唤醒后取消」竞态下泄漏信号量（wake 时 active 已 +1，取消方必须回放 release，否则限额 1 的 Token 永久卡死）；"跨 Key 轮询"在按 Token 分队列的结构里是死代码（pick_token 先绑定 Token，一个队列里不会有别的 Key），nai.request 也没有 Key 身份参数。**真问题**是 pick_token 的队头阻塞（忙碌 Token 的队列挡住空闲 Token）——留到首批捐赠号到位时，重写为 join-idle-token 派发并用 shadow.py 真实日志回放验证后再上。
+- **A（预准入）今晚价值≈0 且有坑**：安静时段 guard_precheck 本来就秒拒（非 PACED 立即 429），A 只省 body 上传，而安静时段生图流量为零；照计划写的"非 PACED 即拒"判定是错的（必须 `all(reasons) and reasons[0].code != PACED`，否则 [PACED, DAILY_CAP] 场景会把 1 分钟等位变秒拒，复活 10-13 的重试风暴）；流式通道的 429 错误体形状也和 HTTP 通道不同（无 NOTICE_PREFIX 前缀），提前抛错会改变成员可见负载。归档为白天小 PR 候选。
+- **C 收窄**：parse_retry_after/clamp 逐字节平移（怪癖被 test_review_regressions 钉死：过去日期→5.0 而非 None、非纯数字→20.0）；classify 只做纯分类，消息与按通道的动作留在三个调用点；nai.py 保留全部旧名字再导出（state.py 与老测试的导入面）。
+- **D 修正**：DROP 必须放在 executescript(SCHEMA) 之后且同步删除 SCHEMA 里的 CREATE（否则每次启动又被建回来）。
+- **部署加码**：部署前 `docker tag` 上一版镜像作一键回滚；07:00 后用 TEST_KEY 走一次完整生图路径冒烟；观察覆盖 07:00 早高峰第一波。
+
 ## 背景
 2026-10-09 全面评审（docs/REVIEW_2026-10-09.md §9）提出六条架构建议，其中"每 Token 一个准入控制器"列为体量最大的一条。此后部分已被实现（request_timing 派发判定、complete_image_operation 两阶段取消、PACED 等位、PR #85 删闲置层）。本计划落地剩余部分，并对齐问卷 Top 诉求（32 份）：报错提示更清楚（16 提及）＞ 排队和等待体验（12）＞ 稳定性（11）。
 
