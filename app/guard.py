@@ -24,12 +24,8 @@ HOURLY_MIN, HOURLY_MAX, HOURLY_STEP = 100, 160, 10     # 上限 ≤ 0.8 × 单�
 # 名称: (默认值, 最小, 最大, 说明)
 FIELDS: dict[str, tuple[int, int, int, str]] = {
     "account_daily_cap": (1000, 0, 20000, "每个上游账号每天最多出图张数"),
-    "daily_cap_fallback": (800, 0, 20000, "试探期的安全档：上游 1 小时内 ≥3 次 429 或连续 403 冷却时，每日上限自动退回这个数（必须低于每日上限，否则保险丝失效；只降不升；0 = 不自动退）"),
     "daily_burst": (150, 0, 20000, "每日上限按时段放行：0 点先放出这么多张，之后每小时补「每日上限 ÷ 24」张，没用完的留到后面；0 = 不分时段（整天先到先得）"),
     "account_hourly_cap": (150, 0, 240, "每个上游账号每小时最多出图张数（自动调整：上游 429 减半；前一天顶到过上限且没有 429 才 +10，范围 100～160）"),
-    "account_3h_cap": (400, 0, 720, "每个上游账号连续 3 小时最多出图张数（防止连续几小时都在冲）"),
-    "account_10m_cap": (0, 0, 500, "每个上游账号每 10 分钟最多出图张数（抹平突发：2026-10-13 第一次被上游 429，"
-                                   "一小时的额度被挤在十分钟内发完，上游看到的是 6 倍速率）；0 = 按每小时上限 ÷ 4 自动分摊"),
     "quiet_start": (0, 0, 23, "安静时段开始（北京时间，整点）；与结束相同 = 不启用（2026-10-10 起不启用：夜里不限速）"),
     "quiet_end": (0, 0, 23, "安静时段结束（北京时间，整点；与开始相同表示不设安静时段）"),
     "quiet_hourly_cap": (20, 0, 240, "安静时段每小时最多出图张数；0 = 完全暂停出图（2026-10-13 站长：3-7 点停用）"),
@@ -94,17 +90,7 @@ class Guard:
     def describe(self) -> dict[str, Any]:
         return {"values": dict(self.values),
                 "fields": {k: {"default": v[0], "min": v[1], "max": v[2], "label": v[3]} for k, v in FIELDS.items()},
-                "quiet_now": self.in_quiet(), "hourly_cap_now": self.hourly_cap(),
-                "fallback_effective": self.fallback_effective()}
-
-    def fallback_effective(self) -> bool:
-        """安全档是否真的能在上游告警时兜住：必须 0 < 安全档 < 每日上限。
-
-        只降不升的设计（fall_back_daily 的 old <= safe 直接返回）意味着
-        安全档 ≥ 每日上限时，429 / 403 保险丝静默失效（历史默认 1000 / 1500 就是这种状态）。
-        """
-        old, safe = self.values["account_daily_cap"], self.values["daily_cap_fallback"]
-        return bool(safe and old and old > safe)
+                "quiet_now": self.in_quiet(), "hourly_cap_now": self.hourly_cap()}
 
     # ---------- 安静时段与每小时上限 ----------
     def in_quiet(self, now: Optional[float] = None) -> bool:
@@ -176,18 +162,12 @@ class Guard:
     def hour_count(self, token_id: str, now: Optional[float] = None) -> int:
         return len(self._window(token_id, time.time() if now is None else now, HOUR))
 
-    def count_3h(self, token_id: str, now: Optional[float] = None) -> int:
-        return len(self._window(token_id, time.time() if now is None else now, WINDOW_3H))
-
     def count_10m(self, token_id: str, now: Optional[float] = None) -> int:
         return len(self._window(token_id, time.time() if now is None else now, WINDOW_10M))
 
     def burst_cap(self, now: Optional[float] = None) -> int:
         """每 10 分钟最多出几张：没单独设置就按每小时上限 ÷ 4（不减少总量，只抹平突发）。"""
         now = time.time() if now is None else now
-        explicit = self.values["account_10m_cap"]
-        if explicit:
-            return explicit
         cap = self.hourly_cap(now)
         return max(1, math.ceil(cap / BURST_DIVISOR)) if cap else 0
 
@@ -235,15 +215,6 @@ class Guard:
         idx = max(0, min(len(q) - 1, len(q) - cap)) if cap else 0
         return max(1, math.ceil((q[idx] + HOUR - now) / 60))
 
-    def minutes_until_free_3h(self, token_id: str, now: Optional[float] = None) -> int:
-        now = time.time() if now is None else now
-        q = self._window(token_id, now, WINDOW_3H)
-        cap = self.values["account_3h_cap"]
-        if not q or not cap:
-            return 1
-        idx = max(0, min(len(q) - 1, len(q) - cap))
-        return max(1, math.ceil((q[idx] + WINDOW_3H - now) / 60))
-
     # ---------- 每小时上限自动调整（AIMD：上游 429 减半，平稳一天 +10）----------
     async def on_upstream_429(self, now: Optional[float] = None) -> Optional[tuple[int, int]]:
         """上游限流是我们唯一能拿到的「红线」信号：立刻把每小时上限减半（不低于 100），返回 (旧, 新)。"""
@@ -261,19 +232,6 @@ class Guard:
             prev = float(await self.db.get_setting("guard_429_cap_at", 0) or 0)
             await self.db.set_setting("guard_429_cap_at", min(prev, old) if prev else old)
         return (old, new) if new != old else None
-
-    async def fall_back_daily(self, why: str, now: Optional[float] = None) -> Optional[tuple[int, int]]:
-        """每日上限试探期的保险丝（2026-10-11 站长定 1700，安全档 1500）：上游出现限流 / 封控信号时退回安全档。
-        只降不升，退回后要站长手动再调高。返回 (旧, 新)；没变化返回 None。"""
-        now = time.time() if now is None else now
-        old, safe = self.values["account_daily_cap"], self.values["daily_cap_fallback"]
-        if not safe or not old or old <= safe:
-            return None
-        self.values["account_daily_cap"] = safe
-        if self.db is not None:
-            await self.db.set_settings_bulk({_key("account_daily_cap"): safe, "guard_daily_fallback_at": now,
-                                             "guard_daily_fallback_why": why[:200]})
-        return old, safe
 
     def note_upstream_429(self, now: Optional[float] = None) -> int:
         """记一次上游 429，返回最近 1 小时内的次数（内存，重启清零）。"""
@@ -404,10 +362,6 @@ class Guard:
         if blocked:
             return Reason(f"本时段出图已达上限（每 10 分钟 {self.burst_cap(now)} 张，用来抹平突发、保护上游账号），"
                           f"约 {blocked} 分钟后可继续", BURST_CAP)
-        cap3 = self.values["account_3h_cap"]
-        if cap3 and self.count_3h(token_id, now) >= cap3:
-            wait = self.minutes_until_free_3h(token_id, now)
-            return Reason(f"最近 3 小时出图量已达上限（{cap3} 张，用来保护上游账号），约 {wait} 分钟后有空位", CAP_3H)
         return None
 
     # ---------- 排队（P1） ----------

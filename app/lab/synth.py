@@ -130,7 +130,7 @@ def generate(path: str, *, members: int = 40, days: int = 9, start: str = "2026-
                "exo": np.array([r[4] for r in prows], dtype=bool), "priv": np.array([r[5] for r in prows], dtype=bool),
                "cap": np.full(n, -1, dtype=np.int64)}
         res = rp.replay(inp, prm, seed=seed, tz_offset=off, retry=spec)
-        msg = {k: v.format(daily=prm["account_daily_cap"], hourly=prm["account_hourly_cap"], cap3=prm["account_3h_cap"],
+        msg = {k: v.format(daily=prm["account_daily_cap"], hourly=prm["account_hourly_cap"], cap3=prm.get("account_3h_cap", 0),
                            v5code=v5code) for k, v in MESSAGES.items()}
         chain = res["chain"]
         for i in range(len(res["outcome_all"])):
@@ -181,7 +181,7 @@ def generate(path: str, *, members: int = 40, days: int = 9, start: str = "2026-
                 kind = ["alternate", "multi_device", "overlap", "allday"][int(ev_rng.integers(0, 4))]
                 con.execute("INSERT INTO share_evidence(ts,key_id,kind,points,detail) VALUES (?,?,?,?,?)",
                             (ts, int(ev_rng.integers(1, members + 1)), kind, 15.0, "合成样例"))
-    settings = {"guard_" + k: params[k] for k in ("account_daily_cap", "account_hourly_cap", "account_3h_cap",
+    settings = {"guard_" + k: params[k] for k in ("account_daily_cap", "account_hourly_cap",
                                                    "interval_jitter", "key_image_queue", "queue_per_account",
                                                    "base_daily_images", "quiet_start", "quiet_end", "quiet_hourly_cap")}
     settings.update({"quota_ceiling": params["quota_target_avg"], "quota_base_now": params["base_daily_images"],

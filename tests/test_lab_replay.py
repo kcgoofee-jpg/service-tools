@@ -17,7 +17,7 @@ def make(arrivals, keys, *, dur=5.0, legacy=True):
 
 
 BASE = {"interval_jitter": 0, "image_min_interval": 1.0, "key_image_min_interval": 0.0, "base_daily_images": 0,
-        "quota_target_avg": 1000, "account_daily_cap": 0, "account_hourly_cap": 0, "account_3h_cap": 0,
+        "quota_target_avg": 1000, "account_daily_cap": 0, "account_hourly_cap": 0,
         "queue_per_account": 100}
 
 
@@ -44,11 +44,6 @@ def test_hourly_cap():
     assert codes(res) == ["ok"] * 5 + ["hourly"] * 5
     assert res["hours_at_cap"] == 1 and res["hourly_peak"] == 5
 
-
-def test_three_hour_cap():
-    res = rp.replay(make([i * 1500.0 for i in range(8)], list(range(8))),
-                    {**BASE, "account_hourly_cap": 3, "account_3h_cap": 5})
-    assert res["rejects"]["cap3h"] >= 1 and res["rejects"]["hourly"] == 0
 
 
 def test_daily_account_cap_and_exhaust_time():
