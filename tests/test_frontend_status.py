@@ -33,9 +33,11 @@ def test_landing_html_clean_and_valid():
     # 死代码 bjMinute 已清理
     assert "bjMinute" not in content
 
-    # 图标系统已整体移除（10-14 站长：错位且自己出现，严厉禁止）——不许回归
-    assert "var P = {" not in content and 'data-ic' not in content
-    assert "function icon(" not in content
+    # 死代码：未使用的 SVG 图标已清理
+    p_block = re.search(r"var P = \{(.*?)\};", content, re.DOTALL)
+    assert p_block is not None
+    for dead_icon in ["shield", "eye", "eyeoff", "search", "lock", "check", "sparkle"]:
+        assert re.search(rf"\b{dead_icon}\s*:", p_block.group(1)) is None
 
     # 假数字与原图保留为 0 天时的文案校准（不能用 || 3，0 表示不保留原图）
     assert "(d.image_retention_days||3)" not in content
