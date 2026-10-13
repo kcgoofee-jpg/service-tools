@@ -146,6 +146,15 @@ CREATE TABLE IF NOT EXISTS key_tags (          -- 后台手动标签（只给站
     ts REAL NOT NULL,
     PRIMARY KEY (key_id, tag)
 );
+CREATE TABLE IF NOT EXISTS member_survey (    -- 成员详细问卷（/survey 网页，按 Key 识别，一人一份可覆盖；Discord /反馈 弹窗走 feedback 表）
+    key_id INTEGER PRIMARY KEY,
+    client TEXT NOT NULL DEFAULT '',
+    understand TEXT NOT NULL DEFAULT '',
+    improve TEXT NOT NULL DEFAULT '',
+    improve_other TEXT NOT NULL DEFAULT '',
+    donate TEXT NOT NULL DEFAULT '',
+    ts REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS share_state (       -- 防分享风险分（share_guard.py）
     key_id INTEGER PRIMARY KEY,
     score REAL NOT NULL DEFAULT 0,
@@ -937,6 +946,24 @@ class Database:
             except BaseException:
                 await db.rollback()
                 raise
+
+    async def save_survey(self, key_id: int, *, client: str, understand: str, improve: str,
+                            improve_other: str, donate: str) -> None:
+        """成员问卷：一人一份，重复提交覆盖（取最新想法）。"""
+        await self._db.execute(
+            "INSERT INTO member_survey(key_id, client, understand, improve, improve_other, donate, ts) "
+            "VALUES (?,?,?,?,?,?,?) ON CONFLICT(key_id) DO UPDATE SET client=excluded.client, "
+            "understand=excluded.understand, improve=excluded.improve, improve_other=excluded.improve_other, "
+            "donate=excluded.donate, ts=excluded.ts",
+            (key_id, client[:60], understand[:20], improve[:200], improve_other[:300], donate[:20], time.time()))
+        await self._db.commit()
+
+    async def list_survey(self) -> list[dict]:
+        rows = await self._db.execute_fetchall(
+            """SELECT f.*, k.name, r.discord_id FROM member_survey f
+               LEFT JOIN api_keys k ON k.id=f.key_id
+               LEFT JOIN discord_registrations r ON r.key_id=f.key_id ORDER BY f.ts DESC""")
+        return [dict(r) for r in rows]
 
     async def forget_registration_for_key(self, key_id: int) -> list[str]:
         """删除该 Key 对应的领取记录，返回被删记录的 Discord ID（用于摘除身份组）。"""
