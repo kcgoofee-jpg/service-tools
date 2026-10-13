@@ -184,6 +184,7 @@ async def _live_meta(state, registrar) -> dict:
             "algo_notice": (await site_flags.get(state.db, site_flags.ALGO_NOTICE))[:300],
             "key_inactivity_delete_days": settings.key_inactivity_delete_days,
             "web_login": not await site_flags.get(state.db, site_flags.WEB_LOGIN_PAUSED),
+            "home_join_open": await site_flags.get(state.db, site_flags.HOME_JOIN_OPEN),
             "audit_notice": await audit_disclosure(state.db, settings),
             "registration": reg}
     _LIVE_META.update(at=now, body=body)
