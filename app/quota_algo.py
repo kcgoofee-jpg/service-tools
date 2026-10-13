@@ -225,19 +225,19 @@ async def _cfg(db) -> dict[str, int]:
     return out
 
 
-async def day_coverage(db, day: str) -> float:
+async def day_coverage(db, day: str, reset_hour: int = 0) -> float:
     """这一天有日志覆盖的小时数（从系统开始记录算起）。覆盖不足的「残缺天」不能拿来调参（统计审查 P6：
     10-09 只有 18:18 之后的数据，却被当成「全天用量 20%」去放宽额度和名额）。"""
-    start = time.mktime(time.strptime(day, "%Y-%m-%d"))
+    start = time.mktime(time.strptime(day, "%Y-%m-%d")) + reset_hour * 3600
     first = (await db._db.execute_fetchall("SELECT MIN(ts) FROM usage_log"))[0][0]
     if first is None:
         return 0.0
     return max(0.0, (start + 86400 - max(start, float(first))) / 3600)
 
 
-async def _yesterday(db, day: str, members: list[int]) -> dict[str, int]:
+async def _yesterday(db, day: str, members: list[int], reset_hour: int = 0) -> dict[str, int]:
     """前一天的统计：成员出图总数、每小时 / 每日总量拦截次数、顶到上限的人数、被保底规则拦下的次数。"""
-    start = time.mktime(time.strptime(day, "%Y-%m-%d"))
+    start = time.mktime(time.strptime(day, "%Y-%m-%d")) + reset_hour * 3600
     end = start + 86400
     rows = await db._db.execute_fetchall(
         "SELECT c.key_id, c.images, k.daily_images, c.legacy_free_images, k.quota_auto FROM counters c "
@@ -286,11 +286,11 @@ async def _yesterday(db, day: str, members: list[int]) -> dict[str, int]:
             "paced_blocks": await count_reason(PACED)}
 
 
-async def _v5_used_equiv(db, day: str) -> float:
+async def _v5_used_equiv(db, day: str, reset_hour: int = 0) -> float:
     """这一天全站用掉的 V5，折成 28 步的张数：按每张 V5 图自己的步数（日志 detail 里的「/NNstep」）折算。
     原来用全站所有图片（大部分是 28 步的 V4.5）的平均折算比例，节约模式那天 V5 多是 14 步，
     V5 用量被高估约 20%，实测恢复速度算成 15.5%（超出合理范围被丢弃），退回保守值 5%（2026-10-10 演练发现）。"""
-    start = time.mktime(time.strptime(day, "%Y-%m-%d"))
+    start = time.mktime(time.strptime(day, "%Y-%m-%d")) + reset_hour * 3600
     rows = await db._db.execute_fetchall(
         "SELECT detail, images FROM usage_log WHERE ts>=? AND ts<? AND status='ok' AND model LIKE '%diffusion-5%'",
         (start, start + 86400))
@@ -420,14 +420,18 @@ async def run(state, now: Optional[float] = None) -> dict[str, Any]:
     a = int(float(await db.get_setting("quota_ceiling", cfg["quota_target_avg"])))
     b = int(float(await db.get_setting("quota_base_now", cfg["quota_base"])))
     members = await _members(db)
+    reset_hour = int(getattr(getattr(state, "settings", None), "day_reset_hour", 0) or 0)
+    _day_fn = getattr(state, "day", None)
+    _sday = (lambda ts: _day_fn(ts)) if callable(_day_fn) else \
+        (lambda ts: datetime.fromtimestamp(ts - reset_hour * 3600).strftime("%Y-%m-%d"))
 
-    # ---- 每日微调（一天一次，看前一天）----
-    today = datetime.fromtimestamp(now).strftime("%Y-%m-%d")
+    # ---- 每日微调（一天一次，看前一天；「今天」按服务日起点 DAY_RESET_HOUR 划分，不是本地 0 点）----
+    today = _sday(now)
     review = None
     if await db.get_setting(DAY_KEY, None) != today:
-        yday = (datetime.fromtimestamp(now) - timedelta(days=1)).strftime("%Y-%m-%d")
-        stats = await _yesterday(db, yday, members)
-        covered = await day_coverage(db, yday)
+        yday = _sday(now - 86400)
+        stats = await _yesterday(db, yday, members, reset_hour)
+        covered = await day_coverage(db, yday, reset_hour)
         # 极简模式（2026-10-11 站长）：每人每天同一个数 N，没有保底 / 上限两层。
         # N = 把「账号日上限 − 全站 V5」按昨天的需求做最大最小公平分配：用得少的人用多少算多少，剩下的平分给用得多的人
         from . import site_flags
@@ -463,7 +467,7 @@ async def run(state, now: Optional[float] = None) -> dict[str, Any]:
         prev = next((h for h in reversed(hist[:-1]) if h.get("v5_pct") is not None), None) \
             if hist and hist[-1].get("day") == review["day"] else None
         if prev is not None:
-            used = await _v5_used_equiv(db, review["day"])
+            used = await _v5_used_equiv(db, review["day"], reset_hour)
             review["v5_used_pct"] = round(used / V5_IMAGES_PER_PERCENT, 2)
             review["v5_rate_measured"] = round(pct - prev["v5_pct"] + review["v5_used_pct"], 2)
         if hist and hist[-1].get("day") == review["day"]:
@@ -508,7 +512,7 @@ async def run(state, now: Optional[float] = None) -> dict[str, Any]:
     v5["rate_check"] = rate_info          # 实时的核对结果（方案一天定一次，核对状态每 10 分钟更新）
 
     # ---- 空闲借用（账号快满时才开放）----
-    since7 = time.mktime(time.strptime(today, "%Y-%m-%d")) - 6 * 86400
+    since7 = time.mktime(time.strptime(today, "%Y-%m-%d")) + reset_hour * 3600 - 6 * 86400
     usage = {int(k): int(n) for k, n in await db._db.execute_fetchall(
         "SELECT key_id, SUM(v5) FROM counters WHERE day>=? GROUP BY key_id",
         (datetime.fromtimestamp(since7).strftime("%Y-%m-%d"),)) if k is not None}
