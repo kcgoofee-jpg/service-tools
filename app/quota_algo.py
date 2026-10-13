@@ -86,27 +86,6 @@ V5_DAY_KEY = "quota_v5_day_plan"   # 当天的 V5 分配（每天只定一次）
 # ---- V5 空闲借用（公益版，2026-10-10 站长确认）----
 # 额度不归任何人，用不完的不会自动流向用得最多的人。只有账号余量快满（再不用就白白浪费恢复量）时，
 # 当天顶到个人上限的人可以多借一点；近 7 天用得最多的三分之一只能借一半——不奖励刷量、开小号。
-BORROW_POOL_PCT = 95
-BORROW_RATIO = 0.5
-BORROW_GLOBAL_RATIO = 0.5          # 借用期间全站上限也放宽这么多
-BORROW: dict[str, Any] = {"open": False}      # 每 10 分钟由 run() 更新；出图检查直接读
-
-
-def borrow_plan(pct: Optional[float], each: int, usage_7d: dict[int, int]) -> dict[str, Any]:
-    """纯函数：余量 ≥ 95% 才开放；每人可借 each × 50%，近 7 天用得最多的三分之一只借一半。"""
-    if pct is None or pct < BORROW_POOL_PCT or each <= 0:
-        return {"open": False, "why": f"账号余量 {pct if pct is not None else '未知'}%，低于 {BORROW_POOL_PCT}% 不借用"}
-    bonus = max(1, int(each * BORROW_RATIO + 0.5))
-    users = sorted((n, k) for k, n in usage_7d.items() if n > 0)
-    heavy = [k for _, k in users[len(users) - len(users) // 3:]] if len(users) >= 3 else []
-    return {"open": True, "bonus": bonus, "heavy_bonus": max(1, bonus // 2), "heavy": heavy,
-            "why": f"账号余量 {pct:.0f}% 快满：顶到上限的人可以多借 {bonus} 张（近 7 天用得最多的 {len(heavy)} 人借 {max(1, bonus // 2)} 张）"}
-
-
-def borrow_for(key_id: int) -> int:
-    if not BORROW.get("open"):
-        return 0
-    return BORROW["heavy_bonus"] if key_id in set(BORROW.get("heavy", [])) else BORROW["bonus"]
 
 
 def choose_rate(api_rate: Optional[float], measured: Optional[float]) -> tuple[float, dict[str, Any]]:
@@ -511,15 +490,6 @@ async def run(state, now: Optional[float] = None) -> dict[str, Any]:
     if pct is not None:
         v5["percent"] = pct
     v5["rate_check"] = rate_info          # 实时的核对结果（方案一天定一次，核对状态每 10 分钟更新）
-
-    # ---- 空闲借用（账号快满时才开放）----
-    since7 = time.mktime(time.strptime(today, "%Y-%m-%d")) + reset_hour * 3600 - 6 * 86400
-    usage = {int(k): int(n) for k, n in await db._db.execute_fetchall(
-        "SELECT key_id, SUM(v5) FROM counters WHERE day>=? GROUP BY key_id",
-        (datetime.fromtimestamp(since7).strftime("%Y-%m-%d"),)) if k is not None}
-    BORROW.clear()
-    BORROW.update({"open": False, "why": "极简模式：每人固定张数，不借用"})       # 2026-10-11 站长：去掉借用这一层
-    v5["borrow"] = {k: BORROW[k] for k in ("open", "why") if k in BORROW}
 
     # ---- 应用：所有由算法管理的成员同一套额度 ----
     cur = await db._db.execute_fetchall(

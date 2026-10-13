@@ -538,7 +538,6 @@ class NaiClient:
             if self.guard is not None:          # 每日上限试探期：封控信号 → 退回安全档
                 import asyncio as _asyncio
                 async def _fall():
-                    fell = await self.guard.fall_back_daily("上游连续 403（账号可能被封控）")
                     if fell:
                         self._event("daily_cap_fallback", f"⚠️ NovelAI 连续返回 403：每日出图上限自动从 {fell[0]} 退回 {fell[1]} 张，确认安全后需要站长手动再调高。", 0)
                 try:
