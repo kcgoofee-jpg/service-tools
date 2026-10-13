@@ -795,7 +795,10 @@ function renderMe(d){
   lr.hidden = true; me.hidden = false;
   var dc = d.discord || {}, nm = esc(dc.display_name || dc.username || '成员');
   if(!d.has_key){
-    var tip = '在 Discord 输入 <code>/register</code> 即可领取。';
+    var regc = d.registration || {};
+    var tip = regc.open === false
+      ? '注册当前已关闭，开放时间看站长公告。'
+      : '在 Discord 输入 <code>/register</code> 即可领取。';
     me.innerHTML = '<p class="me-empty">你好，' + nm + '！你还没有 Key。' + tip + '</p>';
   }else{
     var t = d.today || {}, q = d.queue || [];
@@ -982,7 +985,7 @@ function fmtDate(sec){
   function setBar(id, a, b){ var e = $id(id), p = pct(a, b); if(e){ e.style.width = p + '%'; if(e.parentNode) e.parentNode.setAttribute('aria-valuenow', String(p)); } }
   function mark(k){ Array.prototype.forEach.call(steps, function(s){ var on = s.dataset.step === k; s.classList.toggle('on', on); if(on) s.setAttribute('aria-current', 'step'); else s.removeAttribute('aria-current'); }); }
   var BLOCK_TITLE = {paced: '运行正常 · 时段平滑补给中', daily_cap: '今日出图已满', breaker: '暂停出图 · 上游出错',
-    hourly_cap: '近 60 分钟出图已满', quiet_cap: '安静时段 · 出图已满', cap_3h: '近 3 小时出图已满'};
+    hourly_cap: '近 60 分钟出图已满', quiet_cap: '安静时段 · 暂停出图', cap_3h: '近 3 小时出图已满'};
   var lastQueueCount = -1, lastQueueSec = 0, queueSeenAt = 0;
   function getEstimatedSec(count, iv){
     if(count <= 0) return 0;
@@ -1024,7 +1027,9 @@ function fmtDate(sec){
         step = 'pace';
       } else {
         tone = bk.code === 'breaker' ? 'bad' : 'warn';
-        val = bk.code === 'daily_cap' ? '明天 7 点重置后恢复' : bw ? '约 ' + bw[1] + ' 分钟后' : '稍后再试';
+        val = bk.code === 'daily_cap' ? '明天 7 点重置后恢复'
+            : bk.code === 'quiet_cap' ? '暂停出图 · 7 点恢复'
+            : bw ? '约 ' + bw[1] + ' 分钟后' : '稍后再试';
         sub = bk.code === 'daily_cap' ? '全站今日出图已达上限，明天 7 点自动恢复' : bk.text;
         step = 'pace';
       }
