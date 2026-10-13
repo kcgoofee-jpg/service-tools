@@ -1907,6 +1907,32 @@ async def survey_results(request: Request):
                         "donate": tally("donate"), "client": tally("client")}}
 
 
+@router.get("/donations")
+async def donations_list(request: Request):
+    """首页「捐赠 Key」提交的号：未处理在前。Token 只在这里展示，站长验证后人工接入上游。"""
+    require_admin(request)
+    return await request.app.state.gate.db.list_donations()
+
+
+@router.get("/donations/count")
+async def donations_count(request: Request):
+    """导航角标轮询：未处理的捐赠数量。"""
+    require_admin(request)
+    return {"open": await request.app.state.gate.db.count_unhandled_donations()}
+
+
+@router.post("/donations/{did}/handle")
+async def donation_handle(request: Request, did: int):
+    """标记已处理（已验证接入 / 已联系 / 不可用），可留一句备注。"""
+    require_admin(request)
+    body = await read_json_body(request)
+    ok = await request.app.state.gate.db.handle_donation(did, str(body.get("note", "") or ""))
+    if not ok:
+        raise HTTPException(404, "不存在或已处理过")
+    await log_action(request.app.state.gate.db, _actor(request), "捐赠 Key 已处理", f"#{did}")
+    return {"ok": True}
+
+
 @router.put("/ops/registration")
 async def ops_set_registration(request: Request):
     """开放 / 关闭自助注册、名额上限、新成员默认功能与额度；机器人下一条命令即生效。"""
