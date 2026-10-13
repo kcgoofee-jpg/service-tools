@@ -91,17 +91,9 @@ async def build(state, registrar, now: Optional[float] = None) -> dict[str, Any]
         "interval": round(float(getattr(state.settings, "image_min_interval", 15) or 15) + gv.get("interval_jitter", 0) / 2, 1),
     }
     # 调度规则（首页「点一步看规则」用）：全是站点级参数和汇总，不含任何个人信息
-    anlas = {}
-    try:
-        import json as _json
-        raw = await state.db.get_setting("anlas_pool_last", None)
-        last = _json.loads(raw) if raw else {}
-        anlas = {"per_member": int(last.get("per_member") or 0), "members": len(last.get("members") or []),
-                 "enabled": bool(last.get("enabled"))}
-    except (TypeError, ValueError):
-        pass
     quota = {}
     try:
+        import json as _json
         q = _json.loads(await state.db.get_setting("quota_algo_last", None) or "{}")
         v5 = q.get("v5") or {}
         quota = {"ceiling": q.get("ceiling"), "v5_each": v5.get("each"), "v5_global": v5.get("global"),
@@ -136,7 +128,7 @@ async def build(state, registrar, now: Optional[float] = None) -> dict[str, Any]
         "quiet_cap": (gv.get("quiet_hourly_cap") or 0) * usable,
         "min_interval": float(getattr(state.settings, "image_min_interval", 15) or 15), "jitter": gv.get("interval_jitter", 0),
         "borrow_open": borrow_open,
-        "anlas": anlas,
+        "anlas": {"per_member": 0, "members": 0, "enabled": False},   # Anlas 自动分配已下线（2026-10-13），字段保留兼容旧前端
         "quota": quota,          # 动态额度的当前结果（quota_algo.py）
     }
     if registrar is not None:

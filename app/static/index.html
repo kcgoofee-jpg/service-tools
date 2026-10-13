@@ -1043,13 +1043,11 @@ td.note{min-width:220px}
             <summary class="panel-head"><h2>账号保护与排队</h2><span class="desc" id="fs-guard">0 = 关闭该项，保存后立即生效</span></summary>
             <div id="guardLive" class="hint muted sm" style="margin-bottom:12px">正在读取当前状态…</div>
             <div class="form-grid" id="guardFields"></div>
+            <details class="more" id="guardAdv" style="margin:4px 0 12px">
+              <summary class="muted sm" style="cursor:pointer">高级（3 小时 / 10 分钟 / 保险丝 / 安静时段 / 抖动 / 排队上限）</summary>
+              <div class="form-grid" id="guardFieldsAdv" style="margin-top:10px"></div>
+            </details>
             <button class="btn primary" data-act="save-guard">保存账号保护</button>
-          </details>
-          <details class="card panel fold">
-            <summary class="panel-head"><h2>Anlas 自动分配</h2><span class="desc" id="fs-anlas">每 10 分钟重算，供活跃成员在 V5 用完后续杯</span></summary>
-            <div id="anlasLive" class="hint muted sm" style="margin-bottom:12px;white-space:pre-line">正在读取当前状态…</div>
-            <div class="form-grid" id="anlasFields"></div>
-            <button class="btn primary" data-act="save-anlas">保存并重算</button>
           </details>
           <details class="card panel fold">
             <summary class="panel-head"><h2>图片排队与冷却</h2><span class="desc" id="fs-runtime">排队等待与任务间隔限制</span></summary>
@@ -3504,7 +3502,7 @@ function changeLogPage(delta){ logPage=Math.max(1,logPage+delta); loadLogs(); }
 /* ---------- settings ---------- */
 let quotaV5Managed = false;      // 全站每日 V5 是否由动态额度算法接管（由 loadSettings 探测后写）
 async function loadSettings(){
-  loadGuard(); loadAnlasPool();
+  loadGuard();
   try{
     const [a, s, o, r, qa] = await Promise.all([
       api('/admin/api/announcement').catch(()=>({})), api('/admin/api/settings'),
@@ -3615,15 +3613,16 @@ async function loadGuard(){
   try{
     guardData = await api('/admin/api/guard');
     const v = guardData.values, f = guardData.fields;
-    $('#guardFields').innerHTML = Object.keys(f).filter(k => !GUARD_ALGO_OWNED.has(k)).map(k => `<div class="field"><label for="g_${k}">${esc(f[k].label)}</label>
-      <input id="g_${k}" type="number" min="${f[k].min}" max="${f[k].max}" step="1" value="${esc(v[k])}"><div class="hint" title="默认 ${esc(f[k].default)}">${f[k].min}～${f[k].max}</div></div>`).join('');
+    const CORE = ['account_daily_cap', 'daily_burst', 'account_hourly_cap'];
+    const input = k => `<div class="field"><label for="g_${k}">${esc(f[k].label)}</label>
+      <input id="g_${k}" type="number" min="${f[k].min}" max="${f[k].max}" step="1" value="${esc(v[k])}"><div class="hint" title="默认 ${esc(f[k].default)}">${f[k].min}～${f[k].max}</div></div>`;
+    $('#guardFields').innerHTML = CORE.filter(k => f[k]).map(input).join('');
+    $('#guardFieldsAdv').innerHTML = Object.keys(f).filter(k => !GUARD_ALGO_OWNED.has(k) && !CORE.includes(k)).map(input).join('');
     const acc = guardData.accounts.map(a => `账号 ${a.position}：今天 ${a.today}${v.account_daily_cap?' / '+v.account_daily_cap:''} 张，本小时 ${a.this_hour}${guardData.hourly_cap_now?' / '+guardData.hourly_cap_now:''} 张`).join('；');
-    $('#fs-guard').textContent = `每小时 ${v.account_hourly_cap || '不限'} · 3 小时 ${v.account_3h_cap || '不限'} · 每天 ${v.account_daily_cap || '不限'} 张${v.daily_burst && v.account_daily_cap ? '，按时段放行（0 点先放 '+v.daily_burst+' 张，每小时补 '+Math.round(v.account_daily_cap/24)+' 张）' : ''}（每个上游账号）`;
+    $('#fs-guard').textContent = `每小时 ${v.account_hourly_cap || '不限'} · 每天 ${v.account_daily_cap || '不限'} 张${v.daily_burst && v.account_daily_cap ? '，按时段放行（0 点先放 '+v.daily_burst+' 张，每小时补 '+Math.round(v.account_daily_cap/24)+' 张）' : ''}（每个上游账号）`;
     $('#guardLive').textContent = `${guardData.quiet_now ? '现在是安静时段' : '正常时段'} · ${acc || '没有可用账号'} · 正在生成或排队 ${guardData.queued_images} 张`;
   }catch(e){ $('#guardLive').textContent = '读取失败'; }
 }
-const ANLAS_LABELS = {anlas_auto_enabled:['开启自动分配（1 开 / 0 关）',0,1], anlas_reserve:['保留不分的 Anlas',0,10000],
-  anlas_member_daily_cap:['每人每天最多',0,1000], anlas_min_images_7d:['近 7 天至少出图张数',0,10000], anlas_min_key_age_days:['领取满几天',0,365]};
 /* 把 V5 全站额度的推算过程摆出来，让人一眼能用常识检查（10/10 就是看到「每天恢复 11%」才发现读数错了） */
 function v5Derivation(v){
   if(!v || v.global == null) return '';
@@ -3811,15 +3810,8 @@ async function loadQuotaAlgo(){
             <div class="body"><div class="t">动态额度总开关</div><div class="d">关闭后由站长在后台完全手动分配每把 Key 的额度</div></div>
             <label class="switch"><input type="checkbox" id="qa_auto_enabled" ${autoOn ? 'checked' : ''} aria-label="动态额度总开关"><span></span></label>
           </div>
-          <div class="cols-3" style="margin-top:10px">
-            <div class="field"><label for="qa_target_avg">目标上限 A（每人每天）</label><input id="qa_target_avg" type="number" min="10" max="2000" value="${esc(p.quota_target_avg ?? 150)}"><div class="hint">基准出图张数</div></div>
-            <div class="field"><label for="qa_ceiling_max">上限峰值（最高）</label><input id="qa_ceiling_max" type="number" min="10" max="5000" value="${esc(p.quota_ceiling_max ?? 300)}"><div class="hint">空闲时最高放宽至</div></div>
-            <div class="field"><label for="qa_step">每次微调步长</label><input id="qa_step" type="number" min="1" max="500" value="${esc(p.quota_step ?? 25)}"><div class="hint">每天 0 点微调增减量</div></div>
-            <div class="field"><label for="qa_v5_min">V5 每人最低（张）</label><input id="qa_v5_min" type="number" min="0" max="500" value="${esc(p.quota_v5_min ?? 3)}"><div class="hint">保底 V5 张数</div></div>
-            <div class="field"><label for="qa_v5_max">V5 每人最高（张）</label><input id="qa_v5_max" type="number" min="1" max="500" value="${esc(p.quota_v5_max ?? 30)}"><div class="hint">封顶 V5 张数</div></div>
-          </div>
+          <div class="muted sm" style="margin:8px 0">每人每天的数由算法按「上游恢复速度 − 昨天实际用量」自动注水，无需手填；下方按钮用于临时手动重算。</div>
           <div style="display:flex;gap:10px;margin-top:12px">
-            <button class="btn primary" data-act="save-qa">保存参数并重算</button>
             <button class="btn" data-act="run-qa">立即重算一次</button>
           </div>
         </div>
@@ -3850,24 +3842,17 @@ async function saveQuotaAlgo(btn){
   const saveBtn = btn || document.querySelector('[data-act="save-qa"]');
   let body;
   try{
-    body = {
-      quota_auto_enabled: $('#qa_auto_enabled').checked ? 1 : 0,
-      quota_target_avg: readNum('qa_target_avg', '目标上限 A', {min:10, max:2000}),
-      quota_ceiling_max: readNum('qa_ceiling_max', '上限峰值', {min:10, max:5000}),
-      quota_step: readNum('qa_step', '每次微调步长', {min:1, max:500}),
-      quota_v5_min: readNum('qa_v5_min', 'V5 每人最低', {min:0, max:500}),
-      quota_v5_max: readNum('qa_v5_max', 'V5 每人最高', {min:1, max:500}),
-    };
+    body = { quota_auto_enabled: $('#qa_auto_enabled').checked ? 1 : 0 };
   }catch(e){ toastErr(e); return; }
   if(saveBtn){ saveBtn.disabled = true; saveBtn.textContent = '保存中…'; }
   try{
     await api('/admin/api/quota-algo', {method:'PUT', body:JSON.stringify(body)});
-    toast('动态额度参数已保存并完成重算', 'ok');
+    toast('动态额度开关已保存并完成重算', 'ok');
     loadQuotaAlgo();
     loadAllowance();
   }catch(e){ toastErr(e); }
   finally{
-    if(saveBtn){ saveBtn.disabled = false; saveBtn.textContent = '保存参数并重算'; }
+    if(saveBtn){ saveBtn.disabled = false; saveBtn.textContent = '保存'; }
   }
 }
 
@@ -3885,30 +3870,6 @@ async function runQuotaAlgo(btn){
   }
 }
 
-async function loadAnlasPool(){
-  try{
-    const d = await api('/admin/api/anlas-pool'), v = d.settings, L = d.last;
-    $('#anlasFields').innerHTML = Object.keys(ANLAS_LABELS).map(k => `<div class="field"><label for="a_${k}">${ANLAS_LABELS[k][0]}</label><input id="a_${k}" type="number" min="${ANLAS_LABELS[k][1]}" max="${ANLAS_LABELS[k][2]}" step="1" value="${esc(v[k])}"></div>`).join('');
-    $('#fs-anlas').textContent = !L ? '还没运行过' : L.error ? '上次运行出错' : !L.enabled ? '已关闭' : `今日池 ${L.daily_pool} · 分给 ${L.members.length} 人`;
-    $('#anlasLive').textContent = !L ? '还没有运行过（每 10 分钟自动运行一次，保存后立即运行）。'
-      : L.error ? '上次运行：' + L.error
-      : !L.enabled ? '自动分配已关闭。'
-      : `账号剩余 ${L.anlas} Anlas · 约 ${L.days_to_refill} 天后补满 · 今日池 ${L.daily_pool}\n合格成员 ${L.members.length} 人${L.members.length ? '（' + L.members.slice(0, 8).join('、') + (L.members.length > 8 ? '…' : '') + '）' : ''} · 每人每天 ${L.per_member}${L.per_member ? '（约 ' + Math.floor(L.per_member / 30) + ' 张续杯 V5）' : '（不足一张付费 V5，本轮不分）'}\n更新于 ${fullTime(L.updated_at)}`;
-  }catch(e){ $('#anlasLive').textContent = '读取失败'; }
-}
-async function saveAnlasPool(btn){
-  const saveBtn = btn || document.querySelector('[data-act="save-anlas"]');
-  if(saveBtn){ saveBtn.disabled = true; saveBtn.textContent = '保存中…'; }
-  try{
-    const body = {};
-    for(const k of Object.keys(ANLAS_LABELS)) body[k] = readNum('a_' + k, ANLAS_LABELS[k][0], {min:ANLAS_LABELS[k][1], max:ANLAS_LABELS[k][2]});
-    await api('/admin/api/anlas-pool', {method:'PUT', body: JSON.stringify(body)});
-    toast('已保存并重算 Anlas 分配', 'ok'); loadAnlasPool();
-  }catch(e){ toastErr(e); }
-  finally{
-    if(saveBtn){ saveBtn.disabled = false; saveBtn.textContent = '保存并重算'; }
-  }
-}
 /* 由额度算法每天 0 点写入的字段：后台不让手动改（改了会在 0 点被覆盖，且当天会和「每人 N 张」打架） */
 const GUARD_ALGO_OWNED = new Set(['base_daily_images']);
 async function saveGuard(btn){
@@ -4121,7 +4082,6 @@ document.addEventListener('click', ev=>{
     case 'save-budget': saveBudget(el); break;
     case 'save-runtime': saveRuntimeLimits(el); break;
     case 'save-guard': saveGuard(el); break;
-    case 'save-anlas': saveAnlasPool(el); break;
     case 'save-qa': saveQuotaAlgo(el); break;
     case 'run-qa': runQuotaAlgo(el); break;
     case 'save-announce': saveAnnounce(); break;

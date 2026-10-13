@@ -1302,60 +1302,6 @@ async def test_live_me_is_passive_and_quiet_on_bad_keys(state):
     assert not [a for a, kw in state.db.logs if a[4] == "rejected"]
 
 
-def test_anlas_plan_spends_down_before_refill():
-    from app.anlas_pool import plan
-    now = 1_000_000.0
-    p = plan(9949, now + 16 * 86400, now, 10, reserve=1000, cap=78, budget_left=None, month_days_left=20)
-    assert p["daily_pool"] == 559 and p["per_member"] == 55
-    late = plan(9949, now + 2 * 86400, now, 10, reserve=1000, cap=78, budget_left=None, month_days_left=20)
-    assert late["per_member"] == 78                                        # 临近续费，用不完的提高到上限
-    assert plan(9949, now + 16 * 86400, now, 10, reserve=1000, cap=78, budget_left=300, month_days_left=20)["per_member"] == 0
-    assert plan(1200, now + 16 * 86400, now, 3, reserve=1000, cap=78, budget_left=None, month_days_left=20)["per_member"] == 0
-    assert plan(9949, now + 86400, now, 0, reserve=1000, cap=78, budget_left=None, month_days_left=5)["per_member"] == 0
-
-
-@pytest.mark.asyncio
-async def test_anlas_rebalance_grants_active_v5_members_and_revokes(tmp_path):
-    from types import SimpleNamespace
-    from app import anlas_pool
-    db = Database(str(tmp_path / "a.db"))
-    await db.connect()
-    try:
-        now = time.time()
-        base = dict(daily_images=300, monthly_anlas=0, daily_text_tokens=0, rpm=5, image_model_scope="all")
-        active = await db.create_key({"name": "活跃", "token": "nai-a", **base})
-        quiet = await db.create_key({"name": "不活跃", "token": "nai-b", **base})
-        manual = await db.create_key({"name": "手动", "token": "nai-c", "allow_anlas": True, "daily_anlas": 500, **base})
-        for k, d in ((active, "111"), (quiet, "222"), (manual, "333")):
-            await db._db.execute("INSERT INTO discord_registrations(discord_id,key_id,created_at) VALUES (?,?,?)", (d, k["id"], now))
-        await db._db.execute("UPDATE api_keys SET created_at=?", (now - 5 * 86400,))
-        today = time.strftime("%Y-%m-%d", time.localtime(now))
-        await db._db.execute("INSERT INTO counters(key_id, day, images) VALUES (?,?,20)", (active["id"], today))
-        await db._db.commit()
-        st = SimpleNamespace(db=db, nai=SimpleNamespace(pool=[]), day=lambda: today, month=lambda: today[:7],
-                             settings=SimpleNamespace(global_monthly_anlas=0))
-        sent = []
-
-        async def notify(key_id, text):
-            sent.append(key_id)
-        r = await anlas_pool.rebalance(st, now=now, account={"anlas": 5000, "refill_at": now + 10 * 86400}, notify=notify)
-        assert r["per_member"] == 90 and r["members"] == ["活跃"]
-        row = await db.get_key(active["id"])
-        assert row["allow_anlas"] == 1 and row["anlas_auto"] == 1 and row["daily_anlas"] == 90 and sent == [active["id"]]
-        assert (await db.get_key(manual["id"]))["daily_anlas"] == 500            # 手动设置不受影响
-        await db._db.execute("DELETE FROM counters"); await db._db.commit()
-        await anlas_pool.rebalance(st, now=now, account={"anlas": 5000, "refill_at": now + 10 * 86400}, notify=notify)
-        row = await db.get_key(active["id"])
-        assert row["allow_anlas"] == 0 and row["anlas_auto"] == 0 and sent == [active["id"]]
-        assert json.loads(await db.get_setting(anlas_pool.STATE_KEY, "{}"))["per_member"] == 0
-        # 站长在成员页选了「Anlas 关闭」（-1）：即使又活跃了，算法也不会再开
-        await db._db.execute("UPDATE api_keys SET anlas_auto=-1 WHERE id=?", (active["id"],))
-        await db._db.execute("INSERT INTO counters(key_id, day, images) VALUES (?,?,20)", (active["id"], today))
-        await db._db.commit()
-        r = await anlas_pool.rebalance(st, now=now, account={"anlas": 5000, "refill_at": now + 10 * 86400}, notify=notify)
-        assert r["members"] == [] and (await db.get_key(active["id"]))["allow_anlas"] == 0
-    finally:
-        await db.close()
 
 
 @pytest.mark.asyncio
