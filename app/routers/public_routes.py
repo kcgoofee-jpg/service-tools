@@ -161,18 +161,49 @@ async def announcement():
     return Response(html, media_type="text/html", headers=_ANNOUNCEMENT_HEADERS)
 
 
+_LIVE_META: dict = {"at": 0.0, "body": None}   # at 用 time.monotonic()
+
+
+async def _live_meta(state, registrar) -> dict:
+    """/public/live 的 meta 字段（10-14 重构）：变化很慢（站点地址、公告、注册开关、额度说明），
+    单独 30s 子缓存，不跟着 1 秒轮询每次重算。原 30s 的 /public/status 轮询由它接替。"""
+    now = time.monotonic()
+    if _LIVE_META["body"] is not None and now - _LIVE_META["at"] < 30:
+        return _LIVE_META["body"]
+    settings = state.settings
+    p = settings.announcement_path
+    reg: dict = {"configured": False, "open": False}   # 没配注册服务 = 关闭（fail-closed，与 configured_service 一致）
+    if registrar is not None:
+        cfg = await registrar.settings()
+        reg = {"configured": True, "open": cfg["open"]}
+        if cfg["max_users"]:
+            reg["slots_left"] = max(0, cfg["max_users"] - await registrar.count_active())
+    body = {"site": settings.site_url.rstrip("/"),
+            "discord_invite": settings.discord_invite_url,
+            "has_announcement": bool(p.exists() and p.read_text(encoding="utf-8").strip()),
+            "algo_notice": (await site_flags.get(state.db, site_flags.ALGO_NOTICE))[:300],
+            "key_inactivity_delete_days": settings.key_inactivity_delete_days,
+            "web_login": not await site_flags.get(state.db, site_flags.WEB_LOGIN_PAUSED),
+            "audit_notice": await audit_disclosure(state.db, settings),
+            "registration": reg}
+    _LIVE_META.update(at=now, body=body)
+    return body
+
+
 @router.get("/public/live")
 async def public_live(request: Request):
-    """首页实时架构图：每秒轮询，只含汇总数字（请求数、额度、排队数、账号保护、名额）。"""
+    """首页实时架构图：每秒轮询，只含汇总数字（请求数、额度、排队数、账号保护、名额）+ meta（30s 子缓存）。"""
     state = _state()
-    body = await live.build(state, getattr(request.app.state, "registrar", None))
+    registrar = getattr(request.app.state, "registrar", None)
+    body = await live.build(state, registrar)
+    # 浅拷贝拼响应：live.build 返回的是共享缓存对象，绝不能原地写（test_review_regressions 的红线）
+    body = {**body, **await _live_meta(state, registrar)}
     # 登录的成员：附上「我的排队」，看板第一格直接显示排第几（不用再粘贴 Key）
     from ..registration_routes import _member_session
     discord_id = await _member_session(request)
     me = None
     if discord_id:
-        reg = getattr(request.app.state, "registrar", None)
-        key = await reg.key_row_for(discord_id) if reg is not None else None
+        key = await registrar.key_row_for(discord_id) if registrar is not None else None
         if key is not None and key["enabled"]:
             me = live.mine(state, key["id"])
     return JSONResponse({**body, "me": me}, headers={"Cache-Control": "no-store"})
