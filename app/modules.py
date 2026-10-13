@@ -1,4 +1,4 @@
-"""模块登记：容量 / 分配 / 公平调度 / Anlas / 自动驾驶 / 风险检查 / 领 Key / 观测。
+"""模块登记：容量 / 分配 / 公平调度 / 自动驾驶 / 风险检查 / 领 Key / 观测。
 
 每个模块写明回答的问题、关键参数的当前值和交叉校验。框架见 kernel.py；新增模块写一个 Module(...) 并在 build() 里 register。
 """
@@ -36,9 +36,8 @@ def capacity(state) -> Module:
         if not last or now - float(last) >= 3600:          # 每小时记一次上游真实状态
             fresh = await quota_algo.refresh_allowance(state)    # 主动读一次，夜里没人用 V5 时也是真实值
             pct, rate = await quota_algo._allowance(state)
-            anl = (await _setting_json(state.db, "anlas_pool_last")).get("anlas")
             await state.db._db.execute("INSERT INTO upstream_snapshots(ts, v5_percent, v5_rate, anlas, fresh) VALUES (?,?,?,?,?)",
-                                       (now, pct, rate, anl, 1 if fresh else 0))
+                                       (now, pct, rate, 0, 1 if fresh else 0))
             await state.db._db.commit()
         changed = await g.adapt_daily()
         if changed:
@@ -149,32 +148,6 @@ def allocation(state) -> Module:
                   f"{cfg['quota_step']}；否则不变"),
             Param("范围", lambda: f"{cfg['quota_base_min_fair']}～{cfg['quota_ceiling_max']} 张"),
             Param("V5 每人范围", lambda: f"{cfg['quota_v5_min']}～{cfg['quota_v5_max']} 张", "按账号 V5 剩余和恢复速度分"),
-        ])
-
-
-# ---------------- Anlas 自动分配 ----------------
-def anlas(state) -> Module:
-    from . import anlas_pool
-
-    async def tick(k: Kernel):
-        r = await anlas_pool.rebalance(state, notify=k.extra.get("dm"))
-        return f"每人 {r.get('per_member')} Anlas · {len(r.get('members') or [])} 人" if isinstance(r, dict) else ""
-
-    async def checks(k: Kernel):
-        last = await _setting_json(state.db, anlas_pool.STATE_KEY)
-        per = last.get("per_member") or 0
-        return [Check("分到的 Anlas 至少够一张续杯", per == 0 or per >= anlas_pool.V5_PAID_PRICE,
-                      f"每人 {per}，一张 V5 约 {anlas_pool.V5_PAID_PRICE}")] if last else []
-
-    d = anlas_pool.DEFAULTS
-    return Module(
-        name="anlas", title="Anlas 续杯", question="V5 用完后，账号的 Anlas 怎么分给常用成员",
-        tick=tick, checks=checks, hard_note="关闭后不再重新分配，当天已分配的保持",
-        params=[
-            Param("一张 V5 约", lambda: anlas_pool.V5_PAID_PRICE, "Anlas"),
-            Param("保留不分", lambda: d["anlas_reserve"]),
-            Param("每人每天最多", lambda: d["anlas_member_daily_cap"]),
-            Param("近 7 天至少出图", lambda: d["anlas_min_images_7d"]),
         ])
 
 
@@ -390,7 +363,7 @@ def risk(state) -> Module:
 
 def build(state, bug) -> Kernel:
     k = Kernel(state, bug)
-    for make in (observation, capacity, allocation, scheduling, anlas, autopilot_module, risk,
+    for make in (observation, capacity, allocation, scheduling, autopilot_module, risk,
                  registration, registration_ready):
         k.register(make(state))
     return k
