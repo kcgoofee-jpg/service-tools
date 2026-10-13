@@ -142,20 +142,6 @@ def test_over_base_rejections_are_site_level():
 
 
 
-@pytest.mark.asyncio
-async def test_daily_cap_falls_back_on_upstream_signals():
-    # 2026-10-11 站长：日上限试探到 1700，上游 1 小时 ≥3 次 429 或连续 403 → 自动退回 1500，只降不升
-    g = _guard(account_daily_cap=1700, daily_cap_fallback=1500)
-    now = _at(12)
-    assert g.note_upstream_429(now) == 1 and g.note_upstream_429(now + 10) == 1   # 同一次限流的并发 429 只算一次
-    assert g.note_upstream_429(now + 70) == 2
-    assert g.note_upstream_429(now + 4000) == 1                       # 1 小时外的不算
-    assert await g.fall_back_daily("test") == (1700, 1500)
-    assert g.values["account_daily_cap"] == 1500
-    assert await g.fall_back_daily("again") is None                   # 已在安全档：不再动
-    g2 = _guard(account_daily_cap=1200, daily_cap_fallback=1500)
-    assert await g2.fall_back_daily("x") is None                      # 只降不升
-
 
 @pytest.mark.asyncio
 async def test_simple_mode_one_number_for_everyone(tmp_path, monkeypatch):
@@ -187,7 +173,6 @@ async def test_simple_mode_one_number_for_everyone(tmp_path, monkeypatch):
         assert r["ceiling"] == r["base"] == n == guard.values["base_daily_images"]
         rows = await db._db.execute_fetchall("SELECT DISTINCT daily_images FROM api_keys WHERE quota_auto=1")
         assert [x[0] for x in rows] == [n]                              # 所有人同一个数
-        assert quota_algo.BORROW["open"] is False
     finally:
         await db.close()
 

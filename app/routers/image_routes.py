@@ -183,13 +183,6 @@ async def image_admission(key):
     def _on_sent():
         waiting = guard.waiting_keys()           # 本张开始发往上游时，还在排队的其他 Key
         guard.mark_running(key["id"], entry_id)
-        sched = getattr(state, "sched", None)
-        if sched is not None:
-            try:
-                sched.observe_pick(key["id"], waiting)
-                sched.on_serve(key["id"])
-            except Exception as exc:
-                _bug("scheduling", exc)
     request_timing.on_sent(_on_sent)
     try:
         yield
@@ -293,13 +286,9 @@ async def quota_image_check(key, est: dict, *, legacy_free_images: int = 0,
             manual = key["quota_auto"] == -1
         except (KeyError, IndexError, TypeError):
             manual = False
-        borrow = quota_algo.borrow_for(key["id"]) if key["daily_v5"] > 0 and not manual else 0    # 手动 Key 填多少就是多少，不借
-        if key["daily_v5"] > 0 and c["v5"] + sum(r.v5 for r in own_day) + est["v5"] > key["daily_v5"] + borrow:
-            raise main.err(402, f"今日 V5 额度已用完（{key['daily_v5']} 张/天" + (f"，含空闲借用 {borrow} 张" if borrow else "")
-                      + "），明天恢复后再用", reasons.MEMBER_QUOTA)
+        if key["daily_v5"] > 0 and c["v5"] + sum(r.v5 for r in own_day) + est["v5"] > key["daily_v5"]:
+            raise main.err(402, f"今日 V5 额度已用完（{key['daily_v5']} 张/天），明天恢复后再用", reasons.MEMBER_QUOTA)
         g = await site_flags.get(state.db, site_flags.GLOBAL_DAILY_V5, state.settings)
-        if g > 0 and quota_algo.BORROW.get("open"):
-            g = int(g * (1 + quota_algo.BORROW_GLOBAL_RATIO))
         if g > 0 and not key["exclude_global_v5"]:
             total = await state.db.day_v5_total(state.day())
             if total + sum(r.v5 for r in global_day if not r.exclude_global_v5) + est["v5"] > g:

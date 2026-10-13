@@ -69,8 +69,6 @@ class GateState:
         self.alerter = alerts.from_settings(settings)
         from .share_guard import ShareGuard
         self.share = ShareGuard(self.db)
-        from .scheduling import FairScheduler
-        self.sched = FairScheduler()
         from .errors import Tracker
         self.bugs = Tracker(self.db, notify=lambda kind, msg, cooldown: self.alerter.notify(kind, msg, cooldown=cooldown))
         self.announcer = alerts.announcer_from_settings(settings)
@@ -430,7 +428,6 @@ class GateState:
         guard = getattr(self, "guard", None)
         if guard is not None:
             if guard.note_upstream_429() >= 3:
-                fell = await guard.fall_back_daily("上游 1 小时内 ≥3 次 429")
                 if fell:
                     self.alerter.notify("daily_cap_fallback", f"⚠️ NovelAI 1 小时内多次返回 429：每日出图上限自动从 {fell[0]} 退回 "
                                         f"{fell[1]} 张。确认安全后需要站长手动再调高。", cooldown=0)

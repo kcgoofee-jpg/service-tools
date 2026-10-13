@@ -5,7 +5,7 @@
 ~40 张/10 分钟 ≈ 240 张/小时的速率 → 01:30:07 上游回 429。
 
 结论不是「总量太大」，而是「额度可以挤在十分钟里一口气发完」：
-1. `account_10m_cap`（0 = 每小时上限 ÷ 4）：把额度分摊到 10 分钟窗口；
+1. 10 分钟突发窗口恒为「每小时上限 ÷ 4」自动分摊（旋钮已移除）；
 2. AIMD 加窗不许回到挨限流时的水平（记 `guard_429_cap_at`，天花板压到它的 80%）。
 
 上线后经**独立架构师 review** 补了四条修正，下面的用例就是它们：
@@ -49,9 +49,7 @@ def _fill(g: Guard, token: str, n: int, now: float, span: float = 600.0) -> None
 
 def test_burst_cap_is_a_quarter_of_hourly_by_default():
     g = _guard(100)
-    assert g.burst_cap() == 25                                # ceil(100 / 4)
-    g.values["account_10m_cap"] = 12
-    assert g.burst_cap() == 12                                # 也能单独指定
+    assert g.burst_cap() == 25                                # ceil(100 / 4)；10 分钟旋钮已移除，恒为自动
 
 
 @pytest.mark.asyncio
