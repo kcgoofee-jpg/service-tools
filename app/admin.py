@@ -757,12 +757,7 @@ async def patch_key(request: Request, key_id: int):
         # 手动设置后由站长管理（-1），自动分配不会再覆盖；选「交给算法」则回到 0，下次重算时按条件分配
         await st.db._db.execute("UPDATE api_keys SET anlas_auto=? WHERE id=?", (0 if mode == "auto" else -1, key_id))
         await st.db._db.commit()
-        if mode == "auto":
-            try:
-                from . import anlas_pool
-                await anlas_pool.rebalance(st)
-            except Exception as exc:
-                st.bugs.capture("anlas_pool", exc) if getattr(st, "bugs", None) else None
+
     changes = _describe_changes(before, fields)
     if changes and body.get("notify", True) is not False:
         await _notify_member(request, key_id, "站长调整了你的 Key：\n• " + "\n• ".join(changes))
@@ -1260,34 +1255,6 @@ async def guard_put(request: Request):
     return await guard_get(request)
 
 
-@router.get("/anlas-pool")
-async def anlas_pool_get(request: Request):
-    """Anlas 自动分配：上次结果与参数。"""
-    require_admin(request)
-    from . import anlas_pool
-    db = request.app.state.gate.db
-    last = await db.get_setting(anlas_pool.STATE_KEY, None)
-    return {"last": json.loads(last) if last else None,
-            "settings": {k: await anlas_pool._setting(db, k) for k in anlas_pool.DEFAULTS}}
-
-
-@router.put("/anlas-pool")
-async def anlas_pool_put(request: Request):
-    """修改参数并立即重算一次。"""
-    require_admin(request)
-    from . import anlas_pool
-    body = await read_json_body(request)
-    st = request.app.state.gate
-    bounds = {"anlas_auto_enabled": (0, 1), "anlas_reserve": (0, 10000), "anlas_member_daily_cap": (0, 1000),
-              "anlas_min_images_7d": (0, 10000), "anlas_min_key_age_days": (0, 365)}
-    values = {}
-    for name, (low, high) in bounds.items():
-        if name in body:
-            values[name] = _num(body[name], int, low, high, name)
-    if values:
-        await st.db.set_settings_bulk(values)
-    await anlas_pool.rebalance(st)
-    return await anlas_pool_get(request)
 
 
 @router.get("/quota-shadow")
