@@ -889,6 +889,8 @@ td.note{min-width:220px}
               <div class="desc">系统内置 9 大核心模块（容量、分配、调度、续杯、自动驾驶、防分享、领 Key、观测、风险检查），每 10 分钟自动运行与交叉校验。</div>
             </div>
             <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+              <label class="check" style="margin:0;white-space:nowrap" title="出问题 / 最近报错的模块排前面，方便先看要紧的">
+                <input type="checkbox" id="modSortErr" checked><span>报错优先</span></label>
               <button class="btn sm ghost" id="btnRunModules" type="button"><span data-ic="refresh"></span>立即运行全部校验</button>
             </div>
           </div>
@@ -2906,12 +2908,40 @@ async function putReg(body, okMsg){
   const d = await api('/admin/api/ops/registration', {method:'PUT', body:JSON.stringify(body)});
   opsData = d; toast(okMsg, 'ok'); renderOpsReg();
 }
+/* 三选一确认框：复用确认弹窗，在按钮区临时插入中间选项（取消 / 中间项们 / 主操作）。
+   返回所选 choice 的 value；点「取消」或关掉弹窗返回 null。 */
+async function askChoice(msg, title, choices){
+  const foot = document.querySelector('#confirmModal .dialog-foot');
+  const extra = choices.slice(0, -1).map(c =>
+    `<button class="btn" type="button" data-choice="${esc(c.value)}">${esc(c.label)}</button>`).join('');
+  foot.insertAdjacentHTML('afterbegin', extra);
+  return await new Promise(res => {
+    const done = v => {
+      foot.querySelectorAll('[data-choice]').forEach(b => b.remove());
+      // 走中间按钮时不经过 settleConfirm：要把挂着的 askConfirm 解析器清掉，免得污染下一次确认
+      closeOverlay('#confirmModal'); if(confirmResolve) confirmResolve = null;
+      res(v);
+    };
+    foot.querySelectorAll('[data-choice]').forEach(b =>
+      b.onclick = () => done(b.dataset.choice));
+    askConfirm(msg, title).then(v => done(v ? choices[choices.length-1].value : null));
+  });
+}
 async function toggleRegOpen(input){
   const val = input.checked;
-  if(!await askConfirm(val ? '开放自助领 Key？会在成员公告频道发布一条名额公告。' : '暂停自助领 Key？会在成员公告频道发布一条公告，已领取的成员不受影响。',
-                       val ? '开放并公告' : '暂停并公告')){ input.checked = !val; return; }
+  let notify = true;
+  if(val){
+    const pick = await askChoice('开放自助领 Key。会在成员公告频道发布一条名额公告 —— 也可以只开放、不发公告。',
+                                 '开放领 Key', [
+                                   {label: '仅开放（不公告）', value: 'silent'},
+                                   {label: '开放并公告', value: 'announce'}]);
+    if(!pick){ input.checked = !val; return; }
+    notify = pick === 'announce';
+  }else{
+    if(!await askConfirm('暂停自助领 Key？会在成员公告频道发布一条公告，已领取的成员不受影响。', '暂停并公告')){ input.checked = !val; return; }
+  }
   input.disabled = true;
-  try{ await putReg({open:val}, val?'已开放领 Key':'已关闭领 Key'); }
+  try{ await putReg({open:val, notify}, val?(notify?'已开放领 Key（已公告）':'已开放领 Key（未公告）'):'已关闭领 Key'); }
   catch(e){ input.checked = !val; input.disabled = false; toastErr(e); }
 }
 async function saveReg(btn){
@@ -3595,7 +3625,29 @@ async function loadModules(){
   try{
     const d = await api('/admin/api/modules');
     let bad = 0;
-    $('#modList').innerHTML = d.modules.map(m => {
+    /* 站长反馈：模块页要能排序，「最新报错的放到前面」。默认开；关掉就按后端顺序（观测、容量、分配…）。 */
+    let mods = (d.modules || []).slice();
+    if($('#modSortErr') && $('#modSortErr').checked){
+      const lastBadAt = m => {
+        const runs = ((m.last||{}).runs) || [];
+        return Math.max(0, ...runs.filter(r => r.level === 'bad').map(r => r.at || 0));
+      };
+      const lastWarnAt = m => {
+        const runs = ((m.last||{}).runs) || [];
+        return Math.max(0, ...runs.filter(r => r.level === 'warn').map(r => r.at || 0));
+      };
+      const rank = m => {
+        const L = m.last || {}, checks = L.checks || [];
+        if(!m.enabled) return 0;                                  // 已关闭的沉底
+        if(L.ok === false) return 6;                              // 上次直接跑挂
+        if(checks.some(c => c.level === 'bad')) return 5;         // 有校验不通过
+        if(lastBadAt(m)) return 4;                                // 最近 10 轮里报过错
+        if(checks.some(c => c.level === 'warn') || lastWarnAt(m)) return 3;
+        return 1;
+      };
+      mods.sort((a, b) => (rank(b) - rank(a)) || (lastBadAt(b) - lastBadAt(a)) || (a.title > b.title ? 1 : -1));
+    }
+    $('#modList').innerHTML = mods.map(m => {
       const L = m.last || {}, checks = L.checks || [], runs = L.runs || [];
       bad += checks.filter(c => c.level === 'bad').length;
       const strip = runs.length ? `<div class="mod-runs" title="最近 ${runs.length} 轮，每 10 分钟一轮">${runs.map(r => `<i class="${LV[r.level]||''}" title="${esc(new Date(r.at*1000).toLocaleTimeString('zh-CN',{hour12:false,hour:'2-digit',minute:'2-digit'}))} · ${LV_TXT[r.level]||''}"></i>`).join('')}</div>` : '';
@@ -3614,6 +3666,8 @@ async function loadModules(){
     }).join('');
     $('#navMods').hidden = !bad; $('#navMods').textContent = bad || '';
     $$('#modList [data-mod]').forEach(el => el.addEventListener('change', () => toggleModule(el)));
+    const sortBox = $('#modSortErr');
+    if(sortBox && !sortBox.dataset.bound){ sortBox.dataset.bound = '1'; sortBox.addEventListener('change', () => loadModules()); }
     const runBtn = $('#btnRunModules');
     if(runBtn && !runBtn.dataset.bound){
       runBtn.dataset.bound = '1';
