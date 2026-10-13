@@ -92,6 +92,41 @@ async def healthz():
     return {"ok": True, "upstream": state.nai.configured if state else False}
 
 
+@router.get("/survey")
+async def survey_page():
+    """成员详细问卷页：自包含静态页，提交用虚拟 Key 识别身份（不落明文）。Discord 里的 /反馈 是另一个快速通道。"""
+    return FileResponse(_STATIC_DIR / "survey.html", headers=LANDING_HEADERS)
+
+
+@router.post("/member/survey")
+async def member_survey(request: Request):
+    """问卷提交：Bearer 虚拟 Key 识别身份（passive 鉴权，不算活跃、不进防分享统计）；一人一份，重复提交覆盖。"""
+    from .. import main
+    try:
+        key = await main.authenticate(request, passive=True)
+    except main.GateError as exc:
+        raise HTTPException(exc.status, exc.message) from None
+    try:
+        data = json.loads((await request.body())[:4096] or b"{}")
+    except ValueError:
+        raise HTTPException(400, "请求体不是合法 JSON") from None
+    if not isinstance(data, dict):
+        raise HTTPException(400, "请求体格式无效")
+    if not str(data.get("understand") or "").strip() or not str(data.get("donate") or "").strip():
+        raise HTTPException(422, "还有必选题没填：限额理解、捐赠意愿")
+    improve = data.get("improve") or []
+    if not isinstance(improve, list):
+        raise HTTPException(422, "多选项格式无效")
+    await _state().db.save_survey(
+        key["id"],
+        client=str(data.get("client") or "").strip(),
+        understand=str(data.get("understand") or "").strip(),
+        improve="、".join(str(i)[:40] for i in improve if str(i).strip()),
+        improve_other=str(data.get("improve_other") or "").strip(),
+        donate=str(data.get("donate") or "").strip())
+    return {"ok": True}
+
+
 @router.get("/")
 async def index(request: Request):
     """成员落地页：自包含的静态页面，数据来自 /public/status 与 /public/me。

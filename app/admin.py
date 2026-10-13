@@ -1983,6 +1983,23 @@ async def ops_get(request: Request):
     return await _ops_snapshot(request)
 
 
+@router.get("/survey")
+async def survey_results(request: Request):
+    """成员详细问卷（/survey 网页页）：逐条明细 + 选项汇总；Discord /反馈 的结果在 /feedback。"""
+    require_admin(request)
+    rows = await request.app.state.gate.db.list_survey()
+    def tally(field: str) -> dict:
+        out: dict[str, int] = {}
+        for r in rows:
+            for part in str(r[field] or "").split("、"):
+                if part.strip():
+                    out[part.strip()] = out.get(part.strip(), 0) + 1
+        return dict(sorted(out.items(), key=lambda kv: -kv[1]))
+    return {"total": len(rows), "rows": rows,
+            "summary": {"understand": tally("understand"), "improve": tally("improve"),
+                        "donate": tally("donate"), "client": tally("client")}}
+
+
 @router.put("/ops/registration")
 async def ops_set_registration(request: Request):
     """开放 / 关闭自助注册、名额上限、新成员默认功能与额度；机器人下一条命令即生效。"""
