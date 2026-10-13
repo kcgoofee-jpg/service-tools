@@ -3706,6 +3706,8 @@ async function loadAutopilot(){
 /* 模块：一句话问题 + 开关；运行条（最近 36 轮，每 10 分钟一轮，绿 / 黄 / 红）；校验结果（有问题的展开证据）；参数当前值 */
 const LV = {ok:'ok', warn:'warn', bad:'bad', na:''};
 const LV_TXT = {ok:'正常', warn:'注意', bad:'有问题', na:'不适用'};
+/* 结构性交叉校验的「站长确认」：确认后校验转绿、不再记 warn（数字仍显示）。 */
+const ACK_CHECKS = {'V5：每人额度 × 人数 ≤ 全站上限': 'v5_oversell', '每人承诺 ≤ 全站日容量': 'registration_ready'};
 async function loadModules(){
   try{
     const d = await api('/admin/api/modules');
@@ -3739,7 +3741,7 @@ async function loadModules(){
       const lastLine = !m.enabled ? '已关闭' : L.ok === false ? `上次运行出错：${L.error}` : L.summary || (runs.length ? '' : '等待第一轮（每 10 分钟）');
       const hot = checks.filter(c => c.level === 'bad' || c.level === 'warn');
       const calm = checks.filter(c => !hot.includes(c));
-      const row = c => `<div class="mod-check"><span class="mf ${LV[c.level]||''}">${LV_TXT[c.level]||''}</span><b>${esc(c.name)}</b><span class="muted">${esc(c.detail)}</span>${(c.evidence||[]).length ? `<details class="mod-ev-wrap"><summary>查看判定证据 (${c.evidence.length} 条)</summary><div class="mod-ev">${c.evidence.map(e => `<div>${esc(e)}</div>`).join('')}</div></details>` : ''}</div>`;
+      const row = c => `<div class="mod-check"><span class="mf ${LV[c.level]||''}">${LV_TXT[c.level]||''}</span><b>${esc(c.name)}</b><span class="muted">${esc(c.detail)}</span>${ACK_CHECKS[c.name] ? `<button class="btn sm ghost" data-ack="${ACK_CHECKS[c.name]}" title="确认「先到先得」是有意设计：校验转绿、不再记 Bug，数字仍会显示">站长确认</button>` : ''}${(c.evidence||[]).length ? `<details class="mod-ev-wrap"><summary>查看判定证据 (${c.evidence.length} 条)</summary><div class="mod-ev">${c.evidence.map(e => `<div>${esc(e)}</div>`).join('')}</div></details>` : ''}</div>`;
       return `<div class="card panel mod${m.enabled?'':' off'}">
         <div class="panel-head"><h2>${esc(m.title)}</h2>
           <label class="switch" title="${esc(m.hard_note)}"><input type="checkbox" data-mod="${esc(m.name)}" ${m.enabled?'checked':''} aria-label="启用 ${esc(m.title)}"><span></span></label><div class="desc">${esc(m.question)}</div></div>
@@ -3751,6 +3753,14 @@ async function loadModules(){
     }).join('');
     $('#navMods').hidden = !bad; $('#navMods').textContent = bad || '';
     $$('#modList [data-mod]').forEach(el => el.addEventListener('change', () => toggleModule(el)));
+    $$('#modList [data-ack]').forEach(el => el.addEventListener('click', async () => {
+      try{
+        await api('/admin/api/checks/ack', {method:'POST', body: JSON.stringify({key: el.dataset.ack, on: true})});
+        await api('/admin/api/modules/run', {method:'POST'});
+        toast('已确认为先到先得，校验转绿', 'ok');
+        loadModules();
+      }catch(e){ toastErr(e); }
+    }));
     const sortBox = $('#modSortErr');
     if(sortBox && !sortBox.dataset.bound){ sortBox.dataset.bound = '1'; sortBox.addEventListener('change', () => loadModules()); }
     const runBtn = $('#btnRunModules');

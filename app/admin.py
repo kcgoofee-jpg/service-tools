@@ -1170,6 +1170,24 @@ async def modules_run_all(request: Request):
     return {"ok": True, "modules": await kernel.snapshot()}
 
 
+_ACK_CHECKS = {"v5_oversell": "V5 每人额度×人数 ≤ 全站上限", "registration_ready": "每人承诺 ≤ 全站日容量"}
+
+
+@router.post("/checks/ack")
+async def checks_ack(request: Request):
+    """结构性交叉校验的「站长已确认」：确认后该校验转绿（数字仍显示），不再每 10 分钟记一条 warn。"""
+    require_admin(request)
+    body = await read_json_body(request)
+    key = str(body.get("key", ""))
+    if key not in _ACK_CHECKS:
+        raise HTTPException(422, "未知的校验键")
+    on = bool(body.get("on", True))
+    await request.app.state.gate.db.set_setting("ack_" + key, time.strftime("%m-%d %H:%M") if on else "")
+    await log_action(request.app.state.gate.db, _actor(request),
+                     "站长确认交叉校验" if on else "取消确认交叉校验", _ACK_CHECKS[key])
+    return {"ok": True, "on": on}
+
+
 @router.get("/errors")
 async def errors_list(request: Request, all: bool = False):
     """Bug 追踪：按特征归并的错误（未处理的在前）。detail 含堆栈，只在后台显示。"""
