@@ -116,10 +116,15 @@ def allocation(state) -> Module:
         # 每人额度 × 人数 与全站上限的关系：超卖时「每人 M 张」只是个人上限，全站仍是先到先得。
         # 不改分配结果（要站长确认），但必须在后台看得见，否则首页承诺与成员实际体验长期不一致。
         sold = each * keys
-        oversell = Check("V5：每人额度 × 人数 ≤ 全站上限", not (global_v5 and sold > global_v5),
-                         f"每人 {each} × {keys} 人 = {sold} 张，全站上限 {global_v5} 张"
-                         + (f"：超卖 {sold - global_v5} 张，先到先得，后到的成员拿不到「每人 {each} 张」"
-                            if global_v5 and sold > global_v5 else ""))
+        if await db.get_setting("ack_v5_oversell", ""):
+            # 超卖是「先到先得」的有意设计（站长已在后台确认）：转绿，数字仍显示，不再每 10 分钟记一条 warn
+            oversell = Check("V5：每人额度 × 人数 ≤ 全站上限", True,
+                             f"站长已确认先到先得：每人 {each} × {keys} 人 = {sold} 张，全站上限 {global_v5} 张")
+        else:
+            oversell = Check("V5：每人额度 × 人数 ≤ 全站上限", not (global_v5 and sold > global_v5),
+                             f"每人 {each} × {keys} 人 = {sold} 张，全站上限 {global_v5} 张"
+                             + (f"：超卖 {sold - global_v5} 张，先到先得，后到的成员拿不到「每人 {each} 张」"
+                                if global_v5 and sold > global_v5 else ""))
         # V4.5：保底层（超过保底只在空闲时放行）只在 保底 < 每日上限 时存在；算法把两者设成同一个数后这一层就没了，
         # SYSTEM-FACTS 里「保底 ≤ 上限、保底 = 算法当前值」两句话需要有代码来核对。
         g = getattr(state, "guard", None)
@@ -228,11 +233,17 @@ def registration_ready(state) -> Module:
         # ① 每人承诺 × 人数 vs 全站日容量：开注册前先看这一条 —— 它说明「名额能不能兑现」
         if per and site_daily:
             promise = active * per
-            out.append(Check("每人承诺 ≤ 全站日容量", promise <= site_daily,
-                             f"每人 {per} 张 × {active} 人 = {promise} 张 vs 全站 {site_daily} 张/天"
-                             f"（{len(tokens)} 个上游账号）：平分下来每人每天约 {site_daily // max(1, active)} 张，"
-                             f"先到先得；只有前约 {site_daily // max(1, per)} 个名额能拿满 {per} 张",
-                             level="warn"))
+            if await state.db.get_setting("ack_registration_ready", ""):
+                # 先到先得是有意设计（站长已在后台确认）：转绿，数字仍显示
+                out.append(Check("每人承诺 ≤ 全站日容量", True,
+                                 f"站长已确认先到先得：每人 {per} 张 × {active} 人 = {promise} 张 vs "
+                                 f"全站 {site_daily} 张/天（{len(tokens)} 个上游账号）"))
+            else:
+                out.append(Check("每人承诺 ≤ 全站日容量", promise <= site_daily,
+                                 f"每人 {per} 张 × {active} 人 = {promise} 张 vs 全站 {site_daily} 张/天"
+                                 f"（{len(tokens)} 个上游账号）：平分下来每人每天约 {site_daily // max(1, active)} 张，"
+                                 f"先到先得；只有前约 {site_daily // max(1, per)} 个名额能拿满 {per} 张",
+                                 level="warn"))
         # ② 领取速度 × 每人额度 = 每小时新增的边际需求，不能超过全站一天的量
         if hourly and per and site_daily:
             ramp = hourly * per
