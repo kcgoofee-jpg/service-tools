@@ -254,7 +254,7 @@ font-size:2.4rem;line-height:1;letter-spacing:-.02em;color:var(--fg);white-space
 .logo .mark{font-size:2rem}
 .show-updates-dropdown{background:var(--fg);color:var(--bg);border-radius:4px;padding:.75rem 1.5rem;font-size:.8125rem;font-weight:600;letter-spacing:.14em;white-space:nowrap;display:inline-block}
 .masthead-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.theme-btn{background:transparent;border:1px solid var(--border);color:var(--fg);border-radius:4px;padding:.7rem 1.1rem;font-size:.8125rem;font-weight:600;cursor:pointer}
+.theme-btn{background:transparent;border:1px solid var(--border);color:var(--fg);border-radius:4px;padding:.55rem .85rem;font-size:1.05rem;line-height:1;cursor:pointer}
 .theme-btn:hover{border-color:var(--muted)}
 .page-status{font-weight:500;border-radius:4px;border:1px solid rgba(0,0,0,.1);text-shadow:0 1px 0 rgba(0,0,0,.1);margin-bottom:60px;padding:.75rem 1.25rem;background:#76AD2A;color:#fff;font-size:1.25rem;line-height:1.8125rem}
 .unresolved-incidents{margin-bottom:60px}
@@ -336,7 +336,7 @@ def render(snap: dict[str, Any], subscribe_url: str = "/status/feed.xml") -> str
              f'<title>猫头鹰公益站 状态</title><style>{CSS}</style></head>'
              f'<body class="status index {status_cls}"><div class="layout-content status status-index">',
              f'<div class="masthead"><a class="logo" href="/status"><span class="mark">🦉</span>猫头鹰公益站 状态</a>'
-             f'<div class="masthead-actions"><button id="themeBtn" class="theme-btn" type="button">🌙 夜间</button>'
+             f'<div class="masthead-actions"><button id="themeBtn" class="theme-btn" type="button" aria-label="切换深色 / 浅色主题" title="切换深色 / 浅色主题">🌙</button>'
              f'<a class="show-updates-dropdown" href="{html.escape(subscribe_url)}" rel="noopener">订阅更新</a></div></div>']
     if snap["active"]:
         parts.append('<div class="unresolved-incidents">')
@@ -386,7 +386,8 @@ def render(snap: dict[str, Any], subscribe_url: str = "/status/feed.xml") -> str
                  'var b=document.getElementById("themeBtn");if(!b)return;'
                  'var saved=null;try{saved=localStorage.getItem("owl-status-theme")}catch(e){}'
                  'function apply(t){document.documentElement.setAttribute("data-theme",t);'
-                 'b.textContent=t==="dark"?"\\u2600\\ufe0f \\u65e5\\u95f4":"\\ud83c\\udf19 \\u591c\\u95f4";}'
+                 'b.textContent=t==="dark"?"\\u2600\\ufe0f":"\\ud83c\\udf19";'
+                 'b.setAttribute("aria-label",t==="dark"?"切换到浅色主题":"切换到深色主题");}'
                  'var m=window.matchMedia?matchMedia("(prefers-color-scheme: dark)"):null;'
                  'apply(saved||(m&&m.matches?"dark":"light"));'
                  'b.addEventListener("click",function(){'

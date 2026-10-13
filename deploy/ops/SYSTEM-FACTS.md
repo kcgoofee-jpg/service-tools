@@ -137,6 +137,7 @@
 | `waitlist_dm` | flag | False |  | registration | 有名额时私信候补成员（关 = 只在公告频道发一条汇总） |
 | `issue_hourly_cap` | int | 12 | 0–500 | registration | 每小时最多发放的新 Key |
 | `register_open` | flag | False |  | modules / registration | 开放 /register 领取 |
+| `home_join_open` | flag | True |  | landing / admin | 首页「加入 Discord」按钮（独立于 register_open：只管首页按钮显示，关 = 置灰「关闭注册」） |
 | `global_daily_v5` | int | `.env global_daily_v5` | 0–100000 | 额度 / 首页 / 客户端 | 全站每日 V5 张数（0 = 不限） |
 | `global_daily_anlas` | int | `.env global_daily_anlas` | 0–100000 | 额度 / Vibe PVP | 全站每日 Anlas 额度（0 = 不限，Vibe PVP 抢额度） |
 | `global_daily_anlas_until` | float | 0.0 | 0–2e+09 | 额度 / Vibe PVP | 全站每日 Anlas 开放截止时间戳（0 = 不限时） |

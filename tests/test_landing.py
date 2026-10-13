@@ -62,7 +62,7 @@ async def test_public_live_carries_meta_for_unified_poll(env):
     """/public/live 现在同时携带 meta（原 30s /public/status 的字段），首页单轮询驱动（10-14 重构）。"""
     live = (await env.client.get("/public/live")).json()
     for key in ("site", "discord_invite", "has_announcement", "algo_notice",
-                "key_inactivity_delete_days", "web_login", "audit_notice", "registration"):
+                "key_inactivity_delete_days", "web_login", "audit_notice", "registration", "home_join_open"):
         assert key in live, f"缺 meta 字段 {key}"
     assert live["site"] == "https://gate.example.top" and live["discord_invite"] == "https://discord.gg/abc"
     assert isinstance(live["registration"], dict)
