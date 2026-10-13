@@ -11,14 +11,14 @@ from app.database import Database
 
 def test_slots_rules_and_no_suggestion_only_rules():
     assert not hasattr(autopilot, "idle_days_rule")             # 只给建议、从不执行的规则已删除
-    assert autopilot.slots_rule(50, 50, 3, 0.3, 0)[0] == 55       # 满员 + 候补 + 有余量
-    assert autopilot.slots_rule(50, 48, 0, 0.3, 0)[0] == 55       # 快满（空位 ≤ 2）
-    assert autopilot.slots_rule(50, 30, 0, 0.3, 0)[0] == 50       # 空位多，不加
-    assert autopilot.slots_rule(50, 50, 3, 0.3, 3)[0] == 50       # 3 个小时被拦：不再加
-    assert autopilot.slots_rule(50, 50, 3, 0.7, 0)[0] == 50       # 昨天用量高：不再加
-    assert autopilot.slots_rule(100, 100, 3, 0.1, 0)[0] == 100    # 上限 100
-    assert autopilot.slots_rule(50, 50, 3, 0.3, 0, queue_hours=3)[0] == 50   # 高峰排队拥挤 3 个小时：不再加
-    assert autopilot.slots_rule(50, 50, 3, 0.3, 0, queue_hours=2)[0] == 55
+    assert autopilot.slots_rule(50, 50, 0.3, 0)[0] == 55          # 满员 + 有余量
+    assert autopilot.slots_rule(50, 48, 0.3, 0)[0] == 55          # 快满（空位 ≤ 2）
+    assert autopilot.slots_rule(50, 30, 0.3, 0)[0] == 50          # 空位多，不加
+    assert autopilot.slots_rule(50, 50, 0.3, 3)[0] == 50          # 3 个小时被拦：不再加
+    assert autopilot.slots_rule(50, 50, 0.7, 0)[0] == 50          # 昨天用量高：不再加
+    assert autopilot.slots_rule(100, 100, 0.1, 0)[0] == 100       # 上限 100
+    assert autopilot.slots_rule(50, 50, 0.3, 0, queue_hours=3)[0] == 50      # 高峰排队拥挤 3 个小时：不再加
+    assert autopilot.slots_rule(50, 50, 0.3, 0, queue_hours=2)[0] == 55
 
 
 def test_breaker_and_key_guard():
@@ -149,9 +149,9 @@ async def test_key_guard_ignores_site_level_rejections(tmp_path):
 
 def test_slots_not_added_when_v5_low():
     from app.autopilot import slots_rule
-    cap, why = slots_rule(75, 75, 3, 0.3, 0, 0, v5_pct=40)
+    cap, why = slots_rule(75, 75, 0.3, 0, 0, v5_pct=40)
     assert cap == 75 and "V5" in why
-    assert slots_rule(75, 75, 3, 0.3, 0, 0, v5_pct=90)[0] == 80
+    assert slots_rule(75, 75, 0.3, 0, 0, v5_pct=90)[0] == 80
 
 
 @pytest.mark.asyncio
@@ -172,9 +172,7 @@ async def test_slots_never_turns_unlimited_into_a_cap(tmp_path):
         async def count_active():
             return 120
 
-        async def waitlist():
-            return []
-        reg = SimpleNamespace(settings=settings, count_active=count_active, waitlist=waitlist,
+        reg = SimpleNamespace(settings=settings, count_active=count_active,
                               set_registration=lambda *a, **k: calls.append(a))
         st = SimpleNamespace(db=db, guard=None, share=None, announcer=None, sources=SimpleNamespace(events=[]))
         out = await autopilot.run(st, reg)

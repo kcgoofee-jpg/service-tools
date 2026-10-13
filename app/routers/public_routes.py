@@ -87,10 +87,9 @@ def _settings():
 
 @router.get("/healthz")
 async def healthz():
-    from .. import main
+    # 不返回版本号：匿名接口给出精确版本等于给攻击者指纹定位（部署信息只在后台看）
     state = _state()
-    ver = getattr(main, "__version__", "2.22.1")
-    return {"ok": True, "version": ver, "upstream": state.nai.configured if state else False}
+    return {"ok": True, "upstream": state.nai.configured if state else False}
 
 
 @router.get("/")
@@ -129,7 +128,7 @@ async def announcement():
 
 @router.get("/public/live")
 async def public_live(request: Request):
-    """首页实时架构图：每秒轮询，只含汇总数字（请求数、额度、排队数、账号保护、名额与打码的候补名单）。"""
+    """首页实时架构图：每秒轮询，只含汇总数字（请求数、额度、排队数、账号保护、名额）。"""
     state = _state()
     body = await live.build(state, getattr(request.app.state, "registrar", None))
     # 登录的成员：附上「我的排队」，看板第一格直接显示排第几（不用再粘贴 Key）

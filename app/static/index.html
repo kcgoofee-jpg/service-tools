@@ -921,7 +921,7 @@ td.note{min-width:220px}
           <div class="page-head">
             <div class="tools">
               <button class="btn" data-act="open-bans" id="bansBtn" title="查看与管理满 3 天未活动回收或手动拉黑的账号，支持搜索与移出黑名单"><span data-ic="shield"></span>🚫 封禁黑名单 <span class="badge sm" id="bansCount">0</span></button>
-              <button class="btn" data-act="new-invite"><span data-ic="plus"></span>新建邀请 Key</button><button class="btn primary" data-act="new-key"><span data-ic="plus"></span>新建 Key</button><button class="btn danger outline" data-act="reset-all-keys" title="使全站所有非管理员成员的 Key 失效并解除绑定，用于全站杀头重置"><span data-ic="refresh"></span>全站重置 Key</button></div></div>
+              <button class="btn" data-act="new-invite"><span data-ic="plus"></span>新建邀请 Key</button><button class="btn primary" data-act="new-key"><span data-ic="plus"></span>新建 Key</button><button class="btn danger outline" data-act="reset-all-keys" title="使全站所有非管理员成员的 Key 失效并解除绑定（带「邀请」标签的 Key 不受影响），用于全站杀头重置"><span data-ic="refresh"></span>全站重置 Key</button></div></div>
           <div class="mtools">
             <div class="search"><span data-ic="search"></span><input id="memberSearch" type="search" placeholder="搜索名称、Discord ID、标签或备注" aria-label="搜索成员"></div>
             <div class="chips-filter" id="memberFilter" role="group" aria-label="筛选成员"></div>
@@ -2865,21 +2865,6 @@ function renderOpsReg(){
       <div class="body"><div class="t">${r.open?'可领取':'未开放'}</div><div class="hint" style="margin:0">${r.open?'成员可通过 Discord /register 自助领取 Key':'新成员暂时无法领取 Key'}${r.reset_at?` · 重置时间 ${esc(r.reset_at)}`:''}</div></div>
       <div style="min-width:200px;flex:1;max-width:280px"><div class="quota"><div class="row"><span>名额</span><span class="num"><b>${esc(r.active)}</b> / ${r.max_users>0?esc(r.max_users):'不限'}</span></div>
       <div class="bar ${cls}"><i style="width:${pct}%"></i></div></div></div></div>
-    ${(r.waitlist||[]).length ? `
-      <details class="notice-box" style="padding:10px 14px" ${r.waitlist.length <= 3 ? 'open' : ''}>
-        <summary style="cursor:pointer;font-weight:600;display:flex;align-items:center;justify-content:space-between">
-          <span>${ic('users')} 候补排队中：共 ${r.waitlist.length} 人</span>
-          <span class="muted sm" style="font-weight:normal">名额满时 /register 自动排队 · 点击展开/收起</span>
-        </summary>
-        <div class="hint" style="margin:6px 0 8px">名额满时 /register 自动排队；有空位后按顺序保留名额 24 小时，并在公告频道通知（不私信）。</div>
-        <div style="max-height:160px;overflow-y:auto;border-top:1px solid var(--border);padding-top:6px">
-          ${r.waitlist.map((w,i)=>`<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:12.5px">
-            <span>${i+1}. <b>${esc(w.name||('Discord '+w.discord_id))}</b></span>
-            <span class="${w.invited_at?'ok':'muted'}">${w.invited_at ? '已邀请（' + esc(fullTime(w.invited_at)) + '）' : (w.joined_at ? '排队于 ' + esc(rel(w.joined_at)) : '排队中')}</span>
-          </div>`).join('')}
-        </div>
-      </details>
-    ` : ''}
     <div class="cols-3">
       <div class="field"><label for="reg_max">名额上限</label><input id="reg_max" type="number" min="0" value="${esc(r.max_users)}"><div class="hint">0 = 不限</div></div>
       <div class="field"><label for="reg_exp">有效期（天）</label><input id="reg_exp" type="number" min="0" value="${esc(r.expires_days)}"><div class="hint">0 = 永久</div></div>
@@ -4066,7 +4051,7 @@ document.addEventListener('click', ev=>{
       }).catch(toastErr);
       break;
     case 'reset-all-keys': {
-      const ans = prompt('⚠️【高危操作警告】\n将失效全站所有非管理员成员的 Key，并清空 Discord 绑定！\n执行后成员需在 Discord 输入 /register 重新领 Key。\n\n如确认执行，请输入：确认重置');
+      const ans = prompt('⚠️【高危操作警告】\n将失效全站所有非管理员成员的 Key，并清空 Discord 绑定！\n带「邀请」标签的 Key 不受影响（保留启用、绑定与标签）。\n执行后成员需在 Discord 输入 /register 重新领 Key。\n\n如确认执行，请输入：确认重置');
       if(!ans) break;
       if(ans.trim() !== '确认重置') { toast('输入不匹配，已取消全站重置', 'err'); break; }
       api('/admin/api/ops/reset-all-keys', {method:'POST', body: JSON.stringify({confirm: '确认重置'})})

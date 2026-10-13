@@ -541,6 +541,9 @@ async def create_key(request: Request):
     expires_days = _int_field("expires_days", st.settings.default_expires_days, 0, 3650)
     expires_at = (time.time() + expires_days * 86400) if expires_days > 0 else None
     image_model_scope = "all" if body.get("image_model_scope") == "all" else "legacy"
+    # 配额检查只认 >0 的上限：allow_anlas 开着而日/月上限都是 0 = 个人 Anlas 完全无上限，可无限烧共享账号的付费点数
+    if bool(body.get("allow_anlas", False)) and daily_anlas <= 0 and monthly_anlas <= 0:
+        raise HTTPException(422, "开通 Anlas 时必须设置每日或每月 Anlas 上限（0 = 不限），不能两项都留空")
 
     row = await st.db.create_key({
         "name": str(body.get("name", "") or "").strip()[:60] or "未命名",
@@ -721,6 +724,11 @@ async def patch_key(request: Request, key_id: int):
         fields["v5_pinned"] = None                  # 手动就是填的值，不再有「基础值 + 不低于普通成员」的中间状态
     if "daily_v5" in fields and "v5_pinned" not in fields:
         fields["v5_pinned"] = None                  # 手填的 V5 就是精确值，不再当「基础值」
+    # 同 create_key：开 Anlas 必须留一道上限，日/月全为 0 等于个人无上限（2026-10-13 审查）
+    if fields.get("allow_anlas", before["allow_anlas"]) \
+            and fields.get("daily_anlas", before["daily_anlas"]) <= 0 \
+            and fields.get("monthly_anlas", before["monthly_anlas"]) <= 0:
+        raise HTTPException(422, "开通 Anlas 时必须设置每日或每月 Anlas 上限（0 = 不限），不能两项都留空")
     await st.db.update_key(key_id, fields)
     quota_mode = body.get("quota_mode") or ("auto" if quota == "auto" else None)
     if quota == "manual":
@@ -1951,18 +1959,7 @@ async def _ops_snapshot(request: Request) -> dict:
     st = request.app.state.gate
     service = getattr(request.app.state, "registrar", None)
     reg = await ops.registration_settings(st.db, service)
-    if service:
-        reg["active"] = await service.count_active()
-        reg["waitlist"] = await service.waitlist()
-    else:
-        reg["active"] = await ops._active_count(st.db)
-        try:
-            rows = await st.db.execute_fetchall_compat(
-                "SELECT discord_id, name, joined_at, invited_at FROM waitlist ORDER BY joined_at"
-            )
-            reg["waitlist"] = [{"discord_id": r[0], "name": r[1], "joined_at": r[2], "invited_at": r[3]} for r in rows]
-        except Exception:
-            reg["waitlist"] = []
+    reg["active"] = (await service.count_active()) if service else await ops._active_count(st.db)
     reg["reset_at"] = service.reset_at if service else ""
     reg["v5_capacity"] = await ops.v5_capacity(st.db, st.settings, service)
     prompts, thumbs, days = await ops.audit_flags(st.db, st.settings)
@@ -2031,19 +2028,36 @@ async def ops_set_audit(request: Request):
 
 @router.post("/ops/reset-all-keys")
 async def ops_reset_all_keys(request: Request):
-    """【全站杀头重置】失效所有非管理员 Key 并解除 Discord 绑定映射，以便重新开始。"""
+    """【全站杀头重置】失效所有非管理员 Key 并解除 Discord 绑定映射，以便重新开始。
+
+    带「邀请」标签的 Key 不受影响：保留启用状态、Discord 绑定和全部标签
+    （2026-10-13 站长：重置是为了腾名额给新成员，私邀的朋友要能继续用；
+    名额按 discord_registrations 计数，所以绑定必须一并保留，否则邀请成员会丢名额也丢绑定）。
+    """
     require_admin(request)
     body = await read_json_body(request)
     if not isinstance(body, dict) or body.get("confirm") != "确认重置":
         raise HTTPException(400, "安全确认未通过：必须传入 confirm='确认重置'")
     st = request.app.state.gate
-    cur = await st.db._db.execute("UPDATE api_keys SET enabled=0 WHERE is_admin=0")
+    kept_invites = (await st.db._db.execute_fetchall(
+        "SELECT COUNT(*) FROM key_tags WHERE tag=?", (INVITE_TAG,)))[0][0]
+    cur = await st.db._db.execute(
+        "UPDATE api_keys SET enabled=0 WHERE is_admin=0 AND NOT EXISTS "
+        "(SELECT 1 FROM key_tags t WHERE t.key_id=api_keys.id AND t.tag=?)", (INVITE_TAG,))
     disabled_count = cur.rowcount
-    await st.db._db.execute("DELETE FROM discord_registrations")
-    await st.db._db.execute("DELETE FROM key_tags WHERE key_id NOT IN (SELECT id FROM api_keys WHERE is_admin=1)")
+    await st.db._db.execute(
+        "DELETE FROM discord_registrations WHERE NOT EXISTS "
+        "(SELECT 1 FROM key_tags t WHERE t.key_id=discord_registrations.key_id AND t.tag=?)", (INVITE_TAG,))
+    await st.db._db.execute(
+        "DELETE FROM key_tags WHERE tag!=? AND key_id NOT IN (SELECT id FROM api_keys WHERE is_admin=1) "
+        "AND NOT EXISTS (SELECT 1 FROM key_tags t2 WHERE t2.key_id=key_tags.key_id AND t2.tag=?)",
+        (INVITE_TAG, INVITE_TAG))
     await st.db._db.execute("DELETE FROM share_state")
     await st.db._db.commit()
     request.state.action_logged = True
-    await log_action(st.db, "站长", "全站重置 Key", "全部非管理员", f"已失效 {disabled_count} 把 Key 并清空 Discord 绑定")
-    return {"ok": True, "disabled_count": disabled_count, "message": f"全站已成功重置！已失效 {disabled_count} 把 Key 并解除 Discord 绑定。"}
+    await log_action(st.db, "站长", "全站重置 Key", "全部非管理员",
+                     f"已失效 {disabled_count} 把 Key 并清空 Discord 绑定；「邀请」Key 保留 {kept_invites} 把不受影响")
+    return {"ok": True, "disabled_count": disabled_count, "kept_invites": kept_invites,
+            "message": f"全站已成功重置！已失效 {disabled_count} 把 Key 并解除 Discord 绑定"
+                       + (f"；{kept_invites} 把「邀请」Key 原样保留。" if kept_invites else "。")}
 

@@ -746,7 +746,8 @@ def test_kind_for_path_maps_member_routes():
 
 
 @pytest.mark.asyncio
-async def test_idle_reminder_sent_once_24h_before_reclaim(tmp_path):
+async def test_idle_keys_are_banned_directly_without_any_reminder(tmp_path):
+    """2026-10-13 站长：取消闲置提醒私信。3 天闲置 = 直接删 Key 并拉黑名单，期间不发任何私信。"""
     from types import SimpleNamespace
     from app.state import GateState
     db = Database(str(tmp_path / "g.sqlite"))
@@ -767,14 +768,15 @@ async def test_idle_reminder_sent_once_24h_before_reclaim(tmp_path):
         await db._db.execute("INSERT INTO discord_registrations(discord_id,key_id,created_at) VALUES (?,?,?)",
                              (discord_id, key["id"], time.time()))
     await db._db.commit()
-    assert await GateState.remind_idle_keys(fake, dm, "https://gate.example") == 1
-    assert sent[0][0] == "222" and "还没有成功生成过图片" in sent[0][1] and "https://gate.example" in sent[0][1]
-    assert await GateState.remind_idle_keys(fake, dm, "https://gate.example") == 0          # 同一段闲置只提醒一次
-    await db._db.execute("UPDATE api_keys SET last_used_at=? WHERE id=?", (time.time() - 2.1 * 86400, idle["id"]))
+    assert await GateState.delete_inactive_keys(fake) == 0            # 2.2 天：还没到期，不处理
+    assert sent == []                                                 # 也不再有任何提醒私信
+    await db._db.execute("UPDATE api_keys SET created_at=? WHERE id=?", (time.time() - 3.1 * 86400, idle["id"]))
     await db._db.commit()
-    assert await GateState.remind_idle_keys(fake, dm, "https://gate.example") == 1          # 有过活动后重新计时
-    actions = await db.list_admin_actions()
-    assert actions[0]["action"] == "闲置回收前提醒"
+    assert await GateState.delete_inactive_keys(fake) == 1            # 满 3 天：直接回收
+    assert sent == []                                                 # 回收同样不发私信
+    assert await db.get_key(idle["id"]) is None                       # Key 已删
+    banned = await db._db.execute_fetchall("SELECT discord_id FROM discord_bans")
+    assert [r["discord_id"] for r in banned] == ["222"]               # 成员进黑名单，fresh（111）不受影响
     await db.close()
 
 
@@ -1325,13 +1327,11 @@ async def test_public_live_has_only_aggregates(tmp_path):
         class Reg:
             async def settings(self): return {"max_users": 30, "open": True}
             async def count_active(self): return 13
-            async def waitlist(self): return [{"name": "千分之一的心", "invited_at": None, "discord_id": "9988776655"}]
         live._cache.update(at=0, body=None)
         live.note("ok"); live.note("rejected")
         body = await live.build(st, Reg())
         text = json.dumps(body, ensure_ascii=False)
         assert body["queue"] == {"waiting": 1, "running": 0} and body["quota"]["images_cap"] == 1000
-        assert body["members"]["waitlist"] == [{"name": "千分**", "invited": False}]
         assert "9988776655" not in text and "千分之一" not in text and "token" not in text.lower().replace("token_", "")
         assert body["auth"]["rejected"] >= 1
         me = live.mine(st, 7)

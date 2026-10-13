@@ -9,7 +9,7 @@
 
 ━━ 规则 ━━
 1. slots 名额上限 —— 可执行
-   名额快满（空位 ≤ 2）或有人在候补，且昨天日用量 < 60%（按算力折算）、被每小时上限拦的小时 < 3、
+   名额快满（空位 ≤ 2），且昨天日用量 < 60%（按算力折算）、被每小时上限拦的小时 < 3、
    高峰排队拥挤（排队满被拒 ≥ 5 次）的小时 < 3 → +5（最多 100），
    每天最多一次，且昨天数据要覆盖 ≥ 20 小时（数据不足时不动）。只加不减。
 2. breaker 全站临时暂停 —— 可执行
@@ -57,9 +57,9 @@ QUEUE_BUSY_REJECTS = 5     # 一个小时里「排队的人太多」拒绝 ≥ 5
 SLOTS_V5_MIN = 50          # 账号 V5 剩余低于这个百分比：不加名额（新成员也要分 V5）
 
 
-def slots_rule(cap: int, active: int, waitlist: int, day_util: float, blocked_hours: int,
+def slots_rule(cap: int, active: int, day_util: float, blocked_hours: int,
                queue_hours: int = 0, v5_pct: Optional[float] = None) -> tuple[int, str]:
-    """名额快满（空位 ≤ 2）或有人在候补，且账号昨天还有余量 → +5。余量看三样：
+    """名额快满（空位 ≤ 2）且账号昨天还有余量 → +5。余量看三样：
     日用量 < 60%（按算力折算）、被每小时上限拦的小时 < 3、高峰排队拥挤的小时 < 3。
     人多以后先卡住大家的是高峰排队（出图间隔决定的产能），全天总量可能还很宽松，所以排队也要看（2026-10-10）。
     只加不减：人多了由动态额度把每人份额调小，不踢人。"""
@@ -71,10 +71,10 @@ def slots_rule(cap: int, active: int, waitlist: int, day_util: float, blocked_ho
         return cap, f"昨天 {queue_hours} 个小时高峰排队拥挤（每小时排队满被拒 ≥ {QUEUE_BUSY_REJECTS} 次）：名额不再增加"
     if day_util >= 0.6:
         return cap, f"昨天用量 {day_util:.0%}：名额不再增加"
-    if cap and cap < SLOTS_MAX and (waitlist > 0 or cap - active <= 2):
-        return min(SLOTS_MAX, cap + SLOTS_STEP), (f"名额 {active}/{cap}、候补 {waitlist} 人，"
+    if cap and cap < SLOTS_MAX and cap - active <= 2:
+        return min(SLOTS_MAX, cap + SLOTS_STEP), (f"名额 {active}/{cap}，"
                                                   f"昨天用量 {day_util:.0%}：名额 +{SLOTS_STEP}")
-    return cap, f"名额 {active}/{cap}、候补 {waitlist} 人、昨天用量 {day_util:.0%}：名额不变"
+    return cap, f"名额 {active}/{cap}、昨天用量 {day_util:.0%}：名额不变"
 
 
 def breaker_rule(fails: int, total: int) -> tuple[bool, str]:
@@ -104,8 +104,6 @@ async def run(state, registrar=None, now: Optional[float] = None) -> dict[str, A
     # 名额
     cfg = await registrar.settings() if registrar is not None else {"max_users": 0}
     active = await registrar.count_active() if registrar is not None else 0
-    # 候补只算还没被邀请的人（已邀请的有 24 小时保留名额，不算在等）
-    waitlist = sum(1 for w in await registrar.waitlist() if not w.get("invited_at")) if registrar is not None else 0
 
     # 用动态额度每天 0 点的复盘（昨天的用量 / 被拦小时数，已排除测试号和站长号）
     from . import quota_algo
@@ -128,7 +126,7 @@ async def run(state, registrar=None, now: Optional[float] = None) -> dict[str, A
                                        "AND reason='queue_full' GROUP BY h HAVING COUNT(*)>=?",
                                    start, start + 86400, QUEUE_BUSY_REJECTS))
     v5_pct = (json.loads(await db.get_setting(quota_algo.STATE_KEY, "{}") or "{}").get("v5") or {}).get("percent")
-    slots, why = slots_rule(cap_now, active, waitlist, day_util, int(last.get("hourly_blocks", 0)), queue_hours, v5_pct)
+    slots, why = slots_rule(cap_now, active, day_util, int(last.get("hourly_blocks", 0)), queue_hours, v5_pct)
     if last.get("coverage_hours", 0) < 20:                 # 昨天数据不完整：不据此加名额
         cov = last.get("coverage_hours")
         slots, why = cap_now, (f"昨天只有 {cov} 小时数据，名额不变" if cov is not None

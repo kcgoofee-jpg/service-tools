@@ -271,7 +271,8 @@ class NaiClient:
     async def start(self) -> None:
         client_kwargs: dict[str, Any] = {
             "timeout": httpx.Timeout(connect=15, read=300, write=120, pool=300),
-            "limits": httpx.Limits(max_connections=32, max_keepalive_connections=8),
+            # keepalive_expiry=120：httpx 默认 5 秒，而出图间隔默认 15 秒——不调的话每张图都重新 TLS 握手
+            "limits": httpx.Limits(max_connections=32, max_keepalive_connections=8, keepalive_expiry=120),
             "follow_redirects": True,
         }
         if self._proxy:

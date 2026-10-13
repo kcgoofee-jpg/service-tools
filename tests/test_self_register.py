@@ -41,7 +41,6 @@ class RegistrationTests(unittest.IsolatedAsyncioTestCase):
                 return httpx.Response(200, json={})
             raise AssertionError(f"Unexpected Discord request {request.method} {request.url}")
         await self.db.set_setting("register_open", "1")        # registration is closed by default (safe default)
-        await self.db.set_setting("waitlist_enabled", "1")     # 候补默认关；这里的候补用例显式打开
         self.http = httpx.AsyncClient(transport=httpx.MockTransport(discord), base_url="https://discord.com")
         self.service = RegistrationService(self.db, self.http, client_id="client-id", client_secret="client-secret",
             bot_token="fake-bot-token", bridge_secret="bridge-secret")
@@ -197,6 +196,24 @@ class CapacityAndAdminTests(RegistrationTests):
         self.assertEqual((await self.db._db.execute_fetchall("SELECT count(*) FROM discord_registrations"))[0][0], 0)
         self.assertIn("nai-", (await self.mint())["key"])
 
+    async def test_reset_all_spares_invite_tagged_keys(self):
+        # 2026-10-13 站长：邀请 Key 与手动全站重置同一口径，REGISTER_RESET_AT 的每日清空也不得波及
+        from app.database import INVITE_TAG
+        await self.mint()                                                   # 普通成员
+        invite = await self.db.create_key({"name": "邀请-朋友", "token": "nai-invite-keep", "daily_images": 1,
+                                           "monthly_anlas": 0, "daily_text_tokens": 0, "rpm": 5})
+        await self.db._db.execute("INSERT INTO key_tags(key_id, tag, note, by, ts) VALUES (?,?,?,?,?)",
+                                  (invite["id"], INVITE_TAG, "", "站长", time.time()))
+        await self.db._db.commit()
+        await self.service.revoke("777")                                    # 会删普通 Key；邀请 Key 有绑定才测得到豁免
+        from unittest.mock import AsyncMock
+        self.service.send_dm = AsyncMock(return_value=True)
+        bound = await self.service.bind_invite("888", "nai-invite-keep", {"id": "888", "username": "friend"})
+        self.assertIn("已绑定", bound["message"])
+        self.assertEqual(await self.service.reset_all(), 0)                 # 邀请成员是唯一在册用户，且必须被跳过
+        self.assertIsNotNone(await self.db.get_key(invite["id"]))           # 邀请 Key 原样
+        self.assertIsNotNone(await self.service.key_row_for("888"))         # 绑定也在
+
     async def test_quota_and_resetkey_endpoints_need_secret_and_right_guild(self):
         await self.mint()
         app = FastAPI()
@@ -235,62 +252,17 @@ class OpenRegistrationTests(RegistrationTests):
         self.service.max_users = 1
         await self.mint()
         self.assertEqual(await self.service.count_active(), 1)
-        with self.assertRaises(RegistrationError):
-            await self.service.issue_direct("888", GUILD)               # full
+        with self.assertRaises(RegistrationError) as full:
+            await self.service.issue_direct("888", GUILD)               # full：先到先得，满了直接拒绝
+        self.assertIn("先到先得", str(full.exception))
         await self.db._db.execute("UPDATE api_keys SET expires_at=?", (time.time() - 5,))
         await self.db._db.commit()
         self.assertEqual(await self.service.count_active(), 0)           # expired key no longer holds the slot
-        self.assertEqual([w["discord_id"] for w in await self.service.waitlist()], ["888"])   # 名额满时进了候补
-        with self.assertRaises(RegistrationError) as caught:
-            await self.service.issue_direct("777", GUILD)               # 候补排在前面，后来者不能插队
-        self.assertIn("第 2 位", str(caught.exception))
-        self.assertIn("nai-", (await self.service.issue_direct("888", GUILD))["key"])   # 排第一的候补可以领
-        self.assertEqual([w["discord_id"] for w in await self.service.waitlist()], ["777"])   # 领到后移出候补
+        self.assertIn("nai-", (await self.service.issue_direct("888", GUILD))["key"])   # 空位谁先到谁领
         self.assertEqual(await self.service.count_active(), 1)
 
-    async def test_waitlist_invites_in_order_and_holds_slot_24h(self):
-        from unittest.mock import AsyncMock
-        from app.registration import WAITLIST_HOLD
-        self.service.max_users = 1
-        self.service.send_dm = AsyncMock(return_value=True)
-        await self.db.set_setting("waitlist_dm", "1")          # 这个测试测的是私信邀请模式（默认已改为不私信）
-        await self.mint()
-        for who in ("901", "902"):
-            with self.assertRaises(RegistrationError):
-                await self.service.issue_direct(who, GUILD, name="u" + who)
-        self.assertEqual([w["name"] for w in await self.service.waitlist()], ["u901", "u902"])
-        self.assertEqual(await self.service.invite_waitlist(), 0)                     # 没有空位
-        await self.db._db.execute("UPDATE api_keys SET expires_at=?", (time.time() - 5,))
-        await self.db._db.commit()
-        self.assertEqual(await self.service.invite_waitlist(), 1)                     # 只邀请第一位
-        self.assertEqual(self.service.send_dm.await_args.args[0], "901")
-        with self.assertRaises(RegistrationError):
-            await self.service.issue_direct("903", GUILD)                             # 名额为 901 保留
-        await self.service._check_capacity("901")                                     # 901 可以领（这里只探测，不真领）
-        later = time.time() + WAITLIST_HOLD + 1
-        self.assertEqual(await self.service.invite_waitlist(now=later), 1)            # 901 过期 → 邀请 902
-        self.assertEqual(self.service.send_dm.await_args.args[0], "902")
-        self.assertEqual([w["discord_id"] for w in await self.service.waitlist()], ["902", "903"])
-        self.assertIn("nai-", (await self.service.issue_direct("902", GUILD))["key"])  # 被邀请的 902 真的领到
-        self.assertEqual([w["discord_id"] for w in await self.service.waitlist()], ["903"])
 
-    async def test_waitlist_without_dm_holds_slot_and_posts_one_announcement(self):
-        # 申诉期：waitlist_dm=0 → 不私信，照样保留名额，公告频道只发一条汇总
-        from unittest.mock import AsyncMock
-        self.service.max_users = 2
-        self.service.send_dm = AsyncMock(return_value=True)
-        await self.db.set_setting("waitlist_dm", "0")
-        await self.mint()
-        await self.db._db.execute("INSERT INTO waitlist(discord_id, name, joined_at) VALUES ('901','a',0), ('902','b',1)")
-        await self.db._db.commit()
-        posts = []
-        self.assertEqual(await self.service.invite_waitlist(announce=posts.append), 1)   # 只空 1 个位
-        self.service.send_dm.assert_not_awaited()
-        self.assertEqual(len(posts), 1)
-        self.assertIn("候补前 1 位", posts[0])
-        with self.assertRaises(RegistrationError):
-            await self.service.issue_direct("902", GUILD)                                # 名额为 901 保留
-        self.assertIn("nai-", (await self.service.issue_direct("901", GUILD))["key"])
+
 
     async def test_web_login_paused_by_default_never_starts_oauth(self):
         # 默认暂停：GET /login 必须跳回首页，不能把人送进 Discord 授权（应用审核期间）；设 0 才开放
@@ -350,13 +322,6 @@ class OpenRegistrationTests(RegistrationTests):
             self.assertEqual((await client.post("/login/key", json={"key": row["token"]})).status_code, 429)
         _KEY_LOGIN_FAILS.clear()
 
-    async def test_registration_and_ban_leave_the_waitlist(self):
-        self.service.max_users = 1
-        await self.db._db.execute("INSERT INTO waitlist(discord_id, name, joined_at) VALUES ('777','',0), ('999','',1)")
-        await self.db._db.commit()
-        self.assertIn("nai-", (await self.mint("777"))["key"])
-        await self.service.ban("999")
-        self.assertEqual(await self.service.waitlist(), [])
 
     async def test_young_discord_accounts_cannot_grab_slots(self):
         self.service.min_account_days = 7
@@ -542,17 +507,15 @@ class SessionBindingTests(RegistrationTests):
             self.assertIsNone(await mr._member_session(req))
 
 
-class NoWaitlistTests(RegistrationTests):
-    async def test_full_without_waitlist_refuses_and_frees_first_come(self):
-        # 候补关闭（默认）：名额满直接提示、不进候补；有空位先到先得
-        await self.db.set_setting("waitlist_enabled", "0")
+class FirstComeFirstServedTests(RegistrationTests):
+    async def test_full_refuses_and_frees_first_come(self):
+        # 候补已移除（2026-10-13）：名额满直接提示；有空位先到先得
         self.service.max_users = 1
         await self.db.set_setting("register_max_users", "1")
         await self.mint("777")
         with self.assertRaises(RegistrationError) as ctx:
             await self.mint("888")
         self.assertIn("先到先得", str(ctx.exception))
-        self.assertEqual(await self.count("waitlist"), 0)
         await self.service.revoke("777")
         self.assertIn("nai-", (await self.mint("888"))["key"])
 
