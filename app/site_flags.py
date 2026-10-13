@@ -34,6 +34,8 @@ WEB_LOGIN_PAUSED = Spec("web_login_paused", "flag", True, "registration_routes",
 DM_ENABLED = Spec("dm_enabled", "flag", False, "registration", "私信总闸门（关 = 任何私信都不发）")
 ISSUE_HOURLY_CAP = Spec("issue_hourly_cap", "int", 12, "registration", "每小时最多发放的新 Key", 0, 500)
 REGISTER_OPEN = Spec("register_open", "flag", False, "modules / registration", "开放 /register 领取")
+HOME_JOIN_OPEN = Spec("home_join_open", "flag", True, "landing / admin",
+                      "首页「加入 Discord」按钮（独立于 register_open：只管首页按钮显示，关 = 置灰「关闭注册」）")
 GLOBAL_DAILY_V5 = Spec("global_daily_v5", "int", None, "额度 / 首页 / 客户端", "全站每日 V5 张数（0 = 不限）",
                        0, 100000, env="global_daily_v5")
 GLOBAL_DAILY_ANLAS = Spec("global_daily_anlas", "int", None, "额度 / Vibe PVP", "全站每日 Anlas 额度（0 = 不限，Vibe PVP 抢额度）",
@@ -53,7 +55,7 @@ MEMBER_DOWNLOAD = Spec("member_image_download", "flag", False, "audit", "成员�
 
 MEMBER_SWEEP = Spec("member_sweep", "flag", True, "registration", "退群回收：每人每天核对一次是否还在服务器，不在就删 Key")
 
-ALL = (MEMBER_SWEEP, WEB_LOGIN_PAUSED, DM_ENABLED, ISSUE_HOURLY_CAP, REGISTER_OPEN,
+ALL = (MEMBER_SWEEP, WEB_LOGIN_PAUSED, DM_ENABLED, ISSUE_HOURLY_CAP, REGISTER_OPEN, HOME_JOIN_OPEN,
        GLOBAL_DAILY_V5, GLOBAL_DAILY_ANLAS, GLOBAL_DAILY_ANLAS_UNTIL, GLOBAL_MONTHLY_ANLAS, GUARD_BASE, ALGO_NOTICE, IMAGE_RETENTION, IMAGE_CAP_MB, IMAGE_KEEP_HOURS, MEMBER_DOWNLOAD)
 
 

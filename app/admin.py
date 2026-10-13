@@ -1173,6 +1173,24 @@ async def modules_run_all(request: Request):
 _ACK_CHECKS = {"v5_oversell": "V5 每人额度×人数 ≤ 全站上限", "registration_ready": "每人承诺 ≤ 全站日容量"}
 
 
+@router.get("/home/join")
+async def home_join_get(request: Request):
+    """首页「加入 Discord」按钮开关（独立于领 Key 开关 register_open）。"""
+    require_admin(request)
+    return {"open": await site_flags.get(request.app.state.gate.db, site_flags.HOME_JOIN_OPEN)}
+
+
+@router.post("/home/join")
+async def home_join_set(request: Request):
+    require_admin(request)
+    body = await read_json_body(request)
+    on = bool(body.get("open", True))
+    await site_flags.put(request.app.state.gate.db, site_flags.HOME_JOIN_OPEN, on)
+    await log_action(request.app.state.gate.db, _actor(request),
+                     "首页加入按钮" + ("开放" if on else "关闭（置灰「关闭注册」）"))
+    return {"ok": True, "open": on}
+
+
 @router.post("/checks/ack")
 async def checks_ack(request: Request):
     """结构性交叉校验的「站长已确认」：确认后该校验转绿（数字仍显示），不再每 10 分钟记一条 warn。"""

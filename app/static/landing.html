@@ -694,11 +694,11 @@ function renderAnnouncement(has){
 /* 实时数据说全站被站点规则拦下时（按时段放行 / 每日上限 / 熔断），顶部胶囊跟着改，不再显示「空闲」 */
 function renderStatus(d){
   setSite(d.site);
-  var reg = d.registration || {};   /* 领取胶囊已删（10-14 站长）：注册状态看「加入 Discord」按钮 */
+  /* 加入按钮独立开关（home_join_open，10-14 站长）：与 register_open（/register 是否发放）解耦 */
   var idle = Number(d.key_inactivity_delete_days) || 0;
   $('ruleIdle').hidden = !(idle > 0);
   if(idle > 0) $('idleDays').textContent = String(idle);
-  renderDiscord(d.discord_invite, reg.open === false);
+  renderDiscord(d.discord_invite, d.home_join_open !== true);
   renderAnnouncement(!!d.has_announcement);
   var al = (d.algo_notice || '').trim();
   if($('algoNote')){ $('algoNote').hidden = !al; $('algoNote').textContent = al; }
