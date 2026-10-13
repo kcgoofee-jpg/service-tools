@@ -676,7 +676,7 @@ function renderStatus(d){
     pills.textContent = ''; pills.removeAttribute('aria-busy');
     if(reg.open && (!ME || !ME.has_key)){
       var full = reg.slots_left === 0, rp = pill(full ? 'warn' : 'info', full ? '已满员' : '可领取', false);
-      rp.title = full ? '名额已满，在 Discord 用 /register 可排候补' : '在 Discord 用 /register 领 Key' + (reg.slots_left != null ? '，剩余名额 ' + reg.slots_left : '');
+      rp.title = full ? '名额已满，闲置的 Key 会被自动回收，空出的名额先到先得' : '在 Discord 用 /register 领 Key' + (reg.slots_left != null ? '，剩余名额 ' + reg.slots_left : '');
       pills.appendChild(rp);
     }
   }
