@@ -1110,8 +1110,15 @@ function fmtDate(sec){
   }
   poll();
 
-  /* ---------- 捐赠 Key：提交只进站长后台（人工验证后才接入）；放在主闭包内才能用 $ / toast ---------- */
+  /* ---------- 捐赠 Key：自包含（主闭包在上方已结束，$ / toast 在这里拿不到，自己实现） ---------- */
   (function(){
+    function $(id){ return document.getElementById(id); }
+    var toastT;
+    function toast(msg){
+      var t = $('toast'); if(!t) return;
+      t.textContent = msg; t.classList.add('show');
+      clearTimeout(toastT); toastT = setTimeout(function(){ t.classList.remove('show'); }, Math.min(5000, 1600 + String(msg).length * 60));
+    }
     var btn = $('donateBtn'), form = $('donateForm');
     if(!btn || !form) return;
     btn.addEventListener('click', function(){ btn.hidden = true; form.hidden = false; $('donateToken').focus(); });
