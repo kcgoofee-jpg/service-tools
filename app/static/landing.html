@@ -225,19 +225,7 @@ footer{max-width:var(--container-max,880px);margin:0 auto;padding:var(--sp-6) va
 .board-bar .bar-v5{height:100%;background:var(--v5);transition:width .4s}
 .algo-note{margin:0 0 var(--sp-2);font-size:var(--fs-micro);color:var(--muted)}
 
-/* 状态胶囊 */
-.pills{display:flex;gap:var(--sp-2);flex-wrap:wrap;justify-content:center}
-.pill{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:var(--radius-pill);font-size:var(--fs-sm);font-weight:500;
-  background:var(--surface);border:1px solid var(--border);color:var(--text-2);box-shadow:var(--shadow-sm);min-height:32px;
-  transition:background .2s,border-color .2s,color .2s}
-.pill .dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:none}
-.pill.ok{color:var(--ok);background:var(--ok-soft);border-color:color-mix(in srgb,var(--ok) 25%,transparent)}
-.pill.ok .dot{background:var(--ok);animation:pulse 2.4s infinite}
-.pill.warn{color:var(--warn);background:var(--warn-soft);border-color:color-mix(in srgb,var(--warn) 25%,transparent)}
-.pill.warn .dot{background:var(--warn)}
-.pill.info{color:var(--accent-text);background:var(--accent-soft);border-color:color-mix(in srgb,var(--accent) 25%,transparent)}
-.pill.bad{color:var(--bad);background:var(--bad-soft);border-color:color-mix(in srgb,var(--bad) 25%,transparent)}
-.pill.idle .dot{background:var(--muted)}
+/* 状态胶囊已删（10-14 站长）；@keyframes pulse 仍被看板圆点使用 */
 @keyframes pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--ok) 50%,transparent)}70%,100%{box-shadow:0 0 0 7px transparent}}
 .skel{display:inline-block;height:32px;width:120px;border-radius:var(--radius-pill);
   background:linear-gradient(90deg,var(--surface-3),var(--surface-2),var(--surface-3));background-size:200% 100%;animation:sh 1.4s infinite linear}
@@ -464,8 +452,6 @@ body.haskey #algoNote,html.haskey #algoNote{display:none!important}
 
   <section id="board" aria-labelledby="stBig">
     <div class="card board-card">
-      <!-- 名额 / 领取状态胶囊：JS（renderStatus）只在元素存在时写入 -->
-      <div class="pills" id="pills" aria-busy="true"></div>
       <!-- 实时状态行：大字 + 单行理由 + 0人排队 -->
       <div class="board-top">
         <div class="board-st">
@@ -676,13 +662,11 @@ document.addEventListener('click', function(e){
   copyText(b.getAttribute('data-copy') === 'v1' ? site + '/v1' : site);
 });
 
-function pill(cls, text, dot){
-  var p = el('span', 'pill ' + cls);
-  if(dot) p.appendChild(el('span', 'dot'));
-  p.appendChild(el('span', '', text));
-  return p;
-}
+var _joinSig = null;
 function renderDiscord(inv, closed){
+  var sig = (closed ? '1' : '0') + '|' + (inv || '');
+  if(sig === _joinSig) return;              /* meta 跟着每秒的 /public/live 来：没变化就别重建按钮（避免打断点击） */
+  _joinSig = sig;
   var slot = $('discordSlot'); slot.textContent = '';
   if(closed){
     var off = el('span', 'btn dc off'); off.title = '注册已关闭，开放时间看站长公告';
@@ -706,17 +690,12 @@ function renderAnnouncement(has){
     var f = document.createElement('iframe');
     f.src = '/announcement'; f.setAttribute('sandbox', ''); f.loading = 'lazy'; f.title = '站长公告';
     $('annBox').appendChild(f); annLoaded = true;
-  } else if(has){
-    var cur = $('annBox').querySelector('iframe');
-    if(cur && renderAnnouncement.refresh){ cur.src = '/announcement'; renderAnnouncement.refresh = false; }
   }
 }
 /* 实时数据说全站被站点规则拦下时（按时段放行 / 每日上限 / 熔断），顶部胶囊跟着改，不再显示「空闲」 */
 function renderStatus(d){
   setSite(d.site);
-  var reg = d.registration || {};
-  var pills = $('pills');
-  if(pills){ pills.textContent = ''; pills.removeAttribute('aria-busy'); }   /* 领取胶囊已删（10-14 站长）：注册状态看「加入 Discord」按钮 */
+  var reg = d.registration || {};   /* 领取胶囊已删（10-14 站长）：注册状态看「加入 Discord」按钮 */
   var idle = Number(d.key_inactivity_delete_days) || 0;
   $('ruleIdle').hidden = !(idle > 0);
   if(idle > 0) $('idleDays').textContent = String(idle);
@@ -733,25 +712,7 @@ function renderStatus(d){
   if($('loginBtn')) $('loginBtn').hidden = paused;
   try{ document.dispatchEvent(new CustomEvent('owl-status', {detail: d})); }catch(_){}
 }
-function statusFailed(){
-  var pills = $('pills');
-  if(pills){
-    pills.textContent = ''; pills.removeAttribute('aria-busy');
-    pills.appendChild(pill('bad', '状态暂时无法读取', true));
-  }
-  if(!$('discordSlot').firstChild) renderDiscord('');
-}
-var loading = false;
-function loadStatus(){
-  if(loading) return; loading = true;
-  var ctl = ('AbortController' in window) ? new AbortController() : null;
-  var to = setTimeout(function(){ if(ctl) ctl.abort(); }, 10000);
-  fetch('/public/status', {cache:'no-store', credentials:'omit', signal: ctl ? ctl.signal : undefined})
-    .then(function(r){ if(!r.ok) throw new Error('http'); return r.json(); })
-    .then(renderStatus, statusFailed)
-    .then(function(){ clearTimeout(to); loading = false; }, function(){ clearTimeout(to); loading = false; });
-}
-loadStatus();
+/* （10-14 重构）statusFailed 与 30s 的 /public/status 轮询已退役：meta 并入每秒的 /public/live */
 
 /* 成员网页登录（Discord）：登录后直接看状态、复制 Key，不用粘贴。数据来自 /public/me */
 function maskKey(k){ k = String(k || ''); return k.length > 14 ? k.slice(0, 7) + '…' + k.slice(-4) : k; }
@@ -788,7 +749,7 @@ function renderMe(d){
     $('liveTitle').hidden = !!authed;
     if(!authed) $('liveTitle').innerHTML = icon('key') + '查额度';
   }
-  if(authed && d && d.has_key && $('pills')) $('pills').textContent = '';
+  if(authed && d && d.has_key){ /* 领取胶囊已删 */ }
   var hk = $('headKey');
   if(hk){ hk.hidden = true; hk.innerHTML = ''; }
   if(!authed){ me.hidden = true; lr.hidden = false; return; }
@@ -966,23 +927,19 @@ document.addEventListener('keydown', function(e){
   var menu = $('chipMenu'); if(!menu || menu.hidden) return;
   closeChip(); var b = $('chipBtn'); if(b) b.focus();
 });
-setInterval(function(){ if(document.visibilityState === 'visible') loadStatus(); }, 30000);
-document.addEventListener('visibilitychange', function(){ if(document.visibilityState === 'visible') loadStatus(); });
 
 function fmtDate(sec){
   var d = new Date(sec * 1000), p = function(n){ return n < 10 ? '0' + n : '' + n; };
   return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
 }
-})();
 
-/* ---------- 实时运行看板：每秒拉取 /public/live；登录成员的 d.me 带「我的排队」 ---------- */
+/* ---------- 实时看板（已并入主闭包）：每秒拉取 /public/live（meta 字段 30s 子缓存）---------- */
 (function(){
   var root = document.getElementById('board');
   if(!root) return;
-  function $id(id){ return document.getElementById(id); }
   var steps = root.querySelectorAll('[data-step]'), failed = 0, failSince = 0, reported = false;
   function pct(a, b){ return b > 0 ? Math.min(100, Math.round(a / b * 100)) : 0; }
-  function setBar(id, a, b){ var e = $id(id), p = pct(a, b); if(e){ e.style.width = p + '%'; if(e.parentNode) e.parentNode.setAttribute('aria-valuenow', String(p)); } }
+  function setBar(id, a, b){ var e = $(id), p = pct(a, b); if(e){ e.style.width = p + '%'; if(e.parentNode) e.parentNode.setAttribute('aria-valuenow', String(p)); } }
   function mark(k){ Array.prototype.forEach.call(steps, function(s){ var on = s.dataset.step === k; s.classList.toggle('on', on); if(on) s.setAttribute('aria-current', 'step'); else s.removeAttribute('aria-current'); }); }
   var BLOCK_TITLE = {paced: '运行正常 · 时段平滑补给中', daily_cap: '今日出图已满', breaker: '暂停出图 · 上游出错',
     hourly_cap: '近 60 分钟出图已满', quiet_cap: '安静时段 · 暂停出图', cap_3h: '近 3 小时出图已满'};
@@ -1003,7 +960,7 @@ function fmtDate(sec){
     if(lastQueueCount > 0){
       var passed = Math.floor((Date.now() - queueSeenAt) / 1000);
       var curSec = Math.max(2, lastQueueSec - passed);
-      var el = $id('stBig'), dot = $id('dot');
+      var el = $('stBig'), dot = $('dot');
       if(el && dot && dot.classList.contains('busy') && !dot.classList.contains('mine')){
         el.textContent = '约 ' + curSec + ' 秒后开始';
       }
@@ -1061,13 +1018,13 @@ function fmtDate(sec){
     if(myRun){ tone = 'mine'; val = '你的图正在生成'; sub = '预计十几秒'; step = 'nai'; }
     else if(myPos){ tone = 'mine'; val = '你的图排第 ' + myPos.position + ' 位'; sub = '约 ' + Math.max(5, myPos.eta) + ' 秒后开始画'; step = 'queue'; }
 
-    var dot = $id('dot');
+    var dot = $('dot');
     if(dot) dot.className = 'board-dot pulse ' + tone;
-    var stBig = $id('stBig');
+    var stBig = $('stBig');
     if(stBig) stBig.textContent = val;
-    var stReason = $id('stReason');
+    var stReason = $('stReason');
     if(stReason) stReason.textContent = sub;
-    var stQueue = $id('stQueue');
+    var stQueue = $('stQueue');
     if(stQueue){
       stQueue.textContent = myRun ? '生成中…' : (w === 0 && run === 0 ? '0 人排队' : (w > 0 ? (w + ' 人排队') : (run + ' 人在画')));
     }
@@ -1084,10 +1041,10 @@ function fmtDate(sec){
     var cap45 = Number(q.images_cap || 0);
     var used5 = q.v5_today || 0;
     var cap5 = Number(q.v5_cap || 0);
-    if($id('dTotal')) $id('dTotal').textContent = Math.round(used45);
-    if($id('dTotalCap')) $id('dTotalCap').textContent = cap45 > 0 ? cap45 : '不限';
-    if($id('dV5')) $id('dV5').textContent = used5;
-    if($id('dV5Cap')) $id('dV5Cap').textContent = cap5 > 0 ? cap5 : '不限';
+    if($('dTotal')) $('dTotal').textContent = Math.round(used45);
+    if($('dTotalCap')) $('dTotalCap').textContent = cap45 > 0 ? cap45 : '不限';
+    if($('dV5')) $('dV5').textContent = used5;
+    if($('dV5Cap')) $('dV5Cap').textContent = cap5 > 0 ? cap5 : '不限';
 
     var pctTotal = cap45 > 0 ? Math.min(100, Math.round((used45 / cap45) * 100)) : 0;
     /* V5 的图是今天总量的一部分：青色段画「V5 占今天出图的比例」，而不是自己乘一个系数——
@@ -1095,8 +1052,8 @@ function fmtDate(sec){
        （51/260=20% 的 V5 在条上看起来跟 178/1700=10% 的总量一样宽）。 */
     var v5Share = used45 > 0 ? Math.min(1, used5 / used45) : 0;
     var wV5 = Math.round(pctTotal * v5Share * 10) / 10;
-    if($id('barTotal')) $id('barTotal').style.width = Math.max(0, pctTotal - wV5) + '%';
-    if($id('barV5')) $id('barV5').style.width = Math.min(100, wV5) + '%';
+    if($('barTotal')) $('barTotal').style.width = Math.max(0, pctTotal - wV5) + '%';
+    if($('barV5')) $('barV5').style.width = Math.min(100, wV5) + '%';
   }
   /* 只用查询成功过的 Key，避免输错的 Key 每秒请求一次触发防暴力破解 */
   function poll(){
@@ -1105,6 +1062,7 @@ function fmtDate(sec){
       if(!d) throw 0; failed = 0; failSince = 0; reported = false;
       try{ document.dispatchEvent(new CustomEvent('owl-live', {detail: d})); }catch(_){}
       render(d, d.me || null);          /* 登录成员：d.me 带「我的排队」，第一格显示排第几 */
+      renderStatus(d);                  /* 状态区（加入按钮 / 公告 / 额度说明）同一份载荷驱动；30s 的 /public/status 轮询已退役 */
     }).catch(function(e){
       failed++;
       if(!failSince) failSince = Date.now();
@@ -1115,15 +1073,8 @@ function fmtDate(sec){
   }
   poll();
 
-  /* ---------- 捐赠 Key：自包含（主闭包在上方已结束，$ / toast 在这里拿不到，自己实现） ---------- */
+  /* ---------- 捐赠 Key：提交只进站长后台（人工验证后才接入）；$ / toast 用主闭包共享那份 ---------- */
   (function(){
-    function $(id){ return document.getElementById(id); }
-    var toastT;
-    function toast(msg){
-      var t = $('toast'); if(!t) return;
-      t.textContent = msg; t.classList.add('show');
-      clearTimeout(toastT); toastT = setTimeout(function(){ t.classList.remove('show'); }, Math.min(5000, 1600 + String(msg).length * 60));
-    }
     var btn = $('donateBtn'), form = $('donateForm');
     if(!btn || !form) return;
     btn.addEventListener('click', function(){ btn.hidden = true; form.hidden = false; $('donateToken').focus(); });
@@ -1143,7 +1094,8 @@ function fmtDate(sec){
       }catch(e){ toast('网络异常，稍后再试'); }
     });
   })();
-})();
+})();               /* 实时看板段 */
+})();               /* 主闭包：全页共享 $ / esc / toast / el / ic */
 
 </script>
 </body>

@@ -17,11 +17,15 @@ async def env(tmp_path, monkeypatch):
     announcement = main.SETTINGS.announcement_path
     monkeypatch.setattr(main.SETTINGS, "site_url", "https://gate.example.top/", raising=False)
     monkeypatch.setattr(main.SETTINGS, "discord_invite_url", "https://discord.gg/abc", raising=False)
-    state = SimpleNamespace(db=db, upstream_health=lambda: {
+    state = SimpleNamespace(db=db, settings=main.SETTINGS, day=lambda: "2026-10-14",
+                            nai=SimpleNamespace(pool=[]),
+                            upstream_health=lambda: {
         "status": "degraded", "recent": 9, "failed": 6, "image_cooldown_seconds": 42})
     monkeypatch.setattr(main, "STATE", state)
+    from app.routers import public_routes
+    public_routes._LIVE_META.update(at=0.0, body=None)                 # meta 子缓存不跨测试
     client = httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url="https://gate.example.top")
-    yield SimpleNamespace(client=client, db=db, announcement=announcement)
+    yield SimpleNamespace(client=client, db=db, announcement=announcement, state=state)
     await client.aclose()
     await db.close()
 
@@ -51,6 +55,19 @@ async def test_public_status_exposes_only_safe_fields(env):
                          "discord_invite", "has_announcement", "key_inactivity_delete_days", "image_jobs", "stability",
                          "limits", "web_login"}   # limits 只含排队数、保底张数和安静时段，不含用量
     assert data["web_login"] is False                                 # 默认：网页登录暂停（fail-closed）
+
+
+@pytest.mark.asyncio
+async def test_public_live_carries_meta_for_unified_poll(env):
+    """/public/live 现在同时携带 meta（原 30s /public/status 的字段），首页单轮询驱动（10-14 重构）。"""
+    live = (await env.client.get("/public/live")).json()
+    for key in ("site", "discord_invite", "has_announcement", "algo_notice",
+                "key_inactivity_delete_days", "web_login", "audit_notice", "registration"):
+        assert key in live, f"缺 meta 字段 {key}"
+    assert live["site"] == "https://gate.example.top" and live["discord_invite"] == "https://discord.gg/abc"
+    assert isinstance(live["registration"], dict)
+    # 看板本身的字段不受影响
+    assert "quota" in live and "guard" in live and "rules" in live and "me" in live
 
 
 @pytest.mark.asyncio
