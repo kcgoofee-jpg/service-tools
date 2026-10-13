@@ -420,6 +420,15 @@ class Database:
         await self._db.commit()
         # units 列刚加上时为 NULL：老数据按 1 张 = 1 份回填（偏保守，不会让升级当天突然多出额度）
         await self._db.execute("UPDATE upstream_token_counters SET units=images WHERE units IS NULL")
+        try:
+            await self._db.execute("ALTER TABLE api_keys ADD COLUMN discord_id TEXT")
+        except Exception:
+            pass  # 列已存在
+        # 成员中心（10-14）：Key 带持久 Discord 归属——重置 / 换 Key 不再断链，后台按人合并记录
+        await self._db.execute(
+            "UPDATE api_keys SET discord_id="
+            "(SELECT r.discord_id FROM discord_registrations r WHERE r.key_id=api_keys.id) "
+            "WHERE discord_id IS NULL")
         # 2026-10-13：候补功能移除，老库的 waitlist 表一并清掉
         await self._db.execute("DROP TABLE IF EXISTS waitlist")
         # 2026-10-13：防分享指纹/证据整体移除（误判率高且站规允许挂梯子换节点），老表一并清掉
@@ -643,8 +652,8 @@ class Database:
             """INSERT INTO api_keys
                (name, token, enabled, daily_images, daily_anlas, daily_v5, monthly_anlas,
                daily_text_tokens, rpm, allow_anlas, allow_img2img, exclude_global_v5, image_model_scope, is_admin, expires_at, created_at, features,
-               is_test)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               is_test, discord_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 fields["name"],
                 fields["token"],
@@ -664,6 +673,7 @@ class Database:
                 now,
                 fields.get("features"),
                 1 if fields.get("is_test") else 0,
+                fields.get("discord_id"),
             ),
         )
         await self._db.commit()
@@ -1163,6 +1173,18 @@ class Database:
                         pass
             return n
         return await asyncio.to_thread(sweep)
+
+    async def list_audit_ids(self, limit: int, offset: int, key_ids: tuple) -> tuple[list, int]:
+        """同 list_audit，但按多把 Key（同一成员重置 / 换 Key 后的历史）一起查。"""
+        marks = ",".join("?" * len(key_ids))
+        where, args = (f"WHERE key_id IN ({marks})", key_ids) if key_ids else ("", ())
+        total = (await (await self._db.execute(f"SELECT COUNT(*) FROM generation_audit {where}", args)).fetchone())[0]
+        rows = await (await self._db.execute(
+            f"""SELECT id,ts,key_id,key_name,kind,model,status,prompt,negative,extra,
+                       (thumb IS NOT NULL) AS has_thumb, (image IS NOT NULL OR image_file IS NOT NULL) AS has_image
+                FROM generation_audit {where} ORDER BY id DESC LIMIT ? OFFSET ?""",
+            (*args, limit, offset))).fetchall()
+        return rows, int(total)
 
     async def list_audit(self, limit: int, offset: int, key_id: Optional[int] = None) -> tuple[list, int]:
         where, args = ("WHERE key_id=?", (key_id,)) if key_id is not None else ("", ())
