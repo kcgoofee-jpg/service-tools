@@ -1768,7 +1768,7 @@ _LAST_LOG_EXPORT = 0.0
 
 @router.get("/logs/export")
 async def logs_export(request: Request, days: int = 30):
-    """客户端日志导出（zip：请求、Key、网段、防分享证据），给站长定期独立复核。只读，不含提示词和 Key 原文。"""
+    """客户端日志导出（zip：请求、Key、客户端种类），给站长定期独立复核。只读，不含提示词和 Key 原文。"""
     require_admin(request)
     from . import client_export
     # 全量读会占住唯一的主连接、拖慢出图记账：最多 90 天、每分钟 1 次（10/11 审查）
