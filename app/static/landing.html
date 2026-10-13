@@ -997,7 +997,7 @@ function fmtDate(sec){
         step = 'pace';
       } else {
         tone = bk.code === 'breaker' ? 'bad' : 'warn';
-        val = bk.code === 'daily_cap' ? '明天 0 点恢复' : bw ? '约 ' + bw[1] + ' 分钟后' : '稍后再试';
+        val = bk.code === 'daily_cap' ? '明天 7 点重置后恢复' : bw ? '约 ' + bw[1] + ' 分钟后' : '稍后再试';
         sub = bk.code === 'daily_cap' ? '全站今日出图已达上限，明日 0 点自动恢复' : bk.text;
         step = 'pace';
       }

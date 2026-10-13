@@ -382,7 +382,7 @@ async def _allowance(state) -> tuple[Optional[float], Optional[float]]:
 
 
 def quota_notice(a: int, v5: dict[str, Any], members: int, *, today: str, pct: Optional[float],
-                 review: Optional[dict[str, Any]] = None) -> str:
+                 review: Optional[dict[str, Any]] = None, reset_hour: int = 7) -> str:
     """首页那句「今日额度」。单独成函数是为了能用同一组常量核对文案与判定：
     以前写死「蓄水池 A 张（每小时恢复 4 张，全天上限 96 张）」，与 quota_image_check 的
     30 底仓 + 4/小时（全天最多 126 张）不是同一个数，也和「极简模式每人固定 A 张」矛盾。
@@ -394,13 +394,14 @@ def quota_notice(a: int, v5: dict[str, Any], members: int, *, today: str, pct: O
         v5_status += f"（全站今日共 {global_v5} 张，先到先得）"
     elif pct and pct >= 85 and each >= 10:
         v5_status += f"（当前电池充沛 {pct:.0f}%，额度放宽）"
+    reset_txt = f"每日 {reset_hour} 点重置"
     paced_cap = free_paced_cap(a)
     if a > paced_cap:
-        # 判定里有「0 点底仓 + 每小时注水」，全天实到张数比每日上限小：文案必须用同一组常量推导。
+        # 判定里有「服务日起点底仓 + 每小时注水」，全天实到张数比每日上限小：文案必须用同一组常量推导。
         note = (f"今日额度：V4.5 每人 {a} 张/天（每小时自动恢复 {int(FREE_REFILL_PER_HOUR)} 张，"
-                f"当天最多约 {int(paced_cap)} 张，次日 0 点恢复）{v5_status}")
+                f"当天最多约 {int(paced_cap)} 张，{reset_txt}）{v5_status}")
     else:
-        note = f"今日额度：V4.5 每人 {a} 张/天（次日 0 点恢复）{v5_status}"
+        note = f"今日额度：V4.5 每人 {a} 张/天（{reset_txt}）{v5_status}"
     if review and review.get("from") != review.get("to"):
         note = f"{today[5:].replace('-', '月')}日 算法调整：" + "；".join(review["reasons"]) + "。" + note
     return note
@@ -544,7 +545,7 @@ async def run(state, now: Optional[float] = None) -> dict[str, Any]:
     oversell = bool(v5["global"] and v5["each"] * max(1, len(members)) > v5["global"])
     v5["oversell"] = {"each": v5["each"], "members": len(members), "global": v5["global"]} if oversell else None
     # 首页提醒（站长要求：算法调整只在网站首页提示，不发 Discord）
-    note = quota_notice(a, v5, len(members), today=today, pct=pct, review=review)
+    note = quota_notice(a, v5, len(members), today=today, pct=pct, review=review, reset_hour=reset_hour)
     await db.set_setting(NOTICE_KEY, note)
     result = {"enabled": True, "ceiling": a, "base": b, "v5": v5, "members": len(members), "cap": cap,
               "updated_at": now, "changed_keys": changed, "review": review}

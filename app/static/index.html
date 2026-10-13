@@ -3798,7 +3798,7 @@ async function loadQuotaAlgo(){
     // V5 剩余：每天 0 点记一次；和前一天比的净变化 = 恢复 − 用掉
     const v5cell = (h, i) => { if(h.v5_pct == null) return '—'; const prev = hs[i-1]; const dlt = prev && prev.v5_pct != null ? h.v5_pct - prev.v5_pct : null;
       return `${Math.round(h.v5_pct)}%${dlt != null ? ` <span class="${dlt < 0 ? 'bad-text' : 'muted'}">${dlt >= 0 ? '+' : ''}${dlt.toFixed(1)}</span>` : ''}${h.v5_rate ? `<div class="muted sm">恢复 ${h.v5_rate}%/天</div>` : ''}`; };
-    const rows = hs.map((h, i) => [h, i]).slice(-7).reverse().map(([h, i]) => `<tr><td class="t" data-label="日期">${esc(h.day)}</td><td class="num" data-label="用量 / 账号日上限">${esc(h.used)} / ${esc(h.cap)}</td><td class="num" data-label="次日 0 点 V5 剩余">${v5cell(h, i)}</td><td class="num" data-label="每小时拦截">${esc(h.hourly_blocks)}</td><td class="num" data-label="顶格人数">${esc(h.ceiling_hits)}</td><td class="num" data-label="每人（昨 → 今）">${esc(h.from[0])}→${esc(h.to[0])}</td><td class="muted" data-label="理由">${esc((h.reasons||[]).join('；'))}</td></tr>`).join('');
+    const rows = hs.map((h, i) => [h, i]).slice(-7).reverse().map(([h, i]) => `<tr><td class="t" data-label="日期">${esc(h.day)}</td><td class="num" data-label="用量 / 账号日上限">${esc(h.used)} / ${esc(h.cap)}</td><td class="num" data-label="次日重置时 V5 剩余">${v5cell(h, i)}</td><td class="num" data-label="每小时拦截">${esc(h.hourly_blocks)}</td><td class="num" data-label="顶格人数">${esc(h.ceiling_hits)}</td><td class="num" data-label="每人（昨 → 今）">${esc(h.from[0])}→${esc(h.to[0])}</td><td class="muted" data-label="理由">${esc((h.reasons||[]).join('；'))}</td></tr>`).join('');
 
     const paramsHtml = `
       <details class="qa-params" style="margin-top:14px;border-top:1px solid var(--border);padding-top:10px" ${!autoOn ? 'open' : ''}>
@@ -3841,7 +3841,7 @@ async function loadQuotaAlgo(){
       </div>
       ${v5Derivation(v)}
       <div class="muted sm" style="margin:8px 0">由算法管理 ${esc(l.members ?? 0)} 人 · V5 按 ${esc(v.people ?? '—')} 人分 · 更新于 ${l.updated_at?esc(fullTime(l.updated_at)):'—'}</div>
-      ${rows?`<div class="table-wrap"><table class="rt"><thead><tr><th class="t">日期</th><th class="num">用量 / 账号日上限</th><th class="num" title="每天 0 点记一次账号 V5 剩余；括号里是和前一天比的净变化（恢复 − 用掉）">次日 0 点 V5 剩余</th><th class="num">每小时拦截</th><th class="num">顶格人数</th><th class="num">每人（昨 → 今）</th><th>理由</th></tr></thead><tbody>${rows}</tbody></table></div>`:'<div class="muted sm">每天 0 点的调整记录会出现在这里</div>'}
+      ${rows?`<div class="table-wrap"><table class="rt"><thead><tr><th class="t">日期</th><th class="num">用量 / 账号日上限</th><th class="num" title="每个服务日（7 点）切换时记一次账号 V5 剩余；括号里是和前一天比的净变化（恢复 − 用掉）">次日 0 点 V5 剩余</th><th class="num">每小时拦截</th><th class="num">顶格人数</th><th class="num">每人（昨 → 今）</th><th>理由</th></tr></thead><tbody>${rows}</tbody></table></div>`:'<div class="muted sm">每天 0 点的调整记录会出现在这里</div>'}
       ${paramsHtml}`;
   }catch(e){ $('#qaBody').innerHTML = '<div class="muted">读取失败</div>'; }
 }
