@@ -132,16 +132,38 @@ def daily_base(key) -> int:
     return base
 
 
+PACED_WAIT_CAP = 300          # 替成员等时段份额的上限：更长的等待仍然直接 429（挂着连接等半小时不现实）
+PACED_POLL_SECONDS = 20       # 轮询间隔：份额注水约每小时 daily/24 张，20 秒粒度足够
+
+
 async def guard_precheck() -> None:
-    """出图前先看账号保护：所有可用账号都到了每日 / 每小时上限或安静时段上限时，直接 429 并说明原因。"""
+    """出图前先看账号保护：所有可用账号都到了每日 / 每小时上限或安静时段上限时，直接 429 并说明原因。
+
+    例外：拦截原因全部是「按时段放行（PACED）」时，份额是线性注水的、通常几分钟内就有空位——
+    替成员在网关里等位（上限 5 分钟），避免客户端 429 自动重试又撞每分钟 RPM 形成重试风暴
+    （2026-10-13 healings 事件的成因链）。等待期间客户端断开会被正常取消，不记账。"""
     state = _state()
     guard = getattr(state, "guard", None)
     pool = [t for t in getattr(state.nai, "pool", []) if t.usable]
     if guard is None or not pool:
         return
-    reasons_list = [await guard.token_block_reason(state.db, t.token_id, state.day()) for t in pool]
-    if all(reasons_list):
-        raise _main().err(429, reasons_list[0])
+    day = state.day()
+    reasons_list = [await guard.token_block_reason(state.db, t.token_id, day) for t in pool]
+    if not all(reasons_list):
+        return
+    first = reasons_list[0]
+    if getattr(first, "code", "") != reasons.PACED:
+        raise _main().err(429, first)              # 每日 / 每小时 / 熔断：等也不会好，立即说明
+    deadline = time.monotonic() + PACED_WAIT_CAP
+    while time.monotonic() < deadline:
+        await asyncio.sleep(PACED_POLL_SECONDS)
+        reasons_list = [await guard.token_block_reason(state.db, t.token_id, state.day()) for t in pool]
+        if not all(reasons_list):
+            return                                  # 有账号放出份额了，继续正常准入
+        first = reasons_list[0]
+        if getattr(first, "code", "") != reasons.PACED:
+            break                                   # 等成了更严重的上限（如当日总量）：按新原因拒绝
+    raise _main().err(429, first)
 
 
 @asynccontextmanager

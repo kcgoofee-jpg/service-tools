@@ -589,6 +589,32 @@ async def test_inactive_cleanup_is_logged(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_only_image_generation_counts_as_activity_for_idle_cleanup(tmp_path):
+    """2026-10-13 站长：闲置 = 连续没生图。只查额度 / 记账的 Key 照样回收，生过图的按最后一次生图计时。"""
+    from types import SimpleNamespace
+    from app.state import GateState
+    db = Database(str(tmp_path / "g.sqlite"))
+    await db.connect()
+    fake = SimpleNamespace(db=db, settings=SimpleNamespace(key_inactivity_delete_days=3))
+    quota_only = await db.create_key({"name": "只查额度", "token": "nai-q", "daily_images": 1, "monthly_anlas": 0,
+                                      "daily_text_tokens": 0, "rpm": 5})
+    generator = await db.create_key({"name": "生图党", "token": "nai-g", "daily_images": 1, "monthly_anlas": 0,
+                                     "daily_text_tokens": 0, "rpm": 5})
+    ten_days_ago = time.time() - 10 * 86400
+    # 两人都是 10 天前创建；「只查额度」last_used_at 刷新到现在但从未生图，「生图党」最后一次生图在 1 小时前
+    await db._db.execute("UPDATE api_keys SET created_at=?, last_used_at=? WHERE id=?",
+                         (ten_days_ago, time.time(), quota_only["id"]))
+    await db._db.execute("UPDATE api_keys SET created_at=?, last_image_at=? WHERE id=?",
+                         (ten_days_ago, time.time() - 3600, generator["id"]))
+    await db._db.commit()
+    assert await db.inactive_key_ids(time.time() - 3 * 86400) == [quota_only["id"]]
+    assert await GateState.delete_inactive_keys(fake) == 1
+    assert await db.get_key(quota_only["id"]) is None
+    assert await db.get_key(generator["id"]) is not None
+    await db.close()
+
+
+@pytest.mark.asyncio
 async def test_invite_tagged_keys_skip_inactive_cleanup(tmp_path):
     """10-11 站长：邀请 Key 只由站长手动删，闲置回收跳过带「邀请」标签的 Key。"""
     from types import SimpleNamespace
