@@ -60,7 +60,7 @@ async def test_real_modules_build_tick_and_check(state):
     from app import modules
     bugs = []
     k = modules.build(state, bug=lambda src, exc=None, **kw: bugs.append((src, kw.get("title"))))
-    assert list(k.modules) == ["observation", "capacity", "allocation", "scheduling", "autopilot", "risk", "registration", "registration_ready"]
+    assert list(k.modules) == ["observation", "capacity", "allocation", "autopilot", "risk", "registration", "registration_ready"]
     await k.tick_all()
     snap = {m["name"]: m for m in await k.snapshot()}
     assert snap["capacity"]["params"] and all("读取失败" not in str(p["value"]) for m in snap.values() for p in m["params"])
@@ -68,7 +68,7 @@ async def test_real_modules_build_tick_and_check(state):
     assert not snap["registration"]["enabled"]                 # 领 Key 默认关闭
     await k.set_enabled("registration", True)
     assert await state.db.get_setting("register_open") == "1"
-    await k.set_enabled("scheduling", False)
+    await k.set_enabled("risk", False)
     # 观测：计数和日志对得上；内存每小时计数 ↔ 日志
     checks = {c["name"]: c for m in (await k.snapshot()) for c in m["last"].get("checks", [])}
     assert checks["生成记录 ↔ 用量日志"]["ok"]

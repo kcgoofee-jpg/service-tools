@@ -193,7 +193,7 @@ def replay(inp: dict[str, np.ndarray], params: Optional[dict] = None, *, seed: i
     hcap_normal = int(p["account_hourly_cap"]) * acc
     hcap_quiet = int(p["quiet_hourly_cap"]) * acc
     q_start, q_end = int(p["quiet_start"]), int(p["quiet_end"])
-    cap3 = int(p["account_3h_cap"]) * acc
+    cap3 = int(p.get("account_3h_cap", 0) or 0) * acc   # 3 小时层已从网关移除（2026-10-13），旧参数缺省 0 = 不触发
     burst = int(p.get("daily_burst", 0) or 0) * acc        # 按时段放行（guard.paced_allowance，v2.17.0 起）
     jit = float(p["interval_jitter"])
     kq = int(p["key_image_queue"])

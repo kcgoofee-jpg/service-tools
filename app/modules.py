@@ -1,4 +1,4 @@
-"""模块登记：容量 / 分配 / 公平调度 / 自动驾驶 / 风险检查 / 领 Key / 观测。
+"""模块登记：容量 / 分配 / 自动驾驶 / 风险检查 / 领 Key / 观测。
 
 每个模块写明回答的问题、关键参数的当前值和交叉校验。框架见 kernel.py；新增模块写一个 Module(...) 并在 build() 里 register。
 """
@@ -76,11 +76,6 @@ def capacity(state) -> Module:
             Check("内存每小时计数 ↔ 用量日志", mem >= logged - 2,
                   f"内存 {mem} 张，日志 {logged} 张" + ("" if mem >= logged - 2 else "：内存计数偏少，上限可能被绕过（重启清零？）")),
             Check("实际每小时出图 ≤ 上限", logged <= cap * 1.05 + 2, f"最近 60 分钟 {logged} 张，上限 {cap}"),
-            # 上游 429 / 403 时的保险丝：安全档必须低于每日上限，否则 fall_back_daily 只降不升的判定
-            # 会直接跳过（历史默认 1000 / 1500 就是失效状态，站长也不会收到任何提示）。
-            Check("429 / 403 安全档可用", g.fallback_effective(),
-                  f"每日上限 {g.values['account_daily_cap']} · 安全档 {g.values['daily_cap_fallback']}"
-                  + ("" if g.fallback_effective() else "：安全档不低于每日上限，上游告警时不会自动退档")),
         ]
 
     return Module(
@@ -88,11 +83,10 @@ def capacity(state) -> Module:
         tick=tick, checks=checks,
         hard_note="关闭后不再自动调每小时上限；各项上限照常生效",
         params=[
-            Param("每天", lambda: f"{g.values['account_daily_cap']}（上游 429 / 403 时自动退到 {g.values.get('daily_cap_fallback')}）"),
+            Param("每天", lambda: g.values["account_daily_cap"]),
             Param("按时段放行", lambda: f"服务日起点先放 {g.values['daily_burst']} 张，之后每小时补 "
                   f"{round(g.values['account_daily_cap'] / 24)} 张" if g.values.get("daily_burst") else "关"),
             Param("每小时", lambda: g.values["account_hourly_cap"], "连续 24 小时没有 429 且顶到过上限时 +10"),
-            Param("每 3 小时", lambda: g.values["account_3h_cap"] or "不限"),
             Param("出图间隔（秒）", lambda: state.settings.image_min_interval, "另加随机 0～5 秒"),
             Param("V5 每 1% ≈ 张", lambda: quota_algo.V5_IMAGES_PER_PERCENT),
         ])
@@ -315,39 +309,6 @@ def observation(state) -> Module:
 
 
 # ---------------- ③ 公平调度（DRR）----------------
-def scheduling(state) -> Module:
-    from . import scheduling as sch
-
-    async def get_enabled(k: Kernel):
-        return (await state.db.get_setting(sch.MODE_SETTING, "observe")) != "off"
-
-    async def set_enabled(k: Kernel, on: bool):
-        await state.db.set_setting(sch.MODE_SETTING, "observe" if on else "off")
-
-    async def tick(k: Kernel):
-        r = getattr(state, "sched").report()
-        return f"近 10 分钟 {r['active_keys']} 把 Key · 不公平决策 {r['unfair_rate']:.0%} · 最大差距 {r['skew']}"
-
-    async def checks(k: Kernel):
-        r = getattr(state, "sched").report()
-        if r["shadow_decisions"] < 20:
-            return [Check("公平性（影子）", True, f"样本不足（{r['shadow_decisions']} 次多人排队）")]
-        if r["active_keys"] < 2:          # 只有一个人在用时他占 100% 是必然的，谈不上垄断（以前每晚都误报）
-            return [Check("没有 Key 垄断队列", True, f"近 10 分钟只有 {r['active_keys']} 把 Key 在用")]
-        # 影子观察：没有人被明显垄断、也没人被饿着时算健康；FIFO 下不公平率高 = DRR 值得开
-        return [Check("没有 Key 垄断队列", r["monopoly"] <= 0.6,
-                      f"近 10 分钟最高一把 Key 占 {r['monopoly']:.0%}，出图差距 {r['skew']}，"
-                      f"FIFO 不公平决策 {r['unfair_rate']:.0%}（DRR 可消除）")]
-
-    return Module(
-        name="scheduling", title="排队顺序", question="多人排队时，下一张轮到谁",
-        get_enabled=get_enabled, set_enabled=set_enabled, tick=tick, checks=checks,
-        hard_note="现在按先来后到出图；这里只统计「如果轮流出图会怎样」，不改顺序",
-        params=[Param("实际顺序", lambda: "先来后到"),
-                Param("对照：轮流出图", lambda: f"每把 Key 连出 {P('scheduling.quantum', sch.DEFAULT_QUANTUM)} 张后让队，"
-                      f"等满 {P('scheduling.starvation_seconds', 60)} 秒插最前")])
-
-
 # ---------------- 风险检查 ----------------
 def risk(state) -> Module:
     """出站请求的样子和滥用线索（risk_check.py），每 10 分钟体检一次；只展示，不处罚、不记 Bug。"""
@@ -363,7 +324,7 @@ def risk(state) -> Module:
 
 def build(state, bug) -> Kernel:
     k = Kernel(state, bug)
-    for make in (observation, capacity, allocation, scheduling, autopilot_module, risk,
+    for make in (observation, capacity, allocation, autopilot_module, risk,
                  registration, registration_ready):
         k.register(make(state))
     return k
