@@ -1879,7 +1879,7 @@ async def _ops_snapshot(request: Request) -> dict:
                   "image_retention_days": await audit_image_days(st.db),
                   "image_cap_mb": await audit_image_cap_mb(st.db), "image_bytes": await st.db.audit_image_bytes(),
                   "image_keep_hours": await audit_image_keep_hours(st.db),
-                  "announce_configured": bool(getattr(getattr(st, "announcer", None), "configured", False))},
+                  "announce_configured": bool(getattr(getattr(st, "announcer", None), "configured", False))},  # 兼容字段：公告渠道仍用于其他公告
         "upstream": st.upstream_health() if hasattr(st, "upstream_health") else {},
     }
 
