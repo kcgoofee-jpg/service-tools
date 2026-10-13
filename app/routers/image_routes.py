@@ -325,7 +325,7 @@ async def quota_image_check(key, est: dict, *, legacy_free_images: int = 0,
             day_used = await state.db.day_anlas_total(state.day())
             in_flight = sum(r.anlas for r in global_day)
             if day_used + in_flight + est["anlas"] > vibe_daily_cap:
-                raise main.err(402, f"全站今日 Anlas 额度已抢完（{int(vibe_daily_cap)} Anlas/天），明日 0 点恢复",
+                raise main.err(402, f"全站今日 Anlas 额度已抢完（{int(vibe_daily_cap)} Anlas/天），明天服务日重置后恢复",
                                reasons.SITE_QUOTA)
         # 2026-10-10 站长：放开 Anlas。只用于 NovelAI 一定按 Anlas 收费的操作（超规格尺寸 / 步数、一次多张、
         # Vibe、放大、导演工具）：这些不占 V5 免费额度（官方 FAQ #38），也不影响 V4.5（Opus 不限）。每人仍受每日 Anlas 上限约束。
