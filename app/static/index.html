@@ -1144,7 +1144,7 @@ td.note{min-width:220px}
       <label class="check"><input id="f_allow_img2img" type="checkbox"><span title="还需服务器开启 ALLOW_IMG2IMG；会扣 Anlas 的请求还要允许消耗 Anlas">允许 img2img / 局部重绘</span></label>
       <div class="sec-title">身份组（账号类型）</div>
       <div class="opt-group" role="radiogroup" aria-label="身份组">
-        <label class="check"><input type="radio" name="f_role" value="regular" checked><span>普通（参与成员统计与算法，受 3 天未活动闲置回收约束）</span></label>
+        <label class="check"><input type="radio" name="f_role" value="regular" checked><span>普通（参与成员统计与算法，受 3 天未生图闲置回收约束）</span></label>
         <label class="check"><input type="radio" name="f_role" value="invite"><span>邀请（站长邀请特批，豁免 3 天闲置回收）</span></label>
         <label class="check"><input type="radio" name="f_role" value="test"><span>测试（测试 Key，额度固定手动，不计入成员统计，豁免闲置回收）</span></label>
         <label class="check"><input type="radio" name="f_role" value="admin"><span>站长（最高权限 Key，不限额度，豁免闲置回收）</span></label>
@@ -2469,7 +2469,7 @@ function memberPanel(m, now){
   const roleBox = `<div class="role-selector-box">
       <span class="role-label">身份组</span>
       <div class="seg-role" data-id="${m.id}">
-        <button type="button" class="s-role r-regular ${curRole==='regular'?'on':''}" data-role="regular" title="普通成员：受 3 天未活动闲置回收约束">普通</button>
+        <button type="button" class="s-role r-regular ${curRole==='regular'?'on':''}" data-role="regular" title="普通成员：受 3 天未生图闲置回收约束">普通</button>
         <button type="button" class="s-role r-invite ${curRole==='invite'?'on':''}" data-role="invite" title="邀请特批：豁免 3 天未活动回收">邀请</button>
         <button type="button" class="s-role r-test ${curRole==='test'?'on':''}" data-role="test" title="测试账号：固定额度，豁免回收">测试</button>
         <button type="button" class="s-role r-admin ${curRole==='admin'?'on':''}" data-role="admin" title="站长账号：不限额度，豁免回收">站长</button>
