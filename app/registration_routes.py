@@ -456,6 +456,46 @@ async def logout(request: Request):
     return resp
 
 
+class DonateRequest(BaseModel):
+    token: str
+    message: str          # 留言 / 使用要求（必填：比如「只用 4.5」「周末别用」）
+    contact: str = ""
+
+
+_DONATE_HITS: dict[str, list[float]] = {}   # 每 IP 每小时最多 5 次（内存即可，重启清零）
+
+
+@member_router.post("/public/donate")
+async def public_donate(request: Request, body: DonateRequest):
+    """首页「捐赠 Key」：访客把 NovelAI Token 交给站长并附使用要求。只入库，人工验证后才接入，绝不写日志。"""
+    origin = request.headers.get("origin", "")
+    if origin and origin.split("://", 1)[-1] != request.headers.get("host", ""):
+        raise HTTPException(403, "只接受本站页面的提交")
+    ip = request.client.host if request.client else "unknown"
+    now = _time.time()
+    if len(_DONATE_HITS) > 5000:              # 定期清掉过期来源，避免换 IP 喷射时内存只增不减
+        for k in [k for k, v in _DONATE_HITS.items() if not v or now - v[-1] >= 3600]:
+            _DONATE_HITS.pop(k, None)
+    hits = [t for t in _DONATE_HITS.get(ip, []) if now - t < 3600]
+    if len(hits) >= 5:
+        raise HTTPException(429, "提交太频繁，请一小时后再试")
+    token, message, contact = body.token.strip(), body.message.strip(), body.contact.strip()
+    if not (20 <= len(token) <= 4000):
+        raise HTTPException(422, "Token 看起来不完整：请从 NovelAI 官网把整段 Token 复制过来")
+    if not message or len(message) > 500:
+        raise HTTPException(422, "请写一句留言 / 使用要求（500 字以内），站长好接进合适的池子")
+    if len(contact) > 100:
+        raise HTTPException(422, "联系方式请控制在 100 字以内")
+    hits.append(now)
+    _DONATE_HITS[ip] = hits
+    db = getattr(getattr(request.app.state, "gate", None), "db", None)
+    if db is None:
+        raise HTTPException(503, "服务还没准备好")
+    await db.save_donation(token, message, contact)
+    await log_action(db, f"网页:{ip}", "收到捐赠 Key", f"{len(token)} 字符", "要求：" + message[:120])
+    return JSONResponse({"ok": True}, headers={"Cache-Control": "no-store"})
+
+
 @member_router.get("/public/me")
 async def public_me(request: Request):
     """登录后的个人状态：不用粘贴 Key 就能看额度、排队、到期；并提供自己的 Key 供一键复制。"""
