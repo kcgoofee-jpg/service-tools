@@ -257,7 +257,8 @@ async def _yesterday(db, day: str, members: list[int], reset_hour: int = 0) -> d
         return len(seen)
     return {"used": used, "ceiling_hits": hits,
             # 只数「每小时上限」：按时段放行 / 每日上限是总量本来就这么多，不说明每人给多了（否则上限 A 每天 −25，几天后 A=保底）
-            "hourly_blocks": await hours("%本小时出图量已达上限%"),
+            # 模式同时匹配旧文案「本小时…」与新文案「最近 60 分钟…」（2026-10-14 文案去歧义）
+            "hourly_blocks": await hours("%出图量已达上限%"),
             "base_blocks": await count("%保底%其他人在排队%"),
             # 每人额度被「平滑注水桶」卡住的次数：只记录、不参与每日微调（改动额度分配需要站长确认）；
             # 它的意义是：A 比注水桶全天能放出的量还大时（A > 30 + 4×24 = 126），成员其实到不了 A，

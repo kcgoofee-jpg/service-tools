@@ -352,7 +352,8 @@ class Guard:
             if self.in_quiet(now):
                 return Reason(f"现在是安静时段（{self.values['quiet_start']}:00–{self.values['quiet_end']}:00），"
                               f"出图放慢到每小时 {cap} 张，约 {wait} 分钟后有空位", QUIET_CAP)
-            return Reason(f"本小时出图量已达上限（每小时 {cap} 张，用来保护上游账号），约 {wait} 分钟后有空位", HOURLY_CAP)
+            return Reason(f"最近 60 分钟的出图量已达上限（滚动窗口，全站每小时 {cap} 张，不是整点重置），"
+                          f"约 {wait} 分钟后随最早的图滑出窗口逐张恢复", HOURLY_CAP)
         # 突发保护（2026-10-13 第一次被上游 429 之后加）：小时的额度可以被挤在十分钟里一口气发完，
         # 上游看到的就是 6 倍速率 —— 那正是 429 的触发方式。
         # 只在两种情况下抹平（独立架构师 review 后改：小时额度还很宽裕时不能因为突发窗口拒人）：
