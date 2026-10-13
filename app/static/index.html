@@ -1295,7 +1295,7 @@ td.note{min-width:220px}
 const $ = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
 let editingId = null, keysCache = [], logPage = 1, logPer = 20, logExportCooldown = 0, feedbackExportCooldown = 0, auditPage = 1, auditPer = 24, auditView = 'grid';
-let membersCache = null, statusCache = null, memberSort = 'today', memberDir = 'desc', memberQuery = '', memberFilter = 'all', memberMeta = {};
+let membersCache = null, statusCache = null, memberSort = 'today', memberDir = 'desc', memberQuery = '', memberFilter = 'active', memberMeta = {};
 let allowanceTimer = null, allowanceLoading = false;
 let reconBusy = false, reconReady = false, reconRemoteRunning = false, reconRetryAt = 0, reconTimer = null, reconVersion = 0;
 let reconCsrf = '';
@@ -2487,6 +2487,7 @@ function memberFilters(now){
   return {
     main: [
       ['attention', '需要处理', m => needsAttention(m, now)],
+      ['active', '启用中', m => m.enabled],
       ['today', '今日活跃', m => m.today.requests > 0],
       ['never', '还没出过图', m => !m.first_image_at && !m.is_admin],
       ['disabled', '已停用', m => !m.enabled],
@@ -2608,7 +2609,7 @@ function memberPanel(m, now){
     <div class="mx-sec mx-cols">${today}${settings}${info}</div>
     <div class="share-ev" id="sev-${k.id}"></div>
     <div class="mx-foot">${k ? `<button class="btn mini" type="button" data-act="reset-quota" data-id="${m.id}">重置今日额度${m.reset_today && m.reset_today.count ? ` (${m.reset_today.count})` : ''}</button>` : ''}
-      <button class="btn mini" type="button" data-act="view-audit" data-id="${m.id}">生成记录</button>
+      <button class="btn mini" type="button" data-act="view-audit" data-id="${(m.all_key_ids||[m.id]).join(',')}">生成记录</button>
       <button class="btn mini" type="button" data-act="give-coupon" data-id="${k.id}" title="成员在首页自己点一下，重置当天的 V5 额度；7 天内有效">🎟️ 发重置券</button><span class="sp"></span>${more}</div></div></td></tr>`;
 }
 let memberFilterAuto = true;          // 第一次打开：有要处理的人就直接显示「需要处理」
@@ -2630,7 +2631,7 @@ function renderMembers(){
   const all = [...fs.main, ...fs.more, ...tagFilters];
   const staffish = id => id === 'staff' || id === 'alt' || id.startsWith('tag:') || id.startsWith('role:');      // 这几个筛选也算站长 / 测试账号
   const count = ([id, , fn]) => (staffish(id) ? everyone : members).filter(fn).length;
-  if(memberFilterAuto && everyone.length){ memberFilterAuto = false; if(!fs.main[0][2] || !count(fs.main[0])) memberFilter = 'all'; else memberFilter = 'attention'; }
+  if(memberFilterAuto && everyone.length){ memberFilterAuto = false; memberFilter = count(fs.main[0]) ? 'attention' : 'active'; }
   if(!all.some(f => f[0] === memberFilter)) memberFilter = 'all';
   const inMore = !fs.main.some(f => f[0] === memberFilter);
   $('#memberFilter').innerHTML = fs.main.map(f => {
@@ -2679,7 +2680,7 @@ function renderMembers(){
         <div class="avatar sm ${dc?'dc':''}">${esc([...String(title||'?')][0]||'?')}${av?`<img class="av" src="${esc(av)}" alt="" width="28" height="28" referrerpolicy="no-referrer" loading="lazy">`:''}</div>
         <div style="min-width:0"><div class="mn">${esc(title)} <span class="${roleCls}">${roleText}</span></div><div class="msub">${esc(handle || (m.discord_id ? '' : '后台建的 Key'))}${tag && tag.tag !== '邀请' ? ` <span class="mf tag" title="${esc(tag.note||'')}">${esc(tag.tag)}</span>` : ''}</div></div></div></td>
       <td class="mtoday" data-label="今日">${m.is_admin ? `<span class="muted sm">不限 · 今天 ${m.today.images} 张</span>` : bar('V4.5', v45, cap, '') + (m.daily_v5 > 0 || v5 ? bar('V5', v5, m.daily_v5, 'v5') : '')}</td>
-      <td class="mstat" data-label="状态">${status}</td>
+      <td class="mstat" data-label="状态">${status}${m.key_count > 1 ? ` <span class="mf tag" title="同一成员重置 / 换 Key 的历史已按人合并，记录跨 Key 汇总">${m.key_count} 把 Key</span>` : ''}</td>
       <td class="mtime" data-label="最近使用" title="${esc(m.last_used_at ? '最近使用 ' + fullTime(m.last_used_at) : '从未使用')}">${esc(rel(m.last_used_at))}</td>
       <td class="mact"><button class="btn mini ghost icon mx-arrow" type="button" data-act="mx-toggle" data-id="${m.id}" aria-expanded="${open}" aria-label="展开：${esc(title)}">${ic('chev')}</button></td>
     </tr>${open ? memberPanel(m, now) : ''}`;
@@ -2734,7 +2735,7 @@ function renderAuditSettings(){
 }
 function fillMemberFilter(){
   const sel = $('#auditFilter'), cur = sel.value;
-  sel.innerHTML = '<option value="">全部成员</option>' + (membersCache||[]).map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join('');
+  sel.innerHTML = '<option value="">全部成员</option>' + (membersCache||[]).map(m=>`<option value="${(m.all_key_ids||[m.id]).join(',')}">${esc(m.name)}${m.key_count>1?`（${m.key_count} 把 Key）`:''}</option>`).join('');
   sel.value = cur;
 }
 async function viewAudit(id){
