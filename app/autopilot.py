@@ -146,16 +146,6 @@ async def run(state, registrar=None, now: Optional[float] = None) -> dict[str, A
             await log_action(db, "系统", "自动驾驶：名额", "", f"{cap_now} → {slots}：{why}")
             out["rules"]["slots"]["applied"] = True
 
-    # 疑似同一人（小号）：只观察，结果给后台成员页做「疑似同一人」标签（alt_guard.py）
-    try:
-        from . import alt_guard
-        links = await alt_guard.scan(db, now)
-        out["rules"]["alt_link"] = {"mode": "observe", "value": links,
-                                    "why": "；".join(f"{p['names'][0]} ↔ {p['names'][1]}（{p['score']} 分：{alt_guard.describe(p['signals'])}）"
-                                                    for p in links[:5]) or "没有发现行为相似的 Key"}
-    except Exception as exc:            # 观察规则出错不能影响其他规则
-        out["rules"]["alt_link"] = {"mode": "observe", "value": [], "why": f"计算失败：{type(exc).__name__}"}
-
     # 4 熔断：只算真正打到上游的失败——5xx，或 200 开头后流中途断开（up_status 2xx 但 status=error）。
     # 本地拦截（冷却 / 上限 / 排队超时，up_status=0）、上游 429（另有冷却和 AIMD 减半）、成员参数错误（4xx）都不算。
     # 只看上次熔断结束之后的数据，避免暂停期间没有新样本、下一轮拿同一批旧数据再熔断一次。

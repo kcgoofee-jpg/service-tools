@@ -477,15 +477,6 @@ async def test_usage_by_kind_and_feature_log_filter():
 
 # ---------------------------------------------------------------- 防 Key 分享：来源网段
 
-def test_network_of_masks_and_groups():
-    from app.key_sources import network_of
-    assert network_of("120.235.155.213") == ("120.235.155.0/24", "120.235.*.*")
-    assert network_of("120.235.155.7")[0] == network_of("120.235.155.213")[0]          # 同 /24 视为同一来源
-    assert network_of("::ffff:120.235.155.9")[1] == "120.235.*.*"
-    net, label = network_of("2408:8456:1234:5678::1")
-    assert net == "2408:8456:1234::/48" and label == "2408:8456:…"
-    assert network_of("testclient") is None and network_of("") is None
-
 
 class _Alerts:
     def __init__(self):
@@ -495,59 +486,7 @@ class _Alerts:
         self.sent.append((kind, message))
 
 
-@pytest.mark.asyncio
-async def test_source_tracker_counts_networks_alerts_and_never_stores_full_ip():
-    from app.key_sources import SourceTracker, WRITE_INTERVAL
-    with tempfile.TemporaryDirectory() as tmp:
-        db = Database(str(Path(tmp) / "g.sqlite"))
-        await db.connect()
-        key = await db.create_key({"name": "m", "token": "nai-x", "daily_images": 10, "monthly_anlas": 0,
-                                   "daily_text_tokens": 0, "rpm": 5})
-        alerts = _Alerts()
-        tracker = SourceTracker(db, alerts, threshold=3)
-        tracker.notify_owner = True          # 线上默认关闭（由 share_guard 负责），这里测网段计数本身
-        now = 1_800_000_000.0
-        await tracker.observe(key, "120.235.155.213", now)
-        await tracker.observe(key, "120.235.155.99", now + 1)          # 同网段：不增加
-        await tracker.observe(key, "36.112.10.5", now + 2)
-        assert len(await db.key_source_labels(key["id"], now - 10)) == 2 and not alerts.sent
-        await tracker.observe(key, "2408:8456:1234:5678::1", now + 3)
-        assert len(alerts.sent) == 1 and "3 个不同网段" in alerts.sent[0][1]
-        rows = await db._db.execute_fetchall("SELECT net_hash, label FROM key_sources")
-        dump = repr(list(map(tuple, rows)))
-        assert "155.213" not in dump and "36.112.10" not in dump and "120.235.155" not in dump
-        # 节流：同一来源 5 分钟内不重复写库
-        before = (await db._db.execute_fetchall("SELECT SUM(hits) FROM key_sources"))[0][0]
-        await tracker.observe(key, "36.112.10.5", now + 10)
-        await tracker.observe(key, "36.112.10.5", now + 10 + WRITE_INTERVAL)
-        assert (await db._db.execute_fetchall("SELECT SUM(hits) FROM key_sources"))[0][0] == before + 1
-        # 管理员 Key 不记录；过期清理；删除 Key 时一并删除
-        await tracker.observe({"id": 999, "name": "admin", "is_admin": 1}, "8.8.8.8", now)
-        assert await db.key_source_labels(999, 0) == []
-        assert await db.purge_key_sources(now + 7 * 86400 + 100) >= 3
-        await tracker.observe(key, "1.2.3.4", now + 8 * 86400)
-        await db.delete_key(key["id"])
-        assert (await db._db.execute_fetchall("SELECT COUNT(*) FROM key_sources"))[0][0] == 0
-        await db.close()
 
-
-@pytest.mark.asyncio
-async def test_source_tracker_threshold_zero_only_records():
-    from app.key_sources import SourceTracker
-    with tempfile.TemporaryDirectory() as tmp:
-        db = Database(str(Path(tmp) / "g.sqlite"))
-        await db.connect()
-        key = await db.create_key({"name": "m", "token": "nai-x", "daily_images": 10, "monthly_anlas": 0,
-                                   "daily_text_tokens": 0, "rpm": 5})
-        alerts = _Alerts()
-        tracker = SourceTracker(db, alerts, threshold=0)
-        for i, ip in enumerate(("1.1.1.1", "2.2.2.2", "3.3.3.3", "4.4.4.4")):
-            await tracker.observe(key, ip, 1_800_000_000.0 + i)
-        assert not alerts.sent and len(await db.key_source_labels(key["id"], 0)) == 4
-        await db.close()
-
-
-# ---------------------------------------------------------------- 操作日志
 
 def test_action_summary_hides_secrets():
     from app.action_log import summarize
@@ -705,24 +644,6 @@ async def test_402_403_alert_but_do_not_disable_token(status):
     assert c.pool[0].usable and not c.pool[0].disabled
 
 
-@pytest.mark.asyncio
-async def test_rotating_24s_inside_one_16_count_as_one_source():
-    from app.key_sources import SourceTracker
-    with tempfile.TemporaryDirectory() as tmp:
-        db = Database(str(Path(tmp) / "g.sqlite"))
-        await db.connect()
-        key = await db.create_key({"name": "warp", "token": "nai-w", "daily_images": 10, "monthly_anlas": 0,
-                                   "daily_text_tokens": 0, "rpm": 5})
-        alerts = _Alerts()
-        tracker = SourceTracker(db, alerts, threshold=3)
-        for i, ip in enumerate(("104.28.1.5", "104.28.77.9", "104.28.200.3", "104.28.9.1")):
-            await tracker.observe(key, ip, 1_800_000_000.0 + i)
-        assert await db.key_source_labels(key["id"], 0) == ["104.28.*.*"] and not alerts.sent
-        assert (await db.key_source_summary(0))[key["id"]] == ["104.28.*.*"]
-        await db.close()
-
-
-# ---------------------------------------------------------------- v1.2：被拒请求统一记日志
 
 def _rejections(state):
     return [(a[2], a[4], kw.get("detail", "")) for a, kw in state.db.logs if a[4] == "rejected"]
@@ -1485,42 +1406,6 @@ def test_admin_change_description_for_member_dm():
     assert any("仅 V4.5" in m for m in msgs) and any("长期有效" in m for m in msgs)
 
 
-def test_resale_signals_alternation_clients_and_all_day():
-    from app.key_sources import SourceTracker
-    t = SourceTracker(None)
-    key = {"id": 5, "is_admin": 0}
-    now = 1_000_000.0
-    out = []
-    for i, label in enumerate(["1.2.*.*", "3.4.*.*", "1.2.*.*", "3.4.*.*"]):
-        out = t.signals(key, label, "", now + i * 60)
-    assert any(k == "alternate" for k, _ in out)
-    t2 = SourceTracker(None)
-    assert not any(k == "alternate" for k, _ in [s for i, lb in enumerate(["1.2.*.*", "3.4.*.*", "5.6.*.*"])
-                                                    for s in t2.signals(key, lb, "", now + i * 60)])
-    for i, ua in enumerate(["A/1", "B/1", "C/1"]):
-        out = t.signals(key, None, ua, now + i)
-    assert any(k == "clients" for k, _ in out)
-    t3 = SourceTracker(None)
-    for h in range(20):
-        out = t3.signals(key, None, "", now + h * 3600)
-    assert any(k == "allday" for k, _ in out)
-
-
-@pytest.mark.asyncio
-async def test_source_signals_reach_autopilot_without_alerter():
-    """没配告警渠道（alerter=None）时，网段信号也必须记进 events，否则自动驾驶 key_guard 收不到。"""
-    from app.key_sources import SourceTracker
-    with tempfile.TemporaryDirectory() as tmp:
-        db = Database(str(Path(tmp) / "g.sqlite"))
-        await db.connect()
-        key = await db.create_key({"name": "m", "token": "nai-x", "daily_images": 10, "monthly_anlas": 0,
-                                   "daily_text_tokens": 0, "rpm": 5})
-        tracker = SourceTracker(db, None)
-        now = 1_800_000_000.0
-        for i, ip in enumerate(("1.1.1.1", "2.2.2.2", "1.1.1.9", "2.2.2.9", "1.1.1.7")):
-            await tracker.observe(key, ip, now + i * 30)
-        assert any(k == "alternate" for _, kid, k in tracker.events if kid == key["id"])
-        await db.close()
 
 
 @pytest.mark.asyncio

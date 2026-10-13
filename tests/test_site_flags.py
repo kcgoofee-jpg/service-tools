@@ -36,7 +36,6 @@ def test_specs_are_unique_and_documented():
 def test_fail_closed_defaults():
     assert sf.WEB_LOGIN_PAUSED.default is True        # 不发起 OAuth
     assert sf.DM_ENABLED.default is False             # 不发私信
-    assert sf.SHARE_MODE.default == "observe"         # 不处罚
     assert sf.REGISTER_OPEN.default is False
 
 
@@ -61,13 +60,10 @@ async def test_parse_clamps_and_falls_back():
                  issue_hourly_cap="9999", web_login_paused="0")
     assert await sf.get(db, sf.GLOBAL_DAILY_V5, env) == 190                 # 坏值回到默认
     assert await sf.get(db, sf.IMAGE_RETENTION) == 0                        # 0 是有效值（不保存原图）
-    assert await sf.get(db, sf.SHARE_MODE) == "observe"                     # 不认识的模式 → 不处罚
     assert await sf.get(db, sf.ISSUE_HOURLY_CAP) == 500                     # 夹到上限
     assert await sf.get(db, sf.WEB_LOGIN_PAUSED) is False
     await sf.put(db, sf.WEB_LOGIN_PAUSED, True)
     assert db.kv["web_login_paused"] == "1"
-    with pytest.raises(ValueError):
-        await sf.put(db, sf.SHARE_MODE, "nuke")
 
 
 def test_facts_doc_lists_every_registered_key():
