@@ -22,7 +22,7 @@ from ..upstream_errors import text_stream_events, upstream_error_message
 # 上游真正存在的文本模型：2026-10-13 用网关自己的请求形态（明文 input + use_string）
 # 逐个实测 /ai/generate-stream 得到 200 的只有这两个。以前这份名单里还写着 clio-v1 /
 # nai-glm-4-6 / nai-xialong，上游回的是 403 {"message":"model '…' doesn't exist"} ——
-# 被当成「账号被拒」报给成员，还会污染共享账号的健康度（详见 nai.py 的 MODEL_403_MARKERS）。
+# 被当成「账号被拒」报给成员，还会污染共享账号的健康度（判据见 app/upstream_policy.py 的 MODEL_403_MARKERS）。
 TEXT_MODELS = ["llama-3-erato-v1", "kayra-v1"]
 
 # 曾经出现在名单里、但上游不认的模型名：本地直接给出诚实原因，不要打到上游换一个 403。

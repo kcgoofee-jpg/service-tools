@@ -18,6 +18,10 @@ from .policy import mask_token
 from .allowance import AllowanceCache, AllowanceUnavailable
 from .concurrency import AdjustableLimiter
 from .image_tools import validate_result
+# 上游响应判据收口在 upstream_policy（2026-10-14）；这里再导出旧的函数名，
+# state.py / 老测试 / 运维脚本继续 from .nai import 也能用。
+from .upstream_policy import (RETRY_AFTER_MIN, RETRY_AFTER_MAX, MODEL_403_MARKERS, clamp_retry_after,
+                              parse_retry_after, is_model_level_403 as _is_model_level_403, classify_upstream)
 
 
 # 真实最新的主流桌面浏览器指纹池，完全模拟合法网页端请求
@@ -122,58 +126,6 @@ class TokenState:
         return self.admin_enabled and not self.disabled and time.time() >= self.blocked_until
 
 
-RETRY_AFTER_MIN = 5.0
-RETRY_AFTER_MAX = 3600.0
-
-
-def clamp_retry_after(value: Any) -> float:
-    """任何来源的冷却秒数都钳制到 5..3600 的有限值（inf/NaN/超大值不能造成永久停摆）。"""
-    try:
-        seconds = float(value)
-    except (TypeError, ValueError):
-        return 20.0
-    if seconds != seconds:          # NaN
-        return 20.0
-    return min(RETRY_AFTER_MAX, max(RETRY_AFTER_MIN, seconds))
-
-
-def parse_retry_after(header: Optional[str]) -> float:
-    """十进制秒数或 RFC 7231 HTTP 日期（Cloudflare / WAF 常用后者）；其它格式按默认 20 秒处理。
-
-    只认数字会让「Retry-After: Wed, 21 Oct 2026 07:28:00 GMT」退化成 20 秒，
-    在真实限流窗口内提前重试 —— 这正是最容易被上游升级封控的行为。
-    """
-    value = (header or "").strip()
-    if not value:
-        return 20.0
-    if value.isascii() and value.isdigit():
-        return clamp_retry_after(int(value))
-    # 允许多个日期值（RFC 允许逗号分隔），取第一个能解析的
-    for part in value.split(","):
-        part = part.strip()
-        if not part:
-            continue
-        try:
-            from email.utils import parsedate_to_datetime
-            when = parsedate_to_datetime(part)
-        except (TypeError, ValueError, IndexError):
-            continue
-        if when is None:
-            continue
-        if when.tzinfo is None:
-            from datetime import timezone
-            when = when.replace(tzinfo=timezone.utc)
-        return clamp_retry_after(when.timestamp() - time.time())
-    return 20.0
-
-
-# NovelAI 用 403 表示两类完全不同的东西：账号/风控被拒（要看账号状态）与「模型不存在」。
-# 2026-10-13 实测：{"statusCode":403,"message":"model 'nai-glm-4-6' doesn't exist"}、
-# {"statusCode":403,"message":"model 'glm-4-6' is only available via OpenAI-compatible API"}。
-# 后者纯粹是成员填错模型，不能报「账号被隔离」，更不能污染账号健康度。
-MODEL_403_MARKERS = ("doesn't exist", "does not exist", "is only available via", "model must be a valid enum")
-
-
 async def _peek_body(response, limit: int = 300, timeout: float = 3.0) -> str:
     """读上游错误响应体的一小段，**只用来判断 403 属于哪一类**，绝不回显给成员。
 
@@ -191,11 +143,6 @@ async def _peek_body(response, limit: int = 300, timeout: float = 3.0) -> str:
             return bytes(chunks).decode("utf-8", "replace")
     except Exception:                     # noqa: BLE001  诊断信息拿不到就拿不到，绝不影响主流程
         return ""
-
-
-def _is_model_level_403(body_text: str) -> bool:
-    low = (body_text or "").lower()
-    return any(marker in low for marker in MODEL_403_MARKERS)
 
 
 async def _wait_cleanup(task: asyncio.Task) -> Any:
@@ -728,7 +675,7 @@ class NaiClient:
                 if resp.status_code == 403 and image_lane:
                     # 「模型不存在」也是 403：不算账号被拒（图侧我们本地已校验模型，这里只是保险）
                     peek = await _peek_body(resp)
-                    if _is_model_level_403(peek):
+                    if classify_upstream(resp.status_code, peek=peek).kind == "forbidden_model":
                         raise UpstreamError(400, "上游不认识这个模型：请换用本站白名单里的模型")
                     self.mark_forbidden(ts)
                     if image_lane:
@@ -861,7 +808,7 @@ class NaiClient:
                 raise UpstreamError(429, "上游限流(429)，全站图片生成已进入冷却")
             if resp.status_code == 403:
                 peek = await _peek_body(resp)
-                if _is_model_level_403(peek):
+                if classify_upstream(resp.status_code, peek=peek).kind == "forbidden_model":
                     raise UpstreamError(400, "上游不认识这个模型：请换用本站白名单里的模型")
                 self.mark_forbidden(ts)
                 raise UpstreamError(403, "上游拒绝了请求（HTTP 403），该账号已临时隔离保护")
@@ -930,7 +877,7 @@ class NaiClient:
                 self._event("upstream_401", "NovelAI 返回 401：上游 Token 已失效，生图和文本全部不可用，请尽快更换 Token。", 1800)
                 raise UpstreamError(502, "上游令牌已失效（401），请站长更换 NovelAI Token")
             if resp.status_code == 403:
-                if _is_model_level_403(body_peek):
+                if classify_upstream(resp.status_code, peek=body_peek).kind == "forbidden_model":
                     raise UpstreamError(400, "上游不认识这个文本模型；本站可用的文本模型：llama-3-erato-v1、kayra-v1")
                 ts.fails += 1
                 ts.text_forbidden += 1

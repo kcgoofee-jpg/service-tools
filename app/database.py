@@ -223,12 +223,8 @@ CREATE TABLE IF NOT EXISTS error_events (
     resolved_at REAL               -- 站长标记已处理；之后再出现视为「复发」
 );
 CREATE INDEX IF NOT EXISTS idx_error_events_resolved_last_seen ON error_events (resolved_at, last_seen DESC);
--- waitlist 表已随候补功能移除（2026-10-13）；connect() 里会对老库执行 DROP TABLE IF EXISTS 清理。
-CREATE TABLE IF NOT EXISTS key_idle_reminders (
-    key_id INTEGER PRIMARY KEY,
-    activity REAL NOT NULL,       -- 提醒时 Key 的最后活动时间；之后再有活动会重新计时并允许再次提醒
-    sent_at REAL NOT NULL
-);
+-- key_idle_reminders 已随「闲置提醒」移除（改为 3 天不生图直接拉黑，不发提醒）；share_confirm 是更早的防分享遗留。
+-- 老库在 connect() 里 DROP TABLE IF EXISTS 清理，见下方 waitlist / key_sources 一组。
 CREATE TABLE IF NOT EXISTS admin_actions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ts REAL NOT NULL,
@@ -427,7 +423,8 @@ class Database:
         # 2026-10-13：候补功能移除，老库的 waitlist 表一并清掉
         await self._db.execute("DROP TABLE IF EXISTS waitlist")
         # 2026-10-13：防分享指纹/证据整体移除（误判率高且站规允许挂梯子换节点），老表一并清掉
-        for t in ("key_sources", "share_evidence", "req_features"):
+        # 2026-10-14：key_idle_reminders（闲置提醒已废）、share_confirm（更早的防分享遗留）
+        for t in ("key_sources", "share_evidence", "req_features", "key_idle_reminders", "share_confirm"):
             await self._db.execute(f"DROP TABLE IF EXISTS {t}")
         # 闲置回收改按生图计时：给存量 Key 回填最后一次成功生图的时间（之后由 _record_success_once 增量维护）。
         # 只填 IS NULL 的行：新 Key 没生过图保持 NULL，按 created 起算闲置；启动时跑一遍成本是每 Key 一次索引扫描。
@@ -711,7 +708,6 @@ class Database:
     async def delete_key(self, key_id: int) -> None:
         # The trigger archives the V5 flag and removes offsets atomically.
         # Counters/logs also accept late settlement from already admitted work.
-        await self._db.execute("DELETE FROM key_idle_reminders WHERE key_id=?", (key_id,))
         await self._db.execute("DELETE FROM key_tags WHERE key_id=?", (key_id,))
         await self._db.execute("DELETE FROM discord_registrations WHERE key_id=?", (key_id,))
         await self._db.execute("DELETE FROM api_keys WHERE id=?", (key_id,))
