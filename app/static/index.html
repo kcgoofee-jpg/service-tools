@@ -362,6 +362,14 @@ details.fold[open]>summary{margin-bottom:14px}
 .mt-b{height:6px;border-radius:3px;background:var(--surface-3);overflow:hidden}
 .mt-b i{display:block;height:100%;background:var(--accent);border-radius:3px}
 .meter.v5 .mt-b i{background:var(--v5)}.meter.an .mt-b i{background:var(--warn)}
+.sv-chips{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px}
+.sv-chip{background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:2px}
+.sv-chip b{font-size:12px;color:var(--muted);font-weight:500}
+.sv-chip .num{font-size:18px;font-weight:700}
+.rate24-wrap{margin-top:9px}
+.rate24{display:flex;align-items:flex-end;gap:2px;height:34px;margin-bottom:3px}
+.rate24 i{flex:1;min-width:3px;background:var(--surface-3);border-radius:2px 2px 0 0}
+.rate24 i.on{background:var(--accent)}
 .mx-adj{margin-top:10px}.mx-adj>summary,.tag-new>summary{list-style:none;display:inline-flex}
 .mx-adj>summary::-webkit-details-marker,.tag-new>summary::-webkit-details-marker{display:none}
 .mx-adj-in{margin-top:10px;padding:12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);display:flex;flex-direction:column;gap:8px;align-items:flex-start}
@@ -728,7 +736,11 @@ td.note{min-width:220px}
 }
 
 /* 日志页内的标签：生成记录 / 用量日志 / 操作日志 / Bug 追踪 */
-.subtabs{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 14px;padding:4px;border:1px solid var(--border);background:var(--surface);border-radius:10px;width:max-content;max-width:100%}
+.subtabs{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 16px;padding:5px;border:1px solid var(--border);background:var(--surface);border-radius:12px;width:max-content;max-width:100%}
+.subtabs button{appearance:none;border:0;background:transparent;color:var(--muted);font:inherit;font-size:13px;line-height:1;padding:8px 14px;border-radius:8px;cursor:pointer;white-space:nowrap;transition:background .15s,color .15s}
+.subtabs button:hover{color:var(--text)}
+.subtabs button.on{background:var(--surface-3);color:var(--text);font-weight:600}
+.subtabs .sub-badge{margin-left:6px}
 /* 身份组徽章与切换器 */
 .role-badge{display:inline-flex;align-items:center;padding:1px 6px;border-radius:999px;font-size:11px;font-weight:600;line-height:16px;white-space:nowrap;margin-left:4px}
 .role-badge.r-admin{background:rgba(168,85,247,0.18);color:#c084fc;border:1px solid rgba(168,85,247,0.35)}
@@ -913,6 +925,16 @@ td.note{min-width:220px}
           <div class="card panel">
             <div class="panel-head"><h2>最近动作</h2></div>
             <div id="botEvents"><div class="skel" style="height:120px"></div></div>
+          </div>
+          <div class="card panel">
+            <div class="panel-head">
+              <h2>成员问卷<span class="badge sm" id="svCount" style="margin-left:8px">0</span></h2>
+              <div class="desc">成员私信里的 /survey 网页问卷（Discord 的 /反馈 在「日志 → 成员反馈」）；重复提交只保留最新一份</div>
+            </div>
+            <div id="svSummary"><div class="skel" style="height:80px"></div></div>
+            <div class="table-wrap"><table class="rt"><thead><tr>
+              <th class="t">提交时间</th><th>成员</th><th>客户端</th><th>限额理解</th><th>希望改进</th><th>其他想法</th><th>捐 V4.5</th>
+            </tr></thead><tbody id="svBody"></tbody></table></div>
           </div>
         </section>
 
@@ -1575,6 +1597,7 @@ function tab(name){
   if(name==='up'){ loadOverview(); loadReconciliation(); loadPerf(); loadShadow(); loadAllowance(); }
   if(name==='bugs') loadBugs();
   if(name==='feedback') loadFeedback();
+  if(name==='discord') loadSurvey();
   if(name==='discord') loadBot();
   if(name==='modules') loadModules();
 }
@@ -1781,6 +1804,37 @@ async function loadFeedback(){
         ${qs.map(q=>`<td data-label="${esc(q.label)}" style="white-space:pre-wrap;min-width:140px">${formatAnswer(q.id, it.answers[q.id])}</td>`).join('')}
       </tr>`;
     }).join('') : `<tr><td class="empty" colspan="${qs.length+2}">${total ? '未找到符合条件的反馈' : '还没有反馈'}</td></tr>`;
+  }catch(e){ toastErr(e); }
+}
+/* 成员问卷（/survey 网页版）：汇总卡片 + 明细表。数据来自 GET /admin/api/survey */
+let surveyCache = null;
+async function loadSurvey(){
+  try{
+    const d = await api('/admin/api/survey');
+    surveyCache = d;
+    const rows = d.rows || [];
+    $('#svCount').textContent = rows.length;
+    const pick = f => rows.map(r => r[f]).filter(Boolean);
+    const tally = f => { const o = {}; pick(f).forEach(v => String(v).split('、').forEach(p => { if(p.trim()) o[p.trim()] = (o[p.trim()]||0)+1; })); return Object.entries(o).sort((a,b)=>b[1]-a[1]); };
+    const und = tally('understand'), imp = tally('improve'), don = tally('donate');
+    const willing = (don.find(x => x[0].includes('愿意')) || [])[1] || 0;
+    const okU = und.filter(x => x[0] === '完全理解' || x[0] === '基本理解').reduce((a, x) => a + x[1], 0);
+    const chip = (label, val, sub) => `<div class="sv-chip"><b>${esc(label)}</b><span class="num">${esc(val)}</span><span class="muted sm">${esc(sub || '')}</span></div>`;
+    $('#svSummary').innerHTML = rows.length ? '<div class="sv-chips">' + [
+      chip('已填', rows.length + ' 人', '在册成员里的一份答卷'),
+      chip('理解限额', (rows.length ? Math.round(okU / rows.length * 100) : 0) + '%', '完全 / 基本理解'),
+      chip('愿意捐 V4.5', willing + ' 人', don.length ? '暂不考虑 ' + ((don.find(x => x[0] === '暂不考虑') || [])[1] || 0) + ' 人' : ''),
+      chip('Top 改进诉求', imp[0] ? imp[0][0] : '暂无', imp[0] ? imp[0][1] + ' 人提到' : ''),
+    ].join('') + '</div>' : '<p class="muted sm">还没有成员填过问卷。链接在奶妹的私信里：/survey</p>';
+    $('#svBody').innerHTML = rows.length ? rows.map(r => `<tr>
+      <td class="mono nw t" data-label="时间">${new Date(r.ts*1000).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}</td>
+      <td data-label="成员">${esc(r.name || r.discord_id || '—')}</td>
+      <td data-label="客户端">${esc(r.client || '—')}</td>
+      <td data-label="限额理解">${esc(r.understand || '—')}</td>
+      <td data-label="希望改进" style="max-width:220px">${esc(r.improve || '—')}${r.improve_other ? `<div class="muted sm">补充：${esc(r.improve_other)}</div>` : ''}</td>
+      <td data-label="其他想法" style="max-width:180px">${r.improve_other ? esc(r.improve_other) : '—'}</td>
+      <td data-label="捐 V4.5"><span class="tag ${String(r.donate||'').includes('愿意') ? 'ok' : ''}">${esc(r.donate || '—')}</span></td>
+    </tr>`).join('') : '<tr><td class="empty" colspan="7">还没有问卷</td></tr>';
   }catch(e){ toastErr(e); }
 }
 let bugsCache = null;
@@ -2448,6 +2502,16 @@ function meter(label, used, cap, cls=''){
   const pct = cap > 0 ? Math.min(100, used / cap * 100) : 0;
   return `<div class="meter ${cls}"><div class="mt-l"><span>${label}</span><span class="num">${fmt(used)}${cap > 0 ? ' / ' + fmt(cap) : ''}</span></div>${cap > 0 ? `<div class="mt-b"><i style="width:${pct}%"></i></div>` : ''}</div>`;
 }
+/* 生图速率：最近 24 小时逐小时成功生图数（右端 = 当前小时）。数据来自 /admin/api/members 的 hours24 */
+function rate24(m){
+  const hrs = m.hours24 || [];
+  const total = hrs.reduce((a, b) => a + b, 0);
+  if(!total) return `<p class="muted sm" style="margin:8px 0 0">生图速率：最近 24 小时没有出图</p>`;
+  const peak = Math.max(...hrs, 1);
+  return `<div class="rate24-wrap"><div class="rate24" title="最近 24 小时逐小时生图数；右端是当前小时">${hrs.map(n =>
+    `<i class="${n ? 'on' : ''}" style="height:${n ? Math.max(8, Math.round(n / peak * 100)) : 4}%"${n ? ` title="${n} 张"` : ''}></i>`).join('')}</div>
+    <span class="muted sm">生图速率 <b>${total}</b> 张/24h · 峰值每小时 ${peak} 张</span></div>`;
+}
 function memberPanel(m, now){
   const k = m.k, dc = m.discord || null, v = memberVerdict(m, now), issues = memberIssues(m, now);
   const prof = dc ? safeUrl(dc.profile_url, DC_SITE) : '';
@@ -2461,7 +2525,8 @@ function memberPanel(m, now){
       ${m.is_admin ? `<p class="muted sm">站长 Key 不限额度，仍受全站保护</p>` : meter('V4.5', Math.max(0, m.today.images - (m.today.v5||0)), k.daily_images) + (k.image_model_scope === 'all' ? meter('V5', u.v5||0, k.daily_v5, 'v5') : '')}
       ${k.allow_anlas ? meter('Anlas', Math.round(u.anlas||0), Math.round(k.daily_anlas||0), 'an') : ''}
       ${u.text_tokens ? meter('文本 tokens', u.text_tokens, k.daily_text_tokens) : ''}</div>
-      <p class="muted sm" style="margin:8px 0 0">近 7 天 ${m.week.images} 张 · 累计 ${m.total_images} 张</p></div>`;
+      <p class="muted sm" style="margin:8px 0 0">近 7 天 ${m.week.images} 张 · 累计 ${m.total_images} 张</p>
+      ${rate24(m)}</div>`;
   const mode = m.is_admin ? '' : (m.quota_auto ? '算法' : '手动');
   const anl = !k.allow_anlas ? (m.quota_auto ? '今天没分配' : '关闭') : `${inf(Math.round(k.daily_anlas||0))}/天`;
   const resetInfo = m.reset_today && m.reset_today.count ? `<dt>今日重置</dt><dd class="warn-text" title="最近重置时间：${fullTime(m.reset_today.last_ts)}">已重置 <b>${m.reset_today.count}</b> 次（最近 ${rel(m.reset_today.last_ts)}）</dd>` : '';
