@@ -36,7 +36,7 @@ import numpy as np
 # 拒绝原因：按顺序匹配 detail（线上文案见 guard.token_block_reason / guard.admit_image / main.quota_image_check）
 REASON_PATTERNS: list[tuple[str, tuple[str, ...]]] = [
     ("cap3h", ("最近 3 小时出图量已达上限",)),
-    ("hourly", ("本小时出图量已达上限", "安静时段")),
+    ("hourly", ("本小时出图量已达上限", "最近 60 分钟的出图量已达上限", "安静时段")),
     ("daily_account", ("出图总量已达上限",)),
     ("paced", ("按时段放行",)),
     ("key_queue", ("上一张图还没出完",)),

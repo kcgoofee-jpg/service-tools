@@ -1038,8 +1038,8 @@ function fmtDate(sec){
       step = 'pace';
     }
     else if(hcap && hour >= hcap){
-      tone = 'warn'; val = '本小时已到上限';
-      sub = '每小时 ' + hcap + ' 张（保护上游账号），额度随时间滑动恢复，稍等再试';
+      tone = 'warn'; val = '近 60 分钟已到上限';
+      sub = '全站近 60 分钟上限 ' + hcap + ' 张（滚动窗口，不按整点重置；保护上游账号），额度随时间滑动恢复，稍等再试';
       step = 'pace';
     }
     else if(w + run > 0){ 
