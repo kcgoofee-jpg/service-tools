@@ -50,13 +50,11 @@ IMAGE_RETENTION = Spec("audit_image_retention_days", "int", 3, "audit", "（已�
 IMAGE_CAP_MB = Spec("audit_image_cap_mb", "int", 8192, "audit", "原图占用上限（MB）：超过后自动删掉最旧的原图；0 = 不限", 0, 500_000)
 IMAGE_KEEP_HOURS = Spec("audit_image_keep_hours", "int", 24, "audit", "原图在服务器上保存几小时，到点自动删；0 = 只按容量上限删", 0, 8760)
 MEMBER_DOWNLOAD = Spec("member_image_download", "flag", False, "audit", "成员在首页打包下载自己最近的原图（10-11 站长：先关）")
-SHARE_MODE = Spec("share_guard_mode", "choice", "observe", "share_guard", "防分享：enforce 处罚 / observe 只记录 / off",
-                  choices=("enforce", "observe", "off"))
 
 MEMBER_SWEEP = Spec("member_sweep", "flag", True, "registration", "退群回收：每人每天核对一次是否还在服务器，不在就删 Key")
 
 ALL = (MEMBER_SWEEP, WEB_LOGIN_PAUSED, DM_ENABLED, ISSUE_HOURLY_CAP, REGISTER_OPEN,
-       GLOBAL_DAILY_V5, GLOBAL_DAILY_ANLAS, GLOBAL_DAILY_ANLAS_UNTIL, GLOBAL_MONTHLY_ANLAS, GUARD_BASE, ALGO_NOTICE, IMAGE_RETENTION, IMAGE_CAP_MB, IMAGE_KEEP_HOURS, MEMBER_DOWNLOAD, SHARE_MODE)
+       GLOBAL_DAILY_V5, GLOBAL_DAILY_ANLAS, GLOBAL_DAILY_ANLAS_UNTIL, GLOBAL_MONTHLY_ANLAS, GUARD_BASE, ALGO_NOTICE, IMAGE_RETENTION, IMAGE_CAP_MB, IMAGE_KEEP_HOURS, MEMBER_DOWNLOAD)
 
 
 def default_of(spec: Spec, settings=None) -> Any:

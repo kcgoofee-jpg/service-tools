@@ -898,7 +898,7 @@ td.note{min-width:220px}
           <div class="panel-head" style="margin-bottom:16px">
             <div>
               <h2>内核监控与自动化模块</h2>
-              <div class="desc">系统内置 9 大核心模块（容量、分配、调度、续杯、自动驾驶、防分享、领 Key、观测、风险检查），每 10 分钟自动运行与交叉校验。</div>
+              <div class="desc">系统内置 8 大核心模块（容量、分配、调度、续杯、自动驾驶、领 Key、观测、风险检查），每 10 分钟自动运行与交叉校验。</div>
             </div>
             <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
               <label class="check" style="margin:0;white-space:nowrap" title="出问题 / 最近报错的模块排前面，方便先看要紧的">
@@ -991,7 +991,7 @@ td.note{min-width:220px}
         <section id="tab-logs" hidden>
           <div class="page-head">
             <div class="tools">
-              <button class="btn" data-act="logs-export" title="导出最近 30 天的客户端日志（zip：每次请求、每把 Key、网段、防分享证据；不含提示词和 Key 原文），拿去独立复核">导出客户端日志</button>
+              <button class="btn" data-act="logs-export" title="导出最近 30 天的客户端日志（zip：每次请求、每把 Key；不含提示词和 Key 原文），拿去独立复核">导出客户端日志</button>
               <input id="logRid" class="mono" type="search" placeholder="错误编号" aria-label="按错误编号查找" style="width:130px">
               <details class="lfilt" id="logFilters"><summary class="btn">筛选</summary><div class="lfilt-body">
               <select id="logFeature" aria-label="按功能筛选" style="width:160px"><option value="">全部功能</option>
@@ -2371,19 +2371,6 @@ function setMemberSort(k){
 const nameColl = new Intl.Collator(['zh-Hans-CN', 'en'], {numeric: true, sensitivity: 'base'});
 const memberTitle = m => (m.discord && (m.discord.display_name || m.discord.username)) || m.name || '';
 const memberOpen = new Set();          // 展开的成员：刷新、筛选、排序后保持
-/* 防分享（share_guard.py）：风险分 ≥ 30、有违规或暂停中算「疑似分享」；只看网段数会误伤 VPN 用户 */
-function shareHot(m){ const s = m.share; return !!s && (s.score >= 30 || s.strikes > 0 || s.paused_until > Date.now()/1000); }
-async function loadShare(id){
-  const box = $('#sev-' + id); if(!box) return;
-  box.innerHTML = '<div class="muted sm">读取中…</div>';
-  try{
-    const d = await api(`/admin/api/keys/${id}/share`);
-    const ev = d.evidence.map(e => `<tr><td class="t" data-label="时间">${esc(fullTime(e.ts))}</td><td data-label="类型"><span class="mf ${e.kind==='action'?'bad':'warn'}">${esc(e.label)}</span></td><td class="num" data-label="分值">${e.points?'+'+e.points:''}</td><td class="muted" data-label="说明">${esc(e.detail)}</td></tr>`).join('');
-    const tr = d.trail.map(r => `<tr><td class="t" data-label="时间">${esc(fullTime(r.ts))}</td><td class="mono" data-label="网络">${esc(r.src||'—')}</td><td class="muted" data-label="客户端" title="${esc(r.client)}">${esc(formatClient(r.client) || '—')}</td><td data-label="请求">${esc(r.kind)} · ${esc(r.status)}</td></tr>`).join('');
-    box.innerHTML = `<h5>证据与处罚</h5>${ev ? `<div class="table-wrap"><table class="rt"><tbody>${ev}</tbody></table></div>` : '<div class="muted sm">没有证据</div>'}
-      <h5>最近请求的来源</h5>${tr ? `<div class="table-wrap"><table class="rt"><thead><tr><th class="t">时间</th><th>网络</th><th>客户端</th><th>请求</th></tr></thead><tbody>${tr}</tbody></table></div>` : '<div class="muted sm">没有记录</div>'}`;
-  }catch(e){ box.innerHTML = '<div class="muted sm">读取失败</div>'; }
-}
 async function addMemberTag(id){
   const tag = ($('#tagIn' + id).value || '').trim(), note = ($('#tagNote' + id).value || '').trim();
   if(!tag){ toast('先填标签名', 'err'); $('#tagIn' + id).focus(); return; }
@@ -2414,18 +2401,11 @@ const ACK_TAG = '已查看';          // 「没问题」：24 小时内不再进
 const acked = (m, now) => (m.tags||[]).some(t => t.tag === ACK_TAG && now - (t.ts||0) < D);
 const userTags = m => (m.tags||[]).filter(t => t.tag !== ACK_TAG);
 function memberIssues(m, now){
-  const out = [], k = m.k, nets = memberMeta.share_alert_nets || 3, id = k ? k.id : m.id;
+  const out = [], k = m.k, id = k ? k.id : m.id;
   const btn = (act, label, extra='') => `<button class="btn mini" type="button" data-act="${act}" data-id="${id}"${extra}>${label}</button>`;
   const okBtn = btn('mark-ok', '没问题');
-  const scA = m.share_confirm ? ` · 成员自述：${m.share_confirm.label}（${shortTime(m.share_confirm.answered_at)}）` : '';
   if(m.share && m.share.paused_until > now)
-    out.push({lv:'bad', t:'防分享暂停中', d:`到 ${shortTime(m.share.paused_until)} 自动恢复 · 违规 ${m.share.strikes} 次${scA}`, a: btn('share-view','查看证据') + btn('share-clear','误判，解除')});
-  else if(shareHot(m))
-    out.push({lv:'bad', t:`疑似分享 Key · 风险 ${Math.round(m.share.score)}`, d:`违规 ${m.share.strikes} 次${scA}。先看来源，确认是一个人换网络就点误判`, a: btn('share-view','查看证据') + btn('share-clear','误判，清除')});
-  else if(k && !m.is_admin && (k.sources_24h||[]).length >= nets){
-    // 只看网段数误伤多（手机流量、代理切换）：详情里展示信息，不进「需要处理」（由 shareHot 风险分判定）
-    out.push({lv: 'info', t:`24 小时内从 ${k.sources_24h.length} 个网段使用`, d:'手机加电脑通常是 2 个；更多可能是开启了代理或手机流量切换' + scA, a: btn('share-view','查看来源'), need: false});
-  }
+    out.push({lv:'bad', t:'Key 已被限流暂停', d:`到 ${shortTime(m.share.paused_until)} 自动恢复（多半是客户端死循环重试触发）`, a: btn('share-clear','误判，解除')});
   if(m.expires_at && m.expires_at < now) out.push({lv:'bad', t:'Key 已过期', d:'成员现在用不了', a: btn('edit-key','改到期时间')});
   else if(m.expires_at && m.expires_at - now < 3*D) out.push({lv:'warn', t:`${Math.max(1, Math.ceil((m.expires_at-now)/D))} 天后到期`, d:shortTime(m.expires_at), a: btn('edit-key','改到期时间') + okBtn, need:true});
   // 自动标签：算法标记「只观察」或单纯客户端短时连点「请求过快」不升级为要处理
@@ -2455,7 +2435,6 @@ function memberFilters(now){
       ['new', '24 小时内新加入', m => m.registered_at && now - m.registered_at < D],
       ['reclaim', '快被回收（不活跃）', m => !m.is_admin && m.enabled && now - activityAt(m) > (idleDays - 1) * D],
       ['rejected', '24 小时被拒过', m => m.rejected_24h > 0],
-      ['shared', '疑似分享', m => shareHot(m)],
       ['manual', '后台手动建的 Key', isManual],
       ['staff', '站长 / 测试', m => m.is_test || m.is_admin],
       ['role:invite', '身份组：邀请', m => m.role === 'invite' || userTags(m).some(t=>t.tag==='邀请')],
@@ -2487,8 +2466,7 @@ function memberVerdict(m, now){
 function memberStatus(m, now){
   const f = (cls, text, title='') => `<span class="mf ${cls}"${title?` title="${esc(title)}"`:''}>${esc(text)}</span>`;
   if(!m.enabled) return f('bad', '已停用');
-  if(m.share && m.share.paused_until > now) return f('bad', '防分享暂停');
-  if(shareHot(m)) return f('bad', '疑似分享');
+  if(m.share && m.share.paused_until > now) return f('bad', '已限流');
   if(m.expires_at && m.expires_at < now) return f('bad', '已过期');
   if(needsAttention(m, now)) return f('warn', '要处理', memberIssues(m, now).map(x => x.t).join('、'));
   if(m.is_admin) return f('', '站长');
@@ -4129,7 +4107,6 @@ document.addEventListener('click', ev=>{
     case 'close-modal': closeModal(); break;
     case 'save-key': saveKey(); break;
     case 'regen-key': regenerateKey(id, el); break;
-    case 'share-view': loadShare(id); break;
     case 'share-clear': clearShare(id); break;
     case 'tag-add': addMemberTag(id); break;
     case 'mark-ok': markMemberOk(id); break;

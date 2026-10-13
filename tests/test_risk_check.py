@@ -79,23 +79,6 @@ async def test_concentration_flags_single_key_dominating(env):
     assert any("独吃" in e for e in item["evidence"])
 
 
-@pytest.mark.asyncio
-async def test_net_overlap_ignores_two_keys_but_flags_three(env):
-    db, state = env
-    for kid in (1, 2):                        # 两个 Key 共用一个网段：常见（一家人），不提示
-        await _key(db, f"k{kid}", kid)
-        await db._db.execute("INSERT INTO key_sources (key_id, net_hash, label, first_seen, last_seen, hits) "
-                             "VALUES (?,?,?,?,?,?)", (kid, "net-A", "1.2.3.*", NOW - DAY, NOW - 60, 1))
-    await db._db.commit()
-    item = next(it for it in (await collect(state, NOW))["items"] if it["id"] == "net_overlap")
-    assert item["status"] == "ok"
-    await _key(db, "k3", 3)                   # 第三个 Key 也在同一网段：值得留意
-    await db._db.execute("INSERT INTO key_sources (key_id, net_hash, label, first_seen, last_seen, hits) "
-                         "VALUES (?,?,?,?,?,?)", (3, "net-A", "1.2.3.*", NOW - DAY, NOW - 60, 1))
-    await db._db.commit()
-    item = next(it for it in (await collect(state, NOW))["items"] if it["id"] == "net_overlap")
-    assert item["status"] == "warn"
-
 
 @pytest.mark.asyncio
 async def test_burn_today_reads_counters(env):

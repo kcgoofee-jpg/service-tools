@@ -425,14 +425,12 @@ async def list_keys(request: Request):
     rows = await st.db.list_keys()
     today = st.day()
     totals = await st.db.generated_image_totals()
-    sources = await st.db.key_source_summary(time.time() - 24 * 3600)
     tag_rows = await st.db._db.execute_fetchall("SELECT key_id FROM key_tags WHERE tag=?", (INVITE_TAG,))
     invite_kids = {int(r[0]) for r in tag_rows}
     out = []
     for r in rows:
         c = await st.db.get_counter(r["id"], today)
         item = _key_json(r, c, totals.get(r["id"], 0))
-        item["sources_24h"] = sources.get(r["id"], [])
         if r["is_admin"]:
             role = ROLE_ADMIN
         elif r["is_test"]:
@@ -444,7 +442,7 @@ async def list_keys(request: Request):
         item["role"] = role
         item["role_label"] = ROLE_LABELS[role]
         out.append(item)
-    return {"keys": out, "share_alert_nets": st.settings.key_share_alert_nets}
+    return {"keys": out}
 
 
 def _features_field(body: dict):
@@ -1133,18 +1131,6 @@ async def discord_bot_put(request: Request):
     return {"ok": True, "config": await bot_config.load(request.app.state.gate.db)}
 
 
-@router.get("/keys/{key_id}/share")
-async def key_share_detail(request: Request, key_id: int):
-    """防分享溯源：证据与处罚记录 + 最近 60 次请求的来源网络（打码）和客户端。"""
-    require_admin(request)
-    st = request.app.state.gate
-    trail = await st.db._db.execute_fetchall(
-        "SELECT ts, kind, status, src, client, substr(detail,1,60) FROM usage_log WHERE key_id=? ORDER BY ts DESC LIMIT 60",
-        (key_id,))
-    return {"evidence": await st.share.evidence(key_id),
-            "trail": [{"ts": r[0], "kind": r[1], "status": r[2], "src": r[3], "client": r[4], "detail": r[5]} for r in trail]}
-
-
 @router.post("/keys/{key_id}/share-clear")
 async def key_share_clear(request: Request, key_id: int):
     """误判：清零风险分、解除暂停、违规次数归零（证据保留）。"""
@@ -1153,23 +1139,6 @@ async def key_share_clear(request: Request, key_id: int):
     return {"ok": True}
 
 
-@router.get("/share-guard")
-async def share_guard_get(request: Request):
-    require_admin(request)
-    st = request.app.state.gate
-    return {"mode": await st.share.mode(), "keys": await st.share.report()}
-
-
-@router.put("/share-guard")
-async def share_guard_put(request: Request):
-    """防分享模式：enforce 执行 / observe 只记录并提醒站长 / off 关闭。"""
-    require_admin(request)
-    body = await read_json_body(request)
-    if body.get("mode") not in ("enforce", "observe", "off"):
-        raise HTTPException(422, "mode 只能是 enforce / observe / off")
-    from . import site_flags
-    await site_flags.put(request.app.state.gate.db, site_flags.SHARE_MODE, body["mode"])
-    return {"ok": True, "mode": body["mode"]}
 
 
 @router.get("/modules")
@@ -1596,28 +1565,6 @@ AUTO_TAG_PATTERNS = (
 TAG_MAX_LEN, TAG_NOTE_MAX = 12, 200
 
 
-@router.get("/share-confirm")
-async def share_confirm_report(request: Request):
-    """核对误判：最近被标记的 Key、当前风险分、成员自述。"""
-    require_admin(request)
-    from . import share_confirm
-    from .share_guard import decayed
-    st = request.app.state.gate
-    now = time.time()
-    ans = await share_confirm.answers(st.db)
-    out = []
-    for kid in await share_confirm.flagged_keys(st.db, now):
-        k = await st.db.get_key(kid)
-        r = await st.db._db.execute_fetchall("SELECT score, score_ts, strikes FROM share_state WHERE key_id=?", (kid,))
-        ev = await st.db._db.execute_fetchall(
-            "SELECT kind, COUNT(*) FROM share_evidence WHERE key_id=? AND ts>=? GROUP BY kind", (kid, now - share_confirm.LOOKBACK))
-        out.append({"key_id": kid, "name": k["name"] if k else f"#{kid}",
-                    "score": round(decayed(r[0][0], r[0][1], now), 1) if r else 0, "strikes": r[0][2] if r else 0,
-                    "evidence": dict(ev), "answer": ans.get(kid)})
-    return {"flagged": out, "answered": sum(1 for o in out if o["answer"]),
-            "by_answer": {a: sum(1 for o in out if o["answer"] and o["answer"]["answer"] == a) for a in share_confirm.ANSWERS}}
-
-
 @router.put("/keys/{key_id}/tags")
 async def put_key_tag(request: Request, key_id: int):
     """给成员打 / 改手动标签（只在后台显示）。body: {tag, note}"""
@@ -1663,18 +1610,6 @@ async def member_tags(db, since: float) -> tuple[dict[int, list], dict[int, list
             + " END AS label, COUNT(*) FROM usage_log WHERE ts>? AND status IN ('rejected','error') "
               "AND key_id IS NOT NULL GROUP BY key_id, label HAVING label IS NOT NULL", (since,)):
         auto_tags.setdefault(kid, []).append({"tag": label, "count": n})
-    # 疑似同一人：取自动驾驶最近一次的 alt_link 结果（每 10 分钟算一次）
-    try:
-        from . import alt_guard
-        last = json.loads(await db.get_setting("autopilot_last", "{}") or "{}")
-        for p in ((last.get("rules") or {}).get("alt_link") or {}).get("value") or []:
-            a, b = p["keys"]
-            for me, other, other_name in ((a, b, p["names"][1]), (b, a, p["names"][0])):
-                auto_tags.setdefault(me, []).append({
-                    "tag": "疑似同一人", "count": p["score"],
-                    "note": f"和 #{other} {other_name}：{alt_guard.describe(p['signals'])}（{p['score']} 分，只观察）"})
-    except (TypeError, ValueError, KeyError):
-        pass
     return manual_tags, auto_tags
 
 
@@ -1690,20 +1625,12 @@ async def members(request: Request):
         "SELECT key_id, discord_id, username, display_name, avatar, created_at FROM discord_registrations")}
     since = time.time() - 24 * 3600
     milestones = await st.db.member_milestones(since)
-    sources = await st.db.key_source_summary(since)
     clients = await st.db.latest_member_clients()
     out = []
-    from .share_guard import decayed
     share_map = {}
-    try:
-        from . import share_confirm as _sc
-        confirm_map = await _sc.answers(st.db)
-    except Exception:
-        confirm_map = {}
-    for kid, score, ts, strikes, paused in await st.db._db.execute_fetchall(
-            "SELECT key_id, score, score_ts, strikes, paused_until FROM share_state"):
-        share_map[kid] = {"score": round(decayed(score, ts, time.time()), 1), "strikes": strikes,
-                          "paused_until": paused if paused > time.time() else 0}
+    for kid, paused in await st.db._db.execute_fetchall(
+            "SELECT key_id, paused_until FROM share_state"):
+        share_map[kid] = {"paused_until": paused if paused > time.time() else 0}
     manual_tags, auto_tags = await member_tags(st.db, since)
     # 今日「重置今日额度」痕迹：按服务日起点统计次数与最近一次（从操作日志取，只读）
     import re as _re
@@ -1781,17 +1708,14 @@ async def members(request: Request):
             "last_image_at": milestones.get(row["id"], {}).get("last_image_at"),
             "rejected_24h": milestones.get(row["id"], {}).get("rejected_24h", 0),
             "rejected_why": milestones.get(row["id"], {}).get("rejected_why", []),
-            "sources_24h": len(sources.get(row["id"], [])),
             "share": share_map.get(row["id"]),
-            "share_confirm": confirm_map.get(row["id"]),
             "reset_today": reset_map.get(row["id"]),
             "tags": manual_tags.get(row["id"], []),
             "auto_tags": auto_tags.get(row["id"], []),
             "last_client": clients.get(row["id"], ""),
             "hours24": rate_map.get(row["id"], []),
         })
-    return {"members": out, "share_alert_nets": st.settings.key_share_alert_nets,
-            "inactivity_days": st.settings.key_inactivity_delete_days}
+    return {"members": out, "inactivity_days": st.settings.key_inactivity_delete_days}
 
 
 @router.get("/audit")

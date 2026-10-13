@@ -60,7 +60,6 @@ from .state import GateState
 from . import features
 from .policy import REFERENCE_FIELDS
 from . import status_stats, quota_algo
-from .key_sources import RETENTION_SECONDS as KEY_SOURCE_RETENTION
 from .action_log import RETENTION_DAYS as ADMIN_ACTION_RETENTION_DAYS, log_action
 from .audit import audit_flags, audit_disclosure, audit_image_cap_mb, audit_image_keep_hours, capture_prompts, full_image
 from .upstream_errors import upstream_error_message, text_stream_events
@@ -416,53 +415,7 @@ async def authenticate(request: Request, *, passive: bool = False):
         await STATE.db.touch_key(row["id"])
     except Exception as exc:
         bug("touch_key", exc)
-    sources = getattr(STATE, "sources", None)
-    is_test_call = bool(
-        _row_flag(row, "is_test")
-        or _row_flag(row, "is_admin")
-        or (request.client and getattr(request.client, "host", "").startswith(("172.30.", "127.0.0.1", "10.", "192.168.")))
-    )
-    if sources is not None and not is_test_call:
-        try:                            # 来源网段统计（防 Key 分享）；失败不能影响请求
-            await sources.observe(row, client_id, client=request.headers.get("user-agent", ""))
-        except Exception as exc:
-            bug("key_sources", exc)
-    from .key_sources import network_of
-    found = network_of(client_id)
-    request_timing.set_source(found[1] if found else "")
-    if share is not None and found and not is_test_call:
-        try:                            # 防分享：证据 + 风险分 + 自动处罚（share_guard.py）；失败不能影响请求
-            guard = getattr(STATE, "guard", None)
-            busy = bool(guard and guard.image_inflight.get(row["id"], 0) > 0)
-            await share.observe(row, found[1], 6 if ":" in found[1] else 4, request.headers.get("user-agent", ""),
-                                busy=busy, **_share_callbacks(request))
-        except Exception as exc:
-            bug("share_guard", exc)
     return row
-
-
-def _share_callbacks(request: Request) -> dict:
-    reg = getattr(request.app.state, "registrar", None)
-
-    async def member(key_id: int, text: str) -> None:
-        did = await reg.registration_for_key(key_id) if reg is not None else None
-        if did is not None:
-            await reg.send_dm(did, NOTICE_PREFIX + text)
-
-    async def reset(key_id: int):
-        token = gen_key("nai")
-        return token if await STATE.db.rotate_key_token(key_id, token) else None
-
-    async def ban(key_id: int) -> None:
-        did = await reg.registration_for_key(key_id) if reg is not None else None
-        if did is not None:
-            await reg.ban(did)
-        else:
-            await STATE.db.update_key(key_id, {"enabled": 0})
-
-    def admin(message: str) -> None:
-        notify_owner(f"share_guard_{time.time():.0f}", message, cooldown=0)
-    return {"member": member, "reset": reset, "ban": ban, "admin": admin}
 
 
 async def require_feature(key, name: str) -> None:

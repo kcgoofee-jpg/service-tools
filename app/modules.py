@@ -1,4 +1,4 @@
-"""模块登记：容量 / 分配 / 公平调度 / Anlas / 自动驾驶 / 诚信 / 风险检查 / 领 Key / 观测。
+"""模块登记：容量 / 分配 / 公平调度 / Anlas / 自动驾驶 / 风险检查 / 领 Key / 观测。
 
 每个模块写明回答的问题、关键参数的当前值和交叉校验。框架见 kernel.py；新增模块写一个 Module(...) 并在 build() 里 register。
 """
@@ -196,45 +196,6 @@ def autopilot_module(state) -> Module:
                 Param("名额", lambda: f"快满且有余量时 +{autopilot.SLOTS_STEP}，最多 {autopilot.SLOTS_MAX}（名额不限时不动）")])
 
 
-# ---------------- ④ 诚信（防分享）----------------
-def integrity(state) -> Module:
-    from . import share_guard as sg
-
-    async def get_enabled(k: Kernel):
-        return await state.share.mode() != "off"
-
-    async def set_enabled(k: Kernel, on: bool):
-        # 重新打开只回到 observe（校准前不处罚）；要真的处罚需在后台单独切 enforce
-        await site_flags.put(state.db, site_flags.SHARE_MODE, "observe" if on else "off")
-
-    async def checks(k: Kernel):
-        now = time.time()
-        db = state.db
-        rows = await db._db.execute_fetchall(
-            # 自动驾驶的 1 小时限流（pause_key）不写 paused_ts、也不算违规，不属于防分享处罚，不要求强证据
-            "SELECT key_id FROM share_state WHERE (paused_until>? AND paused_ts>0) OR strikes>0", (now,))
-        unsupported = []
-        for (kid,) in rows:
-            strong = await _q1(db, f"SELECT COUNT(*) FROM share_evidence WHERE key_id=? AND kind IN "
-                                   f"({','.join('?' * len(sg.STRONG))}) AND points>0", kid, *sg.STRONG)
-            if not strong:
-                unsupported.append(kid)
-        return [Check("每个处罚都有强证据", not unsupported,
-                      f"{len(rows)} 把 Key 在处罚中" + (f"，其中 {unsupported} 没有强证据" if unsupported else ""))]
-
-    return Module(
-        name="integrity", title="诚信（防分享）", question="有没有人共用或转卖 Key",
-        get_enabled=get_enabled, set_enabled=set_enabled, checks=checks,
-        hard_note="关闭后不再收集证据和处罚；已暂停的 Key 到期自动恢复",
-        params=[
-            Param("模式", lambda: state.share.mode(), "observe = 只记录不处罚"),
-            Param("提醒 / 暂停 / 重置", lambda: f"{P('share.warn', sg.WARN)} / {P('share.pause', sg.PAUSE)} / {P('share.reset', sg.RESET)} 分"),
-            Param("强证据 / 辅助证据", lambda: f"{sg._pts('overlap')} / {sg.POINTS['multi_device']} 分", "辅助证据要 72 小时内有强证据才计分"),
-            Param("分数半衰期", lambda: f"{P('share.half_life', sg.HALF_LIFE) // 3600} 小时"),
-            Param("停用前违规次数", lambda: sg.STRIKES_BAN),
-        ])
-
-
 # ---------------- 领 Key ----------------
 def registration(state) -> Module:
     async def get_enabled(k: Kernel):
@@ -429,7 +390,7 @@ def risk(state) -> Module:
 
 def build(state, bug) -> Kernel:
     k = Kernel(state, bug)
-    for make in (observation, capacity, allocation, scheduling, anlas, autopilot_module, integrity, risk,
+    for make in (observation, capacity, allocation, scheduling, anlas, autopilot_module, risk,
                  registration, registration_ready):
         k.register(make(state))
     return k

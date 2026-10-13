@@ -642,19 +642,6 @@ async def _generate_image(request: Request, *, streaming: bool):
     if model_tier is None:
         main.record(key, "image", model, "rejected", detail="未列入本站图片模型白名单")
         raise main.err(400, "不支持或尚未开放的图片模型")
-    share = getattr(state, "share", None)
-    is_test_call = bool(
-        main._row_flag(key, "is_test")
-        or main._row_flag(key, "is_admin")
-        or (request.client and getattr(request.client, "host", "").startswith(("172.30.", "127.0.0.1", "10.", "192.168.")))
-    )
-    if share is not None and not is_test_call:
-        try:                            # 防分享：出图习惯指纹（只在内存里保留哈希，见 share_guard.py）
-            busy = bool(state.guard.image_inflight.get(key["id"], 0) > 0)
-            await share.observe_habit(key, body, request_timing.snapshot().get("src", ""),
-                                      request.headers.get("user-agent", ""), busy=busy, **main._share_callbacks(request))
-        except Exception as exc:
-            _bug("share_guard", exc)
     if model_tier == "v5" and not key["is_admin"] and key["image_model_scope"] != "all":
         main.record(key, "image", model, "rejected", detail="模型权限：仅允许 V4.5 及更低")
         raise main.err(403, "你的 Key 目前只能用 V4.5 及更低模型")
