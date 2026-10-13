@@ -1109,28 +1109,28 @@ function fmtDate(sec){
       .then(function(){ setTimeout(poll, visible ? (failed ? 5000 : 1000) : 10000); });
   }
   poll();
-})();
 
-/* ---------- 捐赠 Key：提交只进站长后台（人工验证后才接入） ---------- */
-(function(){
-  var btn = $('donateBtn'), form = $('donateForm');
-  if(!btn || !form) return;
-  btn.addEventListener('click', function(){ btn.hidden = true; form.hidden = false; $('donateToken').focus(); });
-  $('donateCancel').addEventListener('click', function(){ form.hidden = true; btn.hidden = false; });
-  form.addEventListener('submit', async function(ev){
-    ev.preventDefault();
-    var token = $('donateToken').value.trim(), message = $('donateMsg').value.trim(), contact = $('donateContact').value.trim();
-    if(token.length < 20){ toast('Token 好像不完整：请从 NovelAI 官网 Account 页整段复制'); return; }
-    if(!message){ toast('请写一句留言 / 使用要求（站长好接进合适的池子）'); return; }
-    try{
-      var r = await fetch('/public/donate', {method:'POST', headers:{'Content-Type':'application/json'},
-                                             body: JSON.stringify({token: token, message: message, contact: contact})});
-      var j = await r.json().catch(function(){ return {}; });
-      if(!r.ok){ toast(j.detail || '提交失败，稍后再试'); return; }
-      form.reset(); form.hidden = true; btn.hidden = false;
-      toast('已收到，谢谢！站长会在后台验证后接入 💛');
-    }catch(e){ toast('网络异常，稍后再试'); }
-  });
+  /* ---------- 捐赠 Key：提交只进站长后台（人工验证后才接入）；放在主闭包内才能用 $ / toast ---------- */
+  (function(){
+    var btn = $('donateBtn'), form = $('donateForm');
+    if(!btn || !form) return;
+    btn.addEventListener('click', function(){ btn.hidden = true; form.hidden = false; $('donateToken').focus(); });
+    $('donateCancel').addEventListener('click', function(){ form.hidden = true; btn.hidden = false; });
+    form.addEventListener('submit', async function(ev){
+      ev.preventDefault();
+      var token = $('donateToken').value.trim(), message = $('donateMsg').value.trim(), contact = $('donateContact').value.trim();
+      if(token.length < 20){ toast('Token 好像不完整：请从 NovelAI 官网 Account 页整段复制'); return; }
+      if(!message){ toast('请写一句留言 / 使用要求（站长好接进合适的池子）'); return; }
+      try{
+        var r = await fetch('/public/donate', {method:'POST', headers:{'Content-Type':'application/json'},
+                                               body: JSON.stringify({token: token, message: message, contact: contact})});
+        var j = await r.json().catch(function(){ return {}; });
+        if(!r.ok){ toast(j.detail || '提交失败，稍后再试'); return; }
+        form.reset(); form.hidden = true; btn.hidden = false;
+        toast('已收到，谢谢！站长会在后台验证后接入 💛');
+      }catch(e){ toast('网络异常，稍后再试'); }
+    });
+  })();
 })();
 
 </script>
