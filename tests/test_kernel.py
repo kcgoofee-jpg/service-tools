@@ -76,6 +76,26 @@ async def test_real_modules_build_tick_and_check(state):
 
 
 @pytest.mark.asyncio
+async def test_structural_oversell_ack(state):
+    """「先到先得」超卖校验：默认照实报；站长确认（ack_v5_oversell）后转绿且注明确认，不再记 warn。"""
+    import json as _json
+    from app import modules
+    await state.db.set_setting("quota_algo_last", _json.dumps(
+        {"ceiling": 79, "v5": {"each": 10, "global": 260}, "enabled": True}, ensure_ascii=False))
+    k = modules.build(state, bug=lambda src, exc=None, **kw: None)
+
+    def over(snap):
+        return {c["name"]: c for m in snap for c in m["last"].get("checks", [])}["V5：每人额度 × 人数 ≤ 全站上限"]
+
+    await k.tick_all()
+    assert "站长已确认" not in over(await k.snapshot())["detail"]
+    await state.db.set_setting("ack_v5_oversell", "10-14 01:00")
+    await k.tick_all()
+    green = over(await k.snapshot())
+    assert green["ok"] and "站长已确认" in green["detail"]
+
+
+@pytest.mark.asyncio
 async def test_capacity_checks_run_with_a_token(state):
     """有上游账号时容量校验（含上游快照核对）必须能跑通，不能「校验本身出错」（10-10 线上抓到过参数写错）。"""
     from app import modules
