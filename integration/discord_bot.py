@@ -228,8 +228,7 @@ def build_client() -> tuple[discord.Client, app_commands.CommandTree, discord.Ob
         cap = data["max"] or "不限"
         reset = f"，每天 {data['reset_at']} 自动清空" if data["reset_at"] else ""
         state = "开放中" if data.get("open", True) else "已关闭"
-        wait = f"；候补 {data.get('waitlist', 0)} 人（已邀请 {data.get('invited', 0)} 人）" if data.get("waitlist") else ""
-        await interaction.followup.send(f"已领取 {data['active']} / {cap}{reset}；领 Key {state}{wait}", ephemeral=True)
+        await interaction.followup.send(f"已领取 {data['active']} / {cap}{reset}；领 Key {state}", ephemeral=True)
 
     @tree.command(name="revoke", description="（管理员）撤销某位成员的 Key，释放名额", guild=guild)
     @app_commands.default_permissions(manage_guild=True)

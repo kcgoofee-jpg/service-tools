@@ -17,7 +17,7 @@ from . import site_flags
 from . import features
 from .policy import gen_key
 
-# 私信总闸门：所有私信（闲置提醒、候补邀请、Anlas 通知、后台操作通知、防分享处罚）都经过 send_dm。
+# 私信总闸门：所有私信（Anlas 通知、后台操作通知、防分享处罚）都经过 send_dm。
 # 默认关（fail-closed）：新库、恢复备份、设置丢失时都不会私信。2026-10-10 Discord 应用被标记的信号之一就是批量私信。
 DM_BURST, DM_WINDOW, DM_DAILY = 3, 600, 20        # 开启时也限速：10 分钟最多 3 条、24 小时最多 20 条
 
@@ -75,8 +75,7 @@ def welcome_dm(key: str, site: str, quota: str, expires_days: int, idle_days: in
     return text[:1990]
 
 
-WAITLIST_HOLD = 24 * 3600     # 候补被邀请后保留名额的时长（私信通知时）
-WAITLIST_HOLD_NO_DM = 6 * 3600   # 不私信、只在公告频道通知时：很多人看不到，保留太久名额会空占（2026-10-10 实测 21 个名额空占半天）
+# 候补排队已于 2026-10-13 移除（站长：定期重置放新人，候补只会让老候补占坑）：名额一律先到先得。
 
 
 class RegistrationService:
@@ -256,7 +255,6 @@ class RegistrationService:
                 avatar=av or "",
                 banned_by=banned_by or "站长",
             )
-            await self.db._db.execute("DELETE FROM waitlist WHERE discord_id=?", (discord_id,))
             await self.db._db.commit()
             had_key = await self.revoke(discord_id, remove_role=False)
         if had_key:
@@ -280,102 +278,16 @@ class RegistrationService:
         return await registration_settings(self.db, self)
 
     async def _check_capacity(self, user_id: str = "", name: str = "") -> dict:
-        """名额检查 + 候补名单。被邀请（24 小时内）的候补可以占用为他保留的名额；
-        其他人只有在「空位 > 排在前面还没被邀请的候补人数」时才能直接领取，否则加入候补并告知排位。"""
+        """名额检查：有空位先到先得，满了直接拒绝（候补排队已移除，2026-10-13）。"""
         cfg = await self.settings()
         if not cfg["open"]:
             raise RegistrationError("领 Key 暂未开放，请等待站长开放。")
         if not cfg["max_users"]:
             return cfg
-        if not await site_flags.get(self.db, site_flags.WAITLIST):
-            # 候补已取消（2026-10-10 站长：机器人不能私信，候补只会空占名额）：有空位先到先得
-            if cfg["max_users"] - await self.count_active() > 0:
-                return cfg
-            raise RegistrationError(f"名额已满（上限 {cfg['max_users']} 人），请过段时间再试。"
-                                    "闲置的 Key 会被自动回收，空出的名额先到先得。")
-        now = time.time()
-        rows = await self.db._db.execute_fetchall(
-            "SELECT discord_id, invited_at FROM waitlist ORDER BY joined_at")
-        hold = await self._hold_seconds()
-        invited = {r[0] for r in rows if r[1] and now - r[1] < hold}
-        waiting = [r[0] for r in rows if not r[1]]
-        free = cfg["max_users"] - await self.count_active() - len(invited - {user_id})
-        if user_id in invited and free > 0:
+        if cfg["max_users"] - await self.count_active() > 0:
             return cfg
-        ahead = [d for d in waiting if d != user_id]
-        if user_id in waiting:
-            ahead = waiting[:waiting.index(user_id)]
-        if free > len(ahead):
-            return cfg
-        if not user_id:
-            raise RegistrationError(f"名额已满（上限 {cfg['max_users']} 人）。")
-        if user_id not in waiting:
-            await self.db._db.execute(
-                "INSERT OR REPLACE INTO waitlist(discord_id, name, joined_at, invited_at) VALUES (?,?,?,NULL)",
-                (user_id, _clip(name) or "", now))
-            await self.db._db.commit()
-            waiting.append(user_id)
-            ahead = waiting[:-1]
-        how = ("有名额时机器人会私信你" if await site_flags.get(self.db, site_flags.WAITLIST_DM)
-               else "有名额时会在 📢｜公告 频道通知（不私信），请留意")
-        raise RegistrationError(
-            f"名额已满（上限 {cfg['max_users']} 人）。已把你加入候补，目前排第 {len(ahead) + 1} 位；"
-            f"{how}，届时 {hold // 3600} 小时内再用 /register 领取。")
-
-    async def _hold_seconds(self) -> int:
-        """候补被邀请后保留名额多久：私信通知 24 小时；只发公告时 6 小时。"""
-        return WAITLIST_HOLD if await site_flags.get(self.db, site_flags.WAITLIST_DM) else WAITLIST_HOLD_NO_DM
-
-    async def waitlist(self) -> list[dict]:
-        rows = await self.db._db.execute_fetchall(
-            "SELECT discord_id, name, joined_at, invited_at FROM waitlist ORDER BY joined_at")
-        return [{"discord_id": r[0], "name": r[1], "joined_at": r[2], "invited_at": r[3]} for r in rows]
-
-    async def invite_waitlist(self, now: float | None = None, announce=None) -> int:
-        """维护循环调用：过期的邀请让给下一位；有空位就按顺序为候补保留 24 小时名额并通知。返回本次邀请数。
-
-        通知方式由设置 waitlist_dm 决定：1 = 逐个私信（仍受私信总闸门限制）；0（默认）= 不私信，只在公告频道发一条汇总
-        （Discord 应用审核期间用 0：批量私信正是 2026-10-10 被标记的信号之一）。announce 是发公告频道的函数。"""
-        now = time.time() if now is None else now
-        if not await site_flags.get(self.db, site_flags.WAITLIST):
-            return 0
-        use_dm = await site_flags.get(self.db, site_flags.WAITLIST_DM)     # 默认不私信（fail-closed）
-        hold = await self._hold_seconds()
-        cfg = await self.settings()
-        expired = await self.db._db.execute_fetchall(
-            "SELECT discord_id FROM waitlist WHERE invited_at IS NOT NULL AND invited_at <= ?", (now - hold,))
-        if expired:
-            await self.db._db.execute("DELETE FROM waitlist WHERE invited_at IS NOT NULL AND invited_at <= ?",
-                                      (now - hold,))
-            await self.db._db.commit()
-            from .action_log import log_action
-            await log_action(self.db, "系统", "候补邀请过期", f"{len(expired)} 人", f"{hold // 3600} 小时内未领取，名额让给下一位")
-        if not cfg["open"] or not cfg["max_users"]:
-            return 0
-        held = (await self.db._db.execute_fetchall(
-            "SELECT COUNT(*) FROM waitlist WHERE invited_at IS NOT NULL"))[0][0]
-        free = cfg["max_users"] - await self.count_active() - held
-        if free <= 0:
-            return 0
-        rows = await self.db._db.execute_fetchall(
-            "SELECT discord_id, name FROM waitlist WHERE invited_at IS NULL ORDER BY joined_at LIMIT ?", (free,))
-        from .action_log import log_action
-        for discord_id, name in rows:
-            await self.db._db.execute("UPDATE waitlist SET invited_at=? WHERE discord_id=?", (now, discord_id))
-            await self.db._db.commit()
-            if not use_dm:
-                await log_action(self.db, "系统", "邀请候补", name or f"Discord {discord_id}",
-                                 f"已保留 {hold // 3600} 小时（不私信，已在公告频道统一通知）")
-                continue
-            sent = await self.send_dm(discord_id,
-                "🦉 猫头鹰公益站有空位了！为你保留 24 小时：请在任意频道输入 /register 领取。"
-                "超过 24 小时未领取，名额会让给下一位候补。")
-            await log_action(self.db, "系统", "邀请候补", name or f"Discord {discord_id}",
-                             "已私信" if sent else "私信失败（对方可能关闭了私信），名额仍保留 24 小时", ok=sent)
-        if rows and not use_dm and announce is not None:
-            announce(f"🦉 **候补有空位了**：已为候补前 {len(rows)} 位保留名额 {hold // 3600} 小时。"
-                     f"在候补里的朋友请到任意频道输入 `/register` 领取；{hold // 3600} 小时内没领，名额会顺延给下一位。")
-        return len(rows)
+        raise RegistrationError(f"名额已满（上限 {cfg['max_users']} 人），请过段时间再试。"
+                                "闲置的 Key 会被自动回收，空出的名额先到先得。")
 
     async def registration_profile(self, discord_id: str) -> Optional[dict]:
         if str(discord_id).startswith(KEY_SESSION_PREFIX):          # 没绑定 Discord 的 Key 登录（站长手动发的 Key）
@@ -414,10 +326,15 @@ class RegistrationService:
         return True
 
     async def reset_all(self) -> int:
-        """清空所有自助注册用户（删 Key 和记录，保留用量账本），用户需重新 /register。"""
+        """清空所有自助注册用户（删 Key 和记录，保留用量账本），用户需重新 /register。
+
+        带「邀请」标签的 Key 不在清空范围：和手动全站重置同一口径（2026-10-13），私邀的朋友不受每日轮换影响。"""
+        from .database import INVITE_TAG
         rows = await self.db._db.execute_fetchall(
             """SELECT r.discord_id FROM discord_registrations r LEFT JOIN api_keys k ON k.id=r.key_id
-               WHERE k.id IS NULL OR k.enabled=1""")           # 被停用的成员不在清空范围内
+               WHERE (k.id IS NULL OR k.enabled=1)
+                 AND NOT EXISTS (SELECT 1 FROM key_tags t WHERE t.key_id=r.key_id AND t.tag=?)""",
+            (INVITE_TAG,))           # 被停用的成员不在清空范围内；邀请 Key 豁免
         for (discord_id,) in rows:
             await self.revoke(str(discord_id), remove_role=False)
         await self.sync_roles()
@@ -476,7 +393,6 @@ class RegistrationService:
         if self.member_role_id:
             await self.db._db.execute("DELETE FROM pending_role_removals WHERE discord_id=?", (user_id,))
             await self.db._db.execute("UPDATE discord_registrations SET role_granted=1 WHERE discord_id=?", (user_id,))
-        await self.db._db.execute("DELETE FROM waitlist WHERE discord_id=?", (user_id,))
         await self.db._db.commit()
         if self.member_role_id:
             try:
@@ -491,7 +407,7 @@ class RegistrationService:
         """/register 直接发 Key：斜杠命令的 interaction 已被 Discord 签名验明发起人身份，
         不必再走 OAuth 授权（应用被标记审查期间 OAuth 被封；这条通路同时去掉了批量私信）。
         这是唯一的发 Key 入口（旧的 OAuth 领取 begin/finish 已删除，不能再恢复）。
-        校验：限服务器 / 账号年龄 / 封禁 / 去重 / 每小时上限 / 名额与候补 / 可选身份组（机器人 Token 核验）；
+        校验：限服务器 / 账号年龄 / 封禁 / 去重 / 每小时上限 / 名额 / 可选身份组（机器人 Token 核验）；
         通过后交给 _provision 落库。返回 {"key","message"}；不通过抛 RegistrationError。"""
         user_id = str(user_id)
         if guild_id != self.command_guild or not user_id.isdecimal():
@@ -535,7 +451,7 @@ class RegistrationService:
             return await self._provision(user_id, cfg, user)
 
     async def gift(self, user: dict) -> dict:
-        """站长 / 机器人奖励用：这个 Discord 用户没有 Key 就直接发一把（不走名额和候补），有就原样返回。
+        """站长 / 机器人奖励用：这个 Discord 用户没有 Key 就直接发一把（不走名额），有就原样返回。
         返回 {"new": bool, "key_id": int, 新发时还有 "key", "message"（欢迎私信）}。封禁的账号不发。"""
         user_id = str(user.get("id") or "")
         if not user_id.isdecimal():
@@ -563,7 +479,7 @@ class RegistrationService:
 
     async def _provision(self, user_id: str, cfg: dict, user: dict) -> dict:
         """唯一发 Key 的地方：建 api_keys 行、写 discord_registrations、按成员名改 Key 名、
-        身份组标志 / 清掉旧的待摘除、移出候补、提交、挂身份组、生成欢迎消息。
+        身份组标志 / 清掉旧的待摘除、提交、挂身份组、生成欢迎消息。
         调用方（issue_direct）必须已持有 self.lock 并完成全部校验。返回 {"key","message"}。"""
         key = gen_key("nai")
         row = await self.db.create_key({
@@ -584,7 +500,6 @@ class RegistrationService:
         if self.member_role_id:
             await self.db._db.execute("DELETE FROM pending_role_removals WHERE discord_id=?", (user_id,))
             await self.db._db.execute("UPDATE discord_registrations SET role_granted=1 WHERE discord_id=?", (user_id,))
-        await self.db._db.execute("DELETE FROM waitlist WHERE discord_id=?", (user_id,))
         await self.db._db.commit()
         if self.member_role_id:
             try:

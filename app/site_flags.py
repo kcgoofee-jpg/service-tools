@@ -32,7 +32,6 @@ class Spec:
 WEB_LOGIN_PAUSED = Spec("web_login_paused", "flag", True, "registration_routes",
                         "网页 Discord OAuth 登录暂停（申诉期间）。Key 登录不受影响")
 DM_ENABLED = Spec("dm_enabled", "flag", False, "registration", "私信总闸门（关 = 任何私信都不发）")
-WAITLIST_DM = Spec("waitlist_dm", "flag", False, "registration", "有名额时私信候补成员（关 = 只在公告频道发一条汇总）")
 ISSUE_HOURLY_CAP = Spec("issue_hourly_cap", "int", 12, "registration", "每小时最多发放的新 Key", 0, 500)
 REGISTER_OPEN = Spec("register_open", "flag", False, "modules / registration", "开放 /register 领取")
 GLOBAL_DAILY_V5 = Spec("global_daily_v5", "int", None, "额度 / 首页 / 客户端", "全站每日 V5 张数（0 = 不限）",
@@ -54,11 +53,9 @@ MEMBER_DOWNLOAD = Spec("member_image_download", "flag", False, "audit", "成员�
 SHARE_MODE = Spec("share_guard_mode", "choice", "observe", "share_guard", "防分享：enforce 处罚 / observe 只记录 / off",
                   choices=("enforce", "observe", "off"))
 
-WAITLIST = Spec("waitlist_enabled", "flag", False, "registration",
-                "候补排队（关 = 名额满了直接提示，有空位先到先得；机器人不能私信时候补只会空占名额）")
 MEMBER_SWEEP = Spec("member_sweep", "flag", True, "registration", "退群回收：每人每天核对一次是否还在服务器，不在就删 Key")
 
-ALL = (WAITLIST, MEMBER_SWEEP, WEB_LOGIN_PAUSED, DM_ENABLED, WAITLIST_DM, ISSUE_HOURLY_CAP, REGISTER_OPEN,
+ALL = (MEMBER_SWEEP, WEB_LOGIN_PAUSED, DM_ENABLED, ISSUE_HOURLY_CAP, REGISTER_OPEN,
        GLOBAL_DAILY_V5, GLOBAL_DAILY_ANLAS, GLOBAL_DAILY_ANLAS_UNTIL, GLOBAL_MONTHLY_ANLAS, GUARD_BASE, ALGO_NOTICE, IMAGE_RETENTION, IMAGE_CAP_MB, IMAGE_KEEP_HOURS, MEMBER_DOWNLOAD, SHARE_MODE)
 
 

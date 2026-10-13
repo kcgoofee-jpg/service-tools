@@ -223,12 +223,7 @@ CREATE TABLE IF NOT EXISTS error_events (
     resolved_at REAL               -- 站长标记已处理；之后再出现视为「复发」
 );
 CREATE INDEX IF NOT EXISTS idx_error_events_resolved_last_seen ON error_events (resolved_at, last_seen DESC);
-CREATE TABLE IF NOT EXISTS waitlist (
-    discord_id TEXT PRIMARY KEY,
-    name TEXT NOT NULL DEFAULT '',
-    joined_at REAL NOT NULL,
-    invited_at REAL                -- 有名额时发出邀请的时间；24 小时内未领取则让给下一位
-);
+-- waitlist 表已随候补功能移除（2026-10-13）；connect() 里会对老库执行 DROP TABLE IF EXISTS 清理。
 CREATE TABLE IF NOT EXISTS key_idle_reminders (
     key_id INTEGER PRIMARY KEY,
     activity REAL NOT NULL,       -- 提醒时 Key 的最后活动时间；之后再有活动会重新计时并允许再次提醒
@@ -369,6 +364,9 @@ class Database:
         _rollback_on_error(self._db)
         self._db.row_factory = aiosqlite.Row
         await self._db.execute("PRAGMA journal_mode=WAL")
+        # WAL 下的安全默认：commit 只刷 WAL 不等 fsync 落盘。全库每请求 5-7 个独立事务，FULL 的每次
+        # fsync 在小机器慢盘上是最大的写放大来源；NORMAL 在断电时最多丢最近一笔事务，不会损坏库。
+        await self._db.execute("PRAGMA synchronous=NORMAL")
         await self._db.executescript(SCHEMA)
         # 轻量迁移：老库补列（新库建表已含该列，会抛 duplicate column，忽略即可）
         for ddl in (
@@ -434,6 +432,8 @@ class Database:
         await self._db.commit()
         # units 列刚加上时为 NULL：老数据按 1 张 = 1 份回填（偏保守，不会让升级当天突然多出额度）
         await self._db.execute("UPDATE upstream_token_counters SET units=images WHERE units IS NULL")
+        # 2026-10-13：候补功能移除，老库的 waitlist 表一并清掉
+        await self._db.execute("DROP TABLE IF EXISTS waitlist")
         # 2026-10-11：手动额度就是精确值，「V5 基础值」不再用；旧数据一次性清掉（daily_v5 保留当前实际值）
         await self._db.execute("UPDATE api_keys SET v5_pinned=NULL WHERE v5_pinned IS NOT NULL")
         await self._db.commit()
@@ -732,33 +732,6 @@ class Database:
             (grace_started_at, cutoff, INVITE_TAG),
         )
         return [int(row["id"]) for row in await cur.fetchall()]
-
-    async def keys_due_for_idle_reminder(self, remind_before: float) -> list[dict[str, Any]]:
-        """闲置回收前的提醒对象：Discord 自助领取、仍启用、最后活动早于 remind_before、本轮尚未提醒。"""
-        raw_grace = await self.get_setting("key_inactivity_grace_started_at", 0)
-        try:
-            grace = float(raw_grace)
-        except (TypeError, ValueError):
-            return []
-        if not math.isfinite(grace) or grace < 0:
-            return []
-        cur = await self._db.execute(
-            """SELECT k.id AS key_id, k.name AS name, r.discord_id AS discord_id,
-                      MAX(COALESCE(k.last_used_at, k.created_at), ?) AS activity,
-                      EXISTS (SELECT 1 FROM usage_log u WHERE u.key_id=k.id AND u.status='ok') AS ever_used
-               FROM api_keys k JOIN discord_registrations r ON r.key_id=k.id
-               LEFT JOIN key_idle_reminders m ON m.key_id=k.id
-               WHERE k.is_admin=0 AND k.enabled=1
-                 AND MAX(COALESCE(k.last_used_at, k.created_at), ?) < ?
-                 AND (m.key_id IS NULL OR m.activity <> MAX(COALESCE(k.last_used_at, k.created_at), ?))""",
-            (grace, grace, remind_before, grace))
-        return [dict(r) for r in await cur.fetchall()]
-
-    async def mark_idle_reminded(self, key_id: int, activity: float) -> None:
-        await self._db.execute(
-            "INSERT OR REPLACE INTO key_idle_reminders (key_id, activity, sent_at) VALUES (?,?,?)",
-            (key_id, activity, time.time()))
-        await self._db.commit()
 
     async def list_keys(self) -> list[aiosqlite.Row]:
         cur = await self._db.execute("SELECT * FROM api_keys ORDER BY id DESC")
