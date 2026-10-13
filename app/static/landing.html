@@ -437,7 +437,7 @@ body.haskey #algoNote,html.haskey #algoNote{display:none!important}
     <div class="card">
       <!-- 标题与打码 Key：JS 会按登录状态写文案（查额度 / 我的额度）。
            2026-10-12 修复：这些 id 只出现在 JS 里、页面上不存在，导致 my key / 标题整段不渲染。 -->
-      <div class="live-h" id="liveTitle"><span data-ic="key"></span>查额度</div>
+      <div class="live-h" id="liveTitle">查额度</div>
       <div class="copyline" id="headKey" hidden></div>
       <div class="me" id="meCard" hidden></div>
       <div class="loginrow" id="loginRow" hidden>
@@ -503,7 +503,7 @@ body.haskey #algoNote,html.haskey #algoNote{display:none!important}
 
   <section id="donate">
     <div class="card">
-      <div class="ah"><span data-ic="key"></span>捐赠 Key · 让公益站跑得更久</div>
+      <div class="ah">捐赠 Key · 让公益站跑得更久</div>
       <p class="donate-intro">站点的出图名额全部来自大家捐赠的号池。愿意捐一个 NovelAI 账号的话（<b>V4.5 无限出图</b>最帮得上忙），把 Token 粘给站长并附一句<b>使用要求</b>（比如「只用 4.5」「周末别用」）。提交只进站长后台，人工验证后才接入，不会自动生效。</p>
       <button class="btn" id="donateBtn" type="button">💝 我要捐赠</button>
       <form id="donateForm" hidden autocomplete="off">
@@ -579,7 +579,7 @@ body.haskey #algoNote,html.haskey #algoNote{display:none!important}
       <li><span class="ri" data-ic="image"></span><span><b>出图模型规格</b>：推荐 <code>V4.5 Full</code> 与极速 <code>V5 Full</code>（V5 仅需 4~5 秒完成出图，适合找灵感与快速 Roll 图）。免费尺寸上限 1024×1024 或等总像素（如 832×1216），步数建议 ≤ 28。图生图等付费功能未开通前请在客户端关闭。</span></li>
       <li><span class="ri" data-ic="clock"></span><span><b>一次一张，别狂重试</b>：单并发控制，每把 Key 同时只排队或生成 1 张，出完再发下一张。如遇排队请耐心等待——1 小时内连续被拒 60 次会自动触发 1 小时安全冷却，到点自动恢复。</span></li>
       <li><span class="ri" data-ic="info"></span><span><b>查额度、自助换 Key</b>：在 Discord 输入 <code>/quota</code> 随时查看今日剩余免费额度与状态；若怀疑 Key 泄露或遇到配置异常，在 Discord 输入 <code>/resetkey</code> 可一键自助更换新 Key。</span></li>
-      <li><span class="ri" data-ic="key"></span><span><b>一人一把，严禁转售与共用</b>：公益资源有限，Key 仅限本人使用（挂梯子换节点、手机电脑多设备正常使用完全不受影响；多人同时共用或转售会被系统记录证据并回收 Key）。退出 Discord 服务器或长期闲置后 Key 会被自动回收<span id="ruleIdle" hidden>（连续 <b id="idleDays"></b> 天没生图）</span>。</span></li>
+      <li><span><b>一人一把，严禁转售与共用</b>：公益资源有限，Key 仅限本人使用（挂梯子换节点、手机电脑多设备正常使用完全不受影响；多人同时共用或转售会被系统记录证据并回收 Key）。退出 Discord 服务器或长期闲置后 Key 会被自动回收<span id="ruleIdle" hidden>（连续 <b id="idleDays"></b> 天没生图）</span>。</span></li>
       <li><span class="ri" data-ic="ban"></span><span><b>合规安全，禁止违禁</b>：严禁生成违反法律法规或极端有害的内容，违规账号将被永久封禁并不再恢复。</span></li>
       <!-- 记录披露（开启「生成记录」时由服务端下发 audit_notice；关着不显示） -->
       <li id="audit" hidden><span class="ri" data-ic="info"></span><span id="auditTxt"></span></li>
@@ -609,7 +609,6 @@ var P = {
   image:'<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.8"/><path d="M21 16l-5-5-8 8"/>',
   code:'<path d="M8 8l-4 4 4 4M16 8l4 4-4 4M14 5l-4 14"/>',
   moon:'<path d="M20 14.5A8.5 8.5 0 019.5 4 8.5 8.5 0 1020 14.5z"/>',
-  key:'<circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3"/>',
   ban:'<circle cx="12" cy="12" r="9"/><path d="M5.7 5.7l12.6 12.6"/>',
   info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8v.01"/>',
   book:'<path d="M4 5a2 2 0 012-2h13v16H6a2 2 0 00-2 2V5z"/><path d="M4 19a2 2 0 012-2h13"/>',
@@ -747,7 +746,7 @@ function renderMe(d){
      未登录时才显示「🔑 查额度」作引导。 */
   if($('liveTitle')){
     $('liveTitle').hidden = !!authed;
-    if(!authed) $('liveTitle').innerHTML = icon('key') + '查额度';
+    if(!authed) $('liveTitle').textContent = '查额度';
   }
   if(authed && d && d.has_key){ /* 领取胶囊已删 */ }
   var hk = $('headKey');
