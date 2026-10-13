@@ -16,7 +16,9 @@ for kid, tok in rows:
 db.execute("DELETE FROM site_settings WHERE key IN ('key_source_salt','admin_password_hash') OR key LIKE '%password%' "
            "OR key LIKE '%hash%' OR key LIKE '%salt%' OR key LIKE '%secret%' OR key LIKE '%token%'")
 # req_features.toks 是提示词词条的无盐短哈希，用标签字典能还原词条，清空；fp / sig 保留给分析
-db.execute("UPDATE req_features SET toks=''")
+# （req_features 表已随防分享体系移除（2026-10-13）：新快照没有这张表，老快照才有）
+if "req_features" in {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}:
+    db.execute("UPDATE req_features SET toks=''")
 # 报错堆栈可能夹带请求内容，清空
 db.execute("UPDATE error_events SET detail=''")
 cols = {r[1] for r in db.execute("PRAGMA table_info(generation_audit)")}
