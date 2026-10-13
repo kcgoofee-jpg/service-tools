@@ -10,12 +10,9 @@ LANDING_HTML = ROOT / "app" / "static" / "landing.html"
 def test_landing_dead_code_and_icons_removed():
     content = LANDING_HTML.read_text(encoding="utf-8")
     
-    # 1. Unused icons in var P
-    p_match = re.search(r"var P = \{(.*?)\n\};", content, re.DOTALL)
-    assert p_match, "var P not found in landing.html"
-    p_icons = p_match.group(1)
-    for unused_icon in ["alert:", "pulse:", "refresh:"]:
-        assert unused_icon not in p_icons, f"Unused icon {unused_icon} should be removed from landing.html"
+    # 1. 图标系统已整体移除（10-14 站长：图标错位还自己出现，严厉禁止）——不许回归
+    assert "var P = {" not in content and "data-ic" not in content
+    assert "function icon(" not in content and "function hydrate(" not in content
 
     # 2. Dead CSS from legacy key query UI
     dead_selectors = ["#result{", ".alert{", ".chips{", ".avatar{width:44px"]
