@@ -443,7 +443,11 @@ async def _cached_snapshot(db) -> dict[str, Any]:
 @router.api_route("/status", methods=["GET", "HEAD"], response_class=HTMLResponse)
 async def status_page(request: Request):
     snap = await _cached_snapshot(request.app.state.gate.db)
-    return HTMLResponse(render(snap), headers=STATUS_HEADERS)
+    import os
+    guild, chan = os.getenv("DISCORD_GUILD_ID", ""), os.getenv("ANNOUNCE_CHANNEL_ID", "")
+    # 「订阅更新」= 公告频道（成员点开就是 DC）；配了公告频道才用，否则退回 Atom 源
+    sub = f"https://discord.com/channels/{guild}/{chan}" if guild and chan else "/status/feed.xml"
+    return HTMLResponse(render(snap, sub), headers=STATUS_HEADERS)
 
 
 @router.get("/status.json")
