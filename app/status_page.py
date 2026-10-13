@@ -242,7 +242,7 @@ html[data-theme="dark"]{--bg:#101214;--fg:#e8e8e6;--muted:#9aa0a6;--border:rgba(
 @media(prefers-color-scheme:dark){html:not([data-theme="light"]){--bg:#101214;--fg:#e8e8e6;--muted:#9aa0a6;--border:rgba(255,255,255,.16)}}
 body{margin:0;background-color:var(--bg);color:var(--fg);font-family:"Atlassian Sans","Helvetica Neue",Helvetica,Arial,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
 font-weight:400;font-size:16px;line-height:24px;-webkit-font-smoothing:antialiased;overflow-x:hidden}
-a{color:inherit}
+a{color:inherit;text-decoration:none}
 small{font-size:.875rem;line-height:1.334375rem;color:var(--muted)}
 .layout-content{width:100%;max-width:850px;margin:0 auto;padding:0 20px 3rem}
 .font-regular{font-size:1rem;line-height:1.5rem}
@@ -264,32 +264,32 @@ font-size:2.4rem;line-height:1;letter-spacing:-.02em;color:var(--fg);white-space
 .unresolved-incident .updates{padding:1.25rem;border-style:solid;border-width:1px;border-top:none;border-radius:0 0 4px 4px}
 .update{margin-bottom:20px;overflow-wrap:break-word}.update:last-of-type{margin-bottom:0}
 .whitespace-pre-wrap{white-space:pre-wrap}
-.components-uptime-link{text-align:right;font-size:.85em;color:#87867F;margin-bottom:.4rem}
+.components-uptime-link{text-align:right;font-size:.85em;color:var(--muted);margin-bottom:.4rem}
 .components-section{margin-bottom:60px}
-.component-container{padding:1.1rem 1.25rem 1rem;border:1px solid #DEDCD1;border-top-width:0;width:100%;overflow:hidden}
+.component-container{padding:1.1rem 1.25rem 1rem;border:1px solid var(--border);border-top-width:0;width:100%;overflow:hidden}
 .component-container:first-child{border-top-width:1px;border-radius:4px 4px 0 0}
 .component-container:last-child{border-radius:0 0 4px 4px}
 .component-inner-container{display:flex;justify-content:space-between;align-items:baseline;gap:1rem}
-.component-container .name{font-weight:500;color:rgba(20,20,19,.8);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:75%}
+.component-container .name{font-weight:500;color:var(--fg);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:75%}
 .component-container .component-status{font-size:.875rem;white-space:nowrap}
 .uptime-90-days-wrapper{padding-top:5px;margin-bottom:-2px;width:100%;overflow:hidden}
 .uptime-90-days-wrapper svg{display:block;margin:0;padding:0;height:34px;width:100%;overflow:hidden}
 .uptime-90-days-wrapper svg rect:hover{fill:#5e6c84}
 .legend{display:flex;flex-direction:row;justify-content:space-between;position:relative;top:-2px;flex-wrap:wrap;gap:4px}
-.legend .legend-item{flex:0 0 auto;font-size:.875rem;color:#87867f}
-.legend .spacer{flex:1;margin:.75rem .5rem 0;height:1px;background:#87867f;opacity:.3;min-width:20px}
+.legend .legend-item{flex:0 0 auto;font-size:.875rem;color:var(--muted)}
+.legend .spacer{flex:1;margin:.75rem .5rem 0;height:1px;background:var(--muted);opacity:.3;min-width:20px}
 .incidents-list{margin-top:60px}
 .incidents-list h2{margin:0}
 .status-day{margin-top:35px}.status-day:nth-child(2){margin-top:20px}
-.status-day .date{font-weight:500;border-bottom:1px solid #DEDCD1;padding-bottom:3px;margin:0 0 10px}
+.status-day .date{font-weight:500;border-bottom:1px solid var(--border);padding-bottom:3px;margin:0 0 10px}
 .status-day p{margin:0}
-.color-secondary{color:#87867F}
+.color-secondary{color:var(--muted)}
 .incident-container{margin-bottom:1.5rem}
 .incident-container .incident-title{margin:.5rem 0}
-.incident-title.impact-none a{color:#141413}.incident-title.impact-minor a{color:#FAA72A}
+.incident-title.impact-none a{color:var(--fg)}.incident-title.impact-minor a{color:#FAA72A}
 .incident-title.impact-major a{color:#E86235}.incident-title.impact-critical a{color:#E04343}
 .updates-container .update{margin:0 0 1rem}
-.page-footer{margin-top:3rem;border-top:1px solid #DEDCD1;padding-top:1rem;display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap}
+.page-footer{margin-top:3rem;border-top:1px solid var(--border);padding-top:1rem;display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap}
 @media(max-width:768px){.masthead{padding-top:40px;margin-bottom:40px;gap:12px}.page-status,.unresolved-incidents,.components-section{margin-bottom:40px}
 .incidents-list{margin-top:40px}.font-largest{font-size:1.375rem;line-height:1.959375rem}.font-large{font-size:1.125rem;line-height:1.659375rem}
 .component-container{padding:.85rem 1rem .75rem}.logo{font-size:1.85rem}.logo .mark{font-size:1.6rem}}
