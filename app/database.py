@@ -155,6 +155,16 @@ CREATE TABLE IF NOT EXISTS member_survey (    -- 成员详细问卷（/survey �
     donate TEXT NOT NULL DEFAULT '',
     ts REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS key_donations (     -- 访客在首页「捐赠 Key」提交的号（后台人工验证后才接入上游，不自动生效）
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts REAL NOT NULL,
+    token TEXT NOT NULL,                        -- NovelAI Token 原文：只进这张表，不写日志
+    message TEXT NOT NULL DEFAULT '',           -- 捐赠者的留言 / 使用要求（必填）
+    contact TEXT NOT NULL DEFAULT '',           -- 选填联系方式
+    handled INTEGER NOT NULL DEFAULT 0,
+    handled_at REAL,
+    handled_note TEXT NOT NULL DEFAULT ''
+);
 CREATE TABLE IF NOT EXISTS share_state (       -- 防分享风险分（share_guard.py）
     key_id INTEGER PRIMARY KEY,
     score REAL NOT NULL DEFAULT 0,
@@ -936,6 +946,32 @@ class Database:
                LEFT JOIN api_keys k ON k.id=f.key_id
                LEFT JOIN discord_registrations r ON r.key_id=f.key_id ORDER BY f.ts DESC""")
         return [dict(r) for r in rows]
+
+    async def save_donation(self, token: str, message: str, contact: str) -> int:
+        """首页捐赠 Key：原文入库等站长人工接入，返回 id。Token 绝不写日志。"""
+        cur = await self._db.execute(
+            "INSERT INTO key_donations(ts, token, message, contact) VALUES (?,?,?,?)",
+            (time.time(), token, message[:500], contact[:100]))
+        await self._db.commit()
+        return int(cur.lastrowid or 0)
+
+    async def list_donations(self) -> dict:
+        rows = await self._db.execute_fetchall(
+            "SELECT id, ts, token, message, contact, handled, handled_at, handled_note FROM key_donations "
+            "ORDER BY handled, ts DESC LIMIT 200")
+        return {"unhandled": [dict(r) for r in rows if not r["handled"]],
+                "handled": [dict(r) for r in rows if r["handled"]]}
+
+    async def count_unhandled_donations(self) -> int:
+        rows = await self._db.execute_fetchall("SELECT COUNT(*) FROM key_donations WHERE handled=0")
+        return int(rows[0][0] or 0)
+
+    async def handle_donation(self, did: int, note: str) -> bool:
+        cur = await self._db.execute(
+            "UPDATE key_donations SET handled=1, handled_at=?, handled_note=? WHERE id=? AND handled=0",
+            (time.time(), note[:200], did))
+        await self._db.commit()
+        return cur.rowcount > 0
 
     async def forget_registration_for_key(self, key_id: int) -> list[str]:
         """删除该 Key 对应的领取记录，返回被删记录的 Discord ID（用于摘除身份组）。"""

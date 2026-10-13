@@ -799,7 +799,7 @@ td.note{min-width:220px}
       <button data-tab="ops"><span data-ic="key"></span>领 Key 与功能</button>
       <button data-tab="limits"><span data-ic="sliders"></span>额度与保护</button>
       <button data-tab="modules"><span data-ic="toggle"></span>模块<span class="nav-badge" id="navMods" hidden></span></button>
-      <button data-tab="discord"><span data-ic="chat"></span>Discord<span class="nav-badge" id="navBot" hidden>!</span></button>
+      <button data-tab="discord"><span data-ic="chat"></span>Discord<span class="nav-badge" id="navBot" hidden>!</span><span class="nav-badge" id="navDonate" hidden title="未处理的捐赠 Key"></span></button>
       <button data-tab="set"><span data-ic="disk"></span>系统</button>
     </nav>
     <div class="side-foot">
@@ -936,6 +936,16 @@ td.note{min-width:220px}
             <div class="table-wrap"><table class="rt"><thead><tr>
               <th class="t">提交时间</th><th>成员</th><th>客户端</th><th>限额理解</th><th>希望改进</th><th>其他想法</th><th>捐 V4.5</th>
             </tr></thead><tbody id="svBody"></tbody></table></div>
+          </div>
+          <div class="card panel">
+            <div class="panel-head"><h2>捐赠 Key<span class="badge sm" id="dnCount" style="margin-left:8px">0</span></h2>
+              <div class="desc">首页「我要捐赠」收到的号：自己验证可用后手动加进上游，点「已处理」前导航角标一直提醒；Token 只进后台，不写日志</div></div>
+            <div class="table-wrap"><table class="rt"><thead><tr>
+              <th class="t">时间</th><th>留言 / 要求</th><th>联系方式</th><th>Token</th><th>操作</th>
+            </tr></thead><tbody id="dnBody"><tr><td class="empty" colspan="5">加载中…</td></tr></tbody></table></div>
+            <details id="dnHandledWrap" hidden style="margin-top:8px"><summary class="muted sm">已处理 <span id="dnHandledCount">0</span> 条</summary>
+              <div class="table-wrap"><table class="rt"><tbody id="dnHandled"></tbody></table></div>
+            </details>
           </div>
         </section>
 
@@ -1599,6 +1609,7 @@ function tab(name){
   if(name==='feedback') loadFeedback();
   if(name==='discord') loadSurvey();
   if(name==='discord') loadBot();
+  if(name==='discord') loadDonations();
   if(name==='modules') loadModules();
 }
 
@@ -1837,6 +1848,51 @@ async function loadSurvey(){
     </tr>`).join('') : '<tr><td class="empty" colspan="7">还没有问卷</td></tr>';
   }catch(e){ toastErr(e); }
 }
+/* 首页捐赠 Key（/public/donate）：未处理置顶；导航角标在全部处理完前常亮（任意页每 15s 轮询一次数量） */
+let donationTokens = {};
+async function loadDonateBadge(){
+  try{
+    const d = await api('/admin/api/donations/count');
+    const nav = $('#navDonate'); nav.hidden = !d.open; nav.textContent = d.open;
+  }catch(e){}
+}
+async function loadDonations(){
+  try{
+    const d = await api('/admin/api/donations');
+    const un = d.unhandled || [], ha = d.handled || [];
+    $('#dnCount').textContent = un.length;
+    donationTokens = {}; un.concat(ha).forEach(r => { donationTokens[r.id] = r.token; });
+    const tstr = r => new Date(r.ts*1000).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
+    const row = r => `<tr${r.handled ? ' class="muted"' : ''}>
+      <td class="mono nw t" data-label="时间">${tstr(r)}${r.handled ? '<div class="muted sm">已处理</div>' : ''}</td>
+      <td data-label="留言" style="max-width:240px;white-space:pre-wrap">${esc(r.message)}</td>
+      <td data-label="联系" class="mono">${esc(r.contact || '—')}</td>
+      <td data-label="Token" class="mono" style="max-width:230px"><span style="display:inline-block;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom">${esc(r.token.slice(0,12))}…${esc(r.token.slice(-6))}</span>
+        <button class="btn sm" data-dncopy="${r.id}">复制</button></td>
+      <td data-label="操作">${r.handled ? esc(r.handled_note || '') : `<button class="btn sm primary" data-dndone="${r.id}">已处理</button>`}</td>
+    </tr>`;
+    $('#dnBody').innerHTML = un.length ? un.map(row).join('')
+      : '<tr><td class="empty" colspan="5">还没有捐赠。首页「我要捐赠」提交后会出现在这里</td></tr>';
+    $('#dnHandled').innerHTML = ha.map(row).join('');
+    $('#dnHandledCount').textContent = ha.length;
+    $('#dnHandledWrap').hidden = !ha.length;
+  }catch(e){ toastErr(e); }
+}
+document.addEventListener('click', async ev => {
+  const cp = ev.target.closest('[data-dncopy]');
+  if(cp){
+    try{ await navigator.clipboard.writeText(donationTokens[cp.dataset.dncopy] || ''); toast('已复制完整 Token', 'ok'); }
+    catch(e){ toast('复制失败，请手动选中'); }
+    return;
+  }
+  const dn = ev.target.closest('[data-dndone]');
+  if(dn){
+    try{
+      await api(`/admin/api/donations/${dn.dataset.dndone}/handle`, {method:'POST', body: JSON.stringify({note:''})});
+      toast('已标记处理', 'ok'); loadDonations(); loadDonateBadge();
+    }catch(e){ toastErr(e); }
+  }
+});
 let bugsCache = null;
 async function loadBugs(){
   try{
@@ -4189,7 +4245,9 @@ setInterval(() => {
   if(document.hidden || $('#app').style.display==='none' || userBusy()) return;
   const t = currentTab(), fn = AUTO_REFRESH[t];
   try{ if(fn) fn(); else loadBugs(); }catch(e){}        // 设置页只更新边栏角标
+  try{ loadDonateBadge(); }catch(e){}                   // 捐赠角标任意页都看得到（浅请求：只拉数量）
 }, 15000);
+loadDonateBadge();
 
 if(window.matchMedia) matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', applyThemeUi);
 

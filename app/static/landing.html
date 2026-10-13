@@ -419,6 +419,13 @@ body.haskey #algoNote,html.haskey #algoNote{display:none!important}
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}
 }
+/* ── 捐赠 Key ── */
+#donate .donate-intro{margin:6px 0 12px;color:var(--tx-2,#9a9aa3);font-size:.92rem;line-height:1.7}
+#donate form{display:flex;flex-direction:column;gap:12px;margin-top:4px}
+#donate label{display:flex;flex-direction:column;gap:6px;font-size:.88rem}
+#donate textarea,#donate input{width:100%;background:var(--bg-inset,rgba(255,255,255,.04));border:1px solid var(--bd,rgba(255,255,255,.12));border-radius:10px;padding:10px 12px;color:inherit;font:inherit;resize:vertical}
+#donate textarea:focus,#donate input:focus{outline:none;border-color:var(--accent,#8ab4ff)}
+#donate .donate-actions{display:flex;gap:8px}
 </style>
 </head>
 <body>
@@ -505,6 +512,26 @@ body.haskey #algoNote,html.haskey #algoNote{display:none!important}
 
   <section id="announce" hidden>
     <div class="card"><div class="ah"><span data-ic="megaphone"></span>站长公告</div><div id="annBox"></div></div>
+  </section>
+
+  <section id="donate">
+    <div class="card">
+      <div class="ah"><span data-ic="key"></span>捐赠 Key · 让公益站跑得更久</div>
+      <p class="donate-intro">站点的出图名额全部来自大家捐赠的号池。愿意捐一个 NovelAI 账号的话（<b>V4.5 无限出图</b>最帮得上忙），把 Token 粘给站长并附一句<b>使用要求</b>（比如「只用 4.5」「周末别用」）。提交只进站长后台，人工验证后才接入，不会自动生效。</p>
+      <button class="btn" id="donateBtn" type="button">💝 我要捐赠</button>
+      <form id="donateForm" hidden autocomplete="off">
+        <label>NovelAI Token（登录 novelai.net → Account 页整段复制，只给站长看）
+          <textarea id="donateToken" rows="3" spellcheck="false" placeholder="粘贴整段 Token（约几百个字符）"></textarea></label>
+        <label>联系方式（选填：Discord ID / QQ，方便站长有疑问时找你）
+          <input id="donateContact" maxlength="100" placeholder="选填"></label>
+        <label>留言 / 使用要求（必填）
+          <textarea id="donateMsg" rows="2" maxlength="500" placeholder="比如：只用 V4.5 / 周末别用 / 高峰期留给别人…"></textarea></label>
+        <div class="donate-actions">
+          <button class="btn primary" type="submit">提交给站长</button>
+          <button class="btn" type="button" id="donateCancel">收起</button>
+        </div>
+      </form>
+    </div>
   </section>
 
   <section id="start" class="guest-only">
@@ -1082,6 +1109,28 @@ function fmtDate(sec){
       .then(function(){ setTimeout(poll, visible ? (failed ? 5000 : 1000) : 10000); });
   }
   poll();
+})();
+
+/* ---------- 捐赠 Key：提交只进站长后台（人工验证后才接入） ---------- */
+(function(){
+  var btn = $('donateBtn'), form = $('donateForm');
+  if(!btn || !form) return;
+  btn.addEventListener('click', function(){ btn.hidden = true; form.hidden = false; $('donateToken').focus(); });
+  $('donateCancel').addEventListener('click', function(){ form.hidden = true; btn.hidden = false; });
+  form.addEventListener('submit', async function(ev){
+    ev.preventDefault();
+    var token = $('donateToken').value.trim(), message = $('donateMsg').value.trim(), contact = $('donateContact').value.trim();
+    if(token.length < 20){ toast('Token 好像不完整：请从 NovelAI 官网 Account 页整段复制'); return; }
+    if(!message){ toast('请写一句留言 / 使用要求（站长好接进合适的池子）'); return; }
+    try{
+      var r = await fetch('/public/donate', {method:'POST', headers:{'Content-Type':'application/json'},
+                                             body: JSON.stringify({token: token, message: message, contact: contact})});
+      var j = await r.json().catch(function(){ return {}; });
+      if(!r.ok){ toast(j.detail || '提交失败，稍后再试'); return; }
+      form.reset(); form.hidden = true; btn.hidden = false;
+      toast('已收到，谢谢！站长会在后台验证后接入 💛');
+    }catch(e){ toast('网络异常，稍后再试'); }
+  });
 })();
 
 </script>
