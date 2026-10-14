@@ -21,7 +21,7 @@ pub const STATE_COOKIE: &str = "owl_login_state";
 pub const ADMIN_SESSION_SECS: i64 = 7 * 86400;
 pub const MEMBER_SESSION_DAYS: i64 = 30;
 
-fn hmac_hex(secret: &str, payload: &str) -> String {
+pub(crate) fn hmac_hex(secret: &str, payload: &str) -> String {
     let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes()).expect("hmac key");
     mac.update(payload.as_bytes());
     hex::encode(mac.finalize().into_bytes())
@@ -125,7 +125,7 @@ pub fn delete_cookie_header(
 // ------------------------------------------------------------------ 后台
 
 /// 改过的密码（scrypt 哈希）优先；否则用 ADMIN_PASSWORD。
-fn admin_pw_material(state: &AppState) -> String {
+pub(crate) fn admin_pw_material(state: &AppState) -> String {
     state
         .admin_pw_hash
         .read()
@@ -135,12 +135,13 @@ fn admin_pw_material(state: &AppState) -> String {
         .unwrap_or_else(|| state.env.admin_password.clone())
 }
 
+/// 后台签名密钥：`secret + ":" + sha256(密码材料)`。改密码即令所有会话（和绑定会话的令牌）失效。
+pub(crate) fn admin_key_from(secret: &str, pw_material: &str) -> String {
+    format!("{secret}:{}", sha256_hex(pw_material))
+}
+
 fn admin_session_key(state: &AppState) -> String {
-    format!(
-        "{}:{}",
-        state.secret_key,
-        sha256_hex(&admin_pw_material(state))
-    )
+    admin_key_from(&state.secret_key, &admin_pw_material(state))
 }
 
 pub fn make_admin_cookie(state: &AppState) -> String {

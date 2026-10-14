@@ -302,29 +302,19 @@ async fn set_enabled(
 // ------------------------------------------------------------------ Anlas 核对
 
 /// 会话绑定的 CSRF 令牌：用管理员会话密钥对「reconciliation:<会话 Cookie>」做 HMAC（旧版 `_reconciliation_csrf`）。
-/// 密钥推导与 `session::admin_session_key` 相同（SECRET_KEY + ":" + sha256(密码哈希或 ADMIN_PASSWORD)），
+/// 密钥与后台会话相同（`session::admin_key_from`），
 /// 所以改密码 / 换会话都会让旧令牌失效。
 fn csrf_for(secret_key: &str, password_material: &str, session_cookie: &str) -> String {
-    use hmac::{Hmac, KeyInit, Mac};
-    use sha2::{Digest, Sha256};
-    let key = format!(
-        "{secret_key}:{}",
-        hex::encode(Sha256::digest(password_material.as_bytes()))
-    );
-    let mut mac = Hmac::<Sha256>::new_from_slice(key.as_bytes()).expect("hmac key");
-    mac.update(format!("reconciliation:{session_cookie}").as_bytes());
-    hex::encode(mac.finalize().into_bytes())
+    let key = crate::session::admin_key_from(secret_key, password_material);
+    crate::session::hmac_hex(&key, &format!("reconciliation:{session_cookie}"))
 }
 
 fn csrf_token(state: &AppState, session_cookie: &str) -> String {
-    let material = state
-        .admin_pw_hash
-        .read()
-        .expect("pw")
-        .clone()
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| state.env.admin_password.clone());
-    csrf_for(&state.secret_key, &material, session_cookie)
+    csrf_for(
+        &state.secret_key,
+        &crate::session::admin_pw_material(state),
+        session_cookie,
+    )
 }
 
 fn session_cookie(parts: &Parts) -> String {

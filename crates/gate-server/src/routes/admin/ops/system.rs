@@ -85,7 +85,7 @@ async fn announcement_send(
         return Err(HttpError::new(503, "公告频道未配置（.env 的 ANNOUNCE_CHANNEL_ID）").into());
     }
     state.announcer.post(&text);
-    // 与旧版一致：这里自己记一条，中间件还会再记一条「POST /announcement/send」
+    // 只记这一条（带字数和正文摘要），中间件不再重复记
     log_action(
         &state.db,
         &super::super::actor(&state, &parts),
@@ -96,13 +96,15 @@ async fn announcement_send(
         state.now(),
     )
     .await;
-    Ok(ok_json(&json!({"ok": true})))
+    let mut resp = ok_json(&json!({"ok": true}));
+    resp.extensions_mut().insert(super::super::ActionLogged);
+    Ok(resp)
 }
 
 // ------------------------------------------------------------------ 测试告警
 
 async fn alerts_test(State(state): State<AppState>, _s: AdminSession) -> ApiResult {
-    let shared = crate::ops::shared(&state);
+    let shared = &state.ops;
     let now = state.now();
     let last = *shared.alert_test_at.lock().expect("alert_test_at");
     if now - last < ALERT_TEST_GAP {

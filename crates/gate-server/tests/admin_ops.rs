@@ -1264,23 +1264,20 @@ async fn home_join_and_checks_ack() {
         (400, r#"{"detail":"请求体不是合法 JSON"}"#)
     );
 
-    // 与旧版一致：接口自己记一条，中间件再记一条「POST /home/join」
+    // 接口自己记一条（更具体），中间件只在失败时记「修改首页加入按钮」
     let rows = actions(&e).await;
     let join: Vec<(&str, &str, bool)> = rows
         .iter()
-        .filter(|r| r.1.starts_with("首页加入按钮") || r.1 == "POST /home/join")
+        .filter(|r| r.1.starts_with("首页加入按钮") || r.1 == "修改首页加入按钮")
         .map(|r| (r.1.as_str(), r.3.as_str(), r.4))
         .collect();
     assert_eq!(
         join,
         vec![
             ("首页加入按钮关闭（置灰「关闭注册」）", "", true),
-            ("POST /home/join", r#"{"open":false}"#, true),
             ("首页加入按钮开放", "", true),
-            ("POST /home/join", "", true),
             ("首页加入按钮关闭（置灰「关闭注册」）", "", true),
-            ("POST /home/join", r#"{"open":0}"#, true),
-            ("POST /home/join", "失败（400）：请求体不是合法 JSON", false),
+            ("修改首页加入按钮", "失败（400）：请求体不是合法 JSON", false),
         ]
     );
 
@@ -1417,7 +1414,7 @@ async fn announcement_send_validation_and_unconfigured() {
     .await;
     let rows = actions(&e).await;
     let (action, _, detail, ok) = last_action(&rows);
-    assert_eq!((action, ok), ("POST /announcement/send", false));
+    assert_eq!((action, ok), ("发送公告", false));
     assert_eq!(
         detail,
         "失败（503）：公告频道未配置（.env 的 ANNOUNCE_CHANNEL_ID）"

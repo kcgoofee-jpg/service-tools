@@ -16,9 +16,7 @@ use gate_core::site_flags::{self, GLOBAL_DAILY_V5, REGISTER_OPEN};
 use gate_core::{jsondump, pyc, pyval};
 use gate_db::DbError;
 use serde_json::{Map, Value, json};
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::Mutex;
 
 /// 后台这几个接口里的错误：参数不合法回 422，库里的数据坏了回 500。
 #[derive(Debug)]
@@ -46,10 +44,10 @@ impl From<OpsError> for ApiError {
     }
 }
 
-// ------------------------------------------------------------------ 按数据库区分的单例
+// ------------------------------------------------------------------ 进程内共享状态
 
-/// 旧版的模块级全局变量。网关一个进程只有一个数据库，所以按数据库路径区分即可
-/// （同一进程里并行跑多个测试网关时，彼此也不会互相干扰）。
+/// 旧版的模块级全局变量，挂在 `AppState::ops` 上。
+#[derive(Default)]
 pub struct Shared {
     /// 上一次发测试告警的时间（旧版 `_last_alert_test_time`）。
     pub alert_test_at: Mutex<f64>,
@@ -57,23 +55,6 @@ pub struct Shared {
     pub runtime_limits: tokio::sync::Mutex<()>,
     /// 旧版 `ManualReconciliation.lock`：同一时刻只允许一次 Anlas 核对。
     pub reconcile: tokio::sync::Mutex<()>,
-}
-
-pub fn shared(state: &AppState) -> Arc<Shared> {
-    static REGISTRY: OnceLock<Mutex<HashMap<PathBuf, Arc<Shared>>>> = OnceLock::new();
-    let mut map = REGISTRY
-        .get_or_init(|| Mutex::new(HashMap::new()))
-        .lock()
-        .expect("ops registry");
-    map.entry(state.db.path().to_path_buf())
-        .or_insert_with(|| {
-            Arc::new(Shared {
-                alert_test_at: Mutex::new(0.0),
-                runtime_limits: tokio::sync::Mutex::new(()),
-                reconcile: tokio::sync::Mutex::new(()),
-            })
-        })
-        .clone()
 }
 
 // ------------------------------------------------------------------ 注册设置
