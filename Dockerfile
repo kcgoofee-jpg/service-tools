@@ -1,16 +1,43 @@
-FROM python:3.12-slim
+# syntax=docker/dockerfile:1.10
+# 猫头鹰公益站 3.0：一个镜像三个二进制（nai-gate 网关 / nai-bots 机器人 / nai-ops 运维）。
+# 由 GitHub Actions 构建并推到 GHCR；服务器（2 核）只 pull，不在本机编译。
 
-# 以非 root 用户运行；宿主机挂载的 data/ 目录需要属于同一 UID（部署时执行一次 chown -R 10001:10001 data）。
-RUN useradd --uid 10001 --create-home --shell /usr/sbin/nologin app
+# ---------- 前端 ----------
+FROM node:24-bookworm-slim AS web
+WORKDIR /src/web
+RUN corepack enable
+COPY web/package.json web/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+COPY web/ ./
+RUN pnpm vite build
+
+# ---------- Rust 依赖缓存（cargo-chef） ----------
+FROM rust:1.99-bookworm AS chef
+# BoringSSL（wreq 的 Chrome TLS 指纹）需要 cmake / clang
+RUN apt-get update && apt-get install -y --no-install-recommends cmake clang libclang-dev \
+ && rm -rf /var/lib/apt/lists/* \
+ && cargo install cargo-chef --locked --version 0.1.78
+WORKDIR /src
+
+FROM chef AS planner
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS build
+COPY --from=planner /src/recipe.json recipe.json
+RUN cargo chef cook --release --locked --recipe-path recipe.json
+COPY . .
+COPY --from=web /src/web/dist web/dist
+RUN cargo build --release --locked --bin nai-gate --bin nai-bots --bin nai-ops
+
+# ---------- 运行镜像 ----------
+FROM gcr.io/distroless/cc-debian12:nonroot
+# UID 10001：与 2.x 的数据目录属主一致（chown -R 10001:10001 data 只需做过一次）
+USER 10001:10001
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY --chown=app:app app ./app
-RUN mkdir -p /app/data && chown -R app:app /app/data
-USER app
-
+ENV DATA_DIR=/app/data TZ=Asia/Shanghai RUST_LOG=info
+COPY --from=build /src/target/release/nai-gate /src/target/release/nai-bots /src/target/release/nai-ops /usr/local/bin/
 EXPOSE 8000
-HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=4)" || exit 1
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--timeout-graceful-shutdown", "110"]
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD ["/usr/local/bin/nai-gate", "healthcheck"]
+ENTRYPOINT ["/usr/local/bin/nai-gate"]
+CMD ["serve"]
