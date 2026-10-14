@@ -235,14 +235,14 @@ async def test_member_tags_manual_and_auto(env):
     state, client, key = env
     await login(client)
     await state.db.add_log(key['id'], key['name'], 'image', 'm', 'rejected',
-                           detail='403 Vibe 编码会消耗 Anlas（每次编码参考图约 2 Anlas）')
+                           detail='403 检测到 img2img 底图（图生图未开通）')
     r = await client.put(f"/admin/api/keys/{key['id']}/tags", json={'tag': '疑似小号', 'note': '和 #100 同前缀'})
     assert r.status_code == 200
     assert (await client.put(f"/admin/api/keys/{key['id']}/tags", json={'tag': '  '})).status_code == 422
     from app.admin import member_tags
     manual, auto = await member_tags(state.db, time.time() - 86400)
     assert [t['tag'] for t in manual[key['id']]] == ['疑似小号'] and manual[key['id']][0]['note'] == '和 #100 同前缀'
-    assert auto[key['id']] == [{'tag': '开着 Vibe', 'count': 1}]
+    assert auto[key['id']] == [{'tag': '传了底图', 'count': 1}]   # 「开着 Vibe」标签已随 Vibe 全员开放移除（2026-10-14）
     actions = [a['action'] for a in await state.db.list_admin_actions()]
     assert '成员标签' in actions
     assert (await client.delete(f"/admin/api/keys/{key['id']}/tags/疑似小号")).status_code == 200
