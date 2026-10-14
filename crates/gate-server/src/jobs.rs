@@ -4,7 +4,7 @@
 //!
 //! | 循环 | 间隔 | 做什么 |
 //! |---|---|---|
-//! | 维护 | 5 分钟 ±20% | 清过期记录 / 状态码统计落库 / 原图保存期与容量上限 / 注册服务的三个同步（`registration::registrar_jobs`）/ 上游表现提醒 / 磁盘自检 / 官方状态 |
+//! | 维护 | 5 分钟 ±20% | 清过期记录 / 状态码统计落库 / 原图保存期与容量上限 / 自动关闭不用处理的 Bug（最多 10 分钟一次）/ 注册服务的三个同步（`registration::registrar_jobs`）/ 上游表现提醒 / 磁盘自检 / 官方状态 |
 //! | 内核 | 10 分钟 ±20% | 各模块 tick + 交叉校验（旧版叫 `anlas_rebalance_loop`，名字是历史遗留：Anlas 自动分配 10-13 已删除，现在就是内核） |
 //! | 闲置回收 | 1 小时 | 长期不用的 Key 删除并拉黑；`KEY_INACTIVITY_DELETE_DAYS=0` 时**什么都不做** |
 //! | 定时清空注册 | 每天 `REGISTER_RESET_AT` | 清空自助注册用户（循环本身在 `registration` 模块里；没配 / 没有注册服务就每小时看一眼） |
@@ -212,6 +212,8 @@ pub async fn maintenance_once(state: &AppState) {
         };
     }
     job!("purge", purge(state));
+    // 清理之后再自动关 Bug：先关再清的话，久未出现的旧 Bug 会在同一轮里直接被删，来不及留下「自动处理」的痕迹
+    job!("bug_triage", bug_triage(state));
     // 同步身份组 / 补全资料 / 退群回收（注册服务自己逐步记错；没配齐就什么都不做）
     if state.shutdown.is_cancelled() {
         return;
@@ -220,6 +222,15 @@ pub async fn maintenance_once(state: &AppState) {
     check_upstream_perf(state).await;
     job!("disk", disk_check(state));
     job!("official", official_status(state));
+}
+
+/// 自动关闭不需要人处理的 Bug（见 [`crate::bugs::Bugs::auto_triage`]）。最多 10 分钟一次，启动后的第一轮维护就会跑。
+pub async fn bug_triage(state: &AppState) -> Result<(), KernelError> {
+    let now = state.now();
+    if state.bugs.triage_due(now) {
+        state.bugs.auto_triage(now).await?;
+    }
+    Ok(())
 }
 
 /// 清理过期记录；原图的保存期与容量上限。

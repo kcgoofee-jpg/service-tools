@@ -166,6 +166,15 @@
 }
 
 /* Bug 详情 */
+.lg-note {
+  margin: 0;
+}
+.lg-auto {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
 .lg-src {
   min-width: 110px;
   max-width: 200px;

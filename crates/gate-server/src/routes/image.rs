@@ -14,7 +14,7 @@ use crate::auth::{
     authenticate, check_image_cooldown, check_rpm, ctx_of, limit_inflight, require_feature,
 };
 use crate::body::{IMAGE_BODY_LIMIT, read_image_payload, read_json};
-use crate::error::{ApiError, GateError, InternalError, json_response};
+use crate::error::{ApiError, GateError, InternalError, json_response, upstream_transport};
 use crate::key::Key;
 use crate::media::{MAX_RESPONSE_BYTES, prepare_tool, validate_result};
 use crate::reqctx::ReqCtx;
@@ -79,7 +79,9 @@ fn up_to_gate(e: UpstreamError) -> GateError {
     } else {
         502
     };
-    GateError::with_code(status, e.message, e.code).uncertain(e.billing_uncertain)
+    GateError::with_code(status, e.message, e.code)
+        .uncertain(e.billing_uncertain)
+        .from_upstream(true)
 }
 
 fn local(e: ApiError) -> UpstreamError {
@@ -613,7 +615,7 @@ async fn perform_generation(
     let est = billing.lock().expect("billing").est;
     let resp = match res {
         Ok(r) => r,
-        Err(e) if e.transport => return Err(InternalError(e.message).into()),
+        Err(e) if e.transport => return Err(upstream_transport(ctx, e.message)),
         Err(e) => {
             let exc = up_to_gate(e);
             if !ctx.was_sent() && !exc.billing_uncertain {
@@ -688,7 +690,9 @@ async fn perform_generation(
             );
         }
         return Err(
-            GateError::new(resp.status, upstream_error_message(i64::from(resp.status))).into(),
+            GateError::new(resp.status, upstream_error_message(i64::from(resp.status)))
+                .from_upstream(true)
+                .into(),
         );
     }
     let detail = billing.lock().expect("billing").detail.clone();
@@ -1326,7 +1330,8 @@ async fn tool(
                     GateError::new(
                         s,
                         format!("图片工具请求失败（上游状态 {}），未记费", resp.status),
-                    ),
+                    )
+                    .from_upstream(true),
                     false,
                 ));
             }
@@ -1380,6 +1385,7 @@ async fn tool(
                         502,
                         "图片工具连接失败或返回无效结果，未记费；请勿自动重试",
                     )
+                    .from_upstream(true)
                     .into());
                 }
                 Err(exc.into())
@@ -1481,7 +1487,11 @@ async fn vibe(
                         err_entry("上游编码请求失败，未记费".into(), 0.0),
                     )
                     .await;
-                return Err(GateError::new(502, "Vibe 编码连接失败，未记费；请勿自动重试").into());
+                return Err(
+                    GateError::new(502, "Vibe 编码连接失败，未记费；请勿自动重试")
+                        .from_upstream(true)
+                        .into(),
+                );
             }
             Err(e) => {
                 let exc = up_to_gate(e);
@@ -1510,6 +1520,7 @@ async fn vibe(
                 s,
                 format!("Vibe 编码失败（上游状态 {}），未记费", resp.status),
             )
+            .from_upstream(true)
             .into());
         }
         let ct = resp
@@ -1526,7 +1537,9 @@ async fn vibe(
                     err_entry("上游未返回有效二进制编码，未记费".into(), anlas),
                 )
                 .await;
-            return Err(GateError::new(502, "Vibe 编码未返回有效数据，未记费").into());
+            return Err(GateError::new(502, "Vibe 编码未返回有效数据，未记费")
+                .from_upstream(true)
+                .into());
         }
         state
             .settle_record(
@@ -1682,7 +1695,7 @@ async fn suggest(
     };
     let resp = match state.nai.request(opts, &cb, None, ctx).await {
         Ok(r) => r,
-        Err(e) if e.transport => return Err(InternalError(e.message).into()),
+        Err(e) if e.transport => return Err(upstream_transport(ctx, e.message)),
         Err(e) => {
             if e.status != 429 {
                 // 真实上游 429 已由回调记录
@@ -1697,7 +1710,9 @@ async fn suggest(
             } else {
                 502
             };
-            return Err(GateError::with_code(status, e.message, e.code).into());
+            return Err(GateError::with_code(status, e.message, e.code)
+                .from_upstream(!e.local)
+                .into());
         }
     };
     if resp.status != 200 {
@@ -1708,7 +1723,9 @@ async fn suggest(
                 .detail(format!("上游标签接口返回 HTTP {}", resp.status)),
         );
         return Err(
-            GateError::new(resp.status, upstream_error_message(i64::from(resp.status))).into(),
+            GateError::new(resp.status, upstream_error_message(i64::from(resp.status)))
+                .from_upstream(true)
+                .into(),
         );
     }
     state.record(ctx, key, Entry::new("tags", "", "ok"));

@@ -78,6 +78,8 @@ export type BugRow = {
   last_key: number | null;
   last_path: string;
   resolved_at: number | null;
+  /** 自动处理的原因码（见 format.ts 的 autoReason）；站长手动处理 / 未处理为空 */
+  auto_resolved?: string | null;
   key_name: string;
 };
 export type BugsResp = { errors: BugRow[]; open: number };

@@ -5,7 +5,10 @@ use rusqlite::Connection;
 use serde_json::{Value, json};
 
 fn dump(path: &std::path::Path) -> Value {
-    let con = Connection::open(path).unwrap();
+    dump_conn(&Connection::open(path).unwrap())
+}
+
+fn dump_conn(con: &Connection) -> Value {
     let mut stmt = con
         .prepare("SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name")
         .unwrap();
@@ -49,6 +52,25 @@ fn dump(path: &std::path::Path) -> Value {
     json!({"objects": objects, "columns": columns})
 }
 
+/// 旧版 Python 建出来的表结构（冻结的夹具），加上 3.0 新增的列（`bootstrap::RUST_ADDED_COLUMNS`，
+/// 见 docs/v3-deviations.md #45）。夹具本身不改：按夹具里的 DDL 在内存库里重建，再补列，重新导出。
+fn python_schema_plus_rust_additions() -> Value {
+    let master: Value = serde_json::from_str(include_str!("fixtures/python_master.json")).unwrap();
+    let objects = master["objects"].as_array().unwrap();
+    let con = Connection::open_in_memory().unwrap();
+    for kind in ["table", "index", "trigger"] {
+        for o in objects.iter().filter(|o| o["type"] == kind) {
+            con.execute_batch(o["sql"].as_str().unwrap()).unwrap();
+        }
+    }
+    // 重建的结果必须与夹具一致，否则下面补列后的比较没有意义
+    assert_eq!(dump_conn(&con), master, "夹具无法原样重建");
+    for ddl in gate_db::bootstrap::RUST_ADDED_COLUMNS {
+        con.execute(ddl, []).unwrap();
+    }
+    dump_conn(&con)
+}
+
 #[tokio::test]
 async fn fresh_schema_matches_python() {
     let dir = tempfile::tempdir().unwrap();
@@ -56,7 +78,7 @@ async fn fresh_schema_matches_python() {
     let db = gate_db::Db::open(&path, 0.0, &[]).unwrap();
     drop(db);
     let ours = dump(&path);
-    let theirs: Value = serde_json::from_str(include_str!("fixtures/python_master.json")).unwrap();
+    let theirs = python_schema_plus_rust_additions();
     assert_eq!(ours["columns"], theirs["columns"], "列定义不一致");
     assert_eq!(
         ours["objects"], theirs["objects"],

@@ -1,4 +1,8 @@
-/** Bug 追踪：按特征归并的错误。可按级别筛选、含已处理、逐条标记已处理、全部标记已处理（有确认）。 */
+/**
+ * Bug 追踪：按特征归并的错误。可按级别筛选、含已处理、逐条标记已处理、全部标记已处理（有确认）。
+ * 网关会自动关闭不用处理的（网络断开 / 上游故障 / 非本站脚本，以及久未再出现的）：已处理的行带「自动处理」和原因；
+ * 再出现会以「复发」重新打开。
+ */
 import { useState } from "preact/hooks";
 import { fullTime, shortTime } from "../../../../lib/format";
 import { Badge, Button, copyText, cx, Skeleton, toast } from "../../../../ui";
@@ -6,11 +10,13 @@ import { useAdmin } from "../../Admin";
 import { LoadError } from "../_kit";
 import { call } from "../members/actions";
 import { ConfirmDialog, Empty, NARROW, TableScroll, useMedia } from "../members/shared";
-import { bugSource } from "./format";
+import { autoReason, bugSource } from "./format";
 import { useQueryState } from "./query";
 import type { BugRow, BugsResp } from "./types";
 
 const PAGE = 50;
+const NOTE =
+  "注意级 24 小时、错误级 7 天没再出现会自动关闭；再出现会以「复发」重新打开。网络断开、上游故障、非本站脚本的报错不记为 Bug。";
 
 function Detail(props: { b: BugRow }) {
   const { b } = props;
@@ -31,6 +37,19 @@ function Detail(props: { b: BugRow }) {
         </Button>
       </div>
     </details>
+  );
+}
+
+/** 已处理：站长点的只写「已处理」；网关自动关的带「自动处理」徽标和原因。 */
+function Resolved(props: { b: BugRow }) {
+  const { b } = props;
+  if (!b.auto_resolved) return <span class="muted small">已处理</span>;
+  const why = autoReason(b.auto_resolved);
+  return (
+    <span class="lg-auto">
+      <Badge title={`${why}（${fullTime(b.resolved_at)} 自动关闭）`}>自动处理</Badge>
+      <span class="muted small">{why}</span>
+    </span>
   );
 }
 
@@ -68,6 +87,7 @@ export function Bugs() {
 
   return (
     <div class="stack">
+      <p class="small muted lg-note">{NOTE}</p>
       <div class="xa-toolbar">
         <label class="field-inline">
           <span class="field-inline__k">级别</span>
@@ -121,7 +141,7 @@ export function Bugs() {
                   首 {fullTime(b.first_seen)} · 近 {fullTime(b.last_seen)} · 编号 {rid(b)}
                 </div>
                 {b.resolved_at ? (
-                  <span class="small muted">已处理</span>
+                  <Resolved b={b} />
                 ) : (
                   <div>
                     <Button size="sm" disabled={busy === b.sig} onClick={() => resolve(b)}>
@@ -172,7 +192,7 @@ export function Bugs() {
                     <td>{rid(b)}</td>
                     <td>
                       {b.resolved_at ? (
-                        <span class="muted small">已处理</span>
+                        <Resolved b={b} />
                       ) : (
                         <Button size="sm" disabled={busy === b.sig} onClick={() => resolve(b)}>
                           {busy === b.sig ? "处理中…" : "标记已处理"}

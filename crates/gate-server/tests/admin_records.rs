@@ -360,6 +360,7 @@ async fn bug_tracker_lists_resolves_and_names_keys() {
             "last_key",
             "last_path",
             "resolved_at",
+            "auto_resolved", // 3.0 新增（docs/v3-deviations.md #45）
             "key_name"
         ]
     );

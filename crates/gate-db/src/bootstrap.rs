@@ -55,6 +55,14 @@ const ADD_COLUMNS: &[&str] = &[
     "ALTER TABLE api_keys ADD COLUMN last_image_at REAL",
 ];
 
+/// 3.0 新增的列（旧版 Python 不知道它们；表结构只增不减，nullable，回滚到 2.x 不受影响）。
+/// 只放在这里、不写进 `schema.sql`：全新库与线上库走同一条路（建出旧版的表再补列），
+/// `tests/schema_parity.rs` 的「Python 建的表」一侧也是按这份清单补出来的。
+pub const RUST_ADDED_COLUMNS: &[&str] = &[
+    // Bug 自动处理的原因码（gate_core::errors::AutoReason::code）；站长手动处理 / 未处理为 NULL。见 docs/v3-deviations.md #45
+    "ALTER TABLE error_events ADD COLUMN auto_resolved TEXT",
+];
+
 /// 触发器每次启动按同一定义重建（旧库里可能还是不写 is_test 的老定义）。
 const REBUILD_TRIGGER: &str = "DROP TRIGGER IF EXISTS preserve_deleted_key_usage; \
     CREATE TRIGGER preserve_deleted_key_usage BEFORE DELETE ON api_keys BEGIN \
@@ -117,6 +125,13 @@ pub fn run(conn: &mut Connection, now: f64, backfill: &[(&str, &str)]) -> rusqli
     configure(conn)?;
     conn.execute_batch(SCHEMA)?;
     for ddl in ADD_COLUMNS {
+        match conn.execute(ddl, []) {
+            Ok(_) => {}
+            Err(e) if is_duplicate_column(&e) => {}
+            Err(e) => return Err(e),
+        }
+    }
+    for ddl in RUST_ADDED_COLUMNS {
         match conn.execute(ddl, []) {
             Ok(_) => {}
             Err(e) if is_duplicate_column(&e) => {}

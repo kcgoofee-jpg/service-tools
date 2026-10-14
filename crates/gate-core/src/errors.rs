@@ -8,6 +8,9 @@
 //!   （例如 panic 的 `file:line` 或模块路径），传给 [`signature`] 即可；同一个位置要稳定。
 //! - `traceback.format_exception` 生成的堆栈文本：由调用方传入（[`ExcInfo::stack`]）。
 //!
+//! 3.0 新增（旧版没有，见 docs/v3-deviations.md #45）：「自动处理」的纯判断——哪些噪音不算 Bug、哪条未处理的 Bug
+//! 该自动关闭（[`auto_resolve_reason`]）。I/O 在 gate-db（查询 / 更新）与 gate-server（`bugs.rs`、维护循环）。
+//!
 //! 特征码 = `sha1(basis)` 的前 12 个十六进制字符。SHA-1 在这里只是去重用的指纹，不涉及安全，
 //! 所以用一个自带的小实现（工作区依赖里没有 sha1），并用 golden 对拍保证与 `hashlib.sha1` 一致。
 
@@ -306,9 +309,357 @@ pub fn notice_for(state: StoreState, e: &ErrorEvent) -> Option<Notice> {
     })
 }
 
+// ---------------------------------------------------------------- 自动处理（3.0 新增，见 docs/v3-deviations.md #45）
+
+/// 注意级（warn）的 Bug 多久没再出现就自动关闭（秒）：24 小时。
+pub const STALE_WARN_SECS: f64 = 24.0 * 3600.0;
+/// 错误级（error）的 Bug 多久没再出现就自动关闭（秒）：7 天。
+pub const STALE_ERROR_SECS: f64 = 7.0 * 86400.0;
+/// 自动处理最多多久跑一次（秒）。
+pub const TRIAGE_INTERVAL: f64 = 600.0;
+/// 本站前端脚本的路径特征：3.0 的页面只加载 `/_owl/` 下的文件，CSP 又不允许内联脚本，
+/// 所以带出错文件的脚本报错，文件不在这个路径下就一定不是我们的代码。
+pub const OWN_SCRIPT_PATH: &str = "/_owl/";
+
+/// 自动关闭的原因。落库的是 [`AutoReason::code`]（`error_events.auto_resolved`），后台页面按码显示文案。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoReason {
+    /// 浏览器网络失败（断网 / 切后台 / 请求被取消）：不是我们的缺陷。
+    Network,
+    /// 上游（NovelAI）返回 5xx 或连不上：已在用量日志和「上游」页里，不是我们的缺陷。
+    Upstream,
+    /// 不是本站脚本出的错（旧版缓存页、浏览器插件、手机自带浏览器注入）。
+    ForeignScript,
+    /// 注意级超过 [`STALE_WARN_SECS`] 没再出现。
+    StaleWarn,
+    /// 错误级超过 [`STALE_ERROR_SECS`] 没再出现。
+    StaleError,
+}
+
+impl AutoReason {
+    pub const ALL: [AutoReason; 5] = [
+        AutoReason::Network,
+        AutoReason::Upstream,
+        AutoReason::ForeignScript,
+        AutoReason::StaleWarn,
+        AutoReason::StaleError,
+    ];
+
+    pub fn code(self) -> &'static str {
+        match self {
+            AutoReason::Network => "network",
+            AutoReason::Upstream => "upstream",
+            AutoReason::ForeignScript => "foreign_script",
+            AutoReason::StaleWarn => "stale_warn",
+            AutoReason::StaleError => "stale_error",
+        }
+    }
+
+    pub fn from_code(code: &str) -> Option<AutoReason> {
+        Self::ALL.into_iter().find(|r| r.code() == code)
+    }
+}
+
+/// 浏览器网络失败的报错文案（小写比较）：断网、切后台、页面跳转时被取消的请求都会这样报。
+/// 前端 `web/src/lib/api.ts` 的 `isNetworkFailure` 用同一份清单。
+const NETWORK_NEEDLES: [&str; 10] = [
+    "failed to fetch",
+    "networkerror",
+    "load failed",
+    "network error",
+    "the network connection was lost",
+    "aborterror",
+    "the operation was aborted",
+    "cancelled",
+    "canceled",
+    "已取消",
+];
+
+/// 报错文案是不是浏览器的网络失败（不分大小写，包含即可）。
+pub fn is_network_failure(msg: &str) -> bool {
+    let m = msg.to_lowercase();
+    NETWORK_NEEDLES.iter().any(|n| m.contains(n))
+}
+
+/// Chrome 对未捕获异常的报错文案以 `Uncaught ` 开头。
+pub fn is_uncaught(msg: &str) -> bool {
+    msg.starts_with("Uncaught ")
+}
+
+/// 一条网页报错是不是出自别人的脚本。
+/// - 上报里带了 `filename`（出错脚本的地址，3.0 前端取自 `ErrorEvent.filename`）：必须在 `/_owl/` 下；
+/// - 没带（Promise 拒绝，或还没刷新的老页面）：只查 `Uncaught …` 这种脚本错误，`src` 或堆栈里得有 `/_owl/`；
+///   其余消息交给调用方原有的「堆栈里没有一帧来自本站」判断。
+pub fn is_foreign_script_report(msg: &str, filename: Option<&str>, src: &str, stack: &str) -> bool {
+    match filename {
+        Some(f) => !f.contains(OWN_SCRIPT_PATH),
+        None => {
+            is_uncaught(msg) && !(src.contains(OWN_SCRIPT_PATH) || stack.contains(OWN_SCRIPT_PATH))
+        }
+    }
+}
+
+/// 上游故障落成的 Bug 标题（错误账本把上游 5xx 记成 `gate` / `upstream` 来源，标题是「状态码 + 给成员的文案」）。
+/// 新的上游故障不再记 Bug；这条规则只用来清理旧行。
+fn is_upstream_fault_row(source: &str, title: &str) -> bool {
+    const MARKS: [&str; 4] = ["上游", "Vibe 编码", "图片工具", "图片流连接中断"];
+    matches!(source, "gate" | "upstream") && MARKS.iter().any(|m| title.contains(m))
+}
+
+/// 已落库的网页报错是不是别人的脚本：jQuery 的 `$`（3.0 前端从不用）一律算；`Uncaught …` 的详情
+/// （`{src}:{line}\n{UA}\n{堆栈}`）里没有 `/_owl/` 也算。
+fn is_foreign_script_row(source: &str, title: &str, detail: &str) -> bool {
+    source.starts_with("web:")
+        && (title.contains("$ is not defined")
+            || (is_uncaught(title) && !detail.contains(OWN_SCRIPT_PATH)))
+}
+
+/// 一条还没处理的 Bug（自动处理的输入）。
+#[derive(Debug, Clone, Copy)]
+pub struct OpenBug<'a> {
+    pub source: &'a str,
+    pub level: &'a str,
+    pub title: &'a str,
+    pub detail: &'a str,
+    pub last_seen: f64,
+}
+
+/// 这条未处理的 Bug 该不该自动关闭、为什么。先看是不是「不算 Bug」的噪音（立刻关），再看多久没出现。
+/// 级别不是 `warn` 的一律按 `error` 算（与 [`build_event`] 一致）；`last_seen` 在未来（时钟回拨）不关。
+pub fn auto_resolve_reason(b: &OpenBug<'_>, now: f64) -> Option<AutoReason> {
+    if b.source.starts_with("web:") && is_network_failure(b.title) {
+        return Some(AutoReason::Network);
+    }
+    if is_upstream_fault_row(b.source, b.title) {
+        return Some(AutoReason::Upstream);
+    }
+    if is_foreign_script_row(b.source, b.title, b.detail) {
+        return Some(AutoReason::ForeignScript);
+    }
+    let idle = now - b.last_seen;
+    if b.level == "warn" {
+        (idle >= STALE_WARN_SECS).then_some(AutoReason::StaleWarn)
+    } else {
+        (idle >= STALE_ERROR_SECS).then_some(AutoReason::StaleError)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn bug<'a>(source: &'a str, level: &'a str, title: &'a str, last_seen: f64) -> OpenBug<'a> {
+        OpenBug {
+            source,
+            level,
+            title,
+            detail: "",
+            last_seen,
+        }
+    }
+
+    #[test]
+    fn network_failures_are_recognised_case_insensitively() {
+        for m in [
+            "Failed to fetch",
+            "live: Failed to fetch",
+            "NetworkError when attempting to fetch resource.",
+            "TypeError: Load failed",
+            "A network error occurred.",
+            "The network connection was lost.",
+            "AbortError: The operation was aborted.",
+            "fetch cancelled",
+            "请求已取消",
+            "FAILED TO FETCH",
+        ] {
+            assert!(is_network_failure(m), "{m}");
+        }
+        for m in [
+            "TypeError: x is undefined",
+            "ReferenceError: y",
+            "",
+            "加载失败",
+        ] {
+            assert!(!is_network_failure(m), "{m}");
+        }
+    }
+
+    #[test]
+    fn foreign_script_reports() {
+        let own = "https://gate.example.top/_owl/assets/app-abc.js";
+        // 带 filename：只看 filename
+        assert!(!is_foreign_script_report(
+            "Uncaught Error: x",
+            Some(own),
+            "",
+            ""
+        ));
+        assert!(is_foreign_script_report(
+            "Uncaught ReferenceError: $ is not defined",
+            Some("https://gate.example.top/"),
+            "",
+            ""
+        ));
+        assert!(is_foreign_script_report(
+            "ReferenceError: $ is not defined",
+            Some(""),
+            "",
+            ""
+        ));
+        assert!(is_foreign_script_report(
+            "x",
+            Some("chrome-extension://abc/inject.js"),
+            own,
+            own
+        ));
+        // 没带 filename：Uncaught 要在 src / 堆栈里找到本站文件，其余消息不在这里判断
+        assert!(is_foreign_script_report(
+            "Uncaught Error: x",
+            None,
+            "/",
+            "at https://gate.example.top/:1:2"
+        ));
+        assert!(!is_foreign_script_report(
+            "Uncaught Error: x",
+            None,
+            own,
+            ""
+        ));
+        assert!(!is_foreign_script_report(
+            "Uncaught Error: x",
+            None,
+            "/",
+            &format!("at f ({own}:1:2)")
+        ));
+        assert!(!is_foreign_script_report(
+            "TypeError: x is undefined",
+            None,
+            "",
+            ""
+        ));
+    }
+
+    #[test]
+    fn noise_is_resolved_immediately_regardless_of_age() {
+        let now = 1_000_000.0;
+        let fresh = now - 5.0;
+        let reason =
+            |source, level, title| auto_resolve_reason(&bug(source, level, title, fresh), now);
+        // 浏览器网络失败（2.x 页面带 `live:` 前缀）
+        assert_eq!(
+            reason("web:landing", "warn", "live: Failed to fetch"),
+            Some(AutoReason::Network)
+        );
+        assert_eq!(
+            reason(
+                "web:admin",
+                "warn",
+                "NetworkError when attempting to fetch resource."
+            ),
+            Some(AutoReason::Network)
+        );
+        // 同样的字样出在服务端来源（比如后台任务的错误消息）不算噪音
+        assert_eq!(
+            reason("maintenance:official", "warn", "request cancelled"),
+            None
+        );
+        // 上游故障
+        assert_eq!(
+            reason(
+                "gate",
+                "warn",
+                "500 上游服务暂时不可用，请稍后重试（上游状态 500）"
+            ),
+            Some(AutoReason::Upstream)
+        );
+        assert_eq!(
+            reason(
+                "upstream",
+                "warn",
+                "502 Vibe 编码连接失败，未记费；请勿自动重试"
+            ),
+            Some(AutoReason::Upstream)
+        );
+        // 我们自己的 500 不动
+        assert_eq!(
+            reason("request", "error", "InternalError: 数据库已损坏"),
+            None
+        );
+        assert_eq!(reason("gate", "warn", "500 请求体解析失败"), None);
+        // 非本站脚本
+        assert_eq!(
+            reason(
+                "web:landing",
+                "warn",
+                "Uncaught ReferenceError: $ is not defined"
+            ),
+            Some(AutoReason::ForeignScript)
+        );
+        assert_eq!(
+            reason("web:other", "warn", "ReferenceError: $ is not defined"),
+            Some(AutoReason::ForeignScript)
+        );
+    }
+
+    #[test]
+    fn own_script_errors_are_kept() {
+        let now = 1_000_000.0;
+        let mut b = bug(
+            "web:landing",
+            "warn",
+            "Uncaught TypeError: x is undefined",
+            now - 60.0,
+        );
+        b.detail = "https://gate.example.top/_owl/assets/app-abc.js:7\nMozilla/5.0 (synthetic)\nTypeError: x";
+        assert_eq!(auto_resolve_reason(&b, now), None);
+        // 没有 /_owl/ 的 Uncaught（旧版页面 / 插件）立刻关
+        b.detail = "/:7\nMozilla/5.0 (synthetic)\nTypeError: x";
+        assert_eq!(
+            auto_resolve_reason(&b, now),
+            Some(AutoReason::ForeignScript)
+        );
+        // 不是 Uncaught 的普通报错（比如 Promise 拒绝）不凭文案判断
+        let mut c = bug(
+            "web:landing",
+            "warn",
+            "TypeError: x is undefined",
+            now - 60.0,
+        );
+        c.detail = "/:0\nMozilla/5.0 (synthetic)\n";
+        assert_eq!(auto_resolve_reason(&c, now), None);
+    }
+
+    #[test]
+    fn stale_bugs_close_by_level() {
+        let now = 10_000_000.0;
+        let at = |level, ago: f64| {
+            auto_resolve_reason(
+                &bug("maintenance:disk", level, "磁盘读数失败", now - ago),
+                now,
+            )
+        };
+        assert_eq!(at("warn", 24.0 * 3600.0 - 1.0), None);
+        assert_eq!(at("warn", 24.0 * 3600.0), Some(AutoReason::StaleWarn));
+        assert_eq!(at("warn", 3.0 * 86400.0), Some(AutoReason::StaleWarn));
+        // 错误级要等 7 天
+        assert_eq!(at("error", 2.0 * 86400.0), None);
+        assert_eq!(at("error", 7.0 * 86400.0 - 1.0), None);
+        assert_eq!(at("error", 7.0 * 86400.0), Some(AutoReason::StaleError));
+        // 不认识的级别按 error 算
+        assert_eq!(at("weird", 3.0 * 86400.0), None);
+        assert_eq!(at("weird", 8.0 * 86400.0), Some(AutoReason::StaleError));
+        // 时钟回拨：last_seen 在未来，不关
+        assert_eq!(at("warn", -3600.0), None);
+    }
+
+    #[test]
+    fn auto_reason_codes_roundtrip() {
+        for r in AutoReason::ALL {
+            assert_eq!(AutoReason::from_code(r.code()), Some(r));
+        }
+        assert_eq!(AutoReason::from_code("manual"), None);
+        assert_eq!(AutoReason::from_code(""), None);
+    }
 
     #[test]
     fn sha1_known_vectors() {

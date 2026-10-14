@@ -16,7 +16,7 @@ use crate::accounting::Entry;
 use crate::admission::{Slots, acquire_slots};
 use crate::auth::{authenticate, check_rpm, ctx_of, limit_inflight, require_feature};
 use crate::body::{TEXT_BODY_LIMIT, read_json};
-use crate::error::{ApiError, ApiResult, GateError, InternalError, ok_json};
+use crate::error::{ApiError, ApiResult, GateError, InternalError, ok_json, upstream_transport};
 use crate::key::Key;
 use crate::reqctx::ReqCtx;
 use crate::runtime::InflightPermit;
@@ -182,7 +182,9 @@ fn up_to_gate(e: UpstreamError) -> GateError {
     } else {
         502
     };
-    GateError::with_code(status, e.message, e.code).uncertain(e.billing_uncertain)
+    GateError::with_code(status, e.message, e.code)
+        .uncertain(e.billing_uncertain)
+        .from_upstream(!e.local)
 }
 
 /// 已经开始的上游操作：放进后台任务跑完（含记账），调用方断开也不中断。
@@ -226,7 +228,7 @@ async fn open_stream(
     let url = text_url(state, model, true);
     match state.nai.text_stream(&url, body, ctx).await {
         Ok(resp) => Ok(Box::pin(resp.bytes_stream().map(|r| r.map_err(|_| ())))),
-        Err(e) if e.transport => Err(InternalError(e.message).into()),
+        Err(e) if e.transport => Err(upstream_transport(ctx, e.message)),
         Err(e) => {
             state.record(
                 ctx,
@@ -238,7 +240,9 @@ async fn open_stream(
             } else {
                 502
             };
-            Err(GateError::with_code(status, e.message, e.code).into())
+            Err(GateError::with_code(status, e.message, e.code)
+                .from_upstream(!e.local)
+                .into())
         }
     }
 }
@@ -852,7 +856,7 @@ async fn text_call(state: &AppState, ctx: &ReqCtx, n: Native) -> ApiResult {
         .await
     {
         Ok(r) => r,
-        Err(e) if e.transport => return Err(InternalError(e.message).into()),
+        Err(e) if e.transport => return Err(upstream_transport(ctx, e.message)),
         Err(e) => return Err(up_to_gate(e).into()),
     };
     if resp.status != 200 {
@@ -862,7 +866,9 @@ async fn text_call(state: &AppState, ctx: &ReqCtx, n: Native) -> ApiResult {
             Entry::new("text", &n.model, "error").detail(format!("upstream {}", resp.status)),
         );
         return Err(
-            GateError::new(resp.status, upstream_error_message(i64::from(resp.status))).into(),
+            GateError::new(resp.status, upstream_error_message(i64::from(resp.status)))
+                .from_upstream(true)
+                .into(),
         );
     }
     let tokens = estimate_output_tokens(&resp.body)?;
@@ -947,7 +953,7 @@ async fn voice(state: AppState, req: Request) -> ApiResult {
             .await
         {
             Ok(r) => r,
-            Err(e) if e.transport => return Err(InternalError(e.message).into()),
+            Err(e) if e.transport => return Err(upstream_transport(&c, e.message)),
             Err(e) => return Err(up_to_gate(e).into()),
         };
         if resp.status != 200 {
@@ -955,6 +961,7 @@ async fn voice(state: AppState, req: Request) -> ApiResult {
                 resp.status,
                 upstream_error_message(i64::from(resp.status)),
             )
+            .from_upstream(true)
             .into());
         }
         let voice = body.get("voice").map_or_else(String::new, py_str);
@@ -1323,7 +1330,9 @@ async fn chat_collect(p: Pump, mut events: TextEvents, input_text: &str) -> ApiR
     let (run, error_row) = pump_chat(&p, &mut events, false).await;
     settle_chat(&p, &run, error_row).await;
     if let Some(e) = run.error {
-        return Err(GateError::new(e.status, e.message).into());
+        return Err(GateError::new(e.status, e.message)
+            .from_upstream(true)
+            .into());
     }
     let prompt = estimate_tokens(input_text);
     let completion = std::cmp::max(run.counted, 1);
