@@ -22,6 +22,7 @@ pub mod discord;
 pub mod errors;
 pub mod feedback;
 pub mod guard;
+pub mod kernel;
 pub mod keys;
 pub mod misc;
 pub mod public;

@@ -55,6 +55,15 @@ struct Inner {
     writer: std::sync::mpsc::SyncSender<Job>,
     readers: Mutex<Vec<Connection>>,
     reader_count: usize,
+    /// 测试 / 对拍用：开启后按发生顺序记下每一次对 `site_settings` 的写入（见 [`SettingWrite`]）。
+    setting_log: Mutex<Option<Vec<SettingWrite>>>,
+}
+
+/// 一次对 `site_settings` 的写入（`set_setting` 或 `set_settings_bulk`），值是最终落库的字符串。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SettingWrite {
+    Set(String, String),
+    Bulk(Vec<(String, String)>),
 }
 
 /// 写事务里遇到锁冲突时的重试次数（与旧版 `record` 的 4 次一致）。
@@ -117,6 +126,7 @@ impl Db {
                 writer: tx,
                 reader_count: pool.len(),
                 readers: Mutex::new(pool),
+                setting_log: Mutex::new(None),
             }),
         })
     }
@@ -172,6 +182,54 @@ impl Db {
         rx.await
             .map_err(|_| DbError::WriterGone)?
             .map_err(DbError::from)
+    }
+
+    /// 在写连接上直接执行（**不**开事务）：`PRAGMA wal_checkpoint` 之类不能在事务里跑的语句用它。
+    /// 和 [`Db::write`] 排在同一个队列里，所以不会和别的写入交错。
+    pub async fn write_raw<R, F>(&self, f: F) -> Result<R>
+    where
+        R: Send + 'static,
+        F: FnOnce(&mut Connection) -> rusqlite::Result<R> + Send + 'static,
+    {
+        let (tx, rx) = oneshot::channel();
+        let job: Job = Box::new(move |conn: &mut Connection| {
+            let _ = tx.send(f(conn));
+        });
+        self.inner
+            .writer
+            .send(job)
+            .map_err(|_| DbError::WriterGone)?;
+        rx.await
+            .map_err(|_| DbError::WriterGone)?
+            .map_err(DbError::from)
+    }
+
+    /// 开 / 关「记录 site_settings 写入」。开启时清空已有记录。
+    pub fn record_setting_writes(&self, on: bool) {
+        *self.inner.setting_log.lock().expect("设置写入记录锁") = on.then(Vec::new);
+    }
+
+    /// 取走（并清空）到目前为止记下的 site_settings 写入。
+    pub fn take_setting_writes(&self) -> Vec<SettingWrite> {
+        self.inner
+            .setting_log
+            .lock()
+            .expect("设置写入记录锁")
+            .as_mut()
+            .map(std::mem::take)
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn note_setting_write(&self, w: SettingWrite) {
+        if let Some(log) = self
+            .inner
+            .setting_log
+            .lock()
+            .expect("设置写入记录锁")
+            .as_mut()
+        {
+            log.push(w);
+        }
     }
 
     /// 在只读连接上执行查询（WAL 快照读，不阻塞写）。

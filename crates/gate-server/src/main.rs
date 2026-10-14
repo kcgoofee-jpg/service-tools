@@ -70,7 +70,9 @@ fn serve(bind: SocketAddr) -> anyhow::Result<()> {
         let env = EnvConfig::from_process();
         let assets = Assets::new(std::env::var_os("STATIC_DIR").map(Into::into));
         let state = gate_server::AppState::build(env, assets).await?;
-        let app = gate_server::app(state);
+        // 注册服务配齐（state.registration）时，startup 会把它接进内核（registrar / 私信钩子）并拉起全部后台循环
+        gate_server::jobs::startup(&state).await?;
+        let app = gate_server::app(state.clone());
         let listener = tokio::net::TcpListener::bind(bind).await?;
         tracing::info!(%bind, version = gate_server::state::VERSION, "猫头鹰公益站网关已启动");
         axum::serve(
@@ -79,13 +81,17 @@ fn serve(bind: SocketAddr) -> anyhow::Result<()> {
                 SocketAddr,
             >(app),
         )
-        .with_graceful_shutdown(shutdown_signal())
+        .with_graceful_shutdown(shutdown_signal(state.clone()))
         .await?;
+        // HTTP 已停止接收并等完在途请求：等记账 / 写库任务 → 状态码统计落库 → WAL 并回主库
+        gate_server::jobs::shutdown(&state).await;
+        tracing::info!("已退出");
         anyhow::Ok(())
     })
 }
 
-async fn shutdown_signal() {
+/// 收到 SIGINT / SIGTERM：先通知后台循环停下（它们只在睡觉时响应），再让 axum 停止接收新连接。
+async fn shutdown_signal(state: gate_server::AppState) {
     let ctrl_c = async {
         let _ = tokio::signal::ctrl_c().await;
     };
@@ -100,4 +106,5 @@ async fn shutdown_signal() {
     let term = std::future::pending::<()>();
     tokio::select! { _ = ctrl_c => {}, _ = term => {} }
     tracing::info!("收到停止信号，开始优雅关停");
+    state.shutdown.cancel();
 }

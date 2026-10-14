@@ -19,6 +19,7 @@ pub mod fsutil;
 pub mod gen_audit;
 pub mod guard;
 pub mod hooks;
+pub mod jobs;
 pub mod kernel;
 pub mod key;
 pub mod live;

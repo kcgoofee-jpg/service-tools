@@ -1,6 +1,6 @@
 //! site_settings 键值表。值一律以字符串存取（旧版 `str(value)` 写入，读出什么就是什么）。
 
-use crate::{Db, Result};
+use crate::{Db, Result, SettingWrite};
 use rusqlite::{OptionalExtension, params};
 
 impl Db {
@@ -20,6 +20,7 @@ impl Db {
     /// （浮点用 `pyc::float_repr`，布尔用 `pyc::bool_str`）。
     pub async fn set_setting(&self, key: &str, value: &str) -> Result<()> {
         let (key, value) = (key.to_string(), value.to_string());
+        let noted = (key.clone(), value.clone());
         self.write(move |tx| {
             tx.execute(
                 "INSERT INTO site_settings (key, value) VALUES (?,?) \
@@ -28,12 +29,15 @@ impl Db {
             )?;
             Ok(())
         })
-        .await
+        .await?;
+        self.note_setting_write(SettingWrite::Set(noted.0, noted.1));
+        Ok(())
     }
 
     /// 一个事务里写入一组已校验的运行时开关（按给定顺序）。
     pub async fn set_settings_bulk(&self, values: &[(String, String)]) -> Result<()> {
         let values = values.to_vec();
+        let noted = values.clone();
         self.write(move |tx| {
             let mut stmt = tx.prepare(
                 "INSERT INTO site_settings (key, value) VALUES (?,?) \
@@ -44,6 +48,8 @@ impl Db {
             }
             Ok(())
         })
-        .await
+        .await?;
+        self.note_setting_write(SettingWrite::Bulk(noted));
+        Ok(())
     }
 }
