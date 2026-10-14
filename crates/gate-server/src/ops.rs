@@ -199,7 +199,7 @@ pub async fn v5_capacity(state: &AppState) -> Result<Value, DbError> {
 
 /// 占用名额的人数（旧版 `_active_count`，与实际名额检查同一口径）。
 pub async fn active_count(state: &AppState) -> Result<i64, DbError> {
-    state.db.admin_registered_count(state.now()).await
+    state.db.registered_member_count(state.now()).await
 }
 
 /// `int(x)` 失败时旧版路由回的文案：`str(exc) or "参数无效"`。

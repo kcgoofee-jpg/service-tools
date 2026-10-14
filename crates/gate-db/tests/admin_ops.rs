@@ -65,10 +65,10 @@ async fn registered_count_skips_expired_and_deleted_keys() {
         .unwrap();
     }
     // 没有过期时间 / 还没过期的占名额；已过期的释放
-    assert_eq!(db.admin_registered_count(1000.0).await.unwrap(), 2);
-    assert_eq!(db.admin_registered_count(0.0).await.unwrap(), 3);
-    assert_eq!(db.admin_registered_count(6000.0).await.unwrap(), 1);
+    assert_eq!(db.registered_member_count(1000.0).await.unwrap(), 2);
+    assert_eq!(db.registered_member_count(0.0).await.unwrap(), 3);
+    assert_eq!(db.registered_member_count(6000.0).await.unwrap(), 1);
     // Key 被删（登记行同时没了或悬空）不再占名额
     db.delete_key(ids[0]).await.unwrap();
-    assert_eq!(db.admin_registered_count(1000.0).await.unwrap(), 1);
+    assert_eq!(db.registered_member_count(1000.0).await.unwrap(), 1);
 }
