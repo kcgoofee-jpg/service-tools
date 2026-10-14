@@ -1,0 +1,87 @@
+/* 令牌池 */
+.token-grid {
+  display: grid;
+  gap: var(--sp-4);
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr));
+}
+.token {
+  display: grid;
+  gap: var(--sp-3);
+  align-content: start;
+  padding: var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  min-width: 0;
+}
+.token__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.token__name {
+  font-weight: 650;
+  font-size: var(--fs-md);
+  overflow-wrap: anywhere;
+}
+.token__form {
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border);
+}
+.token__form .savebar {
+  margin-top: var(--sp-3);
+}
+
+/* 近 24 小时每小时请求量 */
+.hchart {
+  display: grid;
+  gap: var(--sp-2);
+}
+.hchart__bars {
+  display: grid;
+  grid-template-columns: repeat(24, minmax(0, 1fr));
+  align-items: end;
+  gap: 3px;
+  height: 84px;
+  padding: var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.hchart__col {
+  display: flex;
+  align-items: flex-end;
+  height: 100%;
+}
+.hchart__stack {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  border-radius: 2px;
+  overflow: hidden;
+}
+.hchart__ok {
+  background: var(--accent);
+  flex-basis: 0;
+}
+.hchart__err {
+  background: var(--danger);
+  flex-basis: 0;
+}
+.legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: var(--sp-3);
+}
+.legend::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.legend--err::before {
+  background: var(--danger);
+}
