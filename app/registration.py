@@ -530,6 +530,13 @@ class RegistrationService:
             "redirect_uri": self.site_url + "login/callback",
         }, timeout=12)
         if response.status_code != 200:
+            # 只记 Discord 返回的错误码（如 invalid_grant / invalid_client），不记授权码和密钥：
+            # 10-14 网页登录「点了没反应」时日志里什么都没有，只能猜
+            try:
+                why = str((response.json() or {}).get("error") or "")[:40]
+            except ValueError:
+                why = ""
+            print(f"[web-login] token exchange {response.status_code} {why}", flush=True)
             raise RegistrationError("Discord 授权失败，请重试。")
         token = response.json()["access_token"]
         user = await self._discord("GET", "/users/@me", bearer="Bearer " + token)

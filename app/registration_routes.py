@@ -170,7 +170,9 @@ async def quota(request: Request, body: Who):
     return JSONResponse({
         "enabled": bool(key["enabled"]), "expires_at": key["expires_at"],
         "daily_images": key["daily_images"], "images": counter["images"],
-        "daily_images_base": _base(gate, key),
+        "legacy": counter.get("legacy_free_images", 0),
+        "anlas": round(float(counter.get("anlas") or 0)),
+        "daily_anlas": await _member_anlas_cap(gate, key),
         "daily_v5": key["daily_v5"], "v5": counter["v5"],
         "image_model_scope": key["image_model_scope"],
         "reset_hour": reset_hour,
@@ -182,10 +184,12 @@ async def quota(request: Request, body: Who):
     }, headers={"Cache-Control": "no-store"})
 
 
-def _base(gate, key) -> int:
-    guard = getattr(gate, "guard", None)
-    base = guard.values["base_daily_images"] if guard is not None else 0
-    return base if base and key["daily_images"] and base < key["daily_images"] else 0
+async def _member_anlas_cap(gate, key) -> int:
+    """每人每日 Anlas 上限：Key 手动设置的优先，否则全站默认 member_daily_anlas（与 image_routes 的扣减规则一致）。0 = 不限。"""
+    own = dict(key).get("daily_anlas") or 0
+    if own > 0:
+        return int(own)
+    return int(await site_flags.get(gate.db, site_flags.MEMBER_DAILY_ANLAS, getattr(gate, "settings", None)) or 0)
 
 
 @router.post("/resetkey")
@@ -398,12 +402,16 @@ async def login_callback(request: Request, code: str = "", state: str = ""):
     if await _web_login_paused(request):
         return RedirectResponse("/?login=paused#live")
     if not code or not state or not hmac.compare_digest(state, request.cookies.get(STATE_COOKIE, "")):
+        # error=access_denied（成员点了取消）/ 缺 state cookie（跨浏览器打开授权页）都会走到这里
+        print(f"[web-login] callback rejected: code={'y' if code else 'n'} state_ok=n "
+              f"err={request.query_params.get('error', '')[:40]}", flush=True)
         return RedirectResponse("/?login=failed")
     try:
         who = await service.web_identify(code)
     except RegistrationError:
         return RedirectResponse("/?login=failed")
     if not who.get("in_server", True):          # 不在社区服务器的 Discord 账号不发会话
+        print("[web-login] not in server / role gate", flush=True)
         return RedirectResponse("/?login=failed")
     resp = RedirectResponse("/")
     exp = int(_time.time()) + SESSION_DAYS * 86400
@@ -529,7 +537,10 @@ async def public_me(request: Request):
                    expires_at=key["expires_at"], image_scope=key["image_model_scope"],
                    today={"images": c["images"], "v5": c["v5"],
                           "legacy": c.get("legacy_free_images", 0),
-                          "daily_images": key["daily_images"], "daily_v5": key["daily_v5"]},
+                          "daily_images": key["daily_images"], "daily_v5": key["daily_v5"],
+                          "anlas": round(float(c.get("anlas") or 0)),
+                          "daily_anlas": await _member_anlas_cap(gate, key),
+                          "reset_hour": getattr(getattr(gate, "guard", None), "reset_hour", None)},
                    queue=qv.get("mine", []),
                    coupons=await gate.db.list_coupons(key["id"]),
                    images_stored=await gate.db.audit_image_count(key["id"], since=_time.time() - img_days * 86400),
