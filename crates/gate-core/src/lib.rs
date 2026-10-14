@@ -24,3 +24,15 @@ pub mod reasons;
 pub mod site_flags;
 pub mod upstream_errors;
 pub mod upstream_policy;
+
+pub mod client_views;
+pub mod errors;
+pub mod image_events;
+pub mod json_body;
+pub mod perf;
+pub mod pyloads;
+pub mod pymsgpack;
+pub mod pyobj;
+pub mod request_timing;
+pub mod shadow;
+pub mod sse;
