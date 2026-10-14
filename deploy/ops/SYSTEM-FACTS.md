@@ -82,8 +82,8 @@
 | 公平调度 DRR | **只观察**：真实顺序仍是 FIFO，DRR 重排没接入派发路径 |
 | 领 Key 限速 | 每小时最多 12 人（`issue_hourly_cap`） |
 | 名额 | 上限 61；候补邀请**不私信**（`waitlist_dm` 默认 0），公告频道发一条汇总 |
-| 网页 Discord 登录 | **暂停**（`web_login_paused` 默认 1，设 0 才开放）：首页不显示按钮，服务端 `/login` 也直接跳回首页、不发起 OAuth。应用被 Discord 标记，申诉 10-10 已提交；领 Key 用 `/register`、查额度用 `/quota`。**2026-10-14 起是唯一网页登录方式** |
-| ~~网页 Key 登录~~ | **已下线（2026-10-14 站长：只留一个 Discord 登录按钮）**：`POST /login/key` 已删除；已签发的 `key:<id>` 存量会话在 `member_state`/`key_row_for` 兼容到 cookie 自然过期（≤30 天），之后这段兼容代码也可删 |
+| 网页 Discord 登录 | **暂停**（`web_login_paused` 默认 1，设 0 才开放）：首页不显示按钮，服务端 `/login` 也直接跳回首页、不发起 OAuth。10-14 曾短暂开放，因门户侧 redirect_uri 失效（OAuth2 redirect_uri 无效）旋即暂停；修复 = 门户 OAuth2 页确认重定向列表里有 `https://gate.davidzhao.top/login/callback`（精确匹配、无尾斜杠），再设 `web_login_paused=0` |
+| 网页 Key 登录 | `POST /login/key`：粘贴 Key 换成员会话（按 discord_id 签发，30 天；后台手建未绑定的 Key 用 `key:<id>`）；每 IP 10 分钟错 8 次锁定；校验 Origin 防登录 CSRF。**2026-10-14 短暂下线后当天恢复**（Discord OAuth 回调失效，站长要求换回） |
 | 作品备份（beta） | 首页登录后「作品备份」：EPUB 画册（一图一页 + 提示词/参数）或原图 ZIP（+ prompts.txt），每人 60 秒 1 次，只含仍在保留期内的原图 |
 | 后台 Key 额度 | 后台新建的 Key 为手动额度（算法不覆盖）；编辑 Key 只提交改动过的字段，只有改了额度才转为手动 |
 | `/register` | **唯一的发 Key 路径**：斜杠命令 → `POST /self-register/issue` → `issue_direct` → `_provision`；回复只有本人可见，不走 OAuth、不私信。旧的 OAuth 领取（`/self-register/intent` + `/self-register/callback`，`begin`/`finish`）已删除，不要恢复 |
@@ -132,7 +132,7 @@
 |---|---|---|---|---|---|
 | `waitlist_enabled` | flag | False |  | registration | 候补排队（关 = 名额满了直接提示，有空位先到先得；机器人不能私信时候补只会空占名额） |
 | `member_sweep` | flag | True |  | registration | 退群回收：每人每天核对一次是否还在服务器，不在就删 Key |
-| `web_login_paused` | flag | True |  | registration_routes | 网页 Discord OAuth 登录暂停（Discord 应用审核期间）。Discord OAuth 是唯一网页登录方式（Key 登录已下线） |
+| `web_login_paused` | flag | True |  | registration_routes | 网页 Discord OAuth 登录暂停（Discord 回调修复 / 审核期间）。Key 登录照常可用，不受此开关影响 |
 | `dm_enabled` | flag | False |  | registration | 私信总闸门（关 = 任何私信都不发） |
 | `waitlist_dm` | flag | False |  | registration | 有名额时私信候补成员（关 = 只在公告频道发一条汇总） |
 | `issue_hourly_cap` | int | 12 | 0–500 | registration | 每小时最多发放的新 Key |
