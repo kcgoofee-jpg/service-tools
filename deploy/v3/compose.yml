@@ -46,6 +46,8 @@ services:
     restart: unless-stopped
     entrypoint: ["/usr/local/bin/nai-bots"]
     command: ["naimei"]
+    # 镜像自带的健康检查是查网关的 /healthz，机器人进程用不上
+    healthcheck: {disable: true}
     depends_on: [gate]
     environment:
       - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
@@ -67,6 +69,7 @@ services:
     restart: unless-stopped
     entrypoint: ["/usr/local/bin/nai-bots"]
     command: ["warden"]
+    healthcheck: {disable: true}
     environment:
       - WARDEN_BOT_TOKEN=${WARDEN_BOT_TOKEN}
     mem_limit: 64m
