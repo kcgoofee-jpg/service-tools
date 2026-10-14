@@ -7,11 +7,35 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[lib]
+name = "gate_discord"
+path = "src/lib.rs"
+
 [[bin]]
 name = "nai-bots"
 path = "src/main.rs"
 
 [dependencies]
+gate-core.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+futures.workspace = true
+reqwest.workspace = true
+rustls.workspace = true
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+rand.workspace = true
+twilight-gateway.workspace = true
+twilight-http.workspace = true
+twilight-model.workspace = true
+
+[dev-dependencies]
+gate-golden = { path = "../gate-golden" }
+axum.workspace = true
 
 [lints]
 workspace = true

@@ -31,6 +31,7 @@ http-body-util = "0.1"
 wreq = { version = "=6.0.0-rc.31", features = ["json", "stream", "gzip", "deflate", "socks"] }
 wreq-util = "=3.0.0-rc.14"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rusqlite = { version = "0.40", features = ["bundled", "backup"] }
 jiff = { version = "0.2", features = ["tzdb-bundle-always"] }
 arc-swap = "1.9"
