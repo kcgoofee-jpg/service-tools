@@ -18,5 +18,10 @@ pub fn router(state: AppState) -> Router {
         .merge(public::router())
         .merge(text::router())
         .merge(admin::router(state.clone()))
+        // 与 Starlette 一致：没有的路径 / 不支持的方法回 JSON
+        .fallback(|| async { crate::error::HttpError::new(404, "Not Found") })
+        .method_not_allowed_fallback(|| async {
+            crate::error::HttpError::new(405, "Method Not Allowed")
+        })
         .with_state(state)
 }
