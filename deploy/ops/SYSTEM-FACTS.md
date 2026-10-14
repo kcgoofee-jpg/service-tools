@@ -142,6 +142,7 @@
 | `global_daily_anlas` | int | `.env global_daily_anlas` | 0–100000 | 额度 / Vibe PVP | 全站每日 Anlas 额度（0 = 不限，Vibe PVP 抢额度） |
 | `global_daily_anlas_until` | float | 0.0 | 0–2e+09 | 额度 / Vibe PVP | 全站每日 Anlas 开放截止时间戳（0 = 不限时） |
 | `global_monthly_anlas` | float | `.env global_monthly_anlas` | 0–1e+06 | 额度 / Anlas 池 | 全站每月 Anlas 预算（0 = 不限） |
+| `member_daily_anlas` | int | 50 | 0–100000 | 额度 / Anlas 池 | 每人每日 Anlas 上限（仅对未手动设置 Anlas 日额度的 Key 生效，手动值优先；0 = 不限）。Vibe 编码一张参考图约 2 点 |
 | `guard_base_daily_images` | int | 100 | 0–100000 | guard（注册私信也读） | V4.5 每人每天保底张数 |
 | `algo_notice` | str | '' |  | quota_algo → 首页 | 首页显示的今日额度说明 |
 | `audit_image_retention_days` | int | 3 | 0–365 | audit | （已停用，2026-10-11 起原图按容量上限清理） |

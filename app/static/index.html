@@ -1094,6 +1094,11 @@ td.note{min-width:220px}
                 <input id="s_v5_alert" type="number" min="1" max="100" step="1" placeholder="加载中…">
                 <div class="hint">1～100</div>
               </div>
+              <div class="field">
+                <label for="s_member_anlas">每人每日 Anlas 上限</label>
+                <input id="s_member_anlas" type="number" min="0" step="1" placeholder="加载中…">
+                <div class="hint">0 = 不限；只对没手动设 Anlas 日额度的 Key 生效（Vibe 约 2 点/次）</div>
+              </div>
             </div>
             <button class="btn primary" data-act="save-budget">保存预算</button>
           </details>
@@ -1117,6 +1122,11 @@ td.note{min-width:220px}
               <div id="announcePreview" class="prose"></div>
             </div>
             <div style="margin-top:16px"><button class="btn primary" data-act="save-announce">保存公告</button></div>
+            <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+              <div class="panel-head" style="margin-bottom:8px"><h3 style="margin:0">让奶妹发 Discord 公告</h3><div class="desc">立即发一条消息到社区公告频道（纯文本，@ 不会真的提示任何人）</div></div>
+              <textarea id="dcAnnounce" rows="3" placeholder="例如：今晚 3-7 点安静时段照常，明早 7 点额度刷新。" aria-label="Discord 公告内容"></textarea>
+              <div style="margin-top:8px"><button class="btn primary" data-act="send-dc-announce">发送到公告频道</button></div>
+            </div>
           </div>
           <details class="card panel fold">
             <summary class="panel-head"><h2>后台密码</h2><span class="desc">修改后所有已登录的会话（包括当前）都会失效，需要用新密码重新登录</span></summary>
@@ -3592,6 +3602,7 @@ async function loadSettings(){
       api('/admin/api/quota-algo').catch(()=>null)]);
     if($('#announce')) $('#announce').value = a.html || '';
     if($('#s_budget')) $('#s_budget').value = s.global_monthly_anlas;
+    if($('#s_member_anlas')) $('#s_member_anlas').value = s.member_daily_anlas;
     if($('#s_v5')) $('#s_v5').value = s.global_daily_v5;
     // 动态额度开着时，算法每 10 分钟会把 global_daily_v5 写成它算出的全站 V5 值：
     // 这里手工填的数字会在 10 分钟内被静默覆盖。与其骗站长，不如说清楚并禁用（和领 Key 页的 reg_v5 一致）。
@@ -3605,7 +3616,7 @@ async function loadSettings(){
       if($('#r_'+name)) $('#r_'+name).value = r[name];
     }
     if($('#fs-runtime')) $('#fs-runtime').textContent = `每张间隔 ${r.image_min_interval} 秒 · 排队最多等 ${r.queue_timeout} 秒 · 429 后冷却 ${r.image_429_cooldown_seconds} 秒`;
-    if($('#fs-budget')) $('#fs-budget').textContent = `每月 Anlas ${s.global_monthly_anlas > 0 ? s.global_monthly_anlas : '不限'} · 每天 V5 ${s.global_daily_v5 > 0 ? s.global_daily_v5 : '不限'} · 余量低于 ${s.v5_alert_threshold}% 告警`;
+    if($('#fs-budget')) $('#fs-budget').textContent = `每月 Anlas ${s.global_monthly_anlas > 0 ? s.global_monthly_anlas : '不限'} · 每天 V5 ${s.global_daily_v5 > 0 ? s.global_daily_v5 : '不限'} · 每人每天 ${s.member_daily_anlas > 0 ? s.member_daily_anlas : '不限'} Anlas · 余量低于 ${s.v5_alert_threshold}% 告警`;
     if($('#cfgInfo') && o.month){
       const st = statusCache || {};
       const dk = (st.disk && st.disk.total_mb) ? `${Math.round(st.disk.free_mb/1024)} GB / ${Math.round(st.disk.total_mb/1024)} GB (${Math.round(st.disk.free_mb/st.disk.total_mb*100)}%)` : '—';
@@ -3675,6 +3686,7 @@ async function saveBudget(btn){
   try{
     const body = {
       global_monthly_anlas: readNum('s_budget', '全站月度 Anlas 预算', {max:1000000, int:false}),
+      member_daily_anlas: readNum('s_member_anlas', '每人每日 Anlas 上限', {max:100000}),
       v5_alert_threshold: readNum('s_v5_alert', 'V5 告警阈值', {min:1, max:100}),
     };
     // 算法接管时不提交 V5 日限：提交了也只会被 10 分钟后的重算覆盖，徒增困惑
@@ -4044,6 +4056,23 @@ async function saveAnnounce(){
   }
 }
 
+async function sendDcAnnounce(){
+  const t = ($('#dcAnnounce') ? $('#dcAnnounce').value : '').trim();
+  if(!t) return toast('先写公告内容');
+  if(!confirm('立即让奶妹把这条消息发到 Discord 公告频道？\n\n' + t.slice(0, 120))) return;
+  const btn = $('[data-act="send-dc-announce"]');
+  if(btn){ btn.disabled = true; btn.textContent = '发送中…'; }
+  try{
+    await api('/admin/api/announcement/send', {method:'POST', body: JSON.stringify({text: t})});
+    toast('已发给奶妹，公告频道几秒内可见', 'ok');
+    $('#dcAnnounce').value = '';
+  }catch(e){
+    toastErr(e);
+  }finally{
+    if(btn){ btn.disabled = false; btn.textContent = '发送到公告频道'; }
+  }
+}
+
 /* ---------- events ---------- */
 document.addEventListener('error', ev=>{
   const t = ev.target; if(t && t.tagName === 'IMG' && t.classList.contains('av')) t.remove();
@@ -4177,6 +4206,7 @@ document.addEventListener('click', ev=>{
     case 'save-qa': saveQuotaAlgo(el); break;
     case 'run-qa': runQuotaAlgo(el); break;
     case 'save-announce': saveAnnounce(); break;
+    case 'send-dc-announce': sendDcAnnounce(); break;
     case 'open-bans': openBansModal(); break;
     case 'close-bans': closeBansModal(); break;
     case 'unban-user': unbanUser(el.dataset.dcid, el.dataset.name); break;

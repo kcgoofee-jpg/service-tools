@@ -44,6 +44,9 @@ GLOBAL_DAILY_ANLAS_UNTIL = Spec("global_daily_anlas_until", "float", 0.0, "额�
                                 "全站每日 Anlas 开放截止时间戳（0 = 不限时）", 0, 2_000_000_000)
 GLOBAL_MONTHLY_ANLAS = Spec("global_monthly_anlas", "float", None, "额度 / Anlas 池", "全站每月 Anlas 预算（0 = 不限）",
                             0, 1_000_000, env="global_monthly_anlas")
+MEMBER_DAILY_ANLAS = Spec("member_daily_anlas", "int", 50, "额度 / Anlas 池",
+                          "每人每日 Anlas 上限（仅对未手动设置 Anlas 日额度的 Key 生效；0 = 不限）。"
+                          "Vibe 编码一张参考图约 2 点，50 点 ≈ 25 次/天，防单人吃光全站 PVP 池", 0, 100000)
 from .guard import FIELDS as _GUARD  # noqa: E402  保底张数的默认值和范围以 guard 为准，这里只是登记出来给别的模块读
 GUARD_BASE = Spec("guard_base_daily_images", "int", _GUARD["base_daily_images"][0], "guard（注册私信也读）",
                   "V4.5 每人每天保底张数", _GUARD["base_daily_images"][1], _GUARD["base_daily_images"][2])
