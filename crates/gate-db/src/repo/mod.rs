@@ -23,6 +23,7 @@ pub mod feedback;
 pub mod guard;
 pub mod keys;
 pub mod misc;
+pub mod public;
 pub mod reconciliation;
 pub mod registration;
 pub mod settings;

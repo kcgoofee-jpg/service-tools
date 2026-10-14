@@ -536,7 +536,8 @@ impl<H: Hooks> NaiClient<H> {
         self.inner.cfg.legacy_text_host.trim_end_matches('/')
     }
 
-    fn mono(&self) -> f64 {
+    /// 客户端启动以来的单调秒数（`TokenFields::image_next_at` 用的就是这个时钟；首页 / 后台算「还要等几秒」要用）。
+    pub fn mono(&self) -> f64 {
         self.inner.mono_base.elapsed().as_secs_f64()
     }
 

@@ -3,6 +3,7 @@
 pub mod admin;
 mod image;
 mod pages;
+mod public;
 pub mod status;
 
 use crate::AppState;
@@ -13,6 +14,7 @@ pub fn router(state: AppState) -> Router {
         .merge(pages::router())
         .merge(image::router())
         .merge(status::router())
+        .merge(public::router())
         .merge(admin::router(state.clone()))
         .with_state(state)
 }
