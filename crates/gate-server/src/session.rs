@@ -324,10 +324,10 @@ pub async fn member_state(
     let Some((discord_id, tag)) = parse_member(state, &raw) else {
         return Ok(None);
     };
-    let key = if state.env.registration.is_some() {
-        state.db.key_row_for_discord(&discord_id).await?.map(Key)
-    } else {
-        None
+    // 和 `/self-register/*`、`/public/me` 同一个入口（RegistrationService::key_row_for），没配置自助领取就没有 Key
+    let key = match state.registration.as_deref() {
+        Some(svc) => svc.key_row_for(&discord_id).await?,
+        None => None,
     };
     if !ct_eq(tag.as_bytes(), key_tag(key.as_ref()).as_bytes()) {
         return Ok(None);

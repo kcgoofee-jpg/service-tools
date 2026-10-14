@@ -895,7 +895,7 @@ async fn admin_events(State(state): State<AppState>, _s: AdminSession, req: Requ
 // ------------------------------------------------------------------ 首页首屏数据
 
 /// 登录成员的个人状态（`/public/me` 的内容，旧版 `registration_routes.public_me`）。
-async fn me_payload(
+pub(super) async fn me_payload(
     state: &AppState,
     discord_id: &str,
     key: Option<&Key>,

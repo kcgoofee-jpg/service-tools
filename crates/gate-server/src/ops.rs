@@ -8,13 +8,14 @@
 
 use crate::audit::{audit_flags, audit_image_cap_mb, audit_image_days, audit_image_keep_hours};
 use crate::auth::site_flag;
+use crate::env::RegistrationEnv;
 use crate::error::{ApiError, HttpError, InternalError};
 use crate::state::AppState;
 use gate_core::features::{self, FEATURES, GLOBAL_KEY};
 use gate_core::pyext::{self, PyErr};
 use gate_core::site_flags::{self, GLOBAL_DAILY_V5, REGISTER_OPEN};
 use gate_core::{jsondump, pyc, pyval};
-use gate_db::DbError;
+use gate_db::{Db, DbError};
 use serde_json::{Map, Value, json};
 use std::sync::Mutex;
 
@@ -111,8 +112,15 @@ fn to_int(raw: Option<&str>, default: i64) -> i64 {
 }
 
 pub async fn registration_settings(state: &AppState) -> Result<Registration, DbError> {
-    let defaults = state.env.registration.as_ref();
-    let read = |name: &'static str| async move { state.db.get_setting(name).await };
+    registration_settings_for(&state.db, state.env.registration.as_ref()).await
+}
+
+/// 同 [`registration_settings`]，但只要库和启动默认值（`RegistrationService` 里没有 `AppState`，用这个）。
+pub async fn registration_settings_for(
+    db: &Db,
+    defaults: Option<&RegistrationEnv>,
+) -> Result<Registration, DbError> {
+    let read = |name: &'static str| async move { db.get_setting(name).await };
     let open_raw = read("register_open").await?;
     let feats_raw = read("register_features").await?;
     let open = site_flags::parse(
@@ -386,8 +394,8 @@ pub async fn set_global_features(
 
 // ------------------------------------------------------------------ 生成记录
 
-/// 保存记录开关与保留天数。
-pub async fn set_audit(state: &AppState, body: &Map<String, Value>) -> Result<(), OpsError> {
+/// 保存记录开关与保留天数；返回生效后的值（机器人 `/ops audit` 把它连同提示语一起回给管理员）。
+pub async fn set_audit(state: &AppState, body: &Map<String, Value>) -> Result<Value, OpsError> {
     let db = &state.db;
     let (mut prompts, mut thumbs, mut days) = audit_flags(db, &state.env).await?;
     let mut cap_mb = audit_image_cap_mb(db).await?;
@@ -435,7 +443,12 @@ pub async fn set_audit(state: &AppState, body: &Map<String, Value>) -> Result<()
         (site_flags::IMAGE_CAP_MB.key.into(), cap_mb.to_string()),
     ])
     .await?;
-    Ok(())
+    let image_days = audit_image_days(db).await?;
+    Ok(json!({
+        "prompts": prompts, "thumbs": thumbs, "retention_days": days,
+        "image_retention_days": image_days, "image_cap_mb": cap_mb,
+        "image_keep_hours": keep_hours, "member_download": download,
+    }))
 }
 
 #[cfg(test)]
