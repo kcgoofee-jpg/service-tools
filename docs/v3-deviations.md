@@ -26,3 +26,5 @@
 | 20 | 网页报错上报的「注入脚本」过滤 | 堆栈里含 `/static/`、`/admin`、本站域名、本机地址才算本站文件 | 另外认 `/_owl/`（3.0 前端文件路径） | 否则本站脚本自己的报错会被当成浏览器插件注入的丢掉 |
 | 21 | `/queue-status` 的 `image_min_interval` | 后台改过之后是整数（`15`），没改是浮点（`15.0`） | 恒为浮点（运行期限制统一存 f64） | 只是 JSON 数字写法，客户端不区分 |
 | 22 | 公告文件不是 UTF-8 / `quota_algo_last` 不是 JSON 对象 / `Origin` 头无法解析（如 `http://[abc`） | `/announcement`、`/public/live`、`/public/client-error` 抛异常 → 500 | 公告按替换字符解码；`quota_algo_last` 当空对象；该 `Origin` 头按字面比较，对不上本站就 204 丢弃 | 旧行为是 bug，都只会被刻意构造的输入触发 |
+| 23 | 后台 `GET /quota-shadow`、`GET /shadow`（及 `/anlas-pool`、`/share-guard`） | `/quota-shadow` 返回 `{"retired": true, ...}` 空壳；`/shadow` 回放近 24 / 168 小时请求做调度影子对比；后两个在 2.x 就没有路由，只剩操作日志里的名字 | 都不移植（404） | 影子模式已退役，新前端 `web/src` 没有任何引用；`gate-core::shadow` 仍在，要恢复只需加一个路由 |
+| 24 | `PUT /admin/api/ops/registration` 的 `features` 含列表 / 对象元素（如 `[["a"]]`） | `x not in dict` 抛 `unhashable type`，500 并记 Bug | 422「features 必须是功能名列表」 | 与其它非法元素（数字、未知功能名）同一处理；请求体里这样写只可能是误操作 |
