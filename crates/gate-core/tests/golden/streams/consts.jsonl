@@ -1,0 +1,1 @@
+{"fn":"consts","max_event_bytes":33554432,"max_stream_bytes":134217728,"safe_error":"上游图片事件流格式无效或超过大小限制","media_types":{"sse":"text/event-stream","msgpack":"application/x-msgpack"},"max_json_depth":32,"thread_parse_bytes":262144}

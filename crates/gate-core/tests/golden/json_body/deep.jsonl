@@ -1,0 +1,197 @@
+{"fn":"recursion_probe","first_recursion_depth":9998}
+{"fn":"loads","shape":"arr","n":1,"tail":"","ok":true,"depth":1}
+{"fn":"parse_json","shape":"arr","n":1,"tail":"","ok":true,"depth":1}
+{"fn":"loads","shape":"arr","n":1,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"arr","n":1,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"arr","n":1,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"arr","n":1,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"arr","n":2,"tail":"","ok":true,"depth":2}
+{"fn":"parse_json","shape":"arr","n":2,"tail":"","ok":true,"depth":2}
+{"fn":"loads","shape":"arr","n":2,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"arr","n":2,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"arr","n":2,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"arr","n":2,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"arr","n":31,"tail":"","ok":true,"depth":31}
+{"fn":"parse_json","shape":"arr","n":31,"tail":"","ok":true,"depth":31}
+{"fn":"loads","shape":"arr","n":31,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"arr","n":31,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"arr","n":31,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"arr","n":31,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"arr","n":32,"tail":"","ok":true,"depth":32}
+{"fn":"parse_json","shape":"arr","n":32,"tail":"","ok":true,"depth":32}
+{"fn":"loads","shape":"arr","n":32,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"arr","n":32,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"arr","n":32,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"arr","n":32,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"arr","n":33,"tail":"","ok":true,"depth":33}
+{"fn":"parse_json","shape":"arr","n":33,"tail":"","ok":false,"err":"ValueError","msg":"JSON 嵌套过深"}
+{"fn":"loads","shape":"arr","n":33,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"arr","n":33,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"arr","n":33,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"arr","n":33,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"arr","n":34,"tail":"","ok":true,"depth":34}
+{"fn":"parse_json","shape":"arr","n":34,"tail":"","ok":false,"err":"ValueError","msg":"JSON 嵌套过深"}
+{"fn":"loads","shape":"arr","n":34,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"arr","n":34,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"arr","n":34,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"arr","n":34,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"arr","n":40,"tail":"","ok":true,"depth":40}
+{"fn":"parse_json","shape":"arr","n":40,"tail":"","ok":false,"err":"ValueError","msg":"JSON 嵌套过深"}
+{"fn":"loads","shape":"arr","n":40,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"arr","n":40,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"arr","n":40,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"arr","n":40,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"arr","n":64,"tail":"","ok":true,"depth":64}
+{"fn":"parse_json","shape":"arr","n":64,"tail":"","ok":false,"err":"ValueError","msg":"JSON 嵌套过深"}
+{"fn":"loads","shape":"arr","n":64,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"arr","n":64,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"arr","n":64,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"arr","n":64,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"arr","n":100,"tail":"","ok":true,"depth":100}
+{"fn":"parse_json","shape":"arr","n":100,"tail":"","ok":false,"err":"ValueError","msg":"JSON 嵌套过深"}
+{"fn":"loads","shape":"arr","n":100,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"arr","n":100,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"arr","n":100,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"arr","n":100,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"arr","n":500,"tail":"","ok":true,"depth":500}
+{"fn":"parse_json","shape":"arr","n":500,"tail":"","ok":false,"err":"ValueError","msg":"JSON 嵌套过深"}
+{"fn":"loads","shape":"arr","n":500,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"arr","n":500,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"arr","n":500,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"arr","n":500,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"arr","n":1000,"tail":"","ok":true,"depth":1000}
+{"fn":"parse_json","shape":"arr","n":1000,"tail":"","ok":false,"err":"ValueError","msg":"JSON 嵌套过深"}
+{"fn":"loads","shape":"arr","n":1000,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"arr","n":1000,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"arr","n":1000,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"arr","n":1000,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"arr","n":3000,"tail":"","ok":true,"depth":3000}
+{"fn":"parse_json","shape":"arr","n":3000,"tail":"","ok":false,"err":"ValueError","msg":"JSON 嵌套过深"}
+{"fn":"loads","shape":"arr","n":3000,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"arr","n":3000,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"arr","n":3000,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"arr","n":3000,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"arr","n":5000,"tail":"","ok":true,"depth":5000}
+{"fn":"parse_json","shape":"arr","n":5000,"tail":"","ok":false,"err":"ValueError","msg":"JSON 嵌套过深"}
+{"fn":"loads","shape":"arr","n":5000,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"arr","n":5000,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"arr","n":5000,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"arr","n":5000,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"arr","n":9997,"tail":"","ok":true,"depth":9997}
+{"fn":"parse_json","shape":"arr","n":9997,"tail":"","ok":false,"err":"ValueError","msg":"JSON 嵌套过深"}
+{"fn":"loads","shape":"arr","n":9998,"tail":"","ok":false,"err":"RecursionError","msg":null}
+{"fn":"parse_json","shape":"arr","n":9998,"tail":"","ok":false,"err":"RecursionError","msg":null}
+{"fn":"loads","shape":"arr","n":9999,"tail":"","ok":false,"err":"RecursionError","msg":null}
+{"fn":"parse_json","shape":"arr","n":9999,"tail":"","ok":false,"err":"RecursionError","msg":null}
+{"fn":"loads","shape":"arr","n":20000,"tail":"","ok":false,"err":"RecursionError","msg":null}
+{"fn":"parse_json","shape":"arr","n":20000,"tail":"","ok":false,"err":"RecursionError","msg":null}
+{"fn":"loads","shape":"arr","n":20000,"tail":"x","ok":false,"err":"RecursionError","msg":null}
+{"fn":"parse_json","shape":"arr","n":20000,"tail":"x","ok":false,"err":"RecursionError","msg":null}
+{"fn":"loads","shape":"arr","n":20000,"tail":"open","ok":false,"err":"RecursionError","msg":null}
+{"fn":"parse_json","shape":"arr","n":20000,"tail":"open","ok":false,"err":"RecursionError","msg":null}
+{"fn":"loads","shape":"arr","n":100000,"tail":"","ok":false,"err":"RecursionError","msg":null}
+{"fn":"parse_json","shape":"arr","n":100000,"tail":"","ok":false,"err":"RecursionError","msg":null}
+{"fn":"loads","shape":"arr","n":100000,"tail":"x","ok":false,"err":"RecursionError","msg":null}
+{"fn":"parse_json","shape":"arr","n":100000,"tail":"x","ok":false,"err":"RecursionError","msg":null}
+{"fn":"loads","shape":"arr","n":100000,"tail":"open","ok":false,"err":"RecursionError","msg":null}
+{"fn":"parse_json","shape":"arr","n":100000,"tail":"open","ok":false,"err":"RecursionError","msg":null}
+{"fn":"loads","shape":"obj","n":1,"tail":"","ok":true,"depth":1}
+{"fn":"parse_json","shape":"obj","n":1,"tail":"","ok":true,"depth":1}
+{"fn":"loads","shape":"obj","n":1,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"obj","n":1,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"obj","n":1,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"obj","n":1,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"obj","n":2,"tail":"","ok":true,"depth":2}
+{"fn":"parse_json","shape":"obj","n":2,"tail":"","ok":true,"depth":2}
+{"fn":"loads","shape":"obj","n":2,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"obj","n":2,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"obj","n":2,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"obj","n":2,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"obj","n":31,"tail":"","ok":true,"depth":31}
+{"fn":"parse_json","shape":"obj","n":31,"tail":"","ok":true,"depth":31}
+{"fn":"loads","shape":"obj","n":31,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"obj","n":31,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"obj","n":31,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"obj","n":31,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"obj","n":32,"tail":"","ok":true,"depth":32}
+{"fn":"parse_json","shape":"obj","n":32,"tail":"","ok":true,"depth":32}
+{"fn":"loads","shape":"obj","n":32,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"obj","n":32,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"obj","n":32,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"obj","n":32,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"obj","n":33,"tail":"","ok":true,"depth":33}
+{"fn":"parse_json","shape":"obj","n":33,"tail":"","ok":false,"err":"ValueError","msg":"JSON 嵌套过深"}
+{"fn":"loads","shape":"obj","n":33,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"obj","n":33,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"obj","n":33,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"obj","n":33,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"obj","n":34,"tail":"","ok":true,"depth":34}
+{"fn":"parse_json","shape":"obj","n":34,"tail":"","ok":false,"err":"ValueError","msg":"JSON 嵌套过深"}
+{"fn":"loads","shape":"obj","n":34,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"obj","n":34,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"obj","n":34,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"obj","n":34,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"obj","n":40,"tail":"","ok":true,"depth":40}
+{"fn":"parse_json","shape":"obj","n":40,"tail":"","ok":false,"err":"ValueError","msg":"JSON 嵌套过深"}
+{"fn":"loads","shape":"obj","n":40,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"obj","n":40,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"obj","n":40,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"obj","n":40,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"obj","n":64,"tail":"","ok":true,"depth":64}
+{"fn":"parse_json","shape":"obj","n":64,"tail":"","ok":false,"err":"ValueError","msg":"JSON 嵌套过深"}
+{"fn":"loads","shape":"obj","n":64,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"obj","n":64,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"obj","n":64,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"obj","n":64,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"obj","n":100,"tail":"","ok":true,"depth":100}
+{"fn":"parse_json","shape":"obj","n":100,"tail":"","ok":false,"err":"ValueError","msg":"JSON 嵌套过深"}
+{"fn":"loads","shape":"obj","n":100,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"obj","n":100,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"obj","n":100,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"obj","n":100,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"obj","n":500,"tail":"","ok":true,"depth":500}
+{"fn":"parse_json","shape":"obj","n":500,"tail":"","ok":false,"err":"ValueError","msg":"JSON 嵌套过深"}
+{"fn":"loads","shape":"obj","n":500,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"obj","n":500,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"obj","n":500,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"obj","n":500,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"obj","n":1000,"tail":"","ok":true,"depth":1000}
+{"fn":"parse_json","shape":"obj","n":1000,"tail":"","ok":false,"err":"ValueError","msg":"JSON 嵌套过深"}
+{"fn":"loads","shape":"obj","n":1000,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"obj","n":1000,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"obj","n":1000,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"obj","n":1000,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"obj","n":3000,"tail":"","ok":true,"depth":3000}
+{"fn":"parse_json","shape":"obj","n":3000,"tail":"","ok":false,"err":"ValueError","msg":"JSON 嵌套过深"}
+{"fn":"loads","shape":"obj","n":3000,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"obj","n":3000,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"obj","n":3000,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"obj","n":3000,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"obj","n":5000,"tail":"","ok":true,"depth":5000}
+{"fn":"parse_json","shape":"obj","n":5000,"tail":"","ok":false,"err":"ValueError","msg":"JSON 嵌套过深"}
+{"fn":"loads","shape":"obj","n":5000,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"obj","n":5000,"tail":"x","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"obj","n":5000,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"parse_json","shape":"obj","n":5000,"tail":"open","ok":false,"err":"JSONDecodeError","msg":null}
+{"fn":"loads","shape":"obj","n":9997,"tail":"","ok":true,"depth":9997}
+{"fn":"parse_json","shape":"obj","n":9997,"tail":"","ok":false,"err":"ValueError","msg":"JSON 嵌套过深"}
+{"fn":"loads","shape":"obj","n":9998,"tail":"","ok":false,"err":"RecursionError","msg":null}
+{"fn":"parse_json","shape":"obj","n":9998,"tail":"","ok":false,"err":"RecursionError","msg":null}
+{"fn":"loads","shape":"obj","n":9999,"tail":"","ok":false,"err":"RecursionError","msg":null}
+{"fn":"parse_json","shape":"obj","n":9999,"tail":"","ok":false,"err":"RecursionError","msg":null}
+{"fn":"loads","shape":"obj","n":20000,"tail":"","ok":false,"err":"RecursionError","msg":null}
+{"fn":"parse_json","shape":"obj","n":20000,"tail":"","ok":false,"err":"RecursionError","msg":null}
+{"fn":"loads","shape":"obj","n":20000,"tail":"x","ok":false,"err":"RecursionError","msg":null}
+{"fn":"parse_json","shape":"obj","n":20000,"tail":"x","ok":false,"err":"RecursionError","msg":null}
+{"fn":"loads","shape":"obj","n":20000,"tail":"open","ok":false,"err":"RecursionError","msg":null}
+{"fn":"parse_json","shape":"obj","n":20000,"tail":"open","ok":false,"err":"RecursionError","msg":null}
+{"fn":"loads","shape":"obj","n":100000,"tail":"","ok":false,"err":"RecursionError","msg":null}
+{"fn":"parse_json","shape":"obj","n":100000,"tail":"","ok":false,"err":"RecursionError","msg":null}
+{"fn":"loads","shape":"obj","n":100000,"tail":"x","ok":false,"err":"RecursionError","msg":null}
+{"fn":"parse_json","shape":"obj","n":100000,"tail":"x","ok":false,"err":"RecursionError","msg":null}
+{"fn":"loads","shape":"obj","n":100000,"tail":"open","ok":false,"err":"RecursionError","msg":null}
+{"fn":"parse_json","shape":"obj","n":100000,"tail":"open","ok":false,"err":"RecursionError","msg":null}
+{"fn":"loads","shape":"arr_empty_leaf","n":32,"tail":"","ok":true,"depth":32}
+{"fn":"parse_json","shape":"arr_empty_leaf","n":32,"tail":"","ok":true,"depth":32}
+{"fn":"loads","shape":"arr_empty_leaf","n":33,"tail":"","ok":true,"depth":33}
+{"fn":"parse_json","shape":"arr_empty_leaf","n":33,"tail":"","ok":false,"err":"ValueError","msg":"JSON 嵌套过深"}
