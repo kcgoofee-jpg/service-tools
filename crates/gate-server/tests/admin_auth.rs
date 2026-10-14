@@ -14,7 +14,10 @@ async fn login_session_and_action_log() {
         .send(&e.state)
         .await;
     assert_eq!(status, 401);
-    assert_eq!(serde_json::from_slice::<Value>(&body).unwrap(), json!({"detail": "密码错误"}));
+    assert_eq!(
+        serde_json::from_slice::<Value>(&body).unwrap(),
+        json!({"detail": "密码错误"})
+    );
 
     let (status, headers, _) = Call::new("POST", "/admin/api/login")
         .header("host", "owl.example")
@@ -24,10 +27,18 @@ async fn login_session_and_action_log() {
         .await;
     assert_eq!(status, 200);
     let set = headers["set-cookie"].to_str().unwrap().to_string();
-    assert!(set.starts_with("nai_gate_admin=") && set.contains("HttpOnly") && set.contains("SameSite=strict"), "{set}");
+    assert!(
+        set.starts_with("nai_gate_admin=")
+            && set.contains("HttpOnly")
+            && set.contains("SameSite=strict"),
+        "{set}"
+    );
     let cookie = set.split(';').next().unwrap().to_string();
 
-    let (status, headers, _) = Call::new("GET", "/admin/api/me").header("cookie", cookie.clone()).send(&e.state).await;
+    let (status, headers, _) = Call::new("GET", "/admin/api/me")
+        .header("cookie", cookie.clone())
+        .send(&e.state)
+        .await;
     assert_eq!(status, 200);
     assert_eq!(headers["cache-control"], "no-store");
     let (status, _, _) = Call::new("GET", "/admin/api/me").send(&e.state).await;
@@ -40,13 +51,23 @@ async fn login_session_and_action_log() {
         .header("cookie", cookie.clone())
         .send(&e.state)
         .await;
-    assert_eq!(status, 200, "logout 不校验来源（与旧版一致）: {}", String::from_utf8_lossy(&body));
+    assert_eq!(
+        status,
+        200,
+        "logout 不校验来源（与旧版一致）: {}",
+        String::from_utf8_lossy(&body)
+    );
 
     settle().await;
     let rows = e.state.db.list_admin_actions(10, 0).await.unwrap();
     let actions: Vec<(String, bool)> = rows
         .iter()
-        .map(|r| (r["action"].as_str().unwrap().to_string(), r["ok"].as_i64() == Some(1)))
+        .map(|r| {
+            (
+                r["action"].as_str().unwrap().to_string(),
+                r["ok"].as_i64() == Some(1),
+            )
+        })
         .collect();
     assert!(actions.contains(&("登录后台".into(), false)), "{actions:?}");
     assert!(actions.contains(&("登录后台".into(), true)), "{actions:?}");
@@ -63,5 +84,8 @@ async fn cross_origin_write_rejected() {
         .send(&e.state)
         .await;
     assert_eq!(status, 403);
-    assert_eq!(serde_json::from_slice::<Value>(&body).unwrap(), json!({"detail": "来源校验失败"}));
+    assert_eq!(
+        serde_json::from_slice::<Value>(&body).unwrap(),
+        json!({"detail": "来源校验失败"})
+    );
 }
