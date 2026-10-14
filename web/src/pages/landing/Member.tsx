@@ -106,7 +106,7 @@ export function KeyCard({ me }: { me: MeMember }) {
     >
       <div class="stack">
         <div class="lp-keyrow">
-          <CopyField label="Key" value={key} display={shown ? key : maskKey(key)} />
+          <CopyField label="Key" value={key} display={shown ? key : maskKey(key)} wrap />
           <Button size="sm" aria-label={shown ? "隐藏 Key" : "显示完整 Key"} onClick={() => setShown(!shown)}>
             {shown ? <EyeOff size={14} aria-hidden="true" /> : <Eye size={14} aria-hidden="true" />}
             {shown ? "隐藏" : "显示"}

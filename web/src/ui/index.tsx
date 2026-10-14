@@ -268,10 +268,10 @@ export async function copyText(text: string): Promise<boolean> {
   }
 }
 
-export function CopyField(props: { value: string; label: string; display?: string }) {
+export function CopyField(props: { value: string; label: string; display?: string; wrap?: boolean }) {
   const [done, setDone] = useState(false);
   return (
-    <div class="copy">
+    <div class={props.wrap ? "copy copy--wrap" : "copy"}>
       <code class="copy__value" title={props.label}>
         {props.display ?? props.value}
       </code>
@@ -288,7 +288,7 @@ export function CopyField(props: { value: string; label: string; display?: strin
         }}
       >
         {done ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
-        {done ? "已复制" : "复制"}
+        <span class="copy__btn-text">{done ? "已复制" : "复制"}</span>
       </button>
     </div>
   );

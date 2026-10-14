@@ -54,6 +54,12 @@
 a.btn:hover {
   text-decoration: none;
 }
+/* 很窄的手机上顶栏放不下完整按钮文字：只留短的（无障碍名称用 aria-label 保留完整说法） */
+@media (max-width: 420px) {
+  .lp-wide-only {
+    display: none;
+  }
+}
 
 /* ---------- 版面 ---------- */
 .lp-main {
@@ -68,13 +74,6 @@ a.btn:hover {
 /* 客户端标签：窄屏折行，不出现需要横向滑动才看得到的标签 */
 .lp-main .tabs__list {
   flex-wrap: wrap;
-}
-
-/* 长内容（Key、地址）折行显示，不出现看不见的横向滚动区 */
-.lp-main .copy__value {
-  white-space: normal;
-  overflow: visible;
-  overflow-wrap: anywhere;
 }
 
 /* 游客首屏：左边入口，右边实时状态 */
@@ -310,6 +309,7 @@ a.btn:hover {
 }
 
 /* ---------- 三步上手 / 客户端 / 须知 ---------- */
+/* 三张卡片用 subgrid 共用行：标题 / 说明 / 操作 / 补充 四行各自对齐，内容长短不同也不会错位 */
 .lp-steps {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -321,11 +321,13 @@ a.btn:hover {
 .lp-step {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
   gap: var(--sp-3);
 }
-.lp-step .copy {
-  align-self: stretch;
+.lp-step__act {
+  display: grid;
+}
+.lp-step__act .btn {
+  width: 100%;
 }
 .lp-step h3 {
   display: flex;
@@ -392,6 +394,14 @@ a.btn:hover {
 @media (min-width: 900px) {
   .lp-steps {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-rows: repeat(4, auto);
+    row-gap: 0;
+  }
+  .lp-step {
+    display: grid;
+    grid-row: span 4;
+    grid-template-rows: subgrid;
+    align-content: start;
   }
   .lp-rules {
     grid-template-columns: repeat(2, minmax(0, 1fr));

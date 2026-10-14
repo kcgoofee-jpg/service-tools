@@ -38,7 +38,10 @@
   gap: var(--sp-3);
 }
 .lg-filters {
-  flex: 1 1 100%;
+  flex: 1 1 auto;
+}
+.lg-filters[open] {
+  flex-basis: 100%;
 }
 .lg-filters summary {
   display: inline-flex;
@@ -47,18 +50,9 @@
 .lg-filters .lg-filters-in {
   margin-top: var(--sp-3);
 }
-.lg-ctl {
-  display: grid;
-  gap: 2px;
-}
-.lg-ctl .select,
-.lg-ctl .input {
-  min-width: 140px;
-}
 .lg-check {
   align-items: center;
-  min-height: 34px;
-  margin-top: 18px;
+  height: var(--control-h);
 }
 
 /* 列表卡片 */

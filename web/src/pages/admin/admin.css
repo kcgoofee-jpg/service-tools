@@ -200,7 +200,7 @@
 /* 分区通用：页头 + 指标格 */
 .section-head {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   gap: var(--sp-3);
   flex-wrap: wrap;
 }
@@ -214,7 +214,7 @@
 .stats {
   display: grid;
   gap: var(--sp-3);
-  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
 }
 .stat {
   padding: var(--sp-4);

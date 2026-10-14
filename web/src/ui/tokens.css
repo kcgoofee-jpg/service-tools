@@ -80,6 +80,12 @@
   --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 
   --content: 1080px;
+
+  /* 控件高度：同一行里的按钮、输入框、下拉框、分段按钮、复制框一律等高（不要在分区里另写 min-height） */
+  --control-h: 36px;
+  --control-h-sm: 30px;
+  --control-h-lg: 44px;
+  --control-px: 12px;
 }
 
 @media (prefers-color-scheme: dark) {

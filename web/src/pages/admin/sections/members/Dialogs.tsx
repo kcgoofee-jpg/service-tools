@@ -116,7 +116,7 @@ export function KeyRevealDialog(props: {
             </div>
           </>
         ) : (
-          <CopyField value={props.token} label="Key" />
+          <CopyField value={props.token} label="Key" wrap />
         )}
         <p class="small" role="status" aria-live="polite">
           {copied}
@@ -340,7 +340,7 @@ export function GiftDialog(props: { onClose: () => void; onDone: (text: string) 
           {result.key && (
             <>
               <p class="small muted">私信没有发出去，请把这把 Key 手动转交给对方：</p>
-              <CopyField value={result.key} label="Key" />
+              <CopyField value={result.key} label="Key" wrap />
             </>
           )}
         </div>

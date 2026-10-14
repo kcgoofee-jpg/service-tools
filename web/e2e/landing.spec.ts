@@ -91,7 +91,7 @@ test.describe("游客", () => {
 
     // 客户端设置：三个标签，方向键可切换
     const tabs = page.getByRole("tablist", { name: "客户端" }).getByRole("tab");
-    await expect(tabs).toHaveText(["柏宝绘", "文本客户端（OpenAI 兼容）", "智绘姬（st-chatu8）"]);
+    await expect(tabs).toHaveText(["柏宝绘", "文本客户端", "智绘姬"]);
     await tabs.first().focus();
     await page.keyboard.press("ArrowRight");
     await expect(tabs.nth(1)).toHaveAttribute("aria-selected", "true");

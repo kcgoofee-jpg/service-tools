@@ -105,7 +105,7 @@ export function AlertsCard() {
   return (
     <Card
       title="告警渠道"
-      sub="上游异常、额度告警等会发到这里。"
+      sub="只有重大事故会私信：上游 Token 失效、账号可能被封控、服务停了、磁盘快满。其余情况在「总览」查看，不打扰。"
       actions={
         <Badge {...withTone(a.configured ? "ok" : "warn")}>{a.configured ? "已配置" : "未配置"}</Badge>
       }

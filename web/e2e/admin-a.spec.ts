@@ -219,7 +219,8 @@ test.describe("已登录", () => {
 
   test("成员：新建邀请 Key 的消息说明用 Discord 登录", async ({ page }) => {
     await open(page, "/admin/members", PAGES[1]?.ready as never);
-    await page.getByRole("button", { name: "新建邀请 Key" }).click();
+    await page.getByRole("button", { name: "更多", exact: true }).first().click();
+    await page.getByRole("menuitem", { name: "新建邀请 Key" }).click();
     const dlg = page.getByRole("dialog", { name: /已创建/ });
     await expect(dlg).toBeVisible();
     const msg = dlg.getByRole("textbox");
@@ -231,7 +232,8 @@ test.describe("已登录", () => {
 
   test("成员：黑名单（添加 → 搜索 → 移出）与加标签", async ({ page }) => {
     await open(page, "/admin/members", PAGES[1]?.ready as never);
-    await page.getByRole("button", { name: /封禁黑名单/ }).click();
+    await page.getByRole("button", { name: "更多", exact: true }).first().click();
+    await page.getByRole("menuitem", { name: /封禁黑名单/ }).click();
     const bans = page.getByRole("dialog", { name: "封禁黑名单" });
     await bans.getByLabel("Discord ID（纯数字）").fill("123");
     await bans.getByRole("button", { name: "加入黑名单" }).click();
