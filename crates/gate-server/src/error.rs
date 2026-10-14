@@ -167,6 +167,11 @@ impl From<HttpError> for ApiError {
         ApiError::Http(e)
     }
 }
+impl From<InternalError> for ApiError {
+    fn from(e: InternalError) -> Self {
+        ApiError::Internal(e)
+    }
+}
 impl From<gate_db::DbError> for ApiError {
     fn from(e: gate_db::DbError) -> Self {
         ApiError::Internal(InternalError(e.to_string()))

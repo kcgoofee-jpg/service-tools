@@ -9,7 +9,10 @@ use crate::guard::Guard;
 use crate::hooks::GateHooks;
 use crate::middleware::StatusStats;
 use crate::params::ParamsStore;
-use crate::runtime::{AuthGuard, ImageCooldown, Inflight, KeyPacing, KeyPauses, SlidingWindow, UpstreamHealth};
+use crate::runtime::{
+    AuthGuard, ImageCooldown, Inflight, KeyPacing, KeyPauses, SlidingWindow, TagQueue,
+    UpstreamHealth,
+};
 use crate::web::Assets;
 use gate_core::clock::Clock;
 use gate_db::Db;
@@ -80,6 +83,9 @@ pub struct Inner {
     pub cooldown: ImageCooldown,
     pub pauses: KeyPauses,
     pub inflight: Inflight,
+    pub tags: TagQueue,
+    /// V5 官方免费额度缓存（只有真实出图会刷新）。
+    pub allowance: crate::allowance::ServerAllowance,
     pub health: UpstreamHealth,
     /// 文本等非图片请求的全站并发（旧版 GLOBAL_CONCURRENCY）。
     pub global_sem: Arc<tokio::sync::Semaphore>,
@@ -113,7 +119,9 @@ pub fn resolve_secret(env: &EnvConfig) -> std::io::Result<String> {
         return Ok(env.secret_key.clone());
     }
     let f = env.data_dir.join("secret_key");
-    let existing = std::fs::read_to_string(&f).map(|s| s.trim().to_string()).unwrap_or_default();
+    let existing = std::fs::read_to_string(&f)
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
     if existing.chars().count() >= 32 {
         return Ok(existing);
     }
@@ -135,18 +143,30 @@ impl AppState {
         let announcer = Arc::new(Alerter::announcer(&env));
         let tasks = TaskTracker::new();
         let bugs = Arc::new(Bugs::new(db.clone(), alerter.clone(), tasks.clone()));
-        let guard = Arc::new(Guard::new(db.clone(), &env.tz, env.day_reset_hour, params.clone()));
+        let guard = Arc::new(Guard::new(
+            db.clone(),
+            &env.tz,
+            env.day_reset_hour,
+            params.clone(),
+        ));
 
         // 上游 Token：后台接管过就以 upstream_tokens.json 为准，否则用 NAI_TOKENS
         let managed = gate_upstream::token_store::load(&env.upstream_tokens_path());
         let tokens: Vec<(String, i64, bool)> = match &managed {
-            Some(entries) => entries.iter().map(|e| (e.token.clone(), 0, e.allow_anlas)).collect(),
+            Some(entries) => entries
+                .iter()
+                .map(|e| (e.token.clone(), 0, e.allow_anlas))
+                .collect(),
             None => env
                 .nai_tokens
                 .iter()
                 .enumerate()
                 .map(|(i, t)| {
-                    (t.clone(), env.nai_token_v5_daily_limits.get(i).copied().unwrap_or(0), env.nai_token_allow_anlas.get(i).copied().unwrap_or(true))
+                    (
+                        t.clone(),
+                        env.nai_token_v5_daily_limits.get(i).copied().unwrap_or(0),
+                        env.nai_token_allow_anlas.get(i).copied().unwrap_or(true),
+                    )
                 })
                 .collect(),
         };
@@ -175,6 +195,7 @@ impl AppState {
         };
         let secret_key = resolve_secret(&env)?;
         let global = env.global_concurrency.max(1) as usize;
+        let allowance = crate::allowance::ServerAllowance::new(db.clone(), alerter.clone());
         let state = Self(Arc::new(Inner {
             clock,
             assets,
@@ -194,6 +215,8 @@ impl AppState {
             cooldown: ImageCooldown::default(),
             pauses: KeyPauses::default(),
             inflight: Inflight::default(),
+            tags: TagQueue::default(),
+            allowance,
             health: UpstreamHealth::default(),
             global_sem: Arc::new(tokio::sync::Semaphore::new(global)),
             key_sems: Mutex::new(HashMap::new()),
@@ -222,31 +245,57 @@ impl AppState {
         let enabled = self.db.get_upstream_token_enabled().await?;
         let conc = self.db.get_upstream_token_image_concurrency().await?;
         self.nai
-            .apply_saved(&limits.into_iter().collect(), &enabled.into_iter().collect(), &conc.into_iter().collect())
+            .apply_saved(
+                &limits.into_iter().collect(),
+                &enabled.into_iter().collect(),
+                &conc.into_iter().collect(),
+            )
             .await;
-        self.guard.load().await.map_err(|e| anyhow::anyhow!("{e}"))?;
+        self.guard
+            .load()
+            .await
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
         if let Err(e) = self.guard.seed_hour(&ids, now).await {
-            self.bugs.capture(crate::bugs::Report { source: "guard_seed", error: Some(("GuardIoError", &e.to_string())), ..Default::default() });
+            self.bugs.capture(crate::bugs::Report {
+                source: "guard_seed",
+                error: Some(("GuardIoError", &e.to_string())),
+                ..Default::default()
+            });
         }
         self.pauses.load(self.db.active_pauses(now).await?);
-        self.cooldown.load(self.db.get_setting("image_cooldown_until").await?.as_deref(), now);
+        self.cooldown.load(
+            self.db
+                .get_setting("image_cooldown_until")
+                .await?
+                .as_deref(),
+            now,
+        );
         // 停机检测：最后一条请求日志距今超过 1 小时 → 从现在重新起算闲置天数（不然停机 ≥ 回收天数后一重启就把所有人删光）
         if let Some(last) = self.db.last_log_ts().await? {
             if now - last > 3600.0 {
-                self.db.set_setting("key_inactivity_grace_started_at", &gate_core::pyc::float_repr(now)).await?;
+                self.db
+                    .set_setting(
+                        "key_inactivity_grace_started_at",
+                        &gate_core::pyc::float_repr(now),
+                    )
+                    .await?;
                 self.db
                     .add_admin_action(
                         "系统",
                         "闲置计时重置",
                         "",
-                        &format!("网关停机约 {:.1} 小时，闲置天数从现在重新计算", (now - last) / 3600.0),
+                        &format!(
+                            "网关停机约 {:.1} 小时，闲置天数从现在重新计算",
+                            (now - last) / 3600.0
+                        ),
                         true,
                         now,
                     )
                     .await?;
             }
         }
-        *self.admin_pw_hash.write().expect("pw") = self.db.get_setting("admin_password_hash").await?;
+        *self.admin_pw_hash.write().expect("pw") =
+            self.db.get_setting("admin_password_hash").await?;
         if self.env.admin_password.is_empty() {
             tracing::warn!("未设置 ADMIN_PASSWORD，/admin 管理端将无法登录！");
         }
@@ -286,7 +335,12 @@ impl AppState {
                     self.limits.write().expect("limits").image_min_interval = v;
                 }
                 "queue_timeout" => self.limits.write().expect("limits").queue_timeout = v,
-                "image_429_cooldown_seconds" => self.limits.write().expect("limits").image_429_cooldown_seconds = v,
+                "image_429_cooldown_seconds" => {
+                    self.limits
+                        .write()
+                        .expect("limits")
+                        .image_429_cooldown_seconds = v
+                }
                 _ => {}
             }
         }
@@ -312,7 +366,12 @@ impl AppState {
     /// 每把 Key 的请求并发（旧版 key_sem）。
     pub fn key_sem(&self, key_id: i64) -> Arc<tokio::sync::Semaphore> {
         let n = self.env.key_concurrency.max(1) as usize;
-        self.key_sems.lock().expect("key_sems").entry(key_id).or_insert_with(|| Arc::new(tokio::sync::Semaphore::new(n))).clone()
+        self.key_sems
+            .lock()
+            .expect("key_sems")
+            .entry(key_id)
+            .or_insert_with(|| Arc::new(tokio::sync::Semaphore::new(n)))
+            .clone()
     }
 
     /// 首页「近 1 分钟」的请求结果。
@@ -328,8 +387,16 @@ impl AppState {
     pub async fn block_image_generation(&self, retry_after: f64) -> i64 {
         let now = self.now();
         let until = self.cooldown.block(retry_after, now);
-        if let Err(e) = self.db.set_setting("image_cooldown_until", &gate_core::pyc::float_repr(until)).await {
-            self.bugs.capture(crate::bugs::Report { source: "cooldown_save", error: Some(("DbError", &e.to_string())), ..Default::default() });
+        if let Err(e) = self
+            .db
+            .set_setting("image_cooldown_until", &gate_core::pyc::float_repr(until))
+            .await
+        {
+            self.bugs.capture(crate::bugs::Report {
+                source: "cooldown_save",
+                error: Some(("DbError", &e.to_string())),
+                ..Default::default()
+            });
         }
         let remaining = ((until - now) as i64).max(1);
         match self.guard.on_upstream_429(now).await {
@@ -354,10 +421,15 @@ impl AppState {
     /// 记一次上游调用结果；状态翻转时告警。
     pub fn record_upstream(&self, ok: bool) {
         match self.health.record(ok, self.now()) {
-            Some(crate::runtime::HealthChange::Degraded) => {
-                self.alerter.notify("upstream_degraded", "NovelAI 上游近 10 分钟失败率偏高（上游可能在故障），成员的生图会受影响。", 1800.0)
+            Some(crate::runtime::HealthChange::Degraded) => self.alerter.notify(
+                "upstream_degraded",
+                "NovelAI 上游近 10 分钟失败率偏高（上游可能在故障），成员的生图会受影响。",
+                1800.0,
+            ),
+            Some(crate::runtime::HealthChange::Recovered) => {
+                self.alerter
+                    .notify("upstream_recovered", "NovelAI 上游已恢复正常。", 0.0)
             }
-            Some(crate::runtime::HealthChange::Recovered) => self.alerter.notify("upstream_recovered", "NovelAI 上游已恢复正常。", 0.0),
             None => {}
         }
     }

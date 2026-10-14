@@ -11,10 +11,15 @@ tokio::task_local! {
     static CURRENT: ReqCtx;
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ReqCtx(Arc<Mutex<Inner>>);
 
-#[derive(Debug)]
+impl std::fmt::Debug for ReqCtx {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("ReqCtx").field(&self.rid()).finish()
+    }
+}
+
 struct Inner {
     rid: String,
     t0: Instant,
@@ -26,6 +31,8 @@ struct Inner {
     key_id: Option<i64>,
     key_name: String,
     src: String,
+    /// 第一次发往上游时调用一次（实时图把这张图从「排队」移到「生成中」）。
+    on_sent: Option<Box<dyn FnOnce() + Send>>,
 }
 
 /// `snapshot()`：写进用量日志的计时字段。
@@ -52,6 +59,7 @@ impl ReqCtx {
             key_id: None,
             key_name: String::new(),
             src: String::new(),
+            on_sent: None,
         })))
     }
 
@@ -65,9 +73,36 @@ impl ReqCtx {
 
     /// 第一次真正发往上游时调用；重试不覆盖。
     pub fn mark_sent(&self) {
-        self.with(|i| {
+        let hook = self.with(|i| {
             if i.sent.is_none() {
                 i.sent = Some(Instant::now());
+                i.on_sent.take()
+            } else {
+                None
+            }
+        });
+        if let Some(h) = hook {
+            h();
+        }
+    }
+
+    /// 登记「第一次发往上游」的回调（只保留最后一次登记的）。
+    pub fn on_sent(&self, hook: impl FnOnce() + Send + 'static) {
+        self.with(|i| i.on_sent = Some(Box::new(hook)));
+    }
+
+    /// 来源网络打码标签（写进用量日志）。
+    pub fn set_source(&self, label: &str) {
+        let label = label.to_string();
+        self.with(|i| i.src = label);
+    }
+
+    /// 无明确自报 UA 的客户端，按请求体参数指纹识别（小白盒、dsh-tavern-image 等）。
+    pub fn refine_client_from_payload(&self, body: &serde_json::Value) {
+        self.with(|i| {
+            if let Some(c) = gate_core::request_timing::refine_client_from_payload(&i.client, body)
+            {
+                i.client = c;
             }
         });
     }

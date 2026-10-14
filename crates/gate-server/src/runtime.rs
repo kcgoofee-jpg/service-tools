@@ -10,7 +10,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 use std::net::IpAddr;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tokio::time::{Duration, Instant};
 
 /// 滑动窗口计数器。
@@ -198,11 +198,16 @@ impl KeyPacing {
                         Some(n) => n - now,
                     }
                 };
+                struct Waiting<'a>(&'a std::sync::atomic::AtomicI64);
+                impl Drop for Waiting<'_> {
+                    fn drop(&mut self) {
+                        self.0.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+                    }
+                }
                 self.waiting
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let _w = Waiting(&self.waiting);
                 tokio::time::sleep(wait).await;
-                self.waiting
-                    .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
             }
         };
         tokio::time::timeout(Duration::from_secs_f64(timeout.max(0.0)), fut)
@@ -309,21 +314,22 @@ impl KeyPauses {
 }
 
 /// 每个 Authorization 同时进行中的请求数（读请求体之前就限制：25 MB 的生图请求在 2 GB 机器上很贵）。
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Inflight {
-    inner: Mutex<HashMap<String, usize>>,
+    inner: Arc<Mutex<HashMap<String, usize>>>,
 }
 
 pub const MAX_INFLIGHT_PER_KEY: usize = 4;
 
-pub struct InflightPermit<'a> {
-    owner: &'a Inflight,
+/// 占用一个名额；可以移进后台任务（流式响应要占到推流和结算结束）。
+pub struct InflightPermit {
+    owner: Arc<Mutex<HashMap<String, usize>>>,
     ident: String,
 }
 
-impl Drop for InflightPermit<'_> {
+impl Drop for InflightPermit {
     fn drop(&mut self) {
-        let mut m = self.owner.inner.lock().expect("inflight");
+        let mut m = self.owner.lock().expect("inflight");
         if let Some(n) = m.get_mut(&self.ident) {
             *n -= 1;
             if *n == 0 {
@@ -335,10 +341,7 @@ impl Drop for InflightPermit<'_> {
 
 impl Inflight {
     /// 与鉴权同样归一化：「Bearer K」「bearer K」「Bearer  K」是同一把 Key。没有凭据不限制（返回 Ok(None)）。
-    pub fn acquire(
-        &self,
-        authorization: &str,
-    ) -> Result<Option<InflightPermit<'_>>, TooManyInflight> {
+    pub fn acquire(&self, authorization: &str) -> Result<Option<InflightPermit>, TooManyInflight> {
         let raw = gate_core::pyc::strip(gate_core::pyc::take_chars(authorization, 512));
         let (scheme, rest) = raw.split_once(' ').unwrap_or((raw, ""));
         let ident = if scheme.eq_ignore_ascii_case("bearer") {
@@ -356,7 +359,117 @@ impl Inflight {
             return Err(TooManyInflight);
         }
         *n += 1;
-        Ok(Some(InflightPermit { owner: self, ident }))
+        Ok(Some(InflightPermit {
+            owner: self.inner.clone(),
+            ident,
+        }))
+    }
+}
+
+/// 同一把 Key 两次标签补全至少间隔 2 秒（补全很轻，旧查询会被新查询取代）。
+pub const TAG_MIN_INTERVAL: f64 = 2.0;
+
+/// 标签补全排队（旧版 `wait_for_tag_request` / `finish_tag_request`）。
+/// 客户端每输入一个字就查一次补全，只有最新那次有意义：新查询到来时，同一把 Key 还在排队的旧查询作废。
+#[derive(Default)]
+pub struct TagQueue {
+    inner: Mutex<TagState>,
+    changed: tokio::sync::Notify,
+}
+
+#[derive(Default)]
+struct TagState {
+    active: std::collections::HashSet<i64>,
+    next_at: HashMap<i64, Instant>,
+    waiting: usize,
+    waiting_by_key: HashMap<i64, usize>,
+    latest: HashMap<i64, u64>,
+}
+
+/// 排队结果：放行 / 全站排队已满 / 被同一 Key 更新的查询取代。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TagAdmit {
+    Admitted,
+    Full,
+    Superseded,
+}
+
+impl TagQueue {
+    /// `global_concurrency`、`key_image_min_interval` 取当前设置。被取消（超时 / 断开）时排队计数照样归还。
+    pub async fn wait(
+        &self,
+        key_id: i64,
+        global_concurrency: i64,
+        key_image_min_interval: f64,
+    ) -> TagAdmit {
+        struct Waiting<'a>(&'a TagQueue, i64);
+        impl Drop for Waiting<'_> {
+            fn drop(&mut self) {
+                let mut s = self.0.inner.lock().expect("tags");
+                s.waiting -= 1;
+                match s.waiting_by_key.get_mut(&self.1) {
+                    Some(n) if *n > 1 => *n -= 1,
+                    _ => {
+                        s.waiting_by_key.remove(&self.1);
+                    }
+                }
+            }
+        }
+        let ticket = {
+            let mut s = self.inner.lock().expect("tags");
+            if s.waiting as i64 >= (global_concurrency * 16).max(16) {
+                return TagAdmit::Full;
+            }
+            let t = s.latest.get(&key_id).copied().unwrap_or(0) + 1;
+            s.latest.insert(key_id, t);
+            s.waiting += 1;
+            *s.waiting_by_key.entry(key_id).or_insert(0) += 1;
+            t
+        };
+        let _w = Waiting(self, key_id);
+        self.changed.notify_waiters(); // 叫醒同一 Key 的旧查询，让它们发现自己已作废
+        let capacity = global_concurrency.clamp(1, 8) as usize;
+        loop {
+            let notified = self.changed.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            let delay = {
+                let mut s = self.inner.lock().expect("tags");
+                if s.latest.get(&key_id) != Some(&ticket) {
+                    return TagAdmit::Superseded;
+                }
+                let now = Instant::now();
+                let delay = s
+                    .next_at
+                    .get(&key_id)
+                    .map_or(Duration::ZERO, |n| n.saturating_duration_since(now));
+                if !s.active.contains(&key_id) && s.active.len() < capacity {
+                    if delay.is_zero() {
+                        s.active.insert(key_id);
+                        let gap = TAG_MIN_INTERVAL.min(key_image_min_interval).max(0.0);
+                        s.next_at.insert(key_id, now + Duration::from_secs_f64(gap));
+                        return TagAdmit::Admitted;
+                    }
+                    Some(delay)
+                } else {
+                    None
+                }
+            };
+            match delay {
+                Some(d) => {
+                    tokio::select! {
+                        _ = &mut notified => {}
+                        _ = tokio::time::sleep(d) => {}
+                    }
+                }
+                None => notified.await,
+            }
+        }
+    }
+
+    pub fn finish(&self, key_id: i64) {
+        self.inner.lock().expect("tags").active.remove(&key_id);
+        self.changed.notify_waiters();
     }
 }
 

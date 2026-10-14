@@ -5,7 +5,9 @@
 //! 永远不会让调用方出错或阻塞：入库在后台任务里做。
 
 use crate::alerts::Alerter;
-use gate_core::errors::{Capture, ExcInfo, StoreState, build_event, notice_for, should_print_stack};
+use gate_core::errors::{
+    Capture, ExcInfo, StoreState, build_event, notice_for, should_print_stack,
+};
 use gate_db::Db;
 use gate_db::repo::errors::{ErrorRow, Stored};
 use std::collections::HashMap;
@@ -52,9 +54,23 @@ impl Bugs {
     pub fn capture(&self, r: Report<'_>) -> String {
         let now = crate::time::now();
         let level = if r.level.is_empty() { "error" } else { r.level };
-        let exc = r.error.map(|(ty, msg)| ExcInfo { type_name: ty, message: msg, app_frame: r.source, stack: msg });
+        let exc = r.error.map(|(ty, msg)| ExcInfo {
+            type_name: ty,
+            message: msg,
+            app_frame: r.source,
+            stack: msg,
+        });
         let c = build_event(
-            &Capture { source: r.source, exc, title: r.title, detail: r.detail, path: r.path, key_id: r.key_id, rid: r.rid, level },
+            &Capture {
+                source: r.source,
+                exc,
+                title: r.title,
+                detail: r.detail,
+                path: r.path,
+                key_id: r.key_id,
+                rid: r.rid,
+                level,
+            },
             now,
         );
         tracing::warn!(target: "bug", "{}", c.log_line);
