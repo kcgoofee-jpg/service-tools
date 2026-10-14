@@ -279,7 +279,9 @@ details.more p{font-size:var(--fs-sm);color:var(--muted);margin:var(--sp-1) 0 va
 .loginrow{display:flex;align-items:center;gap:var(--sp-2);flex-wrap:wrap;margin:0}
 .login-hint{margin:0;color:var(--muted);font-size:var(--fs-sm)}
 .keylogin{display:flex;gap:var(--sp-2);flex:1;min-width:0}
-.keylogin input[type=password]{flex:1;min-width:0;min-height:var(--tap);padding:8px 14px;font-size:var(--fs-body);border-radius:var(--radius-sm)}
+.keylogin input[type=password]{flex:1;min-width:0;min-height:var(--tap);padding:8px 14px;font-size:var(--fs-body);border-radius:var(--radius-sm);background:var(--surface-2);border:1px solid var(--border);color:var(--text);outline:none;box-shadow:none;appearance:none}
+.keylogin input[type=password]:focus{border-color:var(--accent)}
+.keylogin input::placeholder{color:var(--muted)}
 .keylogin .btn{flex:none}
 input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 .me{margin:0;padding:0;border:0;background:none}
