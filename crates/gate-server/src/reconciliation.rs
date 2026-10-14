@@ -326,7 +326,7 @@ pub async fn retry_after(state: &AppState) -> Result<i64, RunError> {
 /// 页面用的状态：最近 20 次结果、冷却剩余秒数、是否正在核对。
 pub async fn status(state: &AppState) -> Result<Value, RunError> {
     let history = state.db.reconciliation_history(HISTORY).await?;
-    let running = crate::ops::shared(state).reconcile.try_lock().is_err();
+    let running = state.ops.reconcile.try_lock().is_err();
     Ok(json!({
         "history": history,
         "retry_after": retry_after(state).await?,
@@ -354,7 +354,7 @@ pub async fn run(state: &AppState) -> Result<Value, RunError> {
 /// 同 [`run`]，等图片任务结算的最长时间可调（测试用，旧版是类属性 `wait_timeout`）。
 pub async fn run_with(state: &AppState, wait_timeout: Duration) -> Result<Value, RunError> {
     {
-        let shared = crate::ops::shared(state);
+        let shared = &state.ops;
         let Ok(_exclusive) = shared.reconcile.try_lock() else {
             return Err(ReconError::new("已有核对正在进行，请稍后查看结果", 409, 0).into());
         };

@@ -167,7 +167,6 @@ async fn home_join_set(State(state): State<AppState>, _s: AdminSession, req: Req
     let text = site_flags::encode(&HOME_JOIN_OPEN, &Value::Bool(on))
         .map_err(|e| crate::error::InternalError(e.0))?;
     state.db.set_setting(HOME_JOIN_OPEN.key, &text).await?;
-    // 与旧版一致：这里自己记一条，中间件还会再记一条「POST /home/join」
     log_action(
         &state.db,
         &super::super::actor(&state, &parts),
@@ -185,7 +184,7 @@ async fn home_join_set(State(state): State<AppState>, _s: AdminSession, req: Req
         state.now(),
     )
     .await;
-    Ok(ok_json(&json!({"ok": true, "open": on})))
+    Ok(logged(ok_json(&json!({"ok": true, "open": on}))))
 }
 
 /// 结构性交叉校验的「站长已确认」：确认后该校验转绿（数字仍显示），不再每 10 分钟记一条 warn。
@@ -218,5 +217,12 @@ async fn checks_ack(State(state): State<AppState>, _s: AdminSession, req: Reques
         state.now(),
     )
     .await;
-    Ok(ok_json(&json!({"ok": true, "on": on})))
+    Ok(logged(ok_json(&json!({"ok": true, "on": on}))))
+}
+
+/// 处理函数已经写了一条更具体的操作日志：告诉中间件别再记一条「POST /…」。
+/// （旧版两条都记；3.0 只留这条，见 docs/v3-deviations.md。）
+fn logged(mut resp: axum::response::Response) -> axum::response::Response {
+    resp.extensions_mut().insert(super::super::ActionLogged);
+    resp
 }

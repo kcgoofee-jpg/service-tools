@@ -28,3 +28,5 @@
 | 22 | 公告文件不是 UTF-8 / `quota_algo_last` 不是 JSON 对象 / `Origin` 头无法解析（如 `http://[abc`） | `/announcement`、`/public/live`、`/public/client-error` 抛异常 → 500 | 公告按替换字符解码；`quota_algo_last` 当空对象；该 `Origin` 头按字面比较，对不上本站就 204 丢弃 | 旧行为是 bug，都只会被刻意构造的输入触发 |
 | 23 | 后台 `GET /quota-shadow`、`GET /shadow`（及 `/anlas-pool`、`/share-guard`） | `/quota-shadow` 返回 `{"retired": true, ...}` 空壳；`/shadow` 回放近 24 / 168 小时请求做调度影子对比；后两个在 2.x 就没有路由，只剩操作日志里的名字 | 都不移植（404） | 影子模式已退役，新前端 `web/src` 没有任何引用；`gate-core::shadow` 仍在，要恢复只需加一个路由 |
 | 24 | `PUT /admin/api/ops/registration` 的 `features` 含列表 / 对象元素（如 `[["a"]]`） | `x not in dict` 抛 `unhashable type`，500 并记 Bug | 422「features 必须是功能名列表」 | 与其它非法元素（数字、未知功能名）同一处理；请求体里这样写只可能是误操作 |
+| 25 | 后台「首页加入按钮」「确认交叉校验」「发送公告」的操作日志 | 处理函数记一条、中间件再记一条「POST /…」 | 只留处理函数那条（更具体） | 重复行没有信息量，淹没真正的操作 |
+| 26 | Discord REST 基地址 | 告警用不带版本的 `/api`，注册用 `/api/v10`，混用 | 全部 `/api/v10`，可用 `DISCORD_API_BASE` 指向本地假服务 | 不带版本的请求走 Discord 的旧默认版本 |

@@ -8,8 +8,6 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Instant;
 
-pub const DISCORD_API: &str = "https://discord.com/api";
-
 const QUIET_KINDS: [&str; 4] = [
     "startup",
     "upstream_degraded",
@@ -34,13 +32,19 @@ pub struct Alerter {
 }
 
 impl Alerter {
-    pub fn new(bot_token: &str, user_id: &str, channel_id: &str, webhook_url: &str) -> Self {
+    pub fn new(
+        api_base: &str,
+        bot_token: &str,
+        user_id: &str,
+        channel_id: &str,
+        webhook_url: &str,
+    ) -> Self {
         Self {
             bot_token: bot_token.to_string(),
             user_id: user_id.trim().to_string(),
             channel_id: channel_id.trim().to_string(),
             webhook_url: webhook_url.trim().to_string(),
-            api_base: std::env::var("DISCORD_API_BASE").unwrap_or_else(|_| DISCORD_API.to_string()),
+            api_base: api_base.trim_end_matches('/').to_string(),
             last: Mutex::new(HashMap::new()),
             dm_channel: tokio::sync::Mutex::new(None),
             http: reqwest::Client::builder()
@@ -54,6 +58,7 @@ impl Alerter {
     /// 站长告警通道。
     pub fn owner(env: &crate::env::EnvConfig) -> Self {
         Self::new(
+            &env.discord_api_base,
             &env.discord_bot_token,
             &env.alert_user_id,
             &env.alert_channel_id,
@@ -63,7 +68,13 @@ impl Alerter {
 
     /// 成员公告通道（同一个机器人发到公告频道）。
     pub fn announcer(env: &crate::env::EnvConfig) -> Self {
-        Self::new(&env.discord_bot_token, "", &env.announce_channel_id, "")
+        Self::new(
+            &env.discord_api_base,
+            &env.discord_bot_token,
+            "",
+            &env.announce_channel_id,
+            "",
+        )
     }
 
     pub fn configured(&self) -> bool {

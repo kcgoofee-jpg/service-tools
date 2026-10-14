@@ -1626,10 +1626,19 @@ impl<H: Hooks> NaiClient<H> {
         }
         let info: Value = serde_json::from_slice(&body)
             .map_err(|_| "NovelAI 返回了无法识别的订阅信息".to_string())?;
-        let tier = info
-            .get("tier")
-            .and_then(gate_core::pyval::int_like)
-            .ok_or("NovelAI 返回了无法识别的订阅信息")?;
+        // 旧版 `int(info.get("tier", 0))`：缺省为 0；数字串 / 浮点 / 布尔照 Python int() 转；转不了才算无法识别
+        let unknown = || "NovelAI 返回了无法识别的订阅信息".to_string();
+        if !info.is_object() {
+            return Err(unknown());
+        }
+        let tier = match info.get("tier") {
+            None => 0,
+            Some(Value::Bool(b)) => i64::from(*b),
+            Some(Value::Number(n)) if !n.is_f64() => n.as_i64().ok_or_else(unknown)?,
+            Some(Value::Number(n)) => n.as_f64().and_then(gate_core::pyc::int_of).ok_or_else(unknown)?,
+            Some(Value::String(s)) => gate_core::pyc::parse_int(s).ok_or_else(unknown)?,
+            Some(_) => return Err(unknown()),
+        };
         if !info.get("active").is_some_and(gate_core::pyval::truthy) {
             return Err("这把 Token 对应的账号没有有效订阅".into());
         }

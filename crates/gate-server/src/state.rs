@@ -84,6 +84,8 @@ pub struct Inner {
     pub pauses: KeyPauses,
     pub inflight: Inflight,
     pub tags: TagQueue,
+    /// 后台运营接口的进程内状态（测试告警节流、运行期限制写锁、Anlas 核对互斥）。
+    pub ops: crate::ops::Shared,
     /// V5 官方免费额度缓存（只有真实出图会刷新）。
     pub allowance: crate::allowance::ServerAllowance,
     pub health: UpstreamHealth,
@@ -220,6 +222,7 @@ impl AppState {
             pauses: KeyPauses::default(),
             inflight: Inflight::default(),
             tags: TagQueue::default(),
+            ops: crate::ops::Shared::default(),
             allowance,
             health: UpstreamHealth::default(),
             global_sem: Arc::new(tokio::sync::Semaphore::new(global)),

@@ -152,6 +152,8 @@ pub struct EnvConfig {
     pub announce_channel_id: String,
     pub discord_invite_url: String,
     pub discord_guild_id: String,
+    /// Discord REST 基地址（测试指向本地假服务）。
+    pub discord_api_base: String,
     // 记录
     pub audit_prompts: bool,
     pub audit_thumbs: bool,
@@ -336,6 +338,7 @@ impl EnvConfig {
             announce_channel_id: r.str("ANNOUNCE_CHANNEL_ID", ""),
             discord_invite_url: r.str("DISCORD_INVITE_URL", ""),
             discord_guild_id: r.str("DISCORD_GUILD_ID", ""),
+            discord_api_base: r.str("DISCORD_API_BASE", "https://discord.com/api/v10"),
             audit_prompts: r.bool("AUDIT_PROMPTS", false),
             audit_thumbs: r.bool("AUDIT_THUMBS", false),
             audit_retention_days: r.int("AUDIT_RETENTION_DAYS", 7),

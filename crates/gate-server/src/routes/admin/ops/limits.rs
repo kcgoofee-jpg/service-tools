@@ -145,7 +145,7 @@ async fn put_runtime_limits(
         }
     }
     // 写库 + 生效必须连在一起（旧版 `_runtime_limits_lock`）
-    let shared = crate::ops::shared(&state);
+    let shared = &state.ops;
     let _lock = shared.runtime_limits.lock().await;
     let writes: Vec<(String, String)> = values
         .iter()
