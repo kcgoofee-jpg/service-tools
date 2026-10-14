@@ -287,6 +287,15 @@ pub struct RequestOpts<'a> {
 }
 
 impl<'a> RequestOpts<'a> {
+    /// 无请求体的 GET（标签补全）。
+    pub fn get(url: impl Into<String>) -> Self {
+        Self {
+            method: wreq::Method::GET,
+            json: None,
+            ..Self::post(url, &Value::Null)
+        }
+    }
+
     pub fn post(url: impl Into<String>, json: &'a Value) -> Self {
         Self {
             method: wreq::Method::POST,
