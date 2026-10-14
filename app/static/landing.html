@@ -208,12 +208,6 @@ footer{max-width:var(--container-max,880px);margin:0 auto;padding:var(--sp-6) va
 .board-sub{font-size:var(--fs-micro);color:var(--muted);padding-left:18px}
 .board-sub:empty{display:none}
 .board-q{font-size:var(--fs-xs);font-weight:700;color:var(--text);text-align:right;flex-shrink:0;font-variant-numeric:tabular-nums}
-.board-strip{display:flex;align-items:center;justify-content:space-between;padding:var(--sp-1) 0;
-  border-top:1px solid var(--border);border-bottom:1px solid var(--border);font-size:var(--fs-micro);color:var(--muted);margin:0;gap:2px}
-.board-strip .step-badge{padding:2px 6px;border-radius:var(--radius-xs);background:var(--surface-2);color:var(--muted);transition:all .2s;font-size:var(--fs-micro);white-space:nowrap}
-.board-strip .step-badge.on{background:color-mix(in srgb,var(--warn) 20%,transparent);color:var(--warn);font-weight:600}
-.board-strip .step-badge.accent{background:color-mix(in srgb,var(--accent) 25%,transparent);color:var(--accent);font-weight:600}
-.board-strip .arr{color:var(--muted);opacity:.5}
 .board-quota{display:flex;flex-direction:column;gap:var(--sp-1)}
 .board-quota-txt{display:flex;justify-content:space-between;align-items:center;font-size:var(--fs-micro);font-variant-numeric:tabular-nums}
 .board-quota-txt .q-total{color:var(--muted)}
@@ -375,7 +369,6 @@ body.haskey #algoNote,html.haskey #algoNote{display:none!important}
   .rules{padding:var(--pad-card-tight) var(--sp-4)}
   .me-export-btns{grid-template-columns:1fr}
   .me-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .board-strip{gap:0}
   #navStatus{display:inline-flex}
 }
 /* 触屏：小按钮也保证 40px 触控高度 */
@@ -386,7 +379,6 @@ body.haskey #algoNote,html.haskey #algoNote{display:none!important}
   #navStatus{display:none}
   .brand-link{font-size:var(--fs-sm)}
   .chip-btn .chip-name{max-width:64px}
-  .board-strip .step-badge{padding:2px 4px}
 }
 @media (min-width:640px){
   body{font-size:15px}
@@ -445,6 +437,7 @@ body.haskey #algoNote,html.haskey #algoNote{display:none!important}
           <button class="btn primary" type="submit" id="keyLoginBtn">登录</button>
         </form>
         <p class="login-hint" id="loginHint" hidden>Discord 登录维护中，先用 Key 登录；开放后可点上方按钮</p>
+        <p class="login-hint" id="loginFail" role="alert" hidden>Discord 登录没有成功：请再点一次按钮重试，或先用 Key 登录。</p>
       </div>
     </div>
   </section>
@@ -463,21 +456,6 @@ body.haskey #algoNote,html.haskey #algoNote{display:none!important}
         <div class="board-q">
           <div id="stQueue">0 人排队</div>
         </div>
-      </div>
-
-      <!-- 单行极简流水线链路 -->
-      <div class="board-strip">
-        <span class="step-badge" data-step="client">客户端</span>
-        <span class="arr">›</span>
-        <span class="step-badge" data-step="auth">验Key</span>
-        <span class="arr">›</span>
-        <span class="step-badge" data-step="quota">查额</span>
-        <span class="arr">›</span>
-        <span class="step-badge" data-step="queue">排队</span>
-        <span class="arr">›</span>
-        <span class="step-badge" data-step="pace" id="paceStep">控速</span>
-        <span class="arr">›</span>
-        <span class="step-badge" data-step="nai">NovelAI</span>
       </div>
 
       <!-- 全站大盘：左右两端对齐 + 单行双色堆叠条 -->
@@ -709,6 +687,8 @@ function renderStatus(d){
   var paused = d.web_login !== true;          // 只有服务端明确说开放才显示登录按钮
   if($('loginBtn')) $('loginBtn').hidden = paused;
   if($('loginHint')) $('loginHint').hidden = !paused;
+  /* /login/callback 失败会回到 /?login=failed：以前页面不读这个参数，成员点完授权只看到首页、不知道没登上 */
+  if($('loginFail')) $('loginFail').hidden = paused || !/[?&]login=failed\b/.test(location.search);
   try{ document.dispatchEvent(new CustomEvent('owl-status', {detail: d})); }catch(_){}
 }
 /* （10-14 重构）statusFailed 与 30s 的 /public/status 轮询已退役：meta 并入每秒的 /public/live */
@@ -936,10 +916,9 @@ function fmtDate(sec){
 (function(){
   var root = document.getElementById('board');
   if(!root) return;
-  var steps = root.querySelectorAll('[data-step]'), failed = 0, failSince = 0, reported = false;
+  var failed = 0, failSince = 0, reported = false;
   function pct(a, b){ return b > 0 ? Math.min(100, Math.round(a / b * 100)) : 0; }
   function setBar(id, a, b){ var e = $(id), p = pct(a, b); if(e){ e.style.width = p + '%'; if(e.parentNode) e.parentNode.setAttribute('aria-valuenow', String(p)); } }
-  function mark(k){ Array.prototype.forEach.call(steps, function(s){ var on = s.dataset.step === k; s.classList.toggle('on', on); if(on) s.setAttribute('aria-current', 'step'); else s.removeAttribute('aria-current'); }); }
   var BLOCK_TITLE = {paced: '运行正常 · 时段平滑补给中', daily_cap: '今日出图已满', breaker: '暂停出图 · 上游出错',
     hourly_cap: '近 60 分钟出图已满', quiet_cap: '安静时段 · 暂停出图', cap_3h: '近 3 小时出图已满'};
   var lastQueueCount = -1, lastQueueSec = 0, queueSeenAt = 0;
@@ -973,49 +952,49 @@ function fmtDate(sec){
     var myRun = !!(mine && mine.some(function(x){ return x.state === 'running'; }));
     var myPos = mine && mine.filter(function(x){ return x.state === 'waiting'; })[0];
     var hour = g.hour || 0, hcap = g.hour_cap || 0, qcap = r.queue_cap || 0, bk = g.blocked, bw = bk && /约 (\d+) 分钟/.exec(bk.text);
-    var tone, val, sub = '', step = '';
-    if(g.cooldown){ tone = 'bad'; val = '约 ' + g.cooldown + ' 秒后'; sub = '上游限流，全站暂停出图'; step = 'pace'; }
+    var tone, val, sub = '';
+    if(g.cooldown){ tone = 'bad'; val = '约 ' + g.cooldown + ' 秒后'; sub = '上游限流，全站暂停出图'; }
     else if(bk){
       if(bk.code === 'paced'){
         tone = 'paced';
         val = bw ? '约 ' + bw[1] + ' 分钟后放行' : '时段平滑放行中';
         sub = '全天平稳补给中，到点自动放行';
-        step = 'pace';
+       
       } else {
         tone = bk.code === 'breaker' ? 'bad' : 'warn';
         val = bk.code === 'daily_cap' ? '明天 7 点重置后恢复'
             : bk.code === 'quiet_cap' ? '暂停出图 · 7 点恢复'
             : bw ? '约 ' + bw[1] + ' 分钟后' : '稍后再试';
         sub = bk.code === 'daily_cap' ? '全站今日出图已达上限，明天 7 点自动恢复' : bk.text;
-        step = 'pace';
+       
       }
     }
-    else if(qcap && w >= qcap){ tone = 'warn'; val = '排队已满'; sub = '队伍最多 ' + qcap + ' 张，请稍后再试'; step = 'queue'; }
+    else if(qcap && w >= qcap){ tone = 'warn'; val = '排队已满'; sub = '队伍最多 ' + qcap + ' 张，请稍后再试'; }
     else if(g.burst_wait > 0){
       /* 2026-10-13 加的 10 分钟分摊：到点前这里必须说「限速中」，不能承诺「即发即画」——
          否则成员照着面板发请求，拿到的却是 429，界面和接口各说各话 */
       tone = 'warn'; val = '本时段已到限速';
       sub = '每 10 分钟 ' + (g.burst_cap || '—') + ' 张（抹平突发、保护上游账号），约 ' + g.burst_wait + ' 分钟后可继续';
-      step = 'pace';
+     
     }
     else if(hcap && hour >= hcap){
       tone = 'warn'; val = '近 60 分钟已到上限';
       sub = '全站近 60 分钟上限 ' + hcap + ' 张（滚动窗口，不按整点重置；保护上游账号），额度随时间滑动恢复，稍等再试';
-      step = 'pace';
+     
     }
     else if(w + run > 0){ 
       tone = 'busy'; 
       var estSec = getEstimatedSec(w + run, iv);
       val = '约 ' + estSec + ' 秒后开始'; 
       sub = '前面有 ' + (w + run) + ' 张在等'; 
-      step = 'queue';
+     
     }
     else { 
       lastQueueCount = 0;
-      tone = 'ok'; val = '马上开始'; sub = '通道空闲，即发即画'; step = 'client';
+      tone = 'ok'; val = '马上开始'; sub = '通道空闲，即发即画';
     }
-    if(myRun){ tone = 'mine'; val = '你的图正在生成'; sub = '预计十几秒'; step = 'nai'; }
-    else if(myPos){ tone = 'mine'; val = '你的图排第 ' + myPos.position + ' 位'; sub = '约 ' + Math.max(5, myPos.eta) + ' 秒后开始画'; step = 'queue'; }
+    if(myRun){ tone = 'mine'; val = '你的图正在生成'; sub = '预计十几秒'; }
+    else if(myPos){ tone = 'mine'; val = '你的图排第 ' + myPos.position + ' 位'; sub = '约 ' + Math.max(5, myPos.eta) + ' 秒后开始画'; }
 
     var dot = $('dot');
     if(dot) dot.className = 'board-dot pulse ' + tone;
@@ -1028,11 +1007,6 @@ function fmtDate(sec){
       stQueue.textContent = myRun ? '生成中…' : (w === 0 && run === 0 ? '0 人排队' : (w > 0 ? (w + ' 人排队') : (run + ' 人在画')));
     }
 
-    var allSteps = document.querySelectorAll('#board [data-step]');
-    Array.prototype.forEach.call(allSteps, function(el){
-      var s = el.getAttribute('data-step');
-      el.className = 'step-badge' + (s === step ? (step === 'pace' ? ' on' : ' accent') : '');
-    });
 
     /* 额度：0 = 站长关闭了该上限，必须显示「不限」。以前 q.images_cap 缺失时写死 1700 / 260，
        那两个数字来自历史配置，改配置后页面就在编数字。 */

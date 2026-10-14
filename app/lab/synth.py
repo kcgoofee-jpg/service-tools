@@ -46,7 +46,7 @@ CREATE TABLE req_features (ts REAL NOT NULL, key_id INTEGER NOT NULL, src TEXT N
   os TEXT NOT NULL DEFAULT '', sig TEXT NOT NULL DEFAULT '', toks TEXT NOT NULL DEFAULT '', busy INTEGER NOT NULL DEFAULT 0);
 """
 MESSAGES = {
-    "daily_account": "429 本站今天的出图总量已达上限（每个账号 {daily} 张/天，用来保护上游账号），明天 0 点恢复",
+    "daily_account": "429 本站今天的出图总量已达上限（每个账号 {daily} 张/天，用来保护上游账号），明天 7 点恢复",
     "hourly": "429 本小时出图量已达上限（每小时 {hourly} 张，用来保护上游账号），约 12 分钟后有空位",
     "cap3h": "429 最近 3 小时出图量已达上限（{cap3} 张，用来保护上游账号），约 20 分钟后有空位",
     "key_queue": "429 你的上一张图还没出完：每把 Key 同时只生成 1 张、最多再排 1 张，请等前面的完成后再发",

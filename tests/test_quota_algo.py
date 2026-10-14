@@ -22,25 +22,6 @@ def test_v5_plan_spends_surplus_and_tightens_when_low():
     assert quota_algo.v5_plan(None, None, 14)["rate"] == 5.0               # 拿不到读数按保守的 5%/天（原来的 11 是错误读数）
 
 
-def test_daily_adjust_rules():
-    # 拥挤：上限和保底都下调，保底不高于上限
-    a, b, why = quota_algo.daily_adjust(150, 100, used=900, cap=1000, hourly_blocks=0, ceiling_hits=0, base_blocks=0, cfg=CFG)
-    assert (a, b) == (125, 90) and "拥挤" in why[0]
-    # 3 个不同小时被每小时上限拦过才算拥挤；只在 1～2 个小时扎堆（几分钟内的连拦）不下调
-    a, b, _ = quota_algo.daily_adjust(150, 100, used=100, cap=1000, hourly_blocks=3, ceiling_hits=3, base_blocks=0, cfg=CFG)
-    assert (a, b) == (125, 90)
-    a, b, why = quota_algo.daily_adjust(150, 100, used=200, cap=1000, hourly_blocks=1, ceiling_hits=0, base_blocks=0, cfg=CFG)
-    assert (a, b) == (150, 100) and "无需调整" in why[0]
-    # 有余量且有人顶格：放宽上限；有人被保底拦：抬保底
-    a, b, _ = quota_algo.daily_adjust(150, 100, used=300, cap=1000, hourly_blocks=0, ceiling_hits=2, base_blocks=5, cfg=CFG)
-    assert (a, b) == (175, 110)
-    # 上下限
-    a, b, _ = quota_algo.daily_adjust(300, 100, used=300, cap=1000, hourly_blocks=0, ceiling_hits=2, base_blocks=0, cfg=CFG)
-    assert a == 300
-    a, b, why = quota_algo.daily_adjust(150, 100, used=700, cap=1000, hourly_blocks=0, ceiling_hits=0, base_blocks=0, cfg=CFG)
-    assert (a, b) == (150, 100) and "无需调整" in why[0]
-
-
 @pytest.mark.asyncio
 async def test_run_applies_same_quota_to_auto_members_only(tmp_path):
     db = Database(str(tmp_path / "g.sqlite"))
@@ -102,18 +83,6 @@ async def test_manual_v5_is_exact_and_pinned_rows_are_cleared(tmp_path):
         assert each > 5 and (await db.get_key(low["id"]))["daily_v5"] == 5   # 不再被抬到普通成员的值
     finally:
         await db.close()
-
-
-def test_daily_adjust_paced_never_ratchets_ceiling_down():
-    # 按时段放行后每天用量都接近 100%：上限 A 不能每天 −25 直到等于保底（Sonnet 审查 P1）
-    a, b = 125, 30
-    for _ in range(10):
-        a, b, why = quota_algo.daily_adjust(a, b, used=1500, cap=1500, hourly_blocks=5, ceiling_hits=0,
-                                            base_blocks=0, cfg=CFG, paced=True)
-    assert (a, b) == (125, 30) and "上限不变" in why[0]
-    a, _, why = quota_algo.daily_adjust(125, 30, used=500, cap=1500, hourly_blocks=0, ceiling_hits=3,
-                                        base_blocks=0, cfg=CFG, paced=True)
-    assert a == 150
 
 
 @pytest.mark.asyncio

@@ -24,7 +24,7 @@ HOURLY_MIN, HOURLY_MAX, HOURLY_STEP = 100, 160, 10     # 上限 ≤ 0.8 × 单�
 # 名称: (默认值, 最小, 最大, 说明)
 FIELDS: dict[str, tuple[int, int, int, str]] = {
     "account_daily_cap": (1000, 0, 20000, "每个上游账号每天最多出图张数"),
-    "daily_burst": (150, 0, 20000, "每日上限按时段放行：0 点先放出这么多张，之后每小时补「每日上限 ÷ 24」张，没用完的留到后面；0 = 不分时段（整天先到先得）"),
+    "daily_burst": (150, 0, 20000, "每日上限按时段放行：每天重置时（默认 7 点）先放出这么多张，之后每小时补「每日上限 ÷ 24」张，没用完的留到后面；0 = 不分时段（整天先到先得）"),
     "account_hourly_cap": (150, 0, 240, "每个上游账号每小时最多出图张数（自动调整：上游 429 减半；前一天顶到过上限且没有 429 才 +10，范围 100～160）"),
     "quiet_start": (0, 0, 23, "安静时段开始（北京时间，整点）；与结束相同 = 不启用（2026-10-10 起不启用：夜里不限速）"),
     "quiet_end": (0, 0, 23, "安静时段结束（北京时间，整点；与开始相同表示不设安静时段）"),
@@ -233,18 +233,8 @@ class Guard:
             await self.db.set_setting("guard_429_cap_at", min(prev, old) if prev else old)
         return (old, new) if new != old else None
 
-    def note_upstream_429(self, now: Optional[float] = None) -> int:
-        """记一次上游 429，返回最近 1 小时内的次数（内存，重启清零）。"""
-        now = time.time() if now is None else now
-        seen = [t for t in getattr(self, "_upstream_429", []) if now - t < HOUR]
-        # 同一次限流里几个在途请求会同时收到 429：60 秒内只算一次（Sonnet 审查 P1，避免一次就误退档）
-        if not seen or now - seen[-1] >= 60:
-            seen.append(now)
-        self._upstream_429 = seen
-        return len(seen)
-
     async def adapt_daily(self, now: Optional[float] = None) -> Optional[tuple[int, int]]:
-        """每 24 小时最多一次：过去 24 小时没有上游 429 → +10（不超过 200）。"""
+        """每 24 小时最多一次：过去 24 小时没有上游 429 → +10（不超过 HOURLY_MAX）。"""
         if self.db is None:
             return None
         now = time.time() if now is None else now
@@ -295,7 +285,7 @@ class Guard:
         self.breaker_until = now + max(0.0, seconds)
         self._breaker_reason = reason or f"上游连续出错，已暂停出图 {int(seconds)} 秒，到点自动恢复"
 
-    # ---------- 每日上限按时段放行（令牌桶：0 点有 burst 张，每小时补 daily/24，当天总量不超过 daily）----------
+    # ---------- 每日上限按时段放行（令牌桶：服务日起点有 burst 张，每小时补 daily/24，当天总量不超过 daily）----------
     def _day_elapsed(self, now: float) -> float:
         shifted = now - self.reset_hour * 3600
         local = datetime.fromtimestamp(shifted, self.tz)

@@ -2412,7 +2412,7 @@ function permControls(m){
   return `<div class="qctl"><span class="qctl-l">额度</span><div class="seg" role="radiogroup" aria-label="额度来源">
       <button type="button" role="radio" aria-checked="${auto}" class="${auto?'on':''}" data-qmode="auto" data-id="${m.id}"${m.is_test?' disabled title="测试 Key 只能手动"':''}>算法</button>
       <button type="button" role="radio" aria-checked="${!auto}" class="${!auto?'on':''}" data-qmode="manual" data-id="${m.id}">手动</button></div>
-      <span class="qctl-v">${auto ? '每天 0 点自动分配' : '点「手动」改具体数字'}</span></div>`;
+      <span class="qctl-v">${auto ? '每天 7 点自动分配' : '点「手动」改具体数字'}</span></div>`;
 }
 document.addEventListener('click', async e => {
   const sel = e.target.closest('button[data-qmode]'); if(!sel || sel.disabled) return;
@@ -3713,7 +3713,7 @@ async function loadGuard(){
     $('#guardFields').innerHTML = CORE.filter(k => f[k]).map(input).join('');
     $('#guardFieldsAdv').innerHTML = Object.keys(f).filter(k => !GUARD_ALGO_OWNED.has(k) && !CORE.includes(k)).map(input).join('');
     const acc = guardData.accounts.map(a => `账号 ${a.position}：今天 ${a.today}${v.account_daily_cap?' / '+v.account_daily_cap:''} 张，本小时 ${a.this_hour}${guardData.hourly_cap_now?' / '+guardData.hourly_cap_now:''} 张`).join('；');
-    $('#fs-guard').textContent = `每小时 ${v.account_hourly_cap || '不限'} · 每天 ${v.account_daily_cap || '不限'} 张${v.daily_burst && v.account_daily_cap ? '，按时段放行（0 点先放 '+v.daily_burst+' 张，每小时补 '+Math.round(v.account_daily_cap/24)+' 张）' : ''}（每个上游账号）`;
+    $('#fs-guard').textContent = `每小时 ${v.account_hourly_cap || '不限'} · 每天 ${v.account_daily_cap || '不限'} 张${v.daily_burst && v.account_daily_cap ? '，按时段放行（7 点先放 '+v.daily_burst+' 张，每小时补 '+Math.round(v.account_daily_cap/24)+' 张）' : ''}（每个上游账号）`;
     $('#guardLive').textContent = `${guardData.quiet_now ? '现在是安静时段' : '正常时段'} · ${acc || '没有可用账号'} · 正在生成或排队 ${guardData.queued_images} 张`;
   }catch(e){ $('#guardLive').textContent = '读取失败'; }
 }
@@ -3723,9 +3723,9 @@ function v5Derivation(v){
   const rc = v.rate_check || v.rate_info || {}, f = x => x == null ? '—' : (+x).toFixed(1);
   const cls = rc.status === '对不上' ? 'bad-text' : rc.status === '未核对' ? 'warn-text' : 'muted';
   return `<div class="notice-box" style="margin:10px 0 0;font-size:13px">全站 V5 = 恢复 <b>${f(v.rate)}%/天</b> × 14.2 张/1% × 系数 ${esc(v.k)} = <b>${esc(v.global)} 张</b>
-    <div class="${cls}" style="margin-top:4px">恢复速度：接口读数 ${f(rc.api)} · 实测 ${f(rc.measured)} · 采用 ${f(rc.used)}（${esc(rc.status || '—')}）${(rc.notes||[]).length ? ' · ' + esc(rc.notes.join('；')) : ''}${rc.used != null && Math.abs(rc.used - v.rate) > 0.05 ? `<br>今天的方案是 0 点按 ${f(v.rate)}%/天定的（一天只定一次，不在当天降额），明天 0 点起按 ${f(rc.used)}%/天` : ''}</div></div>`;
+    <div class="${cls}" style="margin-top:4px">恢复速度：接口读数 ${f(rc.api)} · 实测 ${f(rc.measured)} · 采用 ${f(rc.used)}（${esc(rc.status || '—')}）${(rc.notes||[]).length ? ' · ' + esc(rc.notes.join('；')) : ''}${rc.used != null && Math.abs(rc.used - v.rate) > 0.05 ? `<br>今天的方案是 7 点按 ${f(v.rate)}%/天定的（一天只定一次，不在当天降额），明天 7 点起按 ${f(rc.used)}%/天` : ''}</div></div>`;
 }
-/* 动态额度：结果 + 每天 0 点的调整记录（/admin/api/quota-algo，算法见 app/quota_policies.py） */
+/* 动态额度：结果 + 每天 7 点的调整记录（/admin/api/quota-algo，算法见 app/quota_policies.py） */
 const AP_NAME = {alt_link:'疑似同一人（只观察）', slots:'名额上限', breaker:'全站熔断', key_guard:'单个 Key 守护'};
 const AP_MODE = {observe:'<span class="tag warn">观察</span>', enforce:'<span class="tag on">执行</span>', off:'<span class="tag off">关闭</span>'};
 async function loadAutopilot(){
@@ -3898,7 +3898,7 @@ async function loadQuotaAlgo(){
     const d = await api('/admin/api/quota-algo'), l = d.last || {}, v = l.v5 || {};
     const hs = d.history || [], p = d.params || {};
     const autoOn = String(p.quota_auto_enabled ?? 1) !== '0' && l.enabled !== false;
-    // V5 剩余：每天 0 点记一次；和前一天比的净变化 = 恢复 − 用掉
+    // V5 剩余：每天 7 点记一次；和前一天比的净变化 = 恢复 − 用掉
     const v5cell = (h, i) => { if(h.v5_pct == null) return '—'; const prev = hs[i-1]; const dlt = prev && prev.v5_pct != null ? h.v5_pct - prev.v5_pct : null;
       return `${Math.round(h.v5_pct)}%${dlt != null ? ` <span class="${dlt < 0 ? 'bad-text' : 'muted'}">${dlt >= 0 ? '+' : ''}${dlt.toFixed(1)}</span>` : ''}${h.v5_rate ? `<div class="muted sm">恢复 ${h.v5_rate}%/天</div>` : ''}`; };
     const rows = hs.map((h, i) => [h, i]).slice(-7).reverse().map(([h, i]) => `<tr><td class="t" data-label="日期">${esc(h.day)}</td><td class="num" data-label="用量 / 账号日上限">${esc(h.used)} / ${esc(h.cap)}</td><td class="num" data-label="次日重置时 V5 剩余">${v5cell(h, i)}</td><td class="num" data-label="每小时拦截">${esc(h.hourly_blocks)}</td><td class="num" data-label="顶格人数">${esc(h.ceiling_hits)}</td><td class="num" data-label="每人（昨 → 今）">${esc(h.from[0])}→${esc(h.to[0])}</td><td class="muted" data-label="理由">${esc((h.reasons||[]).join('；'))}</td></tr>`).join('');
@@ -3937,7 +3937,7 @@ async function loadQuotaAlgo(){
       </div>
       ${v5Derivation(v)}
       <div class="muted sm" style="margin:8px 0">由算法管理 ${esc(l.members ?? 0)} 人 · V5 按 ${esc(v.people ?? '—')} 人分 · 更新于 ${l.updated_at?esc(fullTime(l.updated_at)):'—'}</div>
-      ${rows?`<div class="table-wrap"><table class="rt"><thead><tr><th class="t">日期</th><th class="num">用量 / 账号日上限</th><th class="num" title="每个服务日（7 点）切换时记一次账号 V5 剩余；括号里是和前一天比的净变化（恢复 − 用掉）">次日 0 点 V5 剩余</th><th class="num">每小时拦截</th><th class="num">顶格人数</th><th class="num">每人（昨 → 今）</th><th>理由</th></tr></thead><tbody>${rows}</tbody></table></div>`:'<div class="muted sm">每天 0 点的调整记录会出现在这里</div>'}
+      ${rows?`<div class="table-wrap"><table class="rt"><thead><tr><th class="t">日期</th><th class="num">用量 / 账号日上限</th><th class="num" title="每个服务日（7 点）切换时记一次账号 V5 剩余；括号里是和前一天比的净变化（恢复 − 用掉）">次日 7 点 V5 剩余</th><th class="num">每小时拦截</th><th class="num">顶格人数</th><th class="num">每人（昨 → 今）</th><th>理由</th></tr></thead><tbody>${rows}</tbody></table></div>`:'<div class="muted sm">每天 7 点的调整记录会出现在这里</div>'}
       ${paramsHtml}`;
   }catch(e){ $('#qaBody').innerHTML = '<div class="muted">读取失败</div>'; }
 }
@@ -3974,7 +3974,7 @@ async function runQuotaAlgo(btn){
   }
 }
 
-/* 由额度算法每天 0 点写入的字段：后台不让手动改（改了会在 0 点被覆盖，且当天会和「每人 N 张」打架） */
+/* 由额度算法每天 7 点写入的字段：后台不让手动改（改了会在 7 点被覆盖，且当天会和「每人 N 张」打架） */
 const GUARD_ALGO_OWNED = new Set(['base_daily_images']);
 async function saveGuard(btn){
   if(!guardData || !guardData.fields){ toast('数据尚未加载完成，请稍候', 'err'); return; }
