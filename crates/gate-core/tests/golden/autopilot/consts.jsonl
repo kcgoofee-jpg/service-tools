@@ -1,0 +1,1 @@
+{"fn":"consts","skip_reasons":["key_paused","queue_full","hourly_cap","quiet_cap","burst_cap","cap_3h","daily_cap","paced","over_base","breaker","cooldown","v5_exhausted","queue_timeout","site_quota"],"slots_max":100,"slots_step":5,"slots_cooldown":86400,"queue_busy":5,"slots_v5_min":50,"state_key":"autopilot_last","history_key":"autopilot_history"}

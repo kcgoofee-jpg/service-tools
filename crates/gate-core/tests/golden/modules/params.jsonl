@@ -1,0 +1,86 @@
+{"fn":"capacity_params","inputs":{"daily_burst":0,"account_daily_cap":0},"out":{"每天":0,"按时段放行":"关","每小时":150,"出图间隔（秒）":15.0,"V5 每 1% ≈ 张":14.2}}
+{"fn":"capacity_params","inputs":{"daily_burst":0,"account_daily_cap":1},"out":{"每天":1,"按时段放行":"关","每小时":150,"出图间隔（秒）":15.0,"V5 每 1% ≈ 张":14.2}}
+{"fn":"capacity_params","inputs":{"daily_burst":0,"account_daily_cap":12},"out":{"每天":12,"按时段放行":"关","每小时":150,"出图间隔（秒）":15.0,"V5 每 1% ≈ 张":14.2}}
+{"fn":"capacity_params","inputs":{"daily_burst":0,"account_daily_cap":36},"out":{"每天":36,"按时段放行":"关","每小时":150,"出图间隔（秒）":15.0,"V5 每 1% ≈ 张":14.2}}
+{"fn":"capacity_params","inputs":{"daily_burst":0,"account_daily_cap":1000},"out":{"每天":1000,"按时段放行":"关","每小时":150,"出图间隔（秒）":15.0,"V5 每 1% ≈ 张":14.2}}
+{"fn":"capacity_params","inputs":{"daily_burst":0,"account_daily_cap":1500},"out":{"每天":1500,"按时段放行":"关","每小时":150,"出图间隔（秒）":15.0,"V5 每 1% ≈ 张":14.2}}
+{"fn":"capacity_params","inputs":{"daily_burst":0,"account_daily_cap":1020},"out":{"每天":1020,"按时段放行":"关","每小时":150,"出图间隔（秒）":15.0,"V5 每 1% ≈ 张":14.2}}
+{"fn":"capacity_params","inputs":{"daily_burst":0,"account_daily_cap":2500},"out":{"每天":2500,"按时段放行":"关","每小时":150,"出图间隔（秒）":15.0,"V5 每 1% ≈ 张":14.2}}
+{"fn":"capacity_params","inputs":{"daily_burst":0,"account_daily_cap":20000},"out":{"每天":20000,"按时段放行":"关","每小时":150,"出图间隔（秒）":15.0,"V5 每 1% ≈ 张":14.2}}
+{"fn":"capacity_params","inputs":{"daily_burst":150,"account_daily_cap":0},"out":{"每天":0,"按时段放行":"服务日起点先放 150 张，之后每小时补 0 张","每小时":150,"出图间隔（秒）":15.0,"V5 每 1% ≈ 张":14.2}}
+{"fn":"capacity_params","inputs":{"daily_burst":150,"account_daily_cap":1},"out":{"每天":1,"按时段放行":"服务日起点先放 150 张，之后每小时补 0 张","每小时":150,"出图间隔（秒）":15.0,"V5 每 1% ≈ 张":14.2}}
+{"fn":"capacity_params","inputs":{"daily_burst":150,"account_daily_cap":12},"out":{"每天":12,"按时段放行":"服务日起点先放 150 张，之后每小时补 0 张","每小时":150,"出图间隔（秒）":15.0,"V5 每 1% ≈ 张":14.2}}
+{"fn":"capacity_params","inputs":{"daily_burst":150,"account_daily_cap":36},"out":{"每天":36,"按时段放行":"服务日起点先放 150 张，之后每小时补 2 张","每小时":150,"出图间隔（秒）":15.0,"V5 每 1% ≈ 张":14.2}}
+{"fn":"capacity_params","inputs":{"daily_burst":150,"account_daily_cap":1000},"out":{"每天":1000,"按时段放行":"服务日起点先放 150 张，之后每小时补 42 张","每小时":150,"出图间隔（秒）":15.0,"V5 每 1% ≈ 张":14.2}}
+{"fn":"capacity_params","inputs":{"daily_burst":150,"account_daily_cap":1500},"out":{"每天":1500,"按时段放行":"服务日起点先放 150 张，之后每小时补 62 张","每小时":150,"出图间隔（秒）":15.0,"V5 每 1% ≈ 张":14.2}}
+{"fn":"capacity_params","inputs":{"daily_burst":150,"account_daily_cap":1020},"out":{"每天":1020,"按时段放行":"服务日起点先放 150 张，之后每小时补 42 张","每小时":150,"出图间隔（秒）":15.0,"V5 每 1% ≈ 张":14.2}}
+{"fn":"capacity_params","inputs":{"daily_burst":150,"account_daily_cap":2500},"out":{"每天":2500,"按时段放行":"服务日起点先放 150 张，之后每小时补 104 张","每小时":150,"出图间隔（秒）":15.0,"V5 每 1% ≈ 张":14.2}}
+{"fn":"capacity_params","inputs":{"daily_burst":150,"account_daily_cap":20000},"out":{"每天":20000,"按时段放行":"服务日起点先放 150 张，之后每小时补 833 张","每小时":150,"出图间隔（秒）":15.0,"V5 每 1% ≈ 张":14.2}}
+{"fn":"capacity_params","inputs":{"daily_burst":300,"account_daily_cap":0},"out":{"每天":0,"按时段放行":"服务日起点先放 300 张，之后每小时补 0 张","每小时":150,"出图间隔（秒）":15.0,"V5 每 1% ≈ 张":14.2}}
+{"fn":"capacity_params","inputs":{"daily_burst":300,"account_daily_cap":1},"out":{"每天":1,"按时段放行":"服务日起点先放 300 张，之后每小时补 0 张","每小时":150,"出图间隔（秒）":15.0,"V5 每 1% ≈ 张":14.2}}
+{"fn":"capacity_params","inputs":{"daily_burst":300,"account_daily_cap":12},"out":{"每天":12,"按时段放行":"服务日起点先放 300 张，之后每小时补 0 张","每小时":150,"出图间隔（秒）":15.0,"V5 每 1% ≈ 张":14.2}}
+{"fn":"capacity_params","inputs":{"daily_burst":300,"account_daily_cap":36},"out":{"每天":36,"按时段放行":"服务日起点先放 300 张，之后每小时补 2 张","每小时":150,"出图间隔（秒）":15.0,"V5 每 1% ≈ 张":14.2}}
+{"fn":"capacity_params","inputs":{"daily_burst":300,"account_daily_cap":1000},"out":{"每天":1000,"按时段放行":"服务日起点先放 300 张，之后每小时补 42 张","每小时":150,"出图间隔（秒）":15.0,"V5 每 1% ≈ 张":14.2}}
+{"fn":"capacity_params","inputs":{"daily_burst":300,"account_daily_cap":1500},"out":{"每天":1500,"按时段放行":"服务日起点先放 300 张，之后每小时补 62 张","每小时":150,"出图间隔（秒）":15.0,"V5 每 1% ≈ 张":14.2}}
+{"fn":"capacity_params","inputs":{"daily_burst":300,"account_daily_cap":1020},"out":{"每天":1020,"按时段放行":"服务日起点先放 300 张，之后每小时补 42 张","每小时":150,"出图间隔（秒）":15.0,"V5 每 1% ≈ 张":14.2}}
+{"fn":"capacity_params","inputs":{"daily_burst":300,"account_daily_cap":2500},"out":{"每天":2500,"按时段放行":"服务日起点先放 300 张，之后每小时补 104 张","每小时":150,"出图间隔（秒）":15.0,"V5 每 1% ≈ 张":14.2}}
+{"fn":"capacity_params","inputs":{"daily_burst":300,"account_daily_cap":20000},"out":{"每天":20000,"按时段放行":"服务日起点先放 300 张，之后每小时补 833 张","每小时":150,"出图间隔（秒）":15.0,"V5 每 1% ≈ 张":14.2}}
+{"fn":"capacity_params","inputs":{"daily_burst":null,"account_daily_cap":0},"out":{"每天":0,"按时段放行":"关","每小时":150,"出图间隔（秒）":15.0,"V5 每 1% ≈ 张":14.2}}
+{"fn":"capacity_params","inputs":{"daily_burst":null,"account_daily_cap":1},"out":{"每天":1,"按时段放行":"关","每小时":150,"出图间隔（秒）":15.0,"V5 每 1% ≈ 张":14.2}}
+{"fn":"capacity_params","inputs":{"daily_burst":null,"account_daily_cap":12},"out":{"每天":12,"按时段放行":"关","每小时":150,"出图间隔（秒）":15.0,"V5 每 1% ≈ 张":14.2}}
+{"fn":"capacity_params","inputs":{"daily_burst":null,"account_daily_cap":36},"out":{"每天":36,"按时段放行":"关","每小时":150,"出图间隔（秒）":15.0,"V5 每 1% ≈ 张":14.2}}
+{"fn":"capacity_params","inputs":{"daily_burst":null,"account_daily_cap":1000},"out":{"每天":1000,"按时段放行":"关","每小时":150,"出图间隔（秒）":15.0,"V5 每 1% ≈ 张":14.2}}
+{"fn":"capacity_params","inputs":{"daily_burst":null,"account_daily_cap":1500},"out":{"每天":1500,"按时段放行":"关","每小时":150,"出图间隔（秒）":15.0,"V5 每 1% ≈ 张":14.2}}
+{"fn":"capacity_params","inputs":{"daily_burst":null,"account_daily_cap":1020},"out":{"每天":1020,"按时段放行":"关","每小时":150,"出图间隔（秒）":15.0,"V5 每 1% ≈ 张":14.2}}
+{"fn":"capacity_params","inputs":{"daily_burst":null,"account_daily_cap":2500},"out":{"每天":2500,"按时段放行":"关","每小时":150,"出图间隔（秒）":15.0,"V5 每 1% ≈ 张":14.2}}
+{"fn":"capacity_params","inputs":{"daily_burst":null,"account_daily_cap":20000},"out":{"每天":20000,"按时段放行":"关","每小时":150,"出图间隔（秒）":15.0,"V5 每 1% ≈ 张":14.2}}
+{"fn":"allocation_params","out":{"规则":"需求接近总量 → 按需求平分；有余量且有人用满 → +25；否则不变","范围":"10～300 张","V5 每人范围":"3～30 张"}}
+{"fn":"autopilot_params","out":{"全站熔断":"15 分钟上游失败 ≥ 5 次且 ≥ 30% → 暂停出图 5 分钟","单个 Key 限流":"1 小时被拒 ≥ 60 次 → 暂停 1 小时","名额":"快满且有余量时 +5，最多 100（名额不限时不动）"}}
+{"fn":"registration_params","inputs":{"days":0},"out":{"Key 有效天数":30,"闲置回收":"关"}}
+{"fn":"registration_params","inputs":{"days":1},"out":{"Key 有效天数":30,"闲置回收":"1 天"}}
+{"fn":"registration_params","inputs":{"days":3},"out":{"Key 有效天数":30,"闲置回收":"3 天"}}
+{"fn":"registration_params","inputs":{"days":30},"out":{"Key 有效天数":30,"闲置回收":"30 天"}}
+{"fn":"seats_text","inputs":{"per":0,"daily":0},"out":"—"}
+{"fn":"seats_text","inputs":{"per":0,"daily":1000},"out":"—"}
+{"fn":"seats_text","inputs":{"per":0,"daily":3000},"out":"—"}
+{"fn":"seats_text","inputs":{"per":0,"daily":2999},"out":"—"}
+{"fn":"seats_text","inputs":{"per":0,"daily":77},"out":"—"}
+{"fn":"seats_text","inputs":{"per":1,"daily":0},"out":"约 0 人（0 张/天 ÷ 每人 1 张）"}
+{"fn":"seats_text","inputs":{"per":1,"daily":1000},"out":"约 1000 人（1000 张/天 ÷ 每人 1 张）"}
+{"fn":"seats_text","inputs":{"per":1,"daily":3000},"out":"约 3000 人（3000 张/天 ÷ 每人 1 张）"}
+{"fn":"seats_text","inputs":{"per":1,"daily":2999},"out":"约 2999 人（2999 张/天 ÷ 每人 1 张）"}
+{"fn":"seats_text","inputs":{"per":1,"daily":77},"out":"约 77 人（77 张/天 ÷ 每人 1 张）"}
+{"fn":"seats_text","inputs":{"per":3,"daily":0},"out":"约 0 人（0 张/天 ÷ 每人 3 张）"}
+{"fn":"seats_text","inputs":{"per":3,"daily":1000},"out":"约 333 人（1000 张/天 ÷ 每人 3 张）"}
+{"fn":"seats_text","inputs":{"per":3,"daily":3000},"out":"约 1000 人（3000 张/天 ÷ 每人 3 张）"}
+{"fn":"seats_text","inputs":{"per":3,"daily":2999},"out":"约 999 人（2999 张/天 ÷ 每人 3 张）"}
+{"fn":"seats_text","inputs":{"per":3,"daily":77},"out":"约 25 人（77 张/天 ÷ 每人 3 张）"}
+{"fn":"seats_text","inputs":{"per":100,"daily":0},"out":"约 0 人（0 张/天 ÷ 每人 100 张）"}
+{"fn":"seats_text","inputs":{"per":100,"daily":1000},"out":"约 10 人（1000 张/天 ÷ 每人 100 张）"}
+{"fn":"seats_text","inputs":{"per":100,"daily":3000},"out":"约 30 人（3000 张/天 ÷ 每人 100 张）"}
+{"fn":"seats_text","inputs":{"per":100,"daily":2999},"out":"约 29 人（2999 张/天 ÷ 每人 100 张）"}
+{"fn":"seats_text","inputs":{"per":100,"daily":77},"out":"约 0 人（77 张/天 ÷ 每人 100 张）"}
+{"fn":"seats_text","inputs":{"per":150,"daily":0},"out":"约 0 人（0 张/天 ÷ 每人 150 张）"}
+{"fn":"seats_text","inputs":{"per":150,"daily":1000},"out":"约 6 人（1000 张/天 ÷ 每人 150 张）"}
+{"fn":"seats_text","inputs":{"per":150,"daily":3000},"out":"约 20 人（3000 张/天 ÷ 每人 150 张）"}
+{"fn":"seats_text","inputs":{"per":150,"daily":2999},"out":"约 19 人（2999 张/天 ÷ 每人 150 张）"}
+{"fn":"seats_text","inputs":{"per":150,"daily":77},"out":"约 0 人（77 张/天 ÷ 每人 150 张）"}
+{"fn":"seats_text","inputs":{"per":125,"daily":0},"out":"约 0 人（0 张/天 ÷ 每人 125 张）"}
+{"fn":"seats_text","inputs":{"per":125,"daily":1000},"out":"约 8 人（1000 张/天 ÷ 每人 125 张）"}
+{"fn":"seats_text","inputs":{"per":125,"daily":3000},"out":"约 24 人（3000 张/天 ÷ 每人 125 张）"}
+{"fn":"seats_text","inputs":{"per":125,"daily":2999},"out":"约 23 人（2999 张/天 ÷ 每人 125 张）"}
+{"fn":"seats_text","inputs":{"per":125,"daily":77},"out":"约 0 人（77 张/天 ÷ 每人 125 张）"}
+{"fn":"seats_text","inputs":{"per":300,"daily":0},"out":"约 0 人（0 张/天 ÷ 每人 300 张）"}
+{"fn":"seats_text","inputs":{"per":300,"daily":1000},"out":"约 3 人（1000 张/天 ÷ 每人 300 张）"}
+{"fn":"seats_text","inputs":{"per":300,"daily":3000},"out":"约 10 人（3000 张/天 ÷ 每人 300 张）"}
+{"fn":"seats_text","inputs":{"per":300,"daily":2999},"out":"约 9 人（2999 张/天 ÷ 每人 300 张）"}
+{"fn":"seats_text","inputs":{"per":300,"daily":77},"out":"约 0 人（77 张/天 ÷ 每人 300 张）"}
+{"fn":"seats_text","inputs":{"per":-5,"daily":0},"out":"约 0 人（0 张/天 ÷ 每人 -5 张）"}
+{"fn":"seats_text","inputs":{"per":-5,"daily":1000},"out":"约 -200 人（1000 张/天 ÷ 每人 -5 张）"}
+{"fn":"seats_text","inputs":{"per":-5,"daily":3000},"out":"约 -600 人（3000 张/天 ÷ 每人 -5 张）"}
+{"fn":"seats_text","inputs":{"per":-5,"daily":2999},"out":"约 -600 人（2999 张/天 ÷ 每人 -5 张）"}
+{"fn":"seats_text","inputs":{"per":-5,"daily":77},"out":"约 -16 人（77 张/天 ÷ 每人 -5 张）"}
+{"fn":"hourly_text","inputs":{"cap":0},"out":"不限"}
+{"fn":"hourly_text","inputs":{"cap":1},"out":"1 个名额/小时"}
+{"fn":"hourly_text","inputs":{"cap":12},"out":"12 个名额/小时"}
+{"fn":"hourly_text","inputs":{"cap":500},"out":"500 个名额/小时"}
