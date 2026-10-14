@@ -5,7 +5,7 @@ use crate::error::ok_json;
 use crate::web::Page;
 use axum::Router;
 use axum::extract::{Path, State};
-use axum::http::{HeaderValue, header};
+use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use serde_json::json;
@@ -29,8 +29,10 @@ async fn healthz(State(st): State<AppState>) -> Response {
     ok_json(&json!({"ok": true, "upstream": true}))
 }
 
-async fn landing(State(st): State<AppState>) -> Response {
-    st.assets.page(Page::Landing, None)
+/// 首页：HTML 里注入首屏数据（我 / 实时看板 / 站点状态，见 `public::landing_boot`），取不到就照常返回页面。
+async fn landing(State(st): State<AppState>, headers: HeaderMap) -> Response {
+    let boot = super::public::landing_boot(&st, &headers).await;
+    st.assets.page(Page::Landing, boot.as_ref())
 }
 
 async fn survey(State(st): State<AppState>) -> Response {

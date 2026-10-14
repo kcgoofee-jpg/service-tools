@@ -106,6 +106,8 @@ pub struct Inner {
     pub live_events: Mutex<std::collections::VecDeque<(f64, String)>>,
     /// 最近 30 分钟上游 5xx：(时间, key_id)。只有不止一把 Key 遇到才算上游故障（见 `note_upstream_5xx`）。
     pub recent_5xx: Mutex<std::collections::VecDeque<(f64, i64)>>,
+    /// 实时看板快照（`/public/live` 与 SSE 共用）、`/public/status` 缓存、前端报错限流。
+    pub live: crate::live::Hub,
 }
 
 impl Deref for AppState {
@@ -232,6 +234,7 @@ impl AppState {
             shutdown: CancellationToken::new(),
             live_events: Mutex::new(std::collections::VecDeque::new()),
             recent_5xx: Mutex::new(std::collections::VecDeque::new()),
+            live: crate::live::Hub::new(),
             env,
             db,
         }));
