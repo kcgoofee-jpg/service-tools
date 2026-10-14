@@ -107,7 +107,17 @@ class Writer:
         self.lines.append(_dump({k: enc(v) for k, v in fields.items()}))
 
     def save(self) -> None:
+        """超过 256 KB 的夹具存成 .jsonl.gz（mtime 固定为 0，重复生成逐字节一致），控制公开仓库体积。"""
+        import gzip
         path = OUT_DIR / f"{self.name}.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("\n".join(self.lines) + "\n", encoding="utf-8")
+        data = ("\n".join(self.lines) + "\n").encode("utf-8")
+        gz = path.with_name(path.name + ".gz")
+        for stale in (path, gz):
+            stale.unlink(missing_ok=True)
+        if len(data) > 256 * 1024:
+            gz.write_bytes(gzip.compress(data, compresslevel=9, mtime=0))
+            path = gz
+        else:
+            path.write_bytes(data)
         print(f"{path.relative_to(ROOT)}: {len(self.lines)} 条")

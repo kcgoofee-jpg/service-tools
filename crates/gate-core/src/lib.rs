@@ -4,7 +4,11 @@
 //! 用 `tests/golden/` 里从旧 Python 生成的夹具逐条对拍（浮点逐位相等）。
 //! 时间一律由调用方传入（Unix 秒，f64），不在这里读时钟。
 
+pub mod autopilot;
 pub mod clock;
+pub mod jsondump;
+pub mod modules;
 pub mod pyc;
 pub mod pyjson;
 pub mod pyval;
+pub mod quota;
