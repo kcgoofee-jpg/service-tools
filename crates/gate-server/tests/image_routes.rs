@@ -236,8 +236,13 @@ async fn stream_upstream_failure_before_start_is_plain_json() {
     assert_eq!(headers["content-type"], "application/json");
     let text = String::from_utf8_lossy(&out);
     assert!(text.starts_with("{\"error\": "), "{text}");
+    assert_eq!(headers["cache-control"], "no-store");
+    assert_eq!(headers["x-accel-buffering"], "no");
     let rows = logs(&e.state).await;
     assert!(rows.iter().any(|r| r["status"] == "error"), "{rows:?}");
+    // 客户端拿到了 JSON 错误，不是「断开」：不能记 disconnect Bug（会私信站长）
+    let bugs = e.state.bugs.recent();
+    assert!(!bugs.iter().any(|b| b.source == "disconnect"), "{bugs:?}");
 }
 
 #[tokio::test]

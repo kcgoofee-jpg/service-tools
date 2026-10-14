@@ -46,8 +46,11 @@ pub async fn request_context(mut req: Request, next: Next) -> Response {
     req.extensions_mut().insert(ctx.clone());
     let rid = ctx.rid();
     let mut resp = ctx.clone().scope(next.run(req)).await;
-    if let Ok(v) = HeaderValue::from_str(&rid) {
-        resp.headers_mut().append("x-request-id", v);
+    // 500 响应自己已经带了编号：不重复
+    if !resp.headers().contains_key("x-request-id")
+        && let Ok(v) = HeaderValue::from_str(&rid)
+    {
+        resp.headers_mut().insert("x-request-id", v);
     }
     resp
 }
