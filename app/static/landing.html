@@ -283,12 +283,7 @@ details.more p{font-size:var(--fs-sm);color:var(--muted);margin:var(--sp-1) 0 va
 
 /* ───────── 我的额度 / 登录 ───────── */
 .loginrow{display:flex;align-items:center;gap:var(--sp-2);flex-wrap:wrap;margin:0}
-.keylogin{display:flex;gap:var(--sp-2);flex:1;min-width:0}
-.keylogin input[type=password]{flex:1;min-width:0;min-height:var(--tap);padding:8px 14px;font-size:var(--fs-body);border-radius:var(--radius-sm)}
-.keylogin .btn{flex:none}
-input[type=password]{width:100%;background:var(--surface);border:1px solid var(--border-strong);border-radius:var(--radius-sm);
-  padding:8px 44px 8px 12px;min-height:var(--tap);outline:none;font-family:var(--mono);font-size:var(--fs-body);
-  transition:border-color .15s,box-shadow .15s}
+.login-hint{margin:0;color:var(--muted);font-size:var(--fs-sm)}
 input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 .me{margin:0;padding:0;border:0;background:none}
 .me-empty{font-size:var(--fs-sm);color:var(--text-2);margin:var(--sp-1) 0}
@@ -442,10 +437,7 @@ body.haskey #algoNote,html.haskey #algoNote{display:none!important}
       <div class="me" id="meCard" hidden></div>
       <div class="loginrow" id="loginRow" hidden>
         <a class="btn primary dc" id="loginBtn" href="/login" hidden><span data-ic="discord"></span>用 Discord 登录</a>
-        <form class="keylogin" id="keyLogin" autocomplete="off">
-          <input type="password" id="keyLoginIn" placeholder="粘贴你的 Key（nai-…）" aria-label="你的 Key" spellcheck="false">
-          <button class="btn primary" type="submit" id="keyLoginBtn">登录</button>
-        </form>
+        <p class="login-hint" id="loginHint" hidden>Discord 登录审核中，即将开放；期间可在 Discord 用 <code>/quota</code> 查额度</p>
       </div>
     </div>
   </section>
@@ -603,7 +595,7 @@ function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(
 var P = {
   theme:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
   copy:'<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 012-2h9"/>',
-  discord:'<path d="M8 8c2.7-1 5.3-1 8 0M7 17c3 1.3 7 1.3 10 0M8 8c-1.5 2-2.5 5-2.5 8l2 1.5M16 8c1.5 2 2.5 5 2.5 8l-2 1.5"/><circle cx="9.5" cy="12.5" r=".8"/><circle cx="14.5" cy="12.5" r=".8"/>',
+  discord:'<path fill="currentColor" stroke="none" d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z"/>',
   clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   megaphone:'<path d="M3 11v2a1 1 0 001 1h2l7 4V6L6 10H4a1 1 0 00-1 1z"/><path d="M17 9a4 4 0 010 6"/>',
   image:'<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.8"/><path d="M21 16l-5-5-8 8"/>',
@@ -709,6 +701,7 @@ function renderStatus(d){
   }
   var paused = d.web_login !== true;          // 只有服务端明确说开放才显示登录按钮
   if($('loginBtn')) $('loginBtn').hidden = paused;
+  if($('loginHint')) $('loginHint').hidden = !paused;
   try{ document.dispatchEvent(new CustomEvent('owl-status', {detail: d})); }catch(_){}
 }
 /* （10-14 重构）statusFailed 与 30s 的 /public/status 轮询已退役：meta 并入每秒的 /public/live */
@@ -896,22 +889,6 @@ function loadWorkbenchLink(){
 }
 loadWorkbenchLink();
 function loadMe(){ fetch('/public/me', {cache:'no-store', credentials:'include'}).then(function(r){ return r.ok ? r.json() : null; }).then(renderMe, function(){ renderMe(null); }); }
-(function(){
-  var f = $('keyLogin'); if(!f) return;
-  f.addEventListener('submit', function(e){
-    e.preventDefault();
-    var v = ($('keyLoginIn').value || '').trim(), b = $('keyLoginBtn');
-    if(!/^nai-/.test(v)){ toast('请粘贴完整的 Key（以 nai- 开头）'); return; }
-    b.disabled = true;
-    fetch('/login/key', {method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body: JSON.stringify({key: v})})
-      .then(function(r){ return r.json().catch(function(){ return {}; }).then(function(j){ return {ok: r.ok, j: j}; }); })
-      .then(function(x){
-        b.disabled = false;
-        if(!x.ok){ toast((x.j && x.j.detail) || '登录失败'); return; }
-        $('keyLoginIn').value = ''; toast('已登录'); loadMe();
-      }, function(){ b.disabled = false; toast('网络错误，请重试'); });
-  });
-})();
 loadMe();
 setInterval(function(){ if(!document.hidden) loadMe(); }, 60000);      // Key 被 /resetkey 换掉、今日用量变化时跟着更新
 document.addEventListener('visibilitychange', function(){ if(!document.hidden) loadMe(); });
