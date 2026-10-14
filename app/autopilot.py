@@ -5,7 +5,7 @@
 每条规则独立设置 autopilot_<规则> = observe（只记录「如果是我会怎么做」）/ enforce（真的执行）/ off。
 没设过的默认 observe。下面每条都写明「能不能执行」——有的规则只给建议，设成 enforce 也不会动。
 （2026-10-10 线上：slots、breaker、key_guard 为 enforce。节约模式 10-11 停用、代码已删除。
-  「闲置回收天数」「每日重置时间」两条只给建议、从不执行，已删除——回收天数固定为 KEY_INACTIVITY_DELETE_DAYS，每日重置是北京时间 0 点。）
+  「闲置回收天数」「每日重置时间」两条只给建议、从不执行，已删除——回收天数固定为 KEY_INACTIVITY_DELETE_DAYS，每日重置是北京时间 7 点（DAY_RESET_HOUR）。）
 
 ━━ 规则 ━━
 1. slots 名额上限 —— 可执行
@@ -105,7 +105,7 @@ async def run(state, registrar=None, now: Optional[float] = None) -> dict[str, A
     cfg = await registrar.settings() if registrar is not None else {"max_users": 0}
     active = await registrar.count_active() if registrar is not None else 0
 
-    # 用动态额度每天 0 点的复盘（昨天的用量 / 被拦小时数，已排除测试号和站长号）
+    # 用动态额度每个服务日（7 点）的复盘（昨天的用量 / 被拦小时数，已排除测试号和站长号）
     from . import quota_algo
     hist = json.loads(await db.get_setting(quota_algo.HISTORY_KEY, "[]") or "[]")
     last = hist[-1] if hist else {}

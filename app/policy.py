@@ -11,7 +11,7 @@ import math
 import re
 from typing import Any, Optional, Tuple
 
-# 免费档（V4.5 及以下）「平滑注水」参数：0 点先给底仓，之后每小时恢复，全天不超过 Key 的每日上限。
+# 免费档（V4.5 及以下）「平滑注水」参数：服务日起点（7 点）先给底仓，之后每小时恢复，全天不超过 Key 的每日上限。
 # 判定（routers/image_routes.quota_image_check）与给成员看的文案（quota_algo 首页额度说明）必须用同一组常量：
 # 之前文案硬编码「全天上限 96 张」，与实际能拿到的 126 张（30 + 4×24）不一致，成员按页面理解会误判额度。
 FREE_BURST = 30.0

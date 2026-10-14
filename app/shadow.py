@@ -175,7 +175,7 @@ async def collect(state, since: float) -> dict:
     slots = sum(t.image_slots.limit for t in usable) or 1
     guard = getattr(state, "guard", None)
     extra = {"account_cap": guard.values["account_daily_cap"]} if guard else {}
-    try:   # 每人每天 N 张（quota_algo 每天 0 点定）
+    try:   # 每人每天 N 张（quota_algo 每天 7 点定）
         live_n = await state.db.get_setting("quota_ceiling", None)
         if live_n is not None:
             extra["per_person"] = int(float(live_n))

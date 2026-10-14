@@ -1219,7 +1219,7 @@ async def errors_list(request: Request, all: bool = False):
         try:
             placeholders = ",".join("?" for _ in keys)
             rows = await (await request.app.state.gate.db._db.execute(
-                f"SELECT id, name FROM keys WHERE id IN ({placeholders})", tuple(keys)
+                f"SELECT id, name FROM api_keys WHERE id IN ({placeholders})", tuple(keys)
             )).fetchall()
             names = {r[0]: r[1] for r in rows}
         except Exception:

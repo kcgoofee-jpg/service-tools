@@ -3,13 +3,11 @@
 ━━ 为什么要动态 ━━
 固定额度有两个问题：人少时额度用不完（V5 额度涨到 100% 后不再累积，多出来的每天白白浪费），
 人多时又可能把上游账号用得太猛（fccc 的号就是日均 1000+ 张、全天不停被限制的）。
-所以额度跟着「账号能承受多少」和「实际有多少人在用」走，每 10 分钟重算一次，每天再根据前一天的结果微调参数。
+所以额度跟着「账号能承受多少」和「实际有多少人在用」走，每 10 分钟重算一次，每个服务日再根据前一天的结果微调参数。
 
 ━━ 三个量 ━━
   A  每人每天 V4.5 上限（daily_images）。初始 150。
-  B  保底（guard_base_daily_images）。2026-10-13 起每天按前一天的实际需求做最大最小公平分配（water_fill）：
-     账号日上限的 60% 按人平分，用得少的人用多少算多少，剩下的平分给用得多的人。
-     超过保底后只在全站空闲、且按时段放出的份额还剩得多时放行（见 guard.site_idle / paced_headroom）。
+  B  保底（guard_base_daily_images）。极简模式下 B = A。
   D5 每人每天 V5 额度（daily_v5）；G 全站每天 V5 上限（global_daily_v5）。
 
 ━━ V5：按官方恢复速度分配（数据来源：NovelAI 官方 Usage Limit 说明 + 账号接口实测）━━
@@ -25,16 +23,12 @@
   · 每人 D5 = G ÷ 最近 3 天用过 V5 的人数（至少按 10 人算，给新来的人留位置），限制在 3～30 张；每天只定一次。
     全站上限 G 兜底：哪怕每个人都用满，也不会超过当天可分配量。
 
-━━ V4.5：上限 A 与保底 B 每天自动微调（「越用越有效」的部分）━━
-  V4.5 的免费规格不消耗额度，真正的限制是「账号每天/每小时出图总量」（guard 里的 1000 张/天、每小时上限 150，AIMD 在 100～160 间自动调）。
-  每天 0 点后第一次运行时看前一天：
-    · 拥挤（全站用量 ≥ 账号日上限的 85%，或有 ≥ 3 个不同小时出现每小时上限拦截；不计测试号 / 站长号）：A −25（不低于 B），B −10（不低于 50）
-      —— 人均少给一点，让更多人能用上，也减少高峰排队。
-    · 有余量（用量 < 60%）且有人顶到了上限 A：A +25（不超过 300）
-      —— 账号还有空，顶格的人说明需求没满足，放宽。
-    · 有余量且有人因为「超过保底、全站不空闲」被拦：B +10（不超过 A）
-      —— 保底太低导致常用成员被卡，抬高保底。
-    · 其余情况不变。每次调整都写进「操作日志」并保留 30 天历史，站长 / 运维定期审核后可以改初始值或步长。
+━━ V4.5：极简模式（quota_policies.simple，2026-10-11 起）━━
+  每人每天同一个数 N（A = B = N，没有单独的保底）。每个服务日（DAY_RESET_HOUR，默认 7 点）第一次运行时看前一天：
+    · 总需求 ≥ 可分配量（账号日上限 − 全站 V5）的 95%：N = water_fill 平分结果（可升可降）；
+    · 否则有人用满 N：N +25（不超过 300）；
+    · 其余情况，或前一天数据不足 20 小时：N 不变。
+  每次调整都写进「操作日志」并保留 30 天历史。
 
 ━━ 范围 ━━
   只管理「由算法管理」的成员 Key（quota_auto = 1，默认）。站长在后台手动改过额度或模型的 Key 变成 -1（手动），
@@ -134,41 +128,6 @@ def v5_plan(percent: Optional[float], rate: Optional[float], active: int, *,
     return {"rate": round(rate, 1), "percent": percent, "k": k, "global": pool, "people": people, "each": each}
 
 
-def daily_adjust(a: int, b: int, *, used: int, cap: int, hourly_blocks: int, ceiling_hits: int,
-                 base_blocks: int, cfg: dict, paced: bool = False) -> tuple[int, int, list[str]]:
-    """前一天的结果 → 新的 A、B 和调整理由（纯函数，方便测试和审核）。
-    paced=True（每日上限按时段放行，2026-10-11 起）：拥挤由按时段放行 + 保底平分处理，不再每天下调上限 A；
-    保底 B 由 fair_base 按需求平分，这里只保留「有余量且有人顶格 → 放宽 A」。"""
-    util = used / cap if cap else 0.0
-    reasons: list[str] = []
-    if paced:
-        a2 = a
-        if util < P("allocation.slack_util", 0.6) and ceiling_hits > 0:
-            a2 = min(cfg["quota_ceiling_max"], a + cfg["quota_step"])
-        reasons.append(f"有余量（用量 {util:.0%}），{ceiling_hits} 人顶到上限：上限 {a}→{a2}" if a2 != a
-                       else f"用量 {util:.0%}：按时段放行，上限不变")
-        return a2, min(b, a2), reasons
-    # 拥挤看两样：全天用量 ≥ 85%，或有 ≥ 3 个不同的小时出现过「每小时上限」拦截。
-    # 只按小时数算：一次几分钟的扎堆（2026-10-09 23:04 一次 10 连拦）不算拥挤，那是每小时上限本身在起作用。
-    if util >= P("allocation.congested_util", 0.85) or hourly_blocks >= P("allocation.congested_hours", 3):
-        a2 = max(b, a - cfg["quota_step"])
-        b2 = max(cfg["quota_base_min"], b - cfg["quota_base_step"])
-        reasons.append(f"拥挤（用量 {util:.0%}，{hourly_blocks} 个小时出现每小时上限拦截）：上限 {a}→{a2}，保底 {b}→{b2}")
-        return a2, min(b2, a2), reasons
-    a2, b2 = a, b
-    if util < P("allocation.slack_util", 0.6) and ceiling_hits > 0:
-        a2 = min(cfg["quota_ceiling_max"], a + cfg["quota_step"])
-        if a2 != a:
-            reasons.append(f"有余量（用量 {util:.0%}），{ceiling_hits} 人顶到上限：上限 {a}→{a2}")
-    if util < P("allocation.slack_util", 0.6) and base_blocks > 0:
-        b2 = min(a2, b + cfg["quota_base_step"])
-        if b2 != b:
-            reasons.append(f"有余量，{base_blocks} 次因「超过保底且全站不空闲」被拦：保底 {b}→{b2}")
-    if not reasons:
-        reasons.append(f"用量 {util:.0%}，无需调整")
-    return a2, b2, reasons
-
-
 FAIR_SHARE = 0.6        # 账号日上限里拿多少按人平分做保底；其余 40% 留给超出保底的人在空闲时段用
 
 
@@ -181,17 +140,6 @@ async def member_usage(db, day: str) -> list[int]:
         "SELECT c.legacy_free_images FROM counters c JOIN api_keys k ON k.id=c.key_id "
         "WHERE c.day=? AND k.is_test=0 AND k.is_admin=0 AND k.quota_auto=1 AND c.legacy_free_images>0", (day,))
     return [int(r[0]) for r in rows]
-
-
-async def fair_base(db, day: str, cap: int, *, lo: int, hi: int, share: float = FAIR_SHARE) -> Optional[int]:
-    """按前一天每个成员的 V4.5 用量算保底（只看算法管理的成员，不含测试 / 站长 Key）。"""
-    rows = await db._db.execute_fetchall(
-        "SELECT c.legacy_free_images FROM counters c JOIN api_keys k ON k.id=c.key_id "
-        "WHERE c.day=? AND k.is_test=0 AND k.is_admin=0 AND k.quota_auto=1 AND c.legacy_free_images>0", (day,))
-    usage = [int(r[0]) for r in rows]
-    if not usage:
-        return None
-    return max(lo, min(hi, water_fill(usage, cap * share)))
 
 
 async def _cfg(db) -> dict[str, int]:
@@ -362,7 +310,7 @@ async def _allowance(state) -> tuple[Optional[float], Optional[float]]:
 
 
 def quota_notice(a: int, v5: dict[str, Any], members: int, *, today: str, pct: Optional[float],
-                 review: Optional[dict[str, Any]] = None, reset_hour: int = 7) -> str:
+                 review: Optional[dict[str, Any]] = None, reset_hour: int = 7, anlas: int = 0) -> str:
     """首页那句「今日额度」。单独成函数是为了能用同一组常量核对文案与判定：
     以前写死「蓄水池 A 张（每小时恢复 4 张，全天上限 96 张）」，与 quota_image_check 的
     30 底仓 + 4/小时（全天最多 126 张）不是同一个数，也和「极简模式每人固定 A 张」矛盾。
@@ -374,6 +322,8 @@ def quota_notice(a: int, v5: dict[str, Any], members: int, *, today: str, pct: O
         v5_status += f"（全站今日共 {global_v5} 张，先到先得）"
     elif pct and pct >= 85 and each >= 10:
         v5_status += f"（当前电池充沛 {pct:.0f}%，额度放宽）"
+    if anlas > 0:          # 每人每日 Anlas（Vibe 等），与 image_routes 的 member_daily_anlas 判定同一个值
+        v5_status += f" · Anlas 每人 {anlas}/天"
     reset_txt = f"每日 {reset_hour} 点重置"
     paced_cap = free_paced_cap(a)
     if a > paced_cap:
@@ -395,7 +345,7 @@ async def run(state, now: Optional[float] = None) -> dict[str, Any]:
     if not cfg["quota_auto_enabled"]:
         return {"enabled": False}
     guard = getattr(state, "guard", None)
-    # 按账号总数算（不看此刻是否可用）：0 点恰好有账号在冷却时，不能把一整天的额度减半（Sonnet 审查 P2）
+    # 按账号总数算（不看此刻是否可用）：重置时恰好有账号在冷却时，不能把一整天的额度减半（Sonnet 审查 P2）
     accounts = max(1, len(getattr(getattr(state, "nai", None), "pool", []) or [])) if getattr(state, "nai", None) else 1
     cap = (guard.values["account_daily_cap"] if guard else 1000) * accounts
     a = int(float(await db.get_setting("quota_ceiling", cfg["quota_target_avg"])))
@@ -494,7 +444,7 @@ async def run(state, now: Optional[float] = None) -> dict[str, Any]:
 
     # ---- 应用：所有由算法管理的成员同一套额度 ----
     cur = await db._db.execute_fetchall(
-        "SELECT COUNT(*) FROM api_keys WHERE quota_auto=1 AND enabled=1 AND is_admin=0 AND is_test=0 "
+        "SELECT COUNT(*) FROM api_keys WHERE quota_auto=1 AND is_admin=0 AND is_test=0 "
         "AND (daily_images<>? OR daily_v5<>? OR image_model_scope<>'all')", (a, v5["each"]))
     changed = int(cur[0][0])
     if changed:
@@ -516,7 +466,10 @@ async def run(state, now: Optional[float] = None) -> dict[str, Any]:
     oversell = bool(v5["global"] and v5["each"] * max(1, len(members)) > v5["global"])
     v5["oversell"] = {"each": v5["each"], "members": len(members), "global": v5["global"]} if oversell else None
     # 首页提醒（站长要求：算法调整只在网站首页提示，不发 Discord）
-    note = quota_notice(a, v5, len(members), today=today, pct=pct, review=review, reset_hour=reset_hour)
+    from . import site_flags
+    member_anlas = int(await site_flags.get(db, site_flags.MEMBER_DAILY_ANLAS, getattr(state, "settings", None)) or 0)
+    note = quota_notice(a, v5, len(members), today=today, pct=pct, review=review, reset_hour=reset_hour,
+                        anlas=member_anlas)
     await db.set_setting(NOTICE_KEY, note)
     result = {"enabled": True, "ceiling": a, "base": b, "v5": v5, "members": len(members), "cap": cap,
               "updated_at": now, "changed_keys": changed, "review": review}
