@@ -302,6 +302,8 @@ export function Menu(props: {
     onClick: () => void;
   }) => ComponentChildren;
   items: Array<{ label: ComponentChildren; onSelect: () => void; danger?: boolean }>;
+  /** 菜单顶部不可点的一行（如账户菜单里的「已登录：某某」） */
+  header?: ComponentChildren;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -331,6 +333,11 @@ export function Menu(props: {
       {props.button({ "aria-expanded": open, "aria-haspopup": "menu", onClick: () => setOpen(!open) })}
       {open && (
         <div class="menu__list" role="menu">
+          {props.header && (
+            <div class="menu__header" role="presentation">
+              {props.header}
+            </div>
+          )}
           {props.items.map((it, i) => (
             <div key={i} role="none">
               <button

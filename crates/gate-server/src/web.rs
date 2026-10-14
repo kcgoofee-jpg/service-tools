@@ -18,7 +18,7 @@ struct Dist;
 
 /// 首页 / 问卷的安全头（比旧版更严：去掉 'unsafe-inline' 与 Discord CDN 头像源）。
 pub const PUBLIC_CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; \
-    img-src 'self' data:; frame-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+    img-src 'self' data: https://cdn.discordapp.com; frame-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 /// 后台的安全头。
 pub const ADMIN_CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; \
     connect-src 'self'; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";

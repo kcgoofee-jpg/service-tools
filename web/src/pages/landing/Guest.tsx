@@ -36,25 +36,16 @@ export function JoinDiscord(props: {
 export function GuestHero() {
   const { meta } = useStore();
   const login = meta.value.web_login;
+  // 首屏不放按钮：登录在右上角，加入 Discord 在下面第 1 步——同一个动作整页只出现一次
   return (
     <section class="lp-hero" aria-labelledby="lp-title">
       <div class="lp-hero__copy">
         <h1 id="lp-title">猫头鹰公益站</h1>
         <p class="lp-lead">Discord 社区成员共享的 NovelAI 公益中转，用你常用的客户端出图。</p>
-        <div class="row lp-cta">
-          {login === true && (
-            <a class="btn btn--primary btn--lg" href="/login">
-              用 Discord 登录
-            </a>
-          )}
-          <JoinDiscord variant={login === true ? "default" : "primary"} size="lg" />
-        </div>
         <p class="muted small">
           {login === true
-            ? "登录后可以查看自己的额度，复制 Key。"
-            : login === false
-              ? "网页登录暂未开放；领取 Key 后直接填进客户端即可使用。"
-              : ""}
+            ? "新成员按下面三步开始；已经领过 Key 的，点右上角「登录」查看自己的额度。"
+            : "新成员按下面三步开始；领到 Key 后直接填进客户端即可使用。"}
         </p>
       </div>
       <StatusCard />

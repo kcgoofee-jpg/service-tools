@@ -45,20 +45,31 @@
   background: var(--surface-2);
   text-decoration: none;
 }
-.lp-user {
-  max-width: 8em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 a.btn:hover {
   text-decoration: none;
 }
-/* 很窄的手机上顶栏放不下完整按钮文字：只留短的（无障碍名称用 aria-label 保留完整说法） */
-@media (max-width: 420px) {
-  .lp-wide-only {
-    display: none;
-  }
+/* 已登录：右上角圆形头像（Discord 头像，拿不到就显示名字首字），点开是名字 + 退出 */
+.lp-avatar {
+  display: grid;
+  place-items: center;
+  width: var(--control-h);
+  height: var(--control-h);
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font: 700 var(--fs-md) / 1 var(--font);
+  cursor: pointer;
+}
+.lp-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.lp-avatar:hover {
+  border-color: var(--border-strong);
 }
 
 /* ---------- 版面 ---------- */

@@ -286,7 +286,6 @@ test.describe("已登录", () => {
     expect(detailId).toBeTruthy();
     await btn.click();
     const row = page.locator(`#${detailId}`);
-    const head = page.locator(`#${(detailId ?? "").replace("mb-d-", "mb-m-")}`);
     await expect(row).toBeVisible();
 
     // 身份组：切到另一个再切回（切换是直接生效的，带 toast）
@@ -324,17 +323,6 @@ test.describe("已登录", () => {
     const reset = page.getByRole("dialog", { name: /重置.*今日额度/ });
     await reset.getByRole("button", { name: "重置", exact: true }).click();
     await expect(reset).toBeHidden();
-
-    // 停用 → 启用
-    await row.getByRole("button", { name: "更多" }).click();
-    await page.getByRole("menuitem", { name: "停用" }).click();
-    const off = page.getByRole("dialog", { name: /停用/ });
-    await off.getByRole("button", { name: "停用", exact: true }).click();
-    await expect(off).toBeHidden();
-    await expect(head.locator(".badge", { hasText: "已停用" })).toBeVisible();
-    await row.getByRole("button", { name: "更多" }).click();
-    await page.getByRole("menuitem", { name: "启用" }).click();
-    await expect(head.locator(".badge", { hasText: "已停用" })).toHaveCount(0);
 
     // 重新生成 Key：确认后显示新 Key
     await row.getByRole("button", { name: "更多" }).click();
@@ -377,6 +365,19 @@ test.describe("已登录", () => {
     const all = page.getByRole("dialog", { name: "全站重置 Key" });
     await expect(all.getByRole("button", { name: "确认重置" })).toBeDisabled();
     await all.getByRole("button", { name: "取消" }).click();
+
+    // 停用：停用的 Key 不再出现在成员列表里（谁用过仍记在日志里）
+    await page.getByRole("searchbox", { name: "搜索成员" }).fill("e2e-临时");
+    const tmp = page.getByRole("button", { name: /展开.*e2e-临时.*的详情/ });
+    const tmpId = await tmp.getAttribute("aria-controls");
+    await tmp.click();
+    const tmpRow = page.locator(`#${tmpId}`);
+    await tmpRow.getByRole("button", { name: "更多" }).click();
+    await page.getByRole("menuitem", { name: "停用" }).click();
+    const off = page.getByRole("dialog", { name: /停用/ });
+    await off.getByRole("button", { name: "停用", exact: true }).click();
+    await expect(off).toBeHidden();
+    await expect(tmp).toHaveCount(0);
     expect(errs).toEqual([]);
   });
 

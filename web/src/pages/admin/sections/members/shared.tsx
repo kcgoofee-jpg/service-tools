@@ -304,10 +304,21 @@ export function Empty(props: { title: string; children?: ComponentChildren }) {
 }
 
 /** 头像：有 Discord 头像地址就显示，加载失败退回首字母。 */
-export function Avatar(props: { name: string; src?: string | null | undefined; size?: number }) {
+/** 头像首字：名字里第一个汉字 / 假名 / 英文字母 / 数字；名字是「(๑•̀ㅂ•́)」这类颜文字时改用用户名。 */
+const INITIAL = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}A-Za-z0-9]/u;
+export function initialOf(name: string, fallback?: string | null): string {
+  return (name.match(INITIAL)?.[0] ?? fallback?.match(INITIAL)?.[0] ?? "?").toUpperCase();
+}
+
+export function Avatar(props: {
+  name: string;
+  fallback?: string | null | undefined;
+  src?: string | null | undefined;
+  size?: number;
+}) {
   const [failed, setFailed] = useState(false);
   const size = props.size ?? 32;
-  const initial = [...(props.name || "?")][0] ?? "?";
+  const initial = initialOf(props.name, props.fallback);
   const ok = props.src?.startsWith("https://cdn.discordapp.com/") && !failed;
   return (
     <span class="xa-avatar" style={{ width: `${size}px`, height: `${size}px` }} aria-hidden="true">

@@ -84,7 +84,8 @@ export default function Members() {
   const idleDays = mem.data?.inactivity_days ?? 3;
   const rows: MemberRow[] = useMemo(() => {
     const km = new Map((keys.data?.keys ?? []).map((k) => [k.id, k]));
-    return (mem.data?.members ?? []).map((m) => ({ ...m, k: km.get(m.id) }));
+    // 以成员为主：停用的 Key 不再列出（谁用过、什么时候停用的，日志里都有）
+    return (mem.data?.members ?? []).filter((m) => m.enabled).map((m) => ({ ...m, k: km.get(m.id) }));
   }, [mem.data, keys.data]);
   const byId = (id: number) => rows.find((r) => r.id === id);
 
@@ -425,7 +426,7 @@ export default function Members() {
   };
 
   /* ---------- 页面 ---------- */
-  const mainFilters = filters.main.filter((f) => !(f.id === "disabled" && count(f) === 0));
+  const mainFilters = filters.main;
   const moreGroups = [
     { label: "状态", list: filters.more },
     { label: "站长标签", list: filters.userTags },

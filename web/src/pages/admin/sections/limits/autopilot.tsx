@@ -37,7 +37,7 @@ export default function AutopilotCard() {
                     <th scope="row">{AP_RULES[name] ?? name}</th>
                     <td>{mode ? <Badge {...withTone(mode.tone)}>{mode.label}</Badge> : r.mode}</td>
                     <td>{autopilotValue(name, r.value)}</td>
-                    <td class="muted">{r.why}</td>
+                    <td class="muted wrap">{r.why}</td>
                   </tr>
                 );
               })}

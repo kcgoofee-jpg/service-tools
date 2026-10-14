@@ -164,8 +164,8 @@ describe("筛选", () => {
     const f = buildFilters([m], NOW, 3);
     expect(f.userTags.map((x) => x.label)).toEqual(["老朋友"]);
   });
-  it("默认筛选：有要处理的人看「需要处理」，否则「启用中」", () => {
-    expect(defaultFilter([mk()], NOW)).toBe("active");
+  it("默认筛选：有要处理的人看「需要处理」，否则「全部成员」", () => {
+    expect(defaultFilter([mk()], NOW)).toBe("all");
     expect(defaultFilter([mk({ expires_at: NOW - 1 })], NOW)).toBe("attention");
   });
   it("搜索：名称、Discord ID、用户名、标签与备注", () => {
@@ -216,5 +216,15 @@ describe("排序 / 身份 / 查找", () => {
     const a = mk({ all_key_ids: [11, 12], id: 12 });
     expect(findByKeyId([a], 11)).toBe(a);
     expect(findByKeyId([a], 99)).toBeUndefined();
+  });
+});
+
+describe("头像首字", () => {
+  it("跳过颜文字符号，名字里没有字母就用用户名", async () => {
+    const { initialOf } = await import("./shared");
+    expect(initialOf("月见草")).toBe("月");
+    expect(initialOf("kestrel")).toBe("K");
+    expect(initialOf("(๑•̀ㅂ•́)", "tanuki")).toBe("T");
+    expect(initialOf("✨", null)).toBe("?");
   });
 });

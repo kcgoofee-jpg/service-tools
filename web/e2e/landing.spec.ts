@@ -166,12 +166,12 @@ test.describe("游客", () => {
     expect(meRequests).toEqual([]);
   });
 
-  test("网页登录开放时：顶栏与首屏都有「用 Discord 登录」，指向 /login", async ({ page }) => {
+  test("网页登录开放时：整页只有右上角一个登录入口，指向 /login", async ({ page }) => {
     await patch(page, STATUS, (b) => ({ ...b, web_login: true }));
     await patch(page, LIVE, (b) => ({ ...b, web_login: true }));
     await page.goto("/");
     const login = page.getByRole("link", { name: "用 Discord 登录" });
-    await expect(login).toHaveCount(2);
+    await expect(login).toHaveCount(1);
     await expect(login.first()).toHaveAttribute("href", "/login");
     await expect(page.getByRole("banner").getByRole("link", { name: "用 Discord 登录" })).toBeVisible();
   });
@@ -181,7 +181,7 @@ test.describe("游客", () => {
     await patch(page, LIVE, (b) => ({ ...b, web_login: false }));
     await page.goto("/");
     await expect(page.getByRole("link", { name: "用 Discord 登录" })).toHaveCount(0);
-    await expect(page.getByText("网页登录暂未开放")).toBeVisible();
+    await expect(page.getByText(/领到 Key 后直接填进客户端即可使用/)).toBeVisible();
   });
 
   test("加入 Discord：有邀请链接时是新窗口外链；关闭入口时置灰", async ({ page }) => {
@@ -193,7 +193,7 @@ test.describe("游客", () => {
     }));
     await page.goto("/");
     const join = page.getByRole("link", { name: "加入 Discord" });
-    await expect(join).toHaveCount(2);
+    await expect(join).toHaveCount(1);
     await expect(join.first()).toHaveAttribute("href", "https://discord.gg/owl-test");
     await expect(join.first()).toHaveAttribute("rel", /noopener/);
 

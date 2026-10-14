@@ -273,7 +273,14 @@ export function Survey() {
   const member = me?.logged_in ? me : null;
   return (
     <>
-      <Topbar user={member ? displayName(member) : undefined} loginOpen={webLogin === true && !member} />
+      <Topbar
+        user={
+          member
+            ? { name: displayName(member), id: member.discord?.id, avatar: member.discord?.avatar }
+            : undefined
+        }
+        loginOpen={webLogin === true && !member}
+      />
       <main class="page sv-main">
         <header class="sv-head">
           <h1>成员问卷</h1>

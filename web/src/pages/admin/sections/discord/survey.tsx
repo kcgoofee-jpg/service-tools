@@ -55,7 +55,7 @@ export default function SurveyCard() {
                   <tr key={`${r.ts}-${r.discord_id ?? r.name}`}>
                     <td class="nowrap">{fullTime(r.ts)}</td>
                     <td>{r.name || r.discord_id || "—"}</td>
-                    <td>{r.client || "—"}</td>
+                    <td class="nowrap">{r.client || "—"}</td>
                     <td>{r.understand || "—"}</td>
                     <td class="wrap">
                       {r.improve || "—"}

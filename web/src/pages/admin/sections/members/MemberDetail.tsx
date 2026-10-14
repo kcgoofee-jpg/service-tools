@@ -1,8 +1,8 @@
-/** 成员展开后的详情：一句话结论 → 待处理 → 今天 / 额度与权限 / 资料 → 日常操作。 */
+/** 成员展开后的详情：一句话结论 → 待处理 → 额度与权限 / 资料 → 日常操作。今天的用量只在列表行里显示一次。 */
 import { ExternalLink, Plus } from "lucide-preact";
 import { useState } from "preact/hooks";
 import { dayOf, fullTime, rel } from "../../../../lib/format";
-import { Badge, Button, copyText, Menu, Meter, toast } from "../../../../ui";
+import { Badge, Button, copyText, Menu, toast } from "../../../../ui";
 import { formatClient } from "../logs/format";
 import {
   type Issue,
@@ -72,34 +72,6 @@ function IssueList(props: { m: MemberRow; issues: Issue[]; act: DetailActions })
   );
 }
 
-function Rate24(props: { hours: number[] }) {
-  const hrs = props.hours;
-  const total = hrs.reduce((a, b) => a + b, 0);
-  if (!total) return <p class="small muted">生图速率：最近 24 小时没有出图</p>;
-  const peak = Math.max(...hrs, 1);
-  return (
-    <div class="mb-rate">
-      <div
-        class="mb-rate__bars"
-        role="img"
-        aria-label={`最近 24 小时逐小时生图数，最右是当前小时，共 ${total} 张，峰值每小时 ${peak} 张`}
-      >
-        {hrs.map((n, i) => (
-          <i
-            key={i}
-            class={n ? "on" : ""}
-            style={{ height: `${n ? Math.max(8, Math.round((n / peak) * 100)) : 4}%` }}
-            title={n ? `${n} 张` : undefined}
-          />
-        ))}
-      </div>
-      <span class="small muted">
-        最近 24 小时 {total} 张 · 峰值每小时 {peak} 张
-      </span>
-    </div>
-  );
-}
-
 export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActions }) {
   const { m, now, act } = props;
   const k = m.k;
@@ -122,7 +94,11 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
   }
   const u = k.used;
   const quotaSource = k.quota_auto && !m.is_test ? "auto" : "manual";
-  const anlas = !k.allow_anlas ? "关闭" : k.daily_anlas > 0 ? `${Math.round(k.daily_anlas)} / 天` : "不限";
+  // 今天的 V4.5 / V5 用量在列表行里已经有了，这里只补行里没有的 Anlas、文本
+  const anlasUsed = Math.round(u.anlas || 0);
+  const anlas = !k.allow_anlas
+    ? "关闭"
+    : `今天 ${anlasUsed} / ${k.daily_anlas > 0 ? Math.round(k.daily_anlas) : "不限"}`;
   const feats = k.features;
 
   return (
@@ -135,50 +111,6 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
       {issues.length > 0 && <IssueList m={m} issues={issues} act={act} />}
 
       <div class="mb-cols">
-        <section class="mb-sec" aria-label="今天用量">
-          <h4 class="mb-h4">今天</h4>
-          <div class="mb-meters">
-            {m.is_admin ? (
-              <p class="small muted">站长 Key 不限额度，仍受全站保护</p>
-            ) : (
-              <>
-                <Meter
-                  label="V4.5"
-                  value={Math.max(0, m.today.images - (m.today.v5 || 0))}
-                  max={k.daily_images}
-                  text={`${Math.max(0, m.today.images - (m.today.v5 || 0))} / ${inf(k.daily_images)}`}
-                />
-                {k.image_model_scope === "all" && (
-                  <Meter
-                    label="V5"
-                    tone="v5"
-                    value={u.v5 || 0}
-                    max={k.daily_v5}
-                    text={`${u.v5 || 0} / ${inf(k.daily_v5)}`}
-                  />
-                )}
-              </>
-            )}
-            {k.allow_anlas && (
-              <Meter
-                label="Anlas"
-                value={Math.round(u.anlas || 0)}
-                max={Math.round(k.daily_anlas || 0)}
-                text={`${Math.round(u.anlas || 0)} / ${inf(Math.round(k.daily_anlas || 0))}`}
-              />
-            )}
-            {u.text_tokens > 0 && (
-              <Meter
-                label="文本 tokens"
-                value={u.text_tokens}
-                max={k.daily_text_tokens}
-                text={`${u.text_tokens} / ${k.daily_text_tokens > 0 ? k.daily_text_tokens : "禁用"}`}
-              />
-            )}
-          </div>
-          <Rate24 hours={m.hours24} />
-        </section>
-
         <section class="mb-sec" aria-label="额度与权限">
           <h4 class="mb-h4">额度与权限</h4>
           <div class="mb-ctl">
@@ -238,6 +170,14 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
             )}
             <dt>Anlas</dt>
             <dd>{anlas}</dd>
+            {u.text_tokens > 0 && (
+              <>
+                <dt>文本</dt>
+                <dd>
+                  今天 {u.text_tokens} / {k.daily_text_tokens > 0 ? k.daily_text_tokens : "禁用"} tokens
+                </dd>
+              </>
+            )}
             <dt>功能</dt>
             <dd>
               <span class="mb-chips">
@@ -277,26 +217,6 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
         <section class="mb-sec" aria-label="资料">
           <h4 class="mb-h4">资料</h4>
           <dl class="mb-kv">
-            <dt>Key</dt>
-            <dd>
-              <span class="mb-key">
-                <code class="mb-key__v">{reveal ? k.token : mask(k.token)}</code>
-                <Button size="sm" variant="ghost" aria-pressed={reveal} onClick={() => setReveal(!reveal)}>
-                  {reveal ? "隐藏" : "显示"}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  aria-label={`复制 ${memberLabel(m)} 的 Key`}
-                  onClick={async () => {
-                    const ok = await copyText(k.token);
-                    toast(ok ? "Key 已复制" : "复制失败，请点「显示」后手动复制", { error: !ok });
-                  }}
-                >
-                  复制
-                </Button>
-              </span>
-            </dd>
             <dt>Discord</dt>
             <dd>
               {dcId ? (
@@ -335,6 +255,26 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
                   </Button>
                 </span>
               )}
+            </dd>
+            <dt>Key</dt>
+            <dd>
+              <span class="mb-key">
+                <code class="mb-key__v">{reveal ? k.token : mask(k.token)}</code>
+                <Button size="sm" variant="ghost" aria-pressed={reveal} onClick={() => setReveal(!reveal)}>
+                  {reveal ? "隐藏" : "显示"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  aria-label={`复制 ${memberLabel(m)} 的 Key`}
+                  onClick={async () => {
+                    const ok = await copyText(k.token);
+                    toast(ok ? "Key 已复制" : "复制失败，请点「显示」后手动复制", { error: !ok });
+                  }}
+                >
+                  复制
+                </Button>
+              </span>
             </dd>
             <dt>{m.discord_id ? "领取" : "创建"}</dt>
             <dd title={fullTime(m.registered_at)}>{m.registered_at ? rel(m.registered_at, now) : "—"}</dd>

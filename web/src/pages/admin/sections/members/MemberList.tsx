@@ -31,7 +31,7 @@ function Identity(props: { m: MemberRow }) {
   const tag = userTags(m).find((t) => t.tag !== "邀请");
   return (
     <div class="mb-ident">
-      <Avatar name={title} src={dc?.avatar_url} size={32} />
+      <Avatar name={title} fallback={dc?.username} src={dc?.avatar_url} size={32} />
       <div class="mb-ident__t">
         <div class="mb-name">
           <span class="mb-name__t">{title}</span>

@@ -111,7 +111,14 @@ function Page({ store }: { store: Store }) {
   useReturnToSurvey(!!member);
   return (
     <>
-      <Topbar user={member ? displayName(member) : undefined} loginOpen={webLogin && !member} />
+      <Topbar
+        user={
+          member
+            ? { name: displayName(member), id: member.discord?.id, avatar: member.discord?.avatar }
+            : undefined
+        }
+        loginOpen={webLogin && !member}
+      />
       <main class="page lp-main">
         {me === undefined ? (
           <Loading />
