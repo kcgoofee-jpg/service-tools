@@ -1,0 +1,20 @@
+{"fn":"_load","text":"{\"a\": 1}","out":{"a":1},"err":null}
+{"fn":"_load","text":"[1, 2]","out":{},"err":null}
+{"fn":"_load","text":"null","out":{},"err":null}
+{"fn":"_load","text":"5","out":{},"err":null}
+{"fn":"_load","text":"\"s\"","out":{},"err":null}
+{"fn":"_load","text":"","out":{},"err":null}
+{"fn":"_load","text":"{","out":{},"err":null}
+{"fn":"_load","text":"{\"a\": 1,}","out":{},"err":null}
+{"fn":"_load","text":"{\"a\": {\"b\": [1, 2.5, null]}}","out":{"a":{"b":[1,2.5,null]}},"err":null}
+{"fn":"_load","text":"  {\"a\": 2}  ","out":{"a":2},"err":null}
+{"fn":"_load","text":"﻿{\"a\": 1}","out":{},"err":null}
+{"fn":"_load","text":"{\"a\": 1, \"a\": 2}","out":{"a":2},"err":null}
+{"fn":"_load","text":"{\"a\": 12345678901234567890}","out":{"a":12345678901234567890},"err":null}
+{"fn":"_load","text":"{\"a\": 1e2}","out":{"a":100.0},"err":null}
+{"fn":"_load","text":"{\"capacity.hourly_min\": \"90\"}","out":{"capacity.hourly_min":"90"},"err":null}
+{"fn":"_load","text":"{\"k\": \"猫\"}","out":{"k":"猫"},"err":null}
+{"fn":"_load","text":"{}","out":{},"err":null}
+{"fn":"_load","text":"true","out":{},"err":null}
+{"fn":"_load","text":"{\"a\": [], \"b\": {}}","out":{"a":[],"b":{}},"err":null}
+{"fn":"_load_missing","text":null,"out":{}}

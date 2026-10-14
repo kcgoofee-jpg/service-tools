@@ -1,0 +1,90 @@
+{"fn":"constants","out":{"FEATURES":[["image","文生图"],["upscale","放大"],["augment","导演工具（线稿、上色等）"],["vibe","Vibe 编码"],["tags","标签补全"],["text","文本生成 / OpenAI 兼容聊天"],["voice","语音合成"]],"GLOBAL_KEY":"features_global","ANLAS_FEATURES":[["vibe","每次编码参考图约 2 Anlas"],["upscale","按图片大小扣 Anlas"],["augment","按图片大小扣 Anlas"]],"KIND_FEATURE":[["image","image"],["image_stream","image"],["upscale","upscale"],["augment-image","augment"],["vibe_encode","vibe"],["tags","tags"],["text","text"],["chat","text"],["voice","voice"]]}}
+{"fn":"kinds_for","args":["image"],"out":["image","image_stream"],"err":null}
+{"fn":"kinds_for","args":["upscale"],"out":["upscale"],"err":null}
+{"fn":"kinds_for","args":["augment"],"out":["augment-image"],"err":null}
+{"fn":"kinds_for","args":["vibe"],"out":["vibe_encode"],"err":null}
+{"fn":"kinds_for","args":["tags"],"out":["tags"],"err":null}
+{"fn":"kinds_for","args":["text"],"out":["text","chat"],"err":null}
+{"fn":"kinds_for","args":["voice"],"out":["voice"],"err":null}
+{"fn":"kinds_for","args":["bogus"],"out":[],"err":null}
+{"fn":"kinds_for","args":[""],"out":[],"err":null}
+{"fn":"kinds_for","args":["text "],"out":[],"err":null}
+{"fn":"parse_list","args":[null],"out":null,"err":null}
+{"fn":"parse_list","args":[""],"out":[],"err":null}
+{"fn":"parse_list","args":["image"],"out":["image"],"err":null}
+{"fn":"parse_list","args":["image,vibe"],"out":["image","vibe"],"err":null}
+{"fn":"parse_list","args":["image, vibe"],"out":["image"],"err":null}
+{"fn":"parse_list","args":["bogus,tags"],"out":["tags"],"err":null}
+{"fn":"parse_list","args":["image,image"],"out":["image","image"],"err":null}
+{"fn":"parse_list","args":["voice,image,text"],"out":["voice","image","text"],"err":null}
+{"fn":"parse_list","args":[","],"out":[],"err":null}
+{"fn":"parse_list","args":[",,"],"out":[],"err":null}
+{"fn":"parse_list","args":[" "],"out":[],"err":null}
+{"fn":"parse_list","args":["IMAGE"],"out":[],"err":null}
+{"fn":"parse_list","args":["image,"],"out":["image"],"err":null}
+{"fn":"parse_list","args":[",image"],"out":["image"],"err":null}
+{"fn":"parse_list","args":["image;vibe"],"out":[],"err":null}
+{"fn":"parse_list","args":[5],"out":[],"err":null}
+{"fn":"parse_list","args":[0],"out":[],"err":null}
+{"fn":"parse_list","args":[true],"out":[],"err":null}
+{"fn":"parse_list","args":[false],"out":[],"err":null}
+{"fn":"parse_list","args":[1.5],"out":[],"err":null}
+{"fn":"parse_list","args":[["image"]],"out":[],"err":null}
+{"fn":"parse_list","args":[["image","vibe"]],"out":[],"err":null}
+{"fn":"parse_list","args":[{}],"out":[],"err":null}
+{"fn":"parse_list","args":[{"image":1}],"out":[],"err":null}
+{"fn":"parse_list","args":["image,upscale,augment,vibe,tags,text,voice"],"out":["image","upscale","augment","vibe","tags","text","voice"],"err":null}
+{"fn":"parse_list","args":["voice,text,tags,vibe,augment,upscale,image"],"out":["voice","text","tags","vibe","augment","upscale","image"],"err":null}
+{"fn":"parse_list","args":["猫"],"out":[],"err":null}
+{"fn":"parse_list","args":["image,猫"],"out":["image"],"err":null}
+{"fn":"normalize","args":[[]],"out":[],"err":null}
+{"fn":"dump","args":[[]],"out":"","err":null}
+{"fn":"normalize","args":[["image"]],"out":["image"],"err":null}
+{"fn":"dump","args":[["image"]],"out":"image","err":null}
+{"fn":"normalize","args":[["voice","image"]],"out":["image","voice"],"err":null}
+{"fn":"dump","args":[["voice","image"]],"out":"image,voice","err":null}
+{"fn":"normalize","args":[["image","image"]],"out":["image"],"err":null}
+{"fn":"dump","args":[["image","image"]],"out":"image","err":null}
+{"fn":"normalize","args":[["bogus"]],"out":[],"err":null}
+{"fn":"dump","args":[["bogus"]],"out":"","err":null}
+{"fn":"normalize","args":[["tags","bogus","vibe","text"]],"out":["vibe","tags","text"],"err":null}
+{"fn":"dump","args":[["tags","bogus","vibe","text"]],"out":"vibe,tags,text","err":null}
+{"fn":"normalize","args":[["voice","text","tags","vibe","augment","upscale","image"]],"out":["image","upscale","augment","vibe","tags","text","voice"],"err":null}
+{"fn":"dump","args":[["voice","text","tags","vibe","augment","upscale","image"]],"out":"image,upscale,augment,vibe,tags,text,voice","err":null}
+{"fn":"normalize","args":[["IMAGE"]],"out":[],"err":null}
+{"fn":"dump","args":[["IMAGE"]],"out":"","err":null}
+{"fn":"normalize","args":[[""]],"out":[],"err":null}
+{"fn":"dump","args":[[""]],"out":"","err":null}
+{"fn":"normalize","args":[["image,vibe"]],"out":[],"err":null}
+{"fn":"dump","args":[["image,vibe"]],"out":"","err":null}
+{"fn":"dump","args":[null],"out":null,"err":null}
+{"fn":"key_features","args":[{}],"out":null,"err":null}
+{"fn":"key_features","args":[{"features":null}],"out":null,"err":null}
+{"fn":"key_features","args":[{"features":""}],"out":[],"err":null}
+{"fn":"key_features","args":[{"features":"image"}],"out":["image"],"err":null}
+{"fn":"key_features","args":[{"features":"image,vibe,upscale"}],"out":["image","vibe","upscale"],"err":null}
+{"fn":"key_features","args":[{"features":"bogus"}],"out":[],"err":null}
+{"fn":"key_features","args":[{"features":5}],"out":[],"err":null}
+{"fn":"key_features","args":[{"id":3}],"out":null,"err":null}
+{"fn":"key_features","args":[{"features":"voice,voice"}],"out":["voice","voice"],"err":null}
+{"fn":"global_flags","args":[null],"out":{"image":true,"upscale":true,"augment":true,"vibe":true,"tags":true,"text":true,"voice":true},"err":null}
+{"fn":"global_flags","args":[""],"out":{"image":true,"upscale":true,"augment":true,"vibe":true,"tags":true,"text":true,"voice":true},"err":null}
+{"fn":"global_flags","args":["{}"],"out":{"image":true,"upscale":true,"augment":true,"vibe":true,"tags":true,"text":true,"voice":true},"err":null}
+{"fn":"global_flags","args":["{\"image\": false}"],"out":{"image":false,"upscale":true,"augment":true,"vibe":true,"tags":true,"text":true,"voice":true},"err":null}
+{"fn":"global_flags","args":["{\"image\": 0}"],"out":{"image":true,"upscale":true,"augment":true,"vibe":true,"tags":true,"text":true,"voice":true},"err":null}
+{"fn":"global_flags","args":["{\"vibe\": \"no\"}"],"out":{"image":true,"upscale":true,"augment":true,"vibe":true,"tags":true,"text":true,"voice":true},"err":null}
+{"fn":"global_flags","args":["[1]"],"out":null,"err":{"type":"AttributeError","msg":"'list' object has no attribute 'get'"}}
+{"fn":"global_flags","args":["null"],"out":null,"err":{"type":"AttributeError","msg":"'NoneType' object has no attribute 'get'"}}
+{"fn":"global_flags","args":["garbage"],"out":{"image":true,"upscale":true,"augment":true,"vibe":true,"tags":true,"text":true,"voice":true},"err":null}
+{"fn":"global_flags","args":["5"],"out":null,"err":{"type":"AttributeError","msg":"'int' object has no attribute 'get'"}}
+{"fn":"global_flags","args":["\"s\""],"out":null,"err":{"type":"AttributeError","msg":"'str' object has no attribute 'get'"}}
+{"fn":"global_flags","args":["true"],"out":null,"err":{"type":"AttributeError","msg":"'bool' object has no attribute 'get'"}}
+{"fn":"global_flags","args":["{\"image\": true, \"voice\": false, \"zzz\": false}"],"out":{"image":true,"upscale":true,"augment":true,"vibe":true,"tags":true,"text":true,"voice":false},"err":null}
+{"fn":"global_flags","args":["1.5"],"out":null,"err":{"type":"AttributeError","msg":"'float' object has no attribute 'get'"}}
+{"fn":"global_flags","args":["{\"image\": false, \"tags\": false, \"text\": true}"],"out":{"image":false,"upscale":true,"augment":true,"vibe":true,"tags":false,"text":true,"voice":true},"err":null}
+{"fn":"global_flags","args":["{\"image\": null}"],"out":{"image":true,"upscale":true,"augment":true,"vibe":true,"tags":true,"text":true,"voice":true},"err":null}
+{"fn":"global_flags","args":["{\"augment\": false, \"upscale\": false, \"vibe\": false}"],"out":{"image":true,"upscale":false,"augment":false,"vibe":false,"tags":true,"text":true,"voice":true},"err":null}
+{"fn":"global_flags","args":[" "],"out":{"image":true,"upscale":true,"augment":true,"vibe":true,"tags":true,"text":true,"voice":true},"err":null}
+{"fn":"global_flags","args":["{\"image\": false"],"out":{"image":true,"upscale":true,"augment":true,"vibe":true,"tags":true,"text":true,"voice":true},"err":null}
+{"fn":"global_flags","args":["[]"],"out":null,"err":{"type":"AttributeError","msg":"'list' object has no attribute 'get'"}}
+{"fn":"global_flags","args":["{\"a\":1}"],"out":{"image":true,"upscale":true,"augment":true,"vibe":true,"tags":true,"text":true,"voice":true},"err":null}

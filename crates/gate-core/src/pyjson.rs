@@ -84,7 +84,8 @@ impl serde_json::ser::Formatter for PyFormatter {
         }
         let mut buf = [0u16; 2];
         for c in fragment.chars() {
-            if c.is_ascii() {
+            // Python 的 ESCAPE_ASCII 只放过 0x20–0x7E：DEL（0x7F）也要转义
+            if c.is_ascii() && c != '\x7f' {
                 writer.write_all(&[c as u8])?;
             } else {
                 for unit in c.encode_utf16(&mut buf) {
