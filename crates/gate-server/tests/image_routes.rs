@@ -306,3 +306,42 @@ async fn single_key_upstream_500s_do_not_page_owner() {
     assert!(!e.state.note_upstream_5xx(1));
     assert!(e.state.note_upstream_5xx(2));
 }
+
+#[tokio::test]
+async fn cors_preflight_allows_authorization_and_fallbacks_are_json() {
+    let e = setup(&[]).await;
+    let req = Request::builder()
+        .method("OPTIONS")
+        .uri("/ai/generate-image")
+        .header("origin", "https://client.example")
+        .header("access-control-request-method", "POST")
+        .header(
+            "access-control-request-headers",
+            "authorization,content-type",
+        )
+        .body(Body::empty())
+        .unwrap();
+    let resp = gate_server::app(e.state.clone())
+        .oneshot(req)
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let h = resp.headers();
+    assert_eq!(h["access-control-allow-origin"], "*");
+    assert!(
+        h["access-control-allow-headers"]
+            .to_str()
+            .unwrap()
+            .contains("authorization")
+    );
+    let (status, _, body) = call(&e.state, "GET", "/no-such-path", None, None).await;
+    assert_eq!(
+        (status.as_u16(), String::from_utf8_lossy(&body).to_string()),
+        (404, r#"{"detail":"Not Found"}"#.to_string())
+    );
+    let (status, _, body) = call(&e.state, "GET", "/ai/generate-image", Some(TOKEN), None).await;
+    assert_eq!(
+        (status.as_u16(), String::from_utf8_lossy(&body).to_string()),
+        (405, r#"{"detail":"Method Not Allowed"}"#.to_string())
+    );
+}

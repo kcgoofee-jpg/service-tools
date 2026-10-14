@@ -125,6 +125,37 @@ pub async fn admin_no_store(req: Request, next: Next) -> Response {
     resp
 }
 
+/// 跨域（旧版 Starlette `CORSMiddleware(allow_origins=CORS_ORIGINS, allow_methods=["*"], allow_headers=["*"],
+/// allow_credentials=False)`，默认 `CORS_ORIGINS=*`）。浏览器里的网页客户端直连网关要靠它。
+/// 预检请求原样回显请求的头：通配符 `*` 不包括 `Authorization`（Fetch 规范），而成员接口要带 Key。
+pub fn cors(origins: &[String]) -> Option<tower_http::cors::CorsLayer> {
+    use axum::http::Method;
+    use tower_http::cors::{AllowHeaders, AllowOrigin, CorsLayer};
+    if origins.is_empty() {
+        return None;
+    }
+    let allow = if origins.iter().any(|o| o == "*") {
+        AllowOrigin::any()
+    } else {
+        AllowOrigin::list(origins.iter().filter_map(|o| HeaderValue::from_str(o).ok()))
+    };
+    Some(
+        CorsLayer::new()
+            .allow_origin(allow)
+            .allow_methods([
+                Method::DELETE,
+                Method::GET,
+                Method::HEAD,
+                Method::OPTIONS,
+                Method::PATCH,
+                Method::POST,
+                Method::PUT,
+            ])
+            .allow_headers(AllowHeaders::mirror_request())
+            .max_age(std::time::Duration::from_secs(600)),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
