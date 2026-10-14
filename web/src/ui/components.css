@@ -4,7 +4,7 @@
   align-items: center;
   justify-content: center;
   gap: var(--sp-2);
-  min-height: 36px;
+  height: var(--control-h);
   padding: 0 var(--sp-4);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
@@ -51,19 +51,41 @@
   background: var(--danger-soft);
 }
 .btn--lg {
-  min-height: 44px;
+  height: var(--control-h-lg);
   padding: 0 var(--sp-5);
   font-size: var(--fs-md);
   border-radius: var(--radius);
 }
 .btn--sm {
-  min-height: 28px;
+  height: var(--control-h-sm);
   padding: 0 var(--sp-3);
   font-size: var(--fs-xs);
 }
 .btn--icon {
-  width: 36px;
+  width: var(--control-h);
   padding: 0;
+  flex: none;
+}
+.btn--sm.btn--icon {
+  width: var(--control-h-sm);
+}
+/* 并排连成一组的控件（如「排序字段 + 升降序」）：共用边框，中间不留缝 */
+.joined {
+  display: inline-flex;
+  align-items: stretch;
+}
+.joined > :not(:first-child) {
+  margin-left: -1px;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+.joined > :not(:last-child) {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.joined > :focus-visible {
+  position: relative;
+  z-index: 1;
 }
 
 /* ---------- Card ---------- */
@@ -284,9 +306,12 @@
 }
 
 /* ---------- CopyField ---------- */
+/* 默认一行显示（地址、命令不在半中间断开）；放不下时复制按钮只留图标。Key 这类随机串用 copy--wrap 允许折行。 */
 .copy {
+  container: copy / inline-size;
   display: flex;
   align-items: stretch;
+  min-height: var(--control-h);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface-2);
@@ -295,27 +320,49 @@
 .copy__value {
   flex: 1;
   min-width: 0;
-  padding: var(--sp-2) var(--sp-3);
+  display: flex;
+  align-items: center;
+  padding: 6px var(--control-px);
   font-family: var(--mono);
   font-size: var(--fs-sm);
+  line-height: 1.5;
   overflow-x: auto;
   white-space: nowrap;
-  scrollbar-width: thin;
+  scrollbar-width: none;
+}
+.copy--wrap .copy__value {
+  white-space: normal;
+  word-break: break-all;
 }
 .copy__btn {
+  flex: none;
   border: 0;
   border-left: 1px solid var(--border);
   background: var(--surface);
   color: var(--text-2);
-  padding: 0 var(--sp-3);
+  padding: 0 var(--control-px);
   font: 600 var(--fs-xs) / 1 var(--font);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
 }
 .copy__btn:hover {
   color: var(--accent-text);
+}
+@container copy (width < 300px) {
+  .copy__btn {
+    width: var(--control-h);
+    padding: 0;
+  }
+  .copy__btn-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+  }
 }
 
 /* ---------- Menu ---------- */
@@ -424,17 +471,47 @@
 .select,
 .textarea {
   width: 100%;
-  min-height: 36px;
-  padding: var(--sp-2) var(--sp-3);
+  height: var(--control-h);
+  padding: 0 var(--control-px);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
-  background: var(--surface);
+  background-color: var(--surface);
   color: var(--text);
-  font: var(--fs-md) / 1.4 var(--font);
+  font: var(--fs-sm) / 1.4 var(--font);
 }
 .textarea {
+  height: auto;
   min-height: 96px;
+  padding: var(--sp-2) var(--control-px);
+  font-size: var(--fs-md);
   resize: vertical;
+}
+/* 下拉框：宽度跟着内容走（箭头紧挨文字，不会被拉到很远），自绘箭头保证各浏览器位置一致 */
+.select {
+  width: auto;
+  max-width: 100%;
+  min-width: 6em;
+  justify-self: start;
+  field-sizing: content;
+  padding-right: calc(var(--control-px) + 18px);
+  appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position:
+    right calc(var(--control-px) + 5px) center,
+    right var(--control-px) center;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+.select:disabled {
+  cursor: not-allowed;
+}
+.select--block {
+  width: 100%;
+  justify-self: stretch;
+  field-sizing: fixed;
 }
 .input:focus-visible,
 .select:focus-visible,
@@ -442,6 +519,43 @@
   outline: 2px solid var(--focus);
   outline-offset: 0;
   border-color: var(--focus);
+}
+
+/* 标题在框内的筛选控件（工具栏用）：「视图 画廊 ⌄」。整排控件天然等高，不用再靠标签占位对齐 */
+.field-inline {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  height: var(--control-h);
+  padding-left: var(--control-px);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-size: var(--fs-sm);
+}
+.field-inline:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: -1px;
+}
+.field-inline__k {
+  flex: none;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.field-inline .select,
+.field-inline .input {
+  height: calc(var(--control-h) - 2px);
+  border: 0;
+  background-color: transparent;
+  padding-left: var(--sp-2);
+  min-width: 0;
+}
+.field-inline .input {
+  width: 12em;
+}
+.field-inline .select:focus-visible,
+.field-inline .input:focus-visible {
+  outline: none;
 }
 
 /* ---------- Notice ---------- */

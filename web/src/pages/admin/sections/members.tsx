@@ -2,10 +2,10 @@
  * 成员：列表（今日 / 近 7 天 / 累计用量）、筛选搜索排序、展开详情与全部 Key 操作。
  * 支持 ?focus=<Key 编号>（⌘K 面板跳转到这里，滚动并高亮该成员）和 ?filter=<筛选 id>（总览的「成员要处理」）。
  */
-import { ArrowDown, ArrowUp, Plus, Search } from "lucide-preact";
+import { ArrowDown, ArrowUp, ChevronDown, Plus, Search } from "lucide-preact";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { useLocation } from "preact-iso";
-import { Badge, Button, Menu, toast } from "../../../ui";
+import { Button, Menu, toast } from "../../../ui";
 import { useAdmin } from "../Admin";
 import { LoadError, Loading, SectionHead } from "./_kit";
 import {
@@ -200,6 +200,7 @@ export default function Members() {
   };
 
   const newInvite = async () => {
+    if (inviting) return;
     setInviting(true);
     const r = await createInvite();
     setInviting(false);
@@ -437,24 +438,20 @@ export default function Members() {
         title="成员"
         actions={
           <div class="xa-toolbar">
-            <Button onClick={() => setDlg({ t: "bans" })}>
-              封禁黑名单 <Badge>{bans.data?.total ?? 0}</Badge>
-            </Button>
-            <Button onClick={newInvite} disabled={inviting}>
-              <Plus size={15} aria-hidden="true" />
-              新建邀请 Key
-            </Button>
             <Button variant="primary" onClick={() => setDlg({ t: "edit", id: null })}>
               <Plus size={15} aria-hidden="true" />
               新建 Key
             </Button>
             <Menu
               button={(p) => (
-                <Button variant="ghost" {...p}>
+                <Button {...p}>
                   更多
+                  <ChevronDown size={15} aria-hidden="true" />
                 </Button>
               )}
               items={[
+                { label: "新建邀请 Key", onSelect: newInvite },
+                { label: `封禁黑名单（${bans.data?.total ?? 0}）`, onSelect: () => setDlg({ t: "bans" }) },
                 { label: "奖励成员…", onSelect: () => setDlg({ t: "gift" }) },
                 { label: "全站重置 Key…", onSelect: () => setDlg({ t: "resetAll" }), danger: true },
               ]}
@@ -482,8 +479,7 @@ export default function Members() {
                   onInput={(e) => setSearch(e.currentTarget.value)}
                 />
               </label>
-              <label class="mb-sort">
-                <span class="sr-only">排序</span>
+              <div class="joined mb-sort">
                 <select
                   class="select"
                   aria-label="排序方式"
@@ -499,19 +495,19 @@ export default function Members() {
                     </option>
                   ))}
                 </select>
-              </label>
-              <Button
-                variant="ghost"
-                icon
-                aria-label={dir === "asc" ? "当前升序，点击改为降序" : "当前降序，点击改为升序"}
-                onClick={() => setDir(dir === "asc" ? "desc" : "asc")}
-              >
-                {dir === "asc" ? (
-                  <ArrowUp size={16} aria-hidden="true" />
-                ) : (
-                  <ArrowDown size={16} aria-hidden="true" />
-                )}
-              </Button>
+                <Button
+                  icon
+                  aria-label={dir === "asc" ? "当前升序，点击改为降序" : "当前降序，点击改为升序"}
+                  title={dir === "asc" ? "升序" : "降序"}
+                  onClick={() => setDir(dir === "asc" ? "desc" : "asc")}
+                >
+                  {dir === "asc" ? (
+                    <ArrowUp size={16} aria-hidden="true" />
+                  ) : (
+                    <ArrowDown size={16} aria-hidden="true" />
+                  )}
+                </Button>
+              </div>
             </div>
             <div class="xa-toolbar">
               <Seg

@@ -34,8 +34,8 @@ export function Actions() {
   return (
     <div class="stack">
       <div class="xa-toolbar">
-        <label class="lg-ctl">
-          <span class="small muted">操作者</span>
+        <label class="field-inline">
+          <span class="field-inline__k">操作者</span>
           <select
             class="select"
             value={actor}
@@ -48,8 +48,8 @@ export function Actions() {
             ))}
           </select>
         </label>
-        <label class="lg-ctl">
-          <span class="small muted">操作类型</span>
+        <label class="field-inline">
+          <span class="field-inline__k">操作类型</span>
           <select
             class="select"
             value={kind}

@@ -69,8 +69,8 @@ export function Bugs() {
   return (
     <div class="stack">
       <div class="xa-toolbar">
-        <label class="lg-ctl">
-          <span class="small muted">级别</span>
+        <label class="field-inline">
+          <span class="field-inline__k">级别</span>
           <select class="select" value={level} onChange={(e) => set({ level: e.currentTarget.value })}>
             <option value="">全部级别</option>
             <option value="error">仅错误</option>

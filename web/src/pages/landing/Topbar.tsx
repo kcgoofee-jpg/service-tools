@@ -74,8 +74,8 @@ export function Topbar(props: {
           />
         ) : (
           props.loginOpen && (
-            <a class="btn btn--primary btn--sm" href="/login">
-              用 Discord 登录
+            <a class="btn btn--primary btn--sm" href="/login" aria-label="用 Discord 登录">
+              <span class="lp-wide-only">用 Discord </span>登录
             </a>
           )
         )}

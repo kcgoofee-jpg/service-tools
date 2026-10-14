@@ -1,6 +1,7 @@
 /* 总览 / 成员 / 日志共用零件。字号只用 tokens 的阶梯，手机与桌面一致，只改布局。 */
 
 /* 分段按钮 */
+/* 外框高度 = 控件高度（2px 内边距 + 1px 边框），和同一行的输入框、下拉框等高 */
 .xa-seg {
   display: inline-flex;
   flex-wrap: wrap;
@@ -11,7 +12,10 @@
   background: var(--surface-2);
 }
 .xa-seg__btn {
-  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: calc(var(--control-h) - 6px);
   padding: 0 var(--sp-3);
   border: 0;
   border-radius: 4px;
@@ -70,17 +74,12 @@
   align-items: center;
   gap: var(--sp-2);
 }
-.xa-pager__size .select {
-  width: auto;
-  min-height: 30px;
-  padding: 2px var(--sp-2);
-  font-size: var(--fs-sm);
+.xa-pager__size .select,
+.xa-pager__jump .input {
+  height: var(--control-h-sm);
 }
 .xa-pager__jump .input {
   width: 64px;
-  min-height: 30px;
-  padding: 2px var(--sp-2);
-  font-size: var(--fs-sm);
 }
 .xa-pager__nav {
   display: flex;
@@ -238,14 +237,9 @@
   flex-wrap: wrap;
   gap: var(--sp-2) var(--sp-3);
 }
-.xa-toolbar .input,
-.xa-toolbar .select {
+.xa-toolbar .input {
   width: auto;
   min-width: 0;
-  min-height: 34px;
-  padding-top: 4px;
-  padding-bottom: 4px;
-  font-size: var(--fs-sm);
 }
 .xa-toolbar .input[type="search"] {
   width: min(100%, 260px);

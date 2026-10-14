@@ -79,8 +79,8 @@ export function Feedback() {
       )}
 
       <div class="xa-toolbar">
-        <label class="lg-ctl">
-          <span class="small muted">搜索</span>
+        <label class="field-inline">
+          <span class="field-inline__k">搜索</span>
           <input
             class="input"
             type="search"
@@ -89,8 +89,8 @@ export function Feedback() {
             onInput={(e) => setSearch(e.currentTarget.value)}
           />
         </label>
-        <label class="lg-ctl">
-          <span class="small muted">评价</span>
+        <label class="field-inline">
+          <span class="field-inline__k">评价</span>
           <select class="select" value={score} onChange={(e) => set({ score: e.currentTarget.value })}>
             <option value="">全部评价</option>
             <option value="good">满意 / 好评</option>

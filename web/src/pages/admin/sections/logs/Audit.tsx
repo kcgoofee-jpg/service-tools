@@ -437,8 +437,8 @@ export function Audit() {
   return (
     <div class="stack">
       <div class="xa-toolbar">
-        <label class="lg-ctl">
-          <span class="small muted">成员</span>
+        <label class="field-inline">
+          <span class="field-inline__k">成员</span>
           <select
             class="select"
             value={key}
@@ -456,8 +456,8 @@ export function Audit() {
             })}
           </select>
         </label>
-        <label class="lg-ctl">
-          <span class="small muted">视图</span>
+        <label class="field-inline">
+          <span class="field-inline__k">视图</span>
           <select
             class="select"
             value={view}

@@ -81,7 +81,10 @@ export function Steps() {
             </span>
             加入 Discord
           </h3>
-          <JoinDiscord variant="primary" fallback />
+          <p class="muted small">Key 在服务器里领取，公告也在那里：</p>
+          <div class="lp-step__act">
+            <JoinDiscord variant="primary" fallback />
+          </div>
         </li>
         <li class="card lp-step">
           <h3>
@@ -91,7 +94,9 @@ export function Steps() {
             领取你的 Key
           </h3>
           <p class="muted small">在服务器任意频道输入：</p>
-          <CopyField value="/register" label="领取命令" />
+          <div class="lp-step__act">
+            <CopyField value="/register" label="领取命令" />
+          </div>
           {closed && <p class="muted small">注册当前已关闭，开放时间看站长公告。</p>}
         </li>
         <li class="card lp-step">
@@ -102,7 +107,9 @@ export function Steps() {
             填入客户端
           </h3>
           <p class="muted small">接口地址填这个，API Key 填你的 Key：</p>
-          <CopyField value={site} label="接入地址" />
+          <div class="lp-step__act">
+            <CopyField value={site} label="接入地址" />
+          </div>
         </li>
       </ol>
     </section>
@@ -138,7 +145,7 @@ function Guides() {
           },
           {
             id: "openai",
-            label: "文本客户端（OpenAI 兼容）",
+            label: "文本客户端",
             panel: () => (
               <div class="stack">
                 <p class="muted small">
@@ -150,37 +157,40 @@ function Guides() {
           },
           {
             id: "chatu8",
-            label: "智绘姬（st-chatu8）",
+            label: "智绘姬",
             panel: () => (
-              <ol class="lp-list">
-                <li>
-                  「站点」选<b>其他站点</b>，接口地址填<b>完整地址</b>（接口地址后拼{" "}
-                  <code>/ai/generate-image</code>，带路径，<b>不要只填根地址</b>
-                  ）——只填根地址的话，遇到限流插件会多发一个无效请求。
-                </li>
-                <li>
-                  「生图间隔时间」从默认 100ms 调大
-                  {ms ? (
-                    <>
-                      到 <b>{ms} 以上</b>（毫秒）——本站每 {interval} 秒放行一张，默认值会连续撞限流。
-                    </>
-                  ) : (
-                    <>——本站出图有最小间隔，默认值会连续撞限流。</>
-                  )}
-                </li>
-                <li>
-                  一条回复尽量只放 1~2 个 image 标签；「自动点击生成」「永久自动点击」保持关闭（默认已关）。
-                </li>
-                <li>
-                  多人共用的高峰时段建议<b>开启「启用云端队列」</b>
-                  （默认队列地址即可）——排队由插件的队列服务承担，生图请求会被排好队再发到站里。
-                </li>
-                <li>
-                  遇到 429 表示本时段份额用完，<b>按提示里的等待时间再点</b>
-                  （插件不会自动重试，也不会自己多发请求）；402 /「需要有效订阅」是额度问题；403 是 Key
-                  被暂停，提示里会写原因。
-                </li>
-              </ol>
+              <div class="stack">
+                <p class="muted small">SillyTavern 生图插件 st-chatu8。</p>
+                <ol class="lp-list">
+                  <li>
+                    「站点」选<b>其他站点</b>，接口地址填<b>完整地址</b>（接口地址后拼{" "}
+                    <code>/ai/generate-image</code>，带路径，<b>不要只填根地址</b>
+                    ）——只填根地址的话，遇到限流插件会多发一个无效请求。
+                  </li>
+                  <li>
+                    「生图间隔时间」从默认 100ms 调大
+                    {ms ? (
+                      <>
+                        到 <b>{ms} 以上</b>（毫秒）——本站每 {interval} 秒放行一张，默认值会连续撞限流。
+                      </>
+                    ) : (
+                      <>——本站出图有最小间隔，默认值会连续撞限流。</>
+                    )}
+                  </li>
+                  <li>
+                    一条回复尽量只放 1~2 个 image 标签；「自动点击生成」「永久自动点击」保持关闭（默认已关）。
+                  </li>
+                  <li>
+                    多人共用的高峰时段建议<b>开启「启用云端队列」</b>
+                    （默认队列地址即可）——排队由插件的队列服务承担，生图请求会被排好队再发到站里。
+                  </li>
+                  <li>
+                    遇到 429 表示本时段份额用完，<b>按提示里的等待时间再点</b>
+                    （插件不会自动重试，也不会自己多发请求）；402 /「需要有效订阅」是额度问题；403 是 Key
+                    被暂停，提示里会写原因。
+                  </li>
+                </ol>
+              </div>
             ),
           },
         ]}

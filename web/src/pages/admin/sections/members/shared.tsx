@@ -36,8 +36,8 @@ export function useMedia(query: string): boolean {
   }, [query]);
   return match;
 }
-/** 与外壳同一个断点：≤860px 侧栏变抽屉，表格改卡片。 */
-export const NARROW = "(max-width: 860px)";
+/** 表格改成卡片的宽度。侧栏在 860px 以上常驻，内容区比视口窄约 240px，所以表格要到 1100px 以上才放得下。 */
+export const NARROW = "(max-width: 1100px)";
 
 export function useDebounced<T>(value: T, ms = 250): T {
   const [v, setV] = useState(value);

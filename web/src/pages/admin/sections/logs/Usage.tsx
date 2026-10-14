@@ -127,8 +127,8 @@ export function Usage() {
 
   const filters = (
     <div class="xa-toolbar lg-filters-in">
-      <label class="lg-ctl">
-        <span class="small muted">成员</span>
+      <label class="field-inline">
+        <span class="field-inline__k">成员</span>
         <select
           class="select"
           value={keyId}
@@ -142,8 +142,8 @@ export function Usage() {
           ))}
         </select>
       </label>
-      <label class="lg-ctl">
-        <span class="small muted">功能</span>
+      <label class="field-inline">
+        <span class="field-inline__k">功能</span>
         <select
           class="select"
           value={feature}
@@ -157,8 +157,8 @@ export function Usage() {
           ))}
         </select>
       </label>
-      <label class="lg-ctl">
-        <span class="small muted">错误编号</span>
+      <label class="field-inline">
+        <span class="field-inline__k">错误编号</span>
         <input
           class="input mono"
           type="search"
