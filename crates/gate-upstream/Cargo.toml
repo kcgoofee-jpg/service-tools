@@ -8,6 +8,23 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+gate-core.workspace = true
+wreq.workspace = true
+wreq-util.workspace = true
+tokio.workspace = true
+bytes.workspace = true
+futures.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+hex.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+rand.workspace = true
+http.workspace = true
+
+[dev-dependencies]
+axum.workspace = true
+tempfile = "3"
 
 [lints]
 workspace = true
