@@ -281,28 +281,46 @@ class OpenRegistrationTests(RegistrationTests):
             opened = await client.get("/login", follow_redirects=False)
             self.assertIn("discord.com", opened.headers["location"])
 
-    async def test_key_login_removed_legacy_sessions_still_valid(self):
-        # 2026-10-14 站长：网页只留 Discord OAuth 登录，/login/key 已下线（路由 404）；
-        # 已签发的 key:<id> 存量会话仍能解析到自己的 Key，随 cookie（最长 30 天）自然过期
+    async def test_key_login_issues_member_session_only_for_registered_keys(self):
+        # 网页 OAuth 暂停期间：用 /register 领到的 Key 登录首页；乱填的不行，后台手建的用 key:<id> 会话，错多了限流
         from types import SimpleNamespace
-        from app.registration_routes import member_router, MEMBER_COOKIE, _key_tag, _sign_member, _time
+        from app.registration_routes import member_router, MEMBER_COOKIE, _KEY_LOGIN_FAILS
         app = FastAPI()
         app.include_router(member_router)
         app.state.registrar = self.service
         app.state.gate = SimpleNamespace(db=self.db, settings=SimpleNamespace(secret_key="k" * 40, data_dir=None))
         await self.mint()
-        row = await self.service.key_row_for(
-            (await self.db._db.execute_fetchall("SELECT discord_id FROM discord_registrations"))[0][0])
+        did = (await self.db._db.execute_fetchall("SELECT discord_id FROM discord_registrations"))[0][0]
+        row = await self.service.key_row_for(did)
+        await self.db._db.execute("UPDATE discord_registrations SET key_id=-1")     # 解绑后同一个 Key 就成了"后台手建"
+        _KEY_LOGIN_FAILS.clear()
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="https://fixture.invalid") as client:
-            gone = await client.post("/login/key", json={"key": row["token"]})
-            self.assertEqual(gone.status_code, 404)
-        from app import registration_routes as mr
-        exp = int(_time.time()) + 86400
-        cookie = _sign_member(SimpleNamespace(app=app), f"key:{row['id']}", exp, _key_tag(row))
-        req = SimpleNamespace(cookies={MEMBER_COOKIE: cookie}, app=app)
-        self.assertEqual(await mr._member_session(req), f"key:{row['id']}")
-        self.assertEqual((await self.service.key_row_for(f"key:{row['id']}"))["id"], row["id"])
-        self.assertIsNone(await self.service.key_row_for("key:abc"))
+            self.assertEqual((await client.post("/login/key", json={"key": "nai-wrong"})).status_code, 401)
+            # 后台手建（没绑定 Discord）的 Key 也能登录（10-11 站长的 Key 登不进去），会话用 key:<id>，能看到自己的额度
+            unbound = await client.post("/login/key", json={"key": row["token"]})
+            self.assertEqual(unbound.status_code, 200)
+            self.assertTrue(unbound.cookies[MEMBER_COOKIE].strip('"').startswith(f"key:{row['id']}:"))
+            from app.registration_routes import _member_session
+            req = SimpleNamespace(cookies={MEMBER_COOKIE: unbound.cookies[MEMBER_COOKIE].strip('"')}, app=app)
+            self.assertEqual(await _member_session(req), f"key:{row['id']}")
+            self.assertEqual((await self.service.key_row_for(f"key:{row['id']}"))["id"], row["id"])
+            self.assertIsNone(await self.service.key_row_for("key:abc"))
+            # 停用的 Key 不行；站长 Key 与普通 Key 均可正常登录查额度
+            await self.db._db.execute("UPDATE api_keys SET enabled=0 WHERE id=?", (row["id"],))
+            self.assertEqual((await client.post("/login/key", json={"key": row["token"]})).status_code, 401)
+            await self.db._db.execute("UPDATE api_keys SET enabled=1, is_admin=1 WHERE id=?", (row["id"],))
+            self.assertEqual((await client.post("/login/key", json={"key": row["token"]})).status_code, 200)
+            await self.db._db.execute("UPDATE api_keys SET is_admin=0 WHERE id=?", (row["id"],))
+            _KEY_LOGIN_FAILS.clear()
+            await self.db._db.execute("UPDATE discord_registrations SET key_id=?", (row["id"],))
+            ok = await client.post("/login/key", json={"key": " " + row["token"] + " "})
+            self.assertEqual(ok.status_code, 200)
+            self.assertIn(MEMBER_COOKIE, ok.headers["set-cookie"])
+            self.assertTrue(ok.cookies[MEMBER_COOKIE].strip('"').startswith(f"{did}:"))
+            for _ in range(8):
+                await client.post("/login/key", json={"key": "nai-wrong"})
+            self.assertEqual((await client.post("/login/key", json={"key": row["token"]})).status_code, 429)
+        _KEY_LOGIN_FAILS.clear()
 
 
     async def test_young_discord_accounts_cannot_grab_slots(self):
@@ -466,10 +484,9 @@ class DepartedSweepTests(RegistrationTests):
 
 class SessionBindingTests(RegistrationTests):
     async def test_resetkey_kills_sessions_opened_with_the_old_key(self):
-        # 审查 P0：会话绑定签发时的 Key 指纹（Discord OAuth 与旧 Key 登录同口径），
-        # 成员 /resetkey 后，旧会话必须失效、攻击者拿不到新 Key
+        # 审查 P0：泄露的 Key 被拿去 /login/key，成员 /resetkey 后，攻击者的会话必须失效、拿不到新 Key
         from types import SimpleNamespace
-        from app.registration_routes import member_router, MEMBER_COOKIE, _key_tag, _sign_member, _time
+        from app.registration_routes import member_router, MEMBER_COOKIE, _KEY_LOGIN_FAILS
         from app.policy import gen_key
         app = FastAPI()
         app.include_router(member_router)
@@ -479,13 +496,15 @@ class SessionBindingTests(RegistrationTests):
         await self.mint()
         did = (await self.db._db.execute_fetchall("SELECT discord_id FROM discord_registrations"))[0][0]
         old = await self.service.key_row_for(did)
-        from app import registration_routes as mr
-        exp = int(_time.time()) + 86400
-        cookie = _sign_member(SimpleNamespace(app=app), str(did), exp, _key_tag(old))
-        req = SimpleNamespace(cookies={MEMBER_COOKIE: cookie}, app=app)
-        self.assertEqual(await mr._member_session(req), str(did))
-        await self.db.rotate_key_token(old["id"], gen_key("nai"))          # /resetkey
-        self.assertIsNone(await mr._member_session(req))
+        _KEY_LOGIN_FAILS.clear()
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="https://fixture.invalid") as client:
+            login = await client.post("/login/key", json={"key": old["token"]})
+            cookie = {MEMBER_COOKIE: login.cookies[MEMBER_COOKIE]}
+            from app import registration_routes as mr
+            req = SimpleNamespace(cookies=cookie, app=app)
+            self.assertEqual(await mr._member_session(req), str(did))
+            await self.db.rotate_key_token(old["id"], gen_key("nai"))          # /resetkey
+            self.assertIsNone(await mr._member_session(req))
 
 
 class FirstComeFirstServedTests(RegistrationTests):

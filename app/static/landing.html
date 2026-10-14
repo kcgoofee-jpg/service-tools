@@ -284,6 +284,9 @@ details.more p{font-size:var(--fs-sm);color:var(--muted);margin:var(--sp-1) 0 va
 /* ───────── 我的额度 / 登录 ───────── */
 .loginrow{display:flex;align-items:center;gap:var(--sp-2);flex-wrap:wrap;margin:0}
 .login-hint{margin:0;color:var(--muted);font-size:var(--fs-sm)}
+.keylogin{display:flex;gap:var(--sp-2);flex:1;min-width:0}
+.keylogin input[type=password]{flex:1;min-width:0;min-height:var(--tap);padding:8px 14px;font-size:var(--fs-body);border-radius:var(--radius-sm)}
+.keylogin .btn{flex:none}
 input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 .me{margin:0;padding:0;border:0;background:none}
 .me-empty{font-size:var(--fs-sm);color:var(--text-2);margin:var(--sp-1) 0}
@@ -437,7 +440,11 @@ body.haskey #algoNote,html.haskey #algoNote{display:none!important}
       <div class="me" id="meCard" hidden></div>
       <div class="loginrow" id="loginRow" hidden>
         <a class="btn primary dc" id="loginBtn" href="/login" hidden><span data-ic="discord"></span>用 Discord 登录</a>
-        <p class="login-hint" id="loginHint" hidden>Discord 登录审核中，即将开放；期间可在 Discord 用 <code>/quota</code> 查额度</p>
+        <form class="keylogin" id="keyLogin" autocomplete="off">
+          <input type="password" id="keyLoginIn" placeholder="粘贴你的 Key（nai-…）" aria-label="你的 Key" spellcheck="false">
+          <button class="btn primary" type="submit" id="keyLoginBtn">登录</button>
+        </form>
+        <p class="login-hint" id="loginHint" hidden>Discord 登录维护中，先用 Key 登录；开放后可点上方按钮</p>
       </div>
     </div>
   </section>
@@ -889,6 +896,22 @@ function loadWorkbenchLink(){
 }
 loadWorkbenchLink();
 function loadMe(){ fetch('/public/me', {cache:'no-store', credentials:'include'}).then(function(r){ return r.ok ? r.json() : null; }).then(renderMe, function(){ renderMe(null); }); }
+(function(){
+  var f = $('keyLogin'); if(!f) return;
+  f.addEventListener('submit', function(e){
+    e.preventDefault();
+    var v = ($('keyLoginIn').value || '').trim(), b = $('keyLoginBtn');
+    if(!/^nai-/.test(v)){ toast('请粘贴完整的 Key（以 nai- 开头）'); return; }
+    b.disabled = true;
+    fetch('/login/key', {method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body: JSON.stringify({key: v})})
+      .then(function(r){ return r.json().catch(function(){ return {}; }).then(function(j){ return {ok: r.ok, j: j}; }); })
+      .then(function(x){
+        b.disabled = false;
+        if(!x.ok){ toast((x.j && x.j.detail) || '登录失败'); return; }
+        $('keyLoginIn').value = ''; toast('已登录'); loadMe();
+      }, function(){ b.disabled = false; toast('网络错误，请重试'); });
+  });
+})();
 loadMe();
 setInterval(function(){ if(!document.hidden) loadMe(); }, 60000);      // Key 被 /resetkey 换掉、今日用量变化时跟着更新
 document.addEventListener('visibilitychange', function(){ if(!document.hidden) loadMe(); });
