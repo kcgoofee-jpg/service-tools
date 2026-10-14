@@ -1191,7 +1191,11 @@ impl RegistrationService {
     /// 机器人私信成员（唯一出口，经过总闸门和限速）；被拦下或对方关闭私信都返回 false，不报错。
     /// 被闸门拦下时原因写在 [`Self::last_dm_block`]。
     pub async fn send_dm(&self, discord_id: &str, text: &str) -> bool {
-        let reason = self.dm_block_reason(now()).await.unwrap_or_default();
+        // 读不到开关就当作关着（Discord 应用被风控过，宁可少发）
+        let reason = self
+            .dm_block_reason(now())
+            .await
+            .unwrap_or_else(|_| "私信总开关读取失败".into());
         *self.last_dm_block.lock().expect("dm") = reason.clone();
         if !reason.is_empty() {
             return false;

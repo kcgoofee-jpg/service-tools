@@ -1635,7 +1635,10 @@ impl<H: Hooks> NaiClient<H> {
             None => 0,
             Some(Value::Bool(b)) => i64::from(*b),
             Some(Value::Number(n)) if !n.is_f64() => n.as_i64().ok_or_else(unknown)?,
-            Some(Value::Number(n)) => n.as_f64().and_then(gate_core::pyc::int_of).ok_or_else(unknown)?,
+            Some(Value::Number(n)) => n
+                .as_f64()
+                .and_then(gate_core::pyc::int_of)
+                .ok_or_else(unknown)?,
             Some(Value::String(s)) => gate_core::pyc::parse_int(s).ok_or_else(unknown)?,
             Some(_) => return Err(unknown()),
         };
