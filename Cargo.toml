@@ -38,7 +38,7 @@ arc-swap = "1.9"
 fancy-regex = "0.19"
 regex = "1"
 rand = "0.9"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg", "webp"] }
 zip = { version = "9", default-features = false, features = ["deflate"] }
 maud = "0.27"
 rust-embed = "8.13"

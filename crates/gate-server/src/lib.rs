@@ -5,6 +5,7 @@ pub mod action_log;
 pub mod admission;
 pub mod alerts;
 pub mod allowance;
+pub mod audit;
 pub mod auth;
 pub mod body;
 pub mod bugs;
