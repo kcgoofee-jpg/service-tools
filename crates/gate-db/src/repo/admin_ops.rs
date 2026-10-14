@@ -19,18 +19,4 @@ impl Db {
         })
         .await
     }
-
-    /// 占用名额的人数：持有未过期 Key 的已注册用户（旧版 `registration.count_registered`）。
-    /// 被站长停用的成员仍占名额；Key 过期或被删则名额释放。
-    pub async fn admin_registered_count(&self, now: f64) -> Result<i64> {
-        self.read(move |c| {
-            c.query_row(
-                "SELECT COUNT(*) FROM discord_registrations r JOIN api_keys k ON k.id=r.key_id \
-                 WHERE k.expires_at IS NULL OR k.expires_at > ?",
-                [now],
-                |r| value::i64_or(r, 0, 0),
-            )
-        })
-        .await
-    }
 }
