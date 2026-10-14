@@ -63,6 +63,45 @@ jobs:
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
 
+  e2e:
+    name: 浏览器端到端（含排版硬规则：不许孤字、同排控件对齐）
+    runs-on: ubuntu-24.04
+    needs: web
+    steps:
+      - uses: actions/checkout@v5
+      - name: BoringSSL 构建依赖 + 中文字体（孤字检查要按真实字宽折行）
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake clang libclang-dev fonts-noto-cjk
+      - run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: e2e
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: web
+      - run: pnpm exec playwright install --with-deps chromium
+        working-directory: web
+      - run: cargo build --locked -p xtask
+      - name: 起本地全套（假上游 + 合成数据）和前端
+        run: |
+          cargo xtask dev > /tmp/gate.log 2>&1 &
+          (cd web && pnpm exec vite --port 5174 --strictPort > /tmp/vite.log 2>&1 &)
+          for _ in $(seq 1 90); do
+            curl -fsS -m 2 http://127.0.0.1:18000/healthz >/dev/null 2>&1 && curl -fsS -m 2 -o /dev/null http://localhost:5174/ && exit 0
+            sleep 2
+          done
+          cat /tmp/gate.log /tmp/vite.log; exit 1
+      - run: pnpm exec playwright test
+        working-directory: web
+        env:
+          E2E_BASE: http://localhost:5174
+
   secrets:
     name: 公开仓库红线（gitleaks + 夹具里不许出现真实 ID / IP）
     runs-on: ubuntu-24.04
