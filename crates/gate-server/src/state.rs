@@ -104,6 +104,8 @@ pub struct Inner {
     pub shutdown: CancellationToken,
     /// 近 1 分钟的请求结果（首页实时图）。
     pub live_events: Mutex<std::collections::VecDeque<(f64, String)>>,
+    /// 最近 30 分钟上游 5xx：(时间, key_id)。只有不止一把 Key 遇到才算上游故障（见 `note_upstream_5xx`）。
+    pub recent_5xx: Mutex<std::collections::VecDeque<(f64, i64)>>,
 }
 
 impl Deref for AppState {
@@ -229,6 +231,7 @@ impl AppState {
             tasks,
             shutdown: CancellationToken::new(),
             live_events: Mutex::new(std::collections::VecDeque::new()),
+            recent_5xx: Mutex::new(std::collections::VecDeque::new()),
             env,
             db,
         }));
@@ -416,6 +419,20 @@ impl AppState {
             1800.0,
         );
         remaining
+    }
+
+    /// 记一次上游 5xx；最近 30 分钟内至少 2 把不同的 Key 遇到时返回 true（该告警站长了）。
+    /// 旧版每个 500 都告警：一位成员反复提交上游处理不了的请求（2026-10-14 夜，V5 + 超长负面提示词）
+    /// 就会每半小时私信站长一次「上游可能故障」，而同时段其他成员一切正常。
+    pub fn note_upstream_5xx(&self, key_id: i64) -> bool {
+        let now = self.now();
+        let mut q = self.recent_5xx.lock().expect("5xx");
+        q.push_back((now, key_id));
+        while q.front().is_some_and(|(t, _)| now - t > 1800.0) {
+            q.pop_front();
+        }
+        let first = q.front().map(|(_, k)| *k);
+        q.iter().any(|(_, k)| Some(*k) != first)
     }
 
     /// 记一次上游调用结果；状态翻转时告警。
