@@ -2,11 +2,11 @@
 //! （例如 `REAL` 列里存了整数、设置表里的数字是字符串）。Python 拿到什么就用什么，
 //! 这里按「Python 会怎么理解这个值」来转换，而不是像 rusqlite 默认那样直接报类型错误。
 
-use rusqlite::Row;
 use rusqlite::types::ValueRef;
+use rusqlite::{Row, RowIndex};
 
 /// 浮点：INTEGER / REAL 直接转；TEXT 按 `float()` 解析；NULL 或无法解析 → None。
-pub fn f64_opt(row: &Row<'_>, idx: &str) -> rusqlite::Result<Option<f64>> {
+pub fn f64_opt<I: RowIndex>(row: &Row<'_>, idx: I) -> rusqlite::Result<Option<f64>> {
     Ok(match row.get_ref(idx)? {
         ValueRef::Null => None,
         ValueRef::Integer(i) => Some(i as f64),
@@ -18,12 +18,12 @@ pub fn f64_opt(row: &Row<'_>, idx: &str) -> rusqlite::Result<Option<f64>> {
     })
 }
 
-pub fn f64_or(row: &Row<'_>, idx: &str, default: f64) -> rusqlite::Result<f64> {
+pub fn f64_or<I: RowIndex>(row: &Row<'_>, idx: I, default: f64) -> rusqlite::Result<f64> {
     Ok(f64_opt(row, idx)?.unwrap_or(default))
 }
 
 /// 整数：INTEGER 直接取；REAL 按 `int()` 向零截断；TEXT 按 `int(float(s))`；NULL → None。
-pub fn i64_opt(row: &Row<'_>, idx: &str) -> rusqlite::Result<Option<i64>> {
+pub fn i64_opt<I: RowIndex>(row: &Row<'_>, idx: I) -> rusqlite::Result<Option<i64>> {
     Ok(match row.get_ref(idx)? {
         ValueRef::Null => None,
         ValueRef::Integer(i) => Some(i),
@@ -38,12 +38,12 @@ pub fn i64_opt(row: &Row<'_>, idx: &str) -> rusqlite::Result<Option<i64>> {
     })
 }
 
-pub fn i64_or(row: &Row<'_>, idx: &str, default: i64) -> rusqlite::Result<i64> {
+pub fn i64_or<I: RowIndex>(row: &Row<'_>, idx: I, default: i64) -> rusqlite::Result<i64> {
     Ok(i64_opt(row, idx)?.unwrap_or(default))
 }
 
 /// 布尔：Python 的 `bool(row[x])`。
-pub fn flag(row: &Row<'_>, idx: &str) -> rusqlite::Result<bool> {
+pub fn flag<I: RowIndex>(row: &Row<'_>, idx: I) -> rusqlite::Result<bool> {
     Ok(match row.get_ref(idx)? {
         ValueRef::Null => false,
         ValueRef::Integer(i) => i != 0,
@@ -54,7 +54,7 @@ pub fn flag(row: &Row<'_>, idx: &str) -> rusqlite::Result<bool> {
 }
 
 /// 文本：TEXT 原样；数字按 Python `str()`；NULL → None。
-pub fn text_opt(row: &Row<'_>, idx: &str) -> rusqlite::Result<Option<String>> {
+pub fn text_opt<I: RowIndex>(row: &Row<'_>, idx: I) -> rusqlite::Result<Option<String>> {
     Ok(match row.get_ref(idx)? {
         ValueRef::Null => None,
         ValueRef::Text(t) => Some(String::from_utf8_lossy(t).into_owned()),
@@ -64,7 +64,7 @@ pub fn text_opt(row: &Row<'_>, idx: &str) -> rusqlite::Result<Option<String>> {
     })
 }
 
-pub fn text_or(row: &Row<'_>, idx: &str, default: &str) -> rusqlite::Result<String> {
+pub fn text_or<I: RowIndex>(row: &Row<'_>, idx: I, default: &str) -> rusqlite::Result<String> {
     Ok(text_opt(row, idx)?.unwrap_or_else(|| default.to_string()))
 }
 
