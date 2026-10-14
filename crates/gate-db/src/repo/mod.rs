@@ -27,6 +27,7 @@ pub mod reconciliation;
 pub mod registration;
 pub mod settings;
 pub mod share_state;
+pub mod status_page;
 pub mod upstream;
 pub mod usage;
 

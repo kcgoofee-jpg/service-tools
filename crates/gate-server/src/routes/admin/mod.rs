@@ -3,6 +3,7 @@
 //! 登录本身无论成败都记录。
 
 mod auth;
+mod incidents;
 
 use crate::action_log::{label, log_action, summarize};
 use crate::error::HttpErrorInfo;
@@ -22,6 +23,7 @@ const AUDIT_BODY_LIMIT: usize = 64 * 1024;
 pub fn router(state: AppState) -> Router<AppState> {
     Router::new()
         .merge(auth::router())
+        .merge(incidents::router())
         .route_layer(from_fn_with_state(state, audited))
 }
 
@@ -55,6 +57,9 @@ async fn target_of(state: &AppState, template: &str, path: &str) -> String {
             Err(_) => return String::new(),
         };
         return format!("Key #{id} {name}");
+    }
+    if let Some(id) = param("incident_id") {
+        return format!("事件 #{id}");
     }
     if let Some(t) = param("token_id") {
         return format!("上游 {}", gate_core::pyc::take_chars(&t, 24));
