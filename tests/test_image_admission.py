@@ -46,6 +46,27 @@ async def test_concurrent_requests_cannot_overspend_one_key(state):
 
 
 @pytest.mark.asyncio
+async def test_member_daily_anlas_default_caps_keys_without_manual_grant(state):
+    # 2026-10-14 站长：Vibe 开放后 PVP 也要有「每人」的限度（像 V5 每人 10 张 / 全站 260）——
+    # 没手动设置 Anlas 日额度的 Key 落到全站默认 member_daily_anlas；手动值优先；0 = 关掉默认
+    key = state.db.keys["fixture-1"]
+    key["daily_anlas"] = 0
+    await state.db.set_setting("member_daily_anlas", "30")
+    async with main.reserve_image_budget(key, {"anlas": 25, "v5": 0}):
+        with pytest.raises(main.GateError) as caught:
+            async with main.reserve_image_budget(key, {"anlas": 25, "v5": 0}):
+                pass
+        assert caught.value.status == 402
+    key["daily_anlas"] = 200                      # 手动设置过的 Key 不吃默认值
+    async with main.reserve_image_budget(key, {"anlas": 60, "v5": 0}):
+        pass
+    await state.db.set_setting("member_daily_anlas", "0")
+    key["daily_anlas"] = 0
+    async with main.reserve_image_budget(key, {"anlas": 60, "v5": 0}):
+        pass
+
+
+@pytest.mark.asyncio
 async def test_concurrent_keys_share_global_anlas_budget(state):
     state.settings.global_monthly_anlas = 2
     first, second = state.db.keys.values()

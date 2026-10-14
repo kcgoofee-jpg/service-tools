@@ -318,9 +318,14 @@ async def quota_image_check(key, est: dict, *, legacy_free_images: int = 0,
                                reasons.SITE_QUOTA)
         # 2026-10-10 站长：放开 Anlas。只用于 NovelAI 一定按 Anlas 收费的操作（超规格尺寸 / 步数、一次多张、
         # Vibe、放大、导演工具）：这些不占 V5 免费额度（官方 FAQ #38），也不影响 V4.5（Opus 不限）。每人仍受每日 Anlas 上限约束。
-        if key["daily_anlas"] > 0 and c["anlas"] + sum(r.anlas for r in own_day) + est["anlas"] > key["daily_anlas"]:
+        # 2026-10-14 站长：PVP 也要有「每人」的限度（像 V5 每人 10 张/全站 260）——没手动设置日额度的 Key
+        # 落到全站默认 member_daily_anlas；手动设置过的 Key 以手动值为准（后台单 Key 编辑）。
+        member_cap = key["daily_anlas"]
+        if member_cap <= 0:
+            member_cap = await site_flags.get(state.db, site_flags.MEMBER_DAILY_ANLAS, state.settings)
+        if member_cap > 0 and c["anlas"] + sum(r.anlas for r in own_day) + est["anlas"] > member_cap:
             raise main.err(402, f"今日 Anlas 额度不足（已用 {c['anlas']:.0f} / 上限 "
-                           f"{key['daily_anlas']:.0f}），明日恢复", reasons.MEMBER_QUOTA)
+                           f"{member_cap:.0f}），明日恢复", reasons.MEMBER_QUOTA)
         used = await state.db.month_anlas(key["id"], state.month())
         if key["monthly_anlas"] > 0 and used + sum(r.anlas for r in own_month) + est["anlas"] > key["monthly_anlas"]:
             raise main.err(402, f"本月 Anlas 额度不足（已用 {used:.0f}/{key['monthly_anlas']:.0f}）", reasons.MEMBER_QUOTA)
