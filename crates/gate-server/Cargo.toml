@@ -50,6 +50,7 @@ image.workspace = true
 zip = { workspace = true, features = ["deflate"] }
 base64.workspace = true
 reqwest.workspace = true
+rustix = { version = "1", default-features = false, features = ["std", "fs"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
