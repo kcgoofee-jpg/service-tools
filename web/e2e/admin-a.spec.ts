@@ -2,28 +2,29 @@
  * 后台「总览 / 成员 / 日志」端到端：登录 → 逐页打开 → 打开 Key 编辑框 → 无控制台报错 →
  * 手机 375px 不横向滚动 → axe 无严重 / 致命问题 → 截图（浅色 / 深色 × 桌面 / 手机）。
  *
- * 运行（先起旧后端和 vite，见 tools/dev/run-legacy.sh）：
- *   E2E_BASE=http://localhost:5175 pnpm exec playwright test e2e/admin-a.spec.ts
- * 后台密码取自环境变量 E2E_ADMIN_PASSWORD，或本地演示数据的 cookies.json（E2E_COOKIES，默认 /tmp/owl-dev-admin-a/cookies.json）。
+ * 运行（先起后端和 vite，见 playwright.config.ts 顶部：`cargo xtask dev` + `pnpm exec vite --port 5174`）：
+ *   E2E_BASE=http://localhost:5174 pnpm exec playwright test e2e/admin-a.spec.ts
+ * 后台密码取自环境变量 E2E_ADMIN_PASSWORD，或 `cargo xtask dev` 写出的 cookies.json（见 devEnv.ts，E2E_COOKIES 可改位置）。
  * 截图放 E2E_SHOTS（默认 /tmp/owl-shots-admin-a），不进仓库。
  */
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import AxeBuilder from "@axe-core/playwright";
 import { type Cookie, expect, type Page, test } from "@playwright/test";
+import { COOKIES_FILE, readCreds } from "./devEnv";
 
 const SHOTS = process.env.E2E_SHOTS ?? "/tmp/owl-shots-admin-a";
-const COOKIES = process.env.E2E_COOKIES ?? "/tmp/owl-dev-admin-a/cookies.json";
 const DESKTOP = { width: 1280, height: 900 };
 const MOBILE = { width: 375, height: 812 };
 
 function adminPassword(): string {
-  if (process.env.E2E_ADMIN_PASSWORD) return process.env.E2E_ADMIN_PASSWORD;
-  if (existsSync(COOKIES))
-    return (JSON.parse(readFileSync(COOKIES, "utf8")) as { admin_password: string }).admin_password;
-  throw new Error("找不到后台密码：设置 E2E_ADMIN_PASSWORD 或 E2E_COOKIES");
+  const password = process.env.E2E_ADMIN_PASSWORD ?? readCreds().admin_password;
+  if (password) return password;
+  throw new Error(
+    `找不到后台密码：设置 E2E_ADMIN_PASSWORD，或先跑 cargo xtask dev（会写出 ${COOKIES_FILE}）`,
+  );
 }
 
-/** 收集页面错误：旧后端没有 SSE（/admin/api/events 404）属于预期，忽略 */
+/** 收集页面错误。实时推送（/admin/api/events）断线时外壳会自动退回定时刷新，这条不算 */
 function watch(page: Page): string[] {
   const errs: string[] = [];
   page.on("pageerror", (e) => errs.push(`pageerror: ${e.message}`));

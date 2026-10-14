@@ -1,16 +1,14 @@
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import AxeBuilder from "@axe-core/playwright";
 import { type BrowserContext, expect, type Page, test } from "@playwright/test";
+import { COOKIES_FILE, readCreds } from "./devEnv";
 
 /**
- * 首页端到端。对着旧 Python 网关的合成数据跑（见 playwright.config.ts 顶部的说明）；
+ * 首页端到端。对着 `cargo xtask dev` 的合成数据跑（见 playwright.config.ts 顶部的说明）；
  * 个别场景（安静时段、冷却、重置券……）用 page.route 在真实响应上改字段来造。
  */
 
-const COOKIES = process.env.E2E_COOKIES ?? "/tmp/owl-dev-landing/cookies.json";
-const member: { member?: string; member_key?: string } = existsSync(COOKIES)
-  ? JSON.parse(readFileSync(COOKIES, "utf8"))
-  : {};
+const member = readCreds();
 const needMember = !member.member;
 
 async function asMember(context: BrowserContext) {
@@ -39,8 +37,16 @@ async function patch(
 const LIVE = /\/public\/live(\?.*)?$/;
 const STATUS = /\/public\/status(\?.*)?$/;
 const ME = /\/public\/me(\?.*)?$/;
+const LIVE_STREAM = "**/public/live/stream";
 
-/** 收集控制台错误。旧网关没有 SSE：/public/live/stream 的 404 是预期的（页面会退回轮询），不算。 */
+// 首页优先走 SSE（/public/live/stream），EventSource 收到非 200 才会放弃并退回轮询 /public/live。下面的用例都靠
+// page.route 改轮询的响应来造场景，所以让 SSE 回 404（abort 的话 EventSource 会一直重连、不退回轮询）；
+// 真实的 SSE 由「实时推送」那条用例单独验证。
+test.beforeEach(async ({ page }) => {
+  await page.route(LIVE_STREAM, (route) => route.fulfill({ status: 404, body: "" }));
+});
+
+/** 收集控制台错误。实时推送 /public/live/stream 断线时页面会退回轮询，这条不算。 */
 function watchConsole(page: Page) {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
@@ -302,6 +308,17 @@ test.describe("游客", () => {
     );
   });
 
+  test("实时推送：不拦截 SSE 时页面连上 /public/live/stream，并显示网关推来的状态", async ({ page }) => {
+    await page.route(LIVE_STREAM, (route) => route.continue()); // 盖掉上面 beforeEach 的拦截
+    const stream = page.waitForResponse(LIVE_STREAM);
+    await page.goto("/");
+    const res = await stream;
+    expect(res.status()).toBe(200);
+    expect(res.headers()["content-type"]).toContain("text/event-stream");
+    await expect(page.locator(".lp-status__text")).not.toBeEmpty();
+    await expect(page.locator(".lp-status").getByRole("progressbar", { name: /全站今日已用/ })).toBeVisible();
+  });
+
   test("手机 375px：无横向滚动、控件不溢出", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     await patch(page, STATUS, (b) => ({ ...b, web_login: true }));
@@ -337,7 +354,7 @@ test.describe("游客", () => {
 });
 
 test.describe("登录成员", () => {
-  test.skip(needMember, `没有成员会话文件 ${COOKIES}（先跑 tools/dev/run-legacy.sh）`);
+  test.skip(needMember, `没有成员会话文件 ${COOKIES_FILE}（先跑 cargo xtask dev）`);
   test.beforeEach(async ({ context }) => asMember(context));
 
   test("额度卡是第一块内容：V4.5 / V5 / Anlas、每日 7 点重置、最近 60 分钟（滚动窗口）", async ({ page }) => {

@@ -114,16 +114,22 @@ pub struct MockUpstream {
 }
 
 impl MockUpstream {
+    /// 绑定本机随机端口启动（测试用）。
     pub async fn start() -> Self {
+        Self::start_on("127.0.0.1:0")
+            .await
+            .expect("绑定本机随机端口")
+    }
+
+    /// 绑定指定地址启动（开发用：`cargo xtask dev` 需要固定端口）。端口被占用时返回错误而不是 panic。
+    pub async fn start_on(bind: impl tokio::net::ToSocketAddrs) -> std::io::Result<Self> {
         let state = Arc::new(MockState {
             v5_percent: Mutex::new(80),
             ..Default::default()
         });
         let app = Router::new().fallback(handle).with_state(state.clone());
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("绑定端口");
-        let addr = listener.local_addr().expect("地址");
+        let listener = tokio::net::TcpListener::bind(bind).await?;
+        let addr = listener.local_addr()?;
         let (tx, rx) = tokio::sync::oneshot::channel::<()>();
         tokio::spawn(async move {
             let _ = axum::serve(listener, app)
@@ -132,11 +138,11 @@ impl MockUpstream {
                 })
                 .await;
         });
-        Self {
+        Ok(Self {
             addr,
             state,
             _shutdown: tx,
-        }
+        })
     }
 
     /// `http://127.0.0.1:<port>`
