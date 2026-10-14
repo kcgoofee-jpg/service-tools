@@ -53,7 +53,7 @@ pub struct Reservation {
     pub legacy: i64,
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Budget {
     pub next_id: u64,
     pub reservations: HashMap<u64, Reservation>,

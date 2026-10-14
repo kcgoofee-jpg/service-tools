@@ -254,6 +254,42 @@ pub async fn error_ledger(State(state): State<AppState>, req: Request, next: Nex
     resp
 }
 
+impl AppState {
+    /// 按后台设置记录提示词和原图（缩略图编码较慢，放后台任务；任何失败都不得影响生图结果）。
+    #[allow(clippy::too_many_arguments)]
+    pub async fn audit_generation(
+        &self,
+        ctx: &ReqCtx,
+        key: &Key,
+        kind: &str,
+        model: &str,
+        status: &str,
+        body: &serde_json::Value,
+        content: Option<bytes::Bytes>,
+    ) {
+        crate::gen_audit::run(self, ctx, key, kind, model, status, body, content).await;
+    }
+
+    /// 不等结果的版本（成功出图后）。
+    #[allow(clippy::too_many_arguments)]
+    pub fn schedule_audit(
+        &self,
+        ctx: &ReqCtx,
+        key: &Key,
+        kind: &str,
+        model: &str,
+        status: &str,
+        body: serde_json::Value,
+        content: Option<bytes::Bytes>,
+    ) {
+        let (s, c, k) = (self.clone(), ctx.clone(), key.clone());
+        let (kind, model, status) = (kind.to_string(), model.to_string(), status.to_string());
+        self.tasks.spawn(async move {
+            crate::gen_audit::run(&s, &c, &k, &kind, &model, &status, &body, content).await;
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
