@@ -680,7 +680,7 @@ async fn perform_generation(
             .audit_generation(ctx, &key, "image", &model, "error", &prep.body, None)
             .await;
         state.record_upstream(resp.status < 500);
-        if resp.status >= 500 {
+        if resp.status >= 500 && state.note_upstream_5xx(key.id()) {
             state.alerter.notify(
                 "upstream_5xx",
                 &format!("NovelAI 图片接口返回 {}，上游可能故障。", resp.status),

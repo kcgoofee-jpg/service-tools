@@ -298,3 +298,11 @@ async fn generation_audit_records_prompt_and_image() {
     assert_eq!(e.state.db.audit_image_count(1, 0.0).await.unwrap(), 1);
     assert!(e.state.db.audit_image_bytes().await.unwrap() > 0);
 }
+
+#[tokio::test]
+async fn single_key_upstream_500s_do_not_page_owner() {
+    let e = setup(&[]).await;
+    assert!(!e.state.note_upstream_5xx(1));
+    assert!(!e.state.note_upstream_5xx(1));
+    assert!(e.state.note_upstream_5xx(2));
+}
