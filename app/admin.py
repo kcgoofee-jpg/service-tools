@@ -1388,6 +1388,7 @@ async def get_settings(request: Request):
     st = request.app.state.gate
     return {"global_monthly_anlas": float(await site_flags.get(st.db, site_flags.GLOBAL_MONTHLY_ANLAS, st.settings)),
             "global_daily_v5": await site_flags.get(st.db, site_flags.GLOBAL_DAILY_V5, st.settings),
+            "member_daily_anlas": await site_flags.get(st.db, site_flags.MEMBER_DAILY_ANLAS, st.settings),
             SETTING: await read_alert_threshold(st.db),
             "v5_capacity": await ops.v5_capacity(st.db, st.settings, getattr(request.app.state, "registrar", None))}
 
@@ -1530,10 +1531,13 @@ async def put_settings(request: Request):
              float, 0.0, 1000000.0, "global_monthly_anlas")
     g5 = _num(body.get("global_daily_v5", await site_flags.get(st.db, site_flags.GLOBAL_DAILY_V5, st.settings)),
               int, 0, 100000, "global_daily_v5")
+    man = _num(body.get("member_daily_anlas", await site_flags.get(st.db, site_flags.MEMBER_DAILY_ANLAS, st.settings)),
+               int, 0, 100000, "member_daily_anlas")
     await site_flags.put(st.db, site_flags.GLOBAL_MONTHLY_ANLAS, v)
     await site_flags.put(st.db, site_flags.GLOBAL_DAILY_V5, g5)
+    await site_flags.put(st.db, site_flags.MEMBER_DAILY_ANLAS, man)
     await st.db.set_setting(SETTING, threshold)
-    return {"ok": True, "global_monthly_anlas": v, "global_daily_v5": g5, SETTING: threshold,
+    return {"ok": True, "global_monthly_anlas": v, "global_daily_v5": g5, "member_daily_anlas": man, SETTING: threshold,
             "v5_capacity": await ops.v5_capacity(st.db, st.settings, getattr(request.app.state, "registrar", None))}
 
 
@@ -1552,6 +1556,25 @@ async def put_announcement(request: Request):
     body = await read_json_body(request)
     html = str(body.get("html", ""))[:20000]
     request.app.state.gate.settings.announcement_path.write_text(html, encoding="utf-8")
+    return {"ok": True}
+
+
+@router.post("/announcement/send")
+async def announcement_send(request: Request):
+    """让奶妹把一条消息发到 Discord 公告频道（ANNOUNCE_CHANNEL_ID）；@ here / @ everyone 会被剥掉。"""
+    require_admin(request)
+    st = request.app.state.gate
+    body = await read_json_body(request)
+    text = str(body.get("text", "")).strip()
+    if not text:
+        raise HTTPException(422, "公告内容不能为空")
+    if len(text) > 1800:
+        raise HTTPException(422, "公告太长（Discord 单条 2000 字符，留了余量）")
+    a = getattr(st, "announcer", None)
+    if a is None or not a.configured:
+        raise HTTPException(503, "公告频道未配置（.env 的 ANNOUNCE_CHANNEL_ID）")
+    a.post(text)
+    await log_action(st.db, _actor(request), "发送公告", f"{len(text)} 字", text[:200])
     return {"ok": True}
 
 

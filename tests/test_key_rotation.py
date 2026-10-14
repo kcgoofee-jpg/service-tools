@@ -43,6 +43,24 @@ async def login(client):
     assert (await client.post('/admin/api/login', json={'password': 'fixture'})).status_code == 200
 
 
+@pytest.mark.asyncio
+async def test_admin_can_send_discord_announcement_via_bot(env, monkeypatch):
+    # 后台「让奶妹发公告」：空内容 422；发送走 announcer.post 并记审计
+    state, client, key = env
+    await login(client)
+    sent = []
+    class StubAnnouncer:
+        configured = True
+        def post(self, text):
+            sent.append(text)
+    monkeypatch.setattr(state, "announcer", StubAnnouncer(), raising=False)   # FakeState 没有该属性
+    assert (await client.post('/admin/api/announcement/send', json={'text': '  '})).status_code == 422
+    r = await client.post('/admin/api/announcement/send', json={'text': '今晚 3-7 点安静时段照常'})
+    assert r.status_code == 200 and sent == ['今晚 3-7 点安静时段照常']
+    actions = [a['action'] for a in await state.db.list_admin_actions()]
+    assert '发送公告' in actions
+
+
 def auth(token):
     return {'Authorization': 'Bearer '+token}
 
