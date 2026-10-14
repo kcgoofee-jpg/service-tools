@@ -302,7 +302,7 @@ class RegistrationService:
 
     async def key_row_for(self, discord_id: str):
         if str(discord_id).startswith(KEY_SESSION_PREFIX):
-            # 旧「Key 登录」会话（该入口 2026-10-14 已下线）：只为存续 cookie 兼容，最迟 30 天自然清零
+            # 「Key 登录」会话（后台手建、未绑定 Discord 的 Key 用 key:<id> 代替 discord_id）
             try:
                 return await self.db.get_key(int(str(discord_id)[len(KEY_SESSION_PREFIX):]))
             except ValueError:
