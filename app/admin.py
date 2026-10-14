@@ -949,7 +949,7 @@ async def gift_member(request: Request):
             out["max_users"] = active
     if g["new"]:
         extra = (f"\n\n🎁 这把 Key 是奶妹送你的（{reason}）" if reason else "") + \
-                ("，还附带一张重置券，用 Key 登录首页就能看到、7 天内有效～" if days else "")
+                ("，还附带一张重置券，网页登录开放后在首页登录即可使用、7 天内有效～" if days else "")
         out["dm_sent"] = await reg.send_dm(user["id"], g["message"] + extra)
         if not out["dm_sent"]:
             out["dm_block"] = getattr(reg, "last_dm_block", "") or "对方关闭了私信"
