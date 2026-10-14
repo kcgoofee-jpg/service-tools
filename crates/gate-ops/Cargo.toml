@@ -1,0 +1,17 @@
+[package]
+name = "gate-ops"
+description = "运维命令：巡检、快照、脱敏、提示词统计、状态页事件、公告、逐条私信、冒烟。"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "nai-ops"
+path = "src/main.rs"
+
+[dependencies]
+
+[lints]
+workspace = true

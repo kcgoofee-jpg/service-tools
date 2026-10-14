@@ -1,0 +1,56 @@
+{"fn":"int","args":["0"],"out":0,"err":null}
+{"fn":"float","args":["0"],"out":0.0,"err":null}
+{"fn":"int","args":["15"],"out":15,"err":null}
+{"fn":"float","args":["15"],"out":15.0,"err":null}
+{"fn":"int","args":[" 15 "],"out":15,"err":null}
+{"fn":"float","args":[" 15 "],"out":15.0,"err":null}
+{"fn":"int","args":["+5"],"out":5,"err":null}
+{"fn":"float","args":["+5"],"out":5.0,"err":null}
+{"fn":"int","args":["-5"],"out":-5,"err":null}
+{"fn":"float","args":["-5"],"out":-5.0,"err":null}
+{"fn":"int","args":["1_000"],"out":1000,"err":null}
+{"fn":"float","args":["1_000"],"out":1000.0,"err":null}
+{"fn":"int","args":["1__0"],"out":null,"err":{"type":"ValueError","msg":"invalid literal for int() with base 10: '1__0'"}}
+{"fn":"float","args":["1__0"],"out":null,"err":{"type":"ValueError","msg":"could not convert string to float: '1__0'"}}
+{"fn":"int","args":["_1"],"out":null,"err":{"type":"ValueError","msg":"invalid literal for int() with base 10: '_1'"}}
+{"fn":"float","args":["_1"],"out":null,"err":{"type":"ValueError","msg":"could not convert string to float: '_1'"}}
+{"fn":"int","args":["1_"],"out":null,"err":{"type":"ValueError","msg":"invalid literal for int() with base 10: '1_'"}}
+{"fn":"float","args":["1_"],"out":null,"err":{"type":"ValueError","msg":"could not convert string to float: '1_'"}}
+{"fn":"int","args":["12.0"],"out":null,"err":{"type":"ValueError","msg":"invalid literal for int() with base 10: '12.0'"}}
+{"fn":"float","args":["12.0"],"out":12.0,"err":null}
+{"fn":"int","args":["12.5"],"out":null,"err":{"type":"ValueError","msg":"invalid literal for int() with base 10: '12.5'"}}
+{"fn":"float","args":["12.5"],"out":12.5,"err":null}
+{"fn":"int","args":["-15.9"],"out":null,"err":{"type":"ValueError","msg":"invalid literal for int() with base 10: '-15.9'"}}
+{"fn":"float","args":["-15.9"],"out":-15.9,"err":null}
+{"fn":"int","args":["1e3"],"out":null,"err":{"type":"ValueError","msg":"invalid literal for int() with base 10: '1e3'"}}
+{"fn":"float","args":["1e3"],"out":1000.0,"err":null}
+{"fn":"int","args":["1E-2"],"out":null,"err":{"type":"ValueError","msg":"invalid literal for int() with base 10: '1E-2'"}}
+{"fn":"float","args":["1E-2"],"out":0.01,"err":null}
+{"fn":"int","args":[".5"],"out":null,"err":{"type":"ValueError","msg":"invalid literal for int() with base 10: '.5'"}}
+{"fn":"float","args":[".5"],"out":0.5,"err":null}
+{"fn":"int","args":["5."],"out":null,"err":{"type":"ValueError","msg":"invalid literal for int() with base 10: '5.'"}}
+{"fn":"float","args":["5."],"out":5.0,"err":null}
+{"fn":"int","args":["inf"],"out":null,"err":{"type":"ValueError","msg":"invalid literal for int() with base 10: 'inf'"}}
+{"fn":"float","args":["inf"],"out":{"$f":"inf"},"err":null}
+{"fn":"int","args":["-Infinity"],"out":null,"err":{"type":"ValueError","msg":"invalid literal for int() with base 10: '-Infinity'"}}
+{"fn":"float","args":["-Infinity"],"out":{"$f":"-inf"},"err":null}
+{"fn":"int","args":["nan"],"out":null,"err":{"type":"ValueError","msg":"invalid literal for int() with base 10: 'nan'"}}
+{"fn":"float","args":["nan"],"out":{"$f":"nan"},"err":null}
+{"fn":"int","args":[""],"out":null,"err":{"type":"ValueError","msg":"invalid literal for int() with base 10: ''"}}
+{"fn":"float","args":[""],"out":null,"err":{"type":"ValueError","msg":"could not convert string to float: ''"}}
+{"fn":"int","args":[" "],"out":null,"err":{"type":"ValueError","msg":"invalid literal for int() with base 10: ' '"}}
+{"fn":"float","args":[" "],"out":null,"err":{"type":"ValueError","msg":"could not convert string to float: ' '"}}
+{"fn":"int","args":["abc"],"out":null,"err":{"type":"ValueError","msg":"invalid literal for int() with base 10: 'abc'"}}
+{"fn":"float","args":["abc"],"out":null,"err":{"type":"ValueError","msg":"could not convert string to float: 'abc'"}}
+{"fn":"int","args":["0x10"],"out":null,"err":{"type":"ValueError","msg":"invalid literal for int() with base 10: '0x10'"}}
+{"fn":"float","args":["0x10"],"out":null,"err":{"type":"ValueError","msg":"could not convert string to float: '0x10'"}}
+{"fn":"int","args":["1,000"],"out":null,"err":{"type":"ValueError","msg":"invalid literal for int() with base 10: '1,000'"}}
+{"fn":"float","args":["1,000"],"out":null,"err":{"type":"ValueError","msg":"could not convert string to float: '1,000'"}}
+{"fn":"int","args":["１２"],"out":12,"err":null}
+{"fn":"float","args":["１２"],"out":12.0,"err":null}
+{"fn":"int","args":["3.0e+2"],"out":null,"err":{"type":"ValueError","msg":"invalid literal for int() with base 10: '3.0e+2'"}}
+{"fn":"float","args":["3.0e+2"],"out":300.0,"err":null}
+{"fn":"int","args":["1.5e"],"out":null,"err":{"type":"ValueError","msg":"invalid literal for int() with base 10: '1.5e'"}}
+{"fn":"float","args":["1.5e"],"out":null,"err":{"type":"ValueError","msg":"could not convert string to float: '1.5e'"}}
+{"fn":"int","args":["--1"],"out":null,"err":{"type":"ValueError","msg":"invalid literal for int() with base 10: '--1'"}}
+{"fn":"float","args":["--1"],"out":null,"err":{"type":"ValueError","msg":"could not convert string to float: '--1'"}}

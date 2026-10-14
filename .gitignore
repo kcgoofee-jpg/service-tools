@@ -21,3 +21,16 @@ docs/AUDIT_*
 
 # 浏览器检查工具（playwright-cli）的运行残留
 .playwright-cli/
+
+# 3.0：Rust / 前端构建产物与更多敏感文件
+/target/
+web/node_modules/
+web/dist/
+web/test-results/
+web/playwright-report/
+.env.*
+!.env.example
+*.zip
+*.db.gz
+*.enc
+*.log

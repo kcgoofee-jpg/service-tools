@@ -1,0 +1,15 @@
+[package]
+name = "gate-golden"
+description = "只在测试时用：读取 tools/parity/golden 生成的 JSONL 夹具，并按 Python 语义比较。"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+base64.workspace = true
+
+[lints]
+workspace = true

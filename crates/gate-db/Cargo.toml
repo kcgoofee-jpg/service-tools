@@ -1,0 +1,13 @@
+[package]
+name = "gate-db"
+description = "SQLite 存取：整个项目只有这里写 SQL；原样沿用旧库表结构，可与 Python 版来回切换。"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

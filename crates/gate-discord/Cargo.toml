@@ -1,0 +1,17 @@
+[package]
+name = "gate-discord"
+description = "Discord 机器人：奶妹（领 Key / 额度 / 反馈）与燕双鹰（只在线）。"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "nai-bots"
+path = "src/main.rs"
+
+[dependencies]
+
+[lints]
+workspace = true
