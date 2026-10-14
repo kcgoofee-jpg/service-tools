@@ -28,6 +28,7 @@ tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.7", features = ["trace", "request-id", "limit", "timeout", "compression-gzip", "set-header", "util"] }
 http = "1"
 http-body-util = "0.1"
+multer = "=3.1.0"
 wreq = { version = "=6.0.0-rc.31", features = ["json", "stream", "gzip", "deflate", "socks"] }
 wreq-util = "=3.0.0-rc.14"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

@@ -1,9 +1,9 @@
 //! 出图请求通路的端到端测试：真实的 AppState + 路由 + 记账，上游换成本地假服务。
 
 mod common;
-use common::{Env, TOKEN, setup};
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use common::{TOKEN, setup};
 use gate_db::repo::usage::LogFilter;
 use gate_server::AppState;
 use gate_testkit::Reply;
@@ -280,4 +280,21 @@ async fn v1_alias_and_root_post_route_to_generate() {
     )
     .await;
     assert_eq!(status, 200);
+}
+
+#[tokio::test]
+async fn generation_audit_records_prompt_and_image() {
+    let e = setup(&[("AUDIT_PROMPTS", "1"), ("AUDIT_THUMBS", "1")]).await;
+    let (status, _, _) = call(
+        &e.state,
+        "POST",
+        "/ai/generate-image",
+        Some(TOKEN),
+        Some(image_body("nai-diffusion-4-5-full", 1)),
+    )
+    .await;
+    assert_eq!(status, 200);
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    assert_eq!(e.state.db.audit_image_count(1, 0.0).await.unwrap(), 1);
+    assert!(e.state.db.audit_image_bytes().await.unwrap() > 0);
 }

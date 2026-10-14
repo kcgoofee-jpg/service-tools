@@ -54,7 +54,11 @@ pub async fn setup(extra: &[(&str, &str)]) -> Env {
     }))
     .unwrap();
     state.db.create_key(&key, state.now()).await.unwrap();
-    Env { state, mock, _dir: dir }
+    Env {
+        state,
+        mock,
+        _dir: dir,
+    }
 }
 
 pub struct Call<'a> {
@@ -66,7 +70,12 @@ pub struct Call<'a> {
 
 impl<'a> Call<'a> {
     pub fn new(method: &'a str, path: &'a str) -> Self {
-        Self { method, path, headers: vec![], body: None }
+        Self {
+            method,
+            path,
+            headers: vec![],
+            body: None,
+        }
     }
     pub fn bearer(mut self, t: &str) -> Self {
         self.headers.push(("authorization", format!("Bearer {t}")));
@@ -95,7 +104,13 @@ impl<'a> Call<'a> {
         let resp = gate_server::app(state.clone()).oneshot(req).await.unwrap();
         let status = resp.status();
         let headers = resp.headers().clone();
-        let bytes = resp.into_body().collect().await.unwrap().to_bytes().to_vec();
+        let bytes = resp
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes()
+            .to_vec();
         (status, headers, bytes)
     }
 }
