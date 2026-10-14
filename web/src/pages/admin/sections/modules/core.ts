@@ -26,12 +26,6 @@ export type ModulesResponse = { modules: Mod[] };
 
 export const LEVEL_TEXT: Record<string, string> = { ok: "正常", warn: "注意", bad: "有问题", na: "不适用" };
 
-/** 结构性交叉校验的「站长已确认」键（按校验名对应；接口没有给出键，只能按名字） */
-export const ACK_KEYS: Record<string, string> = {
-  "V5：每人额度 × 人数 ≤ 全站上限": "v5_oversell",
-  "每人承诺 ≤ 全站日容量": "registration_ready",
-};
-
 export type ModState = "off" | "bad" | "warn" | "ok";
 
 export function moduleState(m: Mod): ModState {

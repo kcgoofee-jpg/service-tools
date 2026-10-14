@@ -384,9 +384,11 @@ async fn startup_wires_the_registration_service_into_the_kernel() {
         .kernel
         .set_official_api(Some("http://127.0.0.1:9/never".into()));
     assert!(e.state.kernel.registrar().is_none() && e.state.kernel.dm().is_none());
+    // 领 Key 开着，「领 Key」模块才会跑校验
+    e.state.db.set_setting("register_open", "1").await.unwrap();
     jobs::startup(&e.state).await.unwrap();
     assert!(e.state.kernel.registrar().is_some() && e.state.kernel.dm().is_some());
-    // 内核的第一轮 tick 读到了注册服务：领 Key 就绪度校验不再是「未配置」
+    // 内核的第一轮 tick 读到了注册服务：「已领人数 ≤ 名额」有了数字，不再是没有注册服务时的空校验
     let start = Instant::now();
     loop {
         let raw = e
@@ -396,8 +398,8 @@ async fn startup_wires_the_registration_service_into_the_kernel() {
             .await
             .unwrap()
             .unwrap_or_default();
-        if raw.contains("\"registration_ready\"") {
-            assert!(raw.contains("配置齐备"), "{raw}");
+        if raw.contains("已领人数 ≤ 名额") {
+            assert!(raw.contains("0 / 10"), "{raw}");
             break;
         }
         assert!(start.elapsed() < Duration::from_secs(10), "{raw}");

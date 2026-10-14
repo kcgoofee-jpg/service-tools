@@ -1,4 +1,4 @@
-//! 七个模块的运行部分（旧版 `app/modules.py`）：开关、tick、交叉校验、面板参数。
+//! 六个模块的运行部分（旧版 `app/modules.py`）：开关、tick、交叉校验、面板参数。
 //! 校验的判定与文案在 `gate_core::modules`（golden 对拍过）；这里只负责取数。
 
 use super::{KernelError, KernelRegistrar, algo, risk};
@@ -6,10 +6,9 @@ use crate::action_log::log_action;
 use crate::state::AppState;
 use gate_core::modules::{
     self as gm, AllocationInputs, CapacityInputs, Check, MODULES, ModuleMeta, RegistrarInfo,
-    RegistrationReadyInputs,
 };
 use gate_core::quota;
-use gate_core::site_flags::{self, ISSUE_HOURLY_CAP, REGISTER_OPEN};
+use gate_core::site_flags::{self, REGISTER_OPEN};
 use gate_core::{pyc, pyval};
 use serde_json::Value;
 use std::sync::Arc;
@@ -119,7 +118,6 @@ pub(super) async fn checks(state: &AppState, name: &str) -> Result<Vec<Check>, K
         "allocation" => allocation_checks(state).await,
         "risk" => risk_checks(state).await,
         "registration" => registration_checks(state).await,
-        "registration_ready" => registration_ready_checks(state).await,
         _ => Ok(Vec::new()),
     }
 }
@@ -187,17 +185,11 @@ async fn allocation_checks(state: &AppState) -> Result<Vec<Check>, KernelError> 
         return Ok(Vec::new());
     };
     let (keys, drift) = state.db.managed_keys_drift(&q.a, q.each).await?;
-    let ack_oversell = state
-        .db
-        .get_setting("ack_v5_oversell")
-        .await?
-        .is_some_and(|s| !s.is_empty());
     let base = Some(state.guard.with(|g| g.values["base_daily_images"]));
     Ok(gm::allocation_checks(&AllocationInputs {
         last_raw: raw,
         keys,
         drift,
-        ack_oversell,
         base,
     })?)
 }
@@ -212,19 +204,13 @@ async fn risk_checks(state: &AppState) -> Result<Vec<Check>, KernelError> {
     Ok(gm::risk_checks(&items)?)
 }
 
-/// 注册服务给内核的数字（`registrar.settings()` + `count_active()` + 服务对象上的环境默认值）。
+/// 注册服务给内核的数字（`registrar.settings()` + `count_active()`）。
 async fn registrar_info(r: &Arc<dyn KernelRegistrar>) -> Result<RegistrarInfo, KernelError> {
     let cfg = r.settings().await.map_err(registrar_err)?;
     let active = r.count_active().await.map_err(registrar_err)?;
-    let (env_daily_images, env_daily_v5, env_max_users) = r.env_defaults();
     Ok(RegistrarInfo {
         max_users: cfg.max_users,
-        daily_images: cfg.daily_images,
-        daily_v5: cfg.daily_v5,
         active,
-        env_daily_images,
-        env_daily_v5,
-        env_max_users,
     })
 }
 
@@ -234,33 +220,6 @@ async fn registration_checks(state: &AppState) -> Result<Vec<Check>, KernelError
         None => None,
     };
     Ok(gm::registration_checks(info.as_ref()))
-}
-
-async fn registration_ready_checks(state: &AppState) -> Result<Vec<Check>, KernelError> {
-    let reg = state.kernel.registrar();
-    // 面板参数要读注册服务对象，就在校验时记一份下来
-    state.kernel.remember_registrar(reg.clone());
-    let open_now = pyval::truthy(&crate::auth::site_flag(state, &REGISTER_OPEN).await?);
-    let registrar = match &reg {
-        Some(r) => Some(registrar_info(r).await?),
-        None => None,
-    };
-    let tokens = usable_token_ids(state).await.len();
-    let hourly = gm::issue_hourly_cap(state.db.get_setting(ISSUE_HOURLY_CAP.key).await?.as_deref());
-    let ack = state
-        .db
-        .get_setting("ack_registration_ready")
-        .await?
-        .is_some_and(|s| !s.is_empty());
-    let account_daily_cap = state.guard.with(|g| g.values["account_daily_cap"]);
-    Ok(gm::registration_ready_checks(&RegistrationReadyInputs {
-        open_now,
-        registrar,
-        account_daily_cap,
-        tokens,
-        hourly,
-        ack,
-    }))
 }
 
 // ---------------------------------------------------------------------------
@@ -300,11 +259,6 @@ async fn image_min_interval_value(state: &AppState) -> Result<Value, KernelError
         Some(v) => Value::from(v),
         None => pyval::float(state.env.image_min_interval),
     })
-}
-
-async fn site_daily(state: &AppState) -> i64 {
-    let tokens = usable_token_ids(state).await.len();
-    gm::site_daily(state.guard.with(|g| g.values["account_daily_cap"]), tokens)
 }
 
 /// 面板上各模块「关键参数」的当前值（顺序同 `MODULES[..].params`）；读不出来的写「读取失败：…」。
@@ -353,28 +307,6 @@ pub(super) async fn param_values(state: &AppState, name: &str) -> Vec<Value> {
             Value::from(state.env.default_expires_days),
             Value::String(gm::idle_recycle_text(state.env.key_inactivity_delete_days)),
         ],
-        "registration_ready" => {
-            let hourly = match state.db.get_setting(ISSUE_HOURLY_CAP.key).await {
-                Ok(raw) => Value::String(gm::hourly_text(gm::issue_hourly_cap(raw.as_deref()))),
-                Err(e) => failed(e),
-            };
-            let seats = seats_text(state).await;
-            vec![hourly, Value::String(seats)]
-        }
         _ => Vec::new(),
     }
-}
-
-/// 全站日容量 ÷ 每人额度 = 能拿满额度的人数（注册名额的现实上限）。出任何错都显示「—」。
-async fn seats_text(state: &AppState) -> String {
-    let reg = state.kernel.seen_registrar();
-    let per = match &reg {
-        None => 0,
-        Some(r) => match r.settings().await {
-            Err(_) => return "—".to_string(),
-            Ok(cfg) if cfg.daily_images != 0 => cfg.daily_images,
-            Ok(_) => r.env_defaults().0,
-        },
-    };
-    gm::seats_text(per, site_daily(state).await)
 }

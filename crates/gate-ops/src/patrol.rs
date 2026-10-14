@@ -1,4 +1,4 @@
-//! 7×24 巡检（移植自 deploy/ops/patrol.py）：只读地检查站点数据、上游容量、成员出图请求与「开注册」的就绪度。
+//! 7×24 巡检（移植自 deploy/ops/patrol.py）：只读地检查站点数据、上游容量、成员出图请求与注册链路。
 //!
 //! 退出码：0 正常 · 1 注意 · 2 危险 · **3 巡检程序自己出错**（旧版崩溃时是 1，systemd 分不出
 //! 「有警告」和「巡检坏了」；见 docs/v3-deviations.md #5）。
@@ -21,23 +21,6 @@ use std::time::Duration;
 
 /// 站点按 Asia/Shanghai 记「天」。
 const NZ: &str = "+8 hours";
-
-/// 已知 / 按设计的事项：照常显示、不告警。加进来之前先问一句「这是不是要站长改决定」——
-/// 是的话就在后台挂一条说明，而不是每分钟响一次（2026-10-13 真出问题的那次就是这么被淹没的）。
-const KNOWN_SIGNATURES: [(&str, &str); 3] = [
-    (
-        "V5：每人额度 × 人数 ≤ 全站上限",
-        "按设计：名额超卖，已在首页写明「先到先得」，改分配结果需站长点头",
-    ),
-    (
-        "每人承诺 ≤ 全站日容量",
-        "按设计：开注册就绪度提示，是否收紧名额/额度由站长决定",
-    ),
-    (
-        "后台额度与环境变量一致",
-        "配置漂移提示：只在后台值与环境变量不一致时出现，盯 .env 即可",
-    ),
-];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Sev {
@@ -133,10 +116,10 @@ impl Report {
         keys
     }
 
-    /// 已知 / 按设计 / 已不再复现的事项：照常显示给人看，但不参与告警。
+    /// 已知 / 已不再复现的事项：照常显示给人看，但不参与告警。
     ///
-    /// 2026-10-13 的教训：三条「按设计」的交叉校验每 10 分钟告警一次，站长只能把告警当背景音，
-    /// 真出问题（局部重绘集体 500）反而被淹没。
+    /// 2026-10-13 的教训：「按设计」的提示每 10 分钟告警一次，站长只能把告警当背景音，
+    /// 真出问题（局部重绘集体 500）反而被淹没。「按设计」的东西不要做成检查项——需要站长拍板的，挂一条后台说明。
     pub fn known(&mut self, area: &'static str, text: &str) {
         self.rows.push(Row {
             sev: Sev::Ok,
@@ -567,12 +550,7 @@ pub fn check_infra(rep: &mut Report, infra: &Infra) {
     }
 }
 
-pub fn check_upstream(
-    rep: &mut Report,
-    conn: &Connection,
-    per_person: i64,
-    active_members: i64,
-) -> rusqlite::Result<()> {
+pub fn check_upstream(rep: &mut Report, conn: &Connection) -> rusqlite::Result<()> {
     let day = q1(conn, "SELECT date('now',?)", [NZ])?;
     let used = num0(&q1(
         conn,
@@ -641,23 +619,6 @@ pub fn check_upstream(
                 gate_core::pyext::py_str(pct),
                 v5.get("rate")
                     .map_or("None".to_string(), gate_core::pyext::py_str)
-            ),
-        );
-    }
-    // 名额承诺 vs 日容量：开注册前最关键的一条
-    if per_person != 0 && active_members != 0 {
-        let promise = per_person * active_members;
-        rep.set("promise_images", promise);
-        rep.set("per_person", per_person);
-        rep.set("active_members", active_members);
-        rep.add(
-            if promise > site_daily { Sev::Warn } else { Sev::Ok },
-            "注册",
-            format!(
-                "每人 {per_person} 张 × {active_members} 人 = {promise} 张 vs 日容量 {site_daily} 张：\
-                 平分每人约 {} 张，只有前约 {} 人能拿满",
-                pyc::floordiv(site_daily, active_members.max(1)),
-                pyc::floordiv(site_daily, per_person.max(1)),
             ),
         );
     }
@@ -819,13 +780,16 @@ pub fn check_members(rep: &mut Report, conn: &Connection, now: f64) -> rusqlite:
     Ok(())
 }
 
-/// 注册就绪度：开关、名额、链路、领取速度。返回 (每人额度, 报名人数)。
+/// 注册状态：开关、名额、链路、领取速度。
+///
+/// 不做「每人额度 × 人数 vs 日容量」「后台额度 vs 环境变量」这类对比：额度是 PVP（全站共用、先到先得），
+/// 每人额度只是上限不是承诺，名额和每人额度又会被自动驾驶 / 动态额度逐日改写，这些对比永远是噪音。
 pub fn check_registration(
     rep: &mut Report,
     conn: &Connection,
     now: f64,
     env_file: &Path,
-) -> rusqlite::Result<(i64, i64)> {
+) -> rusqlite::Result<()> {
     let open_now = matches!(
         read_setting(conn, "register_open")?
             .filter(|s| !s.is_empty())
@@ -866,11 +830,17 @@ pub fn check_registration(
     } else {
         "不限".to_string()
     };
+    // 每小时领取上限 0 = 不限（后台显示「不限」）
+    let hourly_text = if hourly != 0 {
+        format!("{hourly} 个")
+    } else {
+        "不限".to_string()
+    };
     rep.add(
         Sev::Ok,
         "注册",
         format!(
-            "{} · 已领 {registered} 人 / 名额 {quota_text} · 每人 {per} 张（V5 {v5_per}）· 每小时最多发 {hourly} 个",
+            "{} · 已领 {registered} 人 / 名额 {quota_text} · 每人 {per} 张（V5 {v5_per}）· 每小时最多发 {hourly_text}",
             if open_now { "开放" } else { "关闭" },
         ),
     );
@@ -879,7 +849,7 @@ pub fn check_registration(
         "注册",
         format!("新注册：24 小时 {new24} 人 · 1 小时 {new1h} 人"),
     );
-    if open_now && new1h >= hourly {
+    if open_now && hourly != 0 && new1h >= hourly {
         rep.add(
             Sev::Warn,
             "注册",
@@ -893,26 +863,7 @@ pub fn check_registration(
             "网关没有 REGISTRATION_BRIDGE_SECRET：/register 会直接失败",
         );
     }
-    // 后台额度 vs 环境变量（后台值被清掉会跳回环境变量）
-    let env_num =
-        |k: &str| pyc::parse_int_via_float(&util::env_file_value(env_file, k)).unwrap_or(0);
-    let env_per = env_num("REGISTER_DAILY_IMAGES");
-    let env_quota = env_num("REGISTER_MAX_USERS");
-    if env_per != 0 && env_per != per {
-        rep.add(
-            Sev::Warn,
-            "注册",
-            format!("每人额度：后台 {per} / 环境变量 {env_per}（后台值被清掉会跳到 {env_per}）"),
-        );
-    }
-    if env_quota != 0 && env_quota != max_users {
-        rep.add(
-            Sev::Warn,
-            "注册",
-            format!("名额：后台 {quota_text} / 环境变量 {env_quota}"),
-        );
-    }
-    Ok((per, registered))
+    Ok(())
 }
 
 /// 记账一致性 + Bug 追踪。
@@ -957,7 +908,7 @@ pub fn check_data(rep: &mut Report, conn: &Connection, ctx: &Ctx<'_>) -> rusqlit
         "bugs_open",
         Value::Object(bugs.iter().map(|(k, n)| (k.clone(), json!(n))).collect()),
     );
-    // 只有 error 级才告警：warn 级多为「按设计」的交叉校验提示，会长期挂着（见 KNOWN_SIGNATURES）
+    // 只有 error 级才告警：warn 级只是提示，不该把站长叫起来
     rep.add_key(
         if bug("error") != 0 { Sev::Red } else { Sev::Ok },
         "数据",
@@ -982,20 +933,12 @@ pub fn check_data(rep: &mut Report, conn: &Connection, ctx: &Ctx<'_>) -> rusqlit
     for (level, title, count, last_seen) in recent {
         let count = sv_str(&count);
         let last = num0(&last_seen);
-        let known_why = KNOWN_SIGNATURES
-            .iter()
-            .find(|(sig, _)| title.contains(sig))
-            .map(|(_, why)| *why);
         let hit = ctx
             .restarts
             .iter()
             .copied()
             .find(|r| *r <= last as f64 && (last as f64) < r + 180.0);
-        if let (None, true, Some(hit)) = (
-            known_why,
-            title.starts_with("live:"),
-            hit.filter(|h| *h != 0.0),
-        ) {
+        if let (true, Some(hit)) = (title.starts_with("live:"), hit.filter(|h| *h != 0.0)) {
             // 前端每秒轮询 /public/live，网关重启那十几秒必然失败 —— 我们自己的部署不算故障
             rep.known(
                 "数据",
@@ -1006,9 +949,7 @@ pub fn check_data(rep: &mut Report, conn: &Connection, ctx: &Ctx<'_>) -> rusqlit
             );
             continue;
         }
-        if let Some(why) = known_why {
-            rep.known("数据", &format!("[{level}] {title}（{count} 次）— {why}"));
-        } else if (last as f64) < ctx.now - ctx.cfg.stale_seconds as f64 {
+        if (last as f64) < ctx.now - ctx.cfg.stale_seconds as f64 {
             // 已不再出现的旧记录：留着给站长看，但不该每 10 分钟吵一次
             rep.known(
                 "数据",
@@ -1187,8 +1128,8 @@ pub fn run_checks(
 ) -> rusqlite::Result<()> {
     check_infra(rep, infra);
     check_data(rep, conn, ctx)?;
-    let (per_person, active_members) = check_registration(rep, conn, ctx.now, &ctx.cfg.env_file)?;
-    check_upstream(rep, conn, per_person, active_members)?;
+    check_registration(rep, conn, ctx.now, &ctx.cfg.env_file)?;
+    check_upstream(rep, conn)?;
     check_members(rep, conn, ctx.now)?;
     check_channels(rep, conn, ctx.now)?;
     Ok(())

@@ -53,7 +53,7 @@ pub struct Args {
 pub fn run(args: Args) -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
-            // 内核的交叉校验提醒（target = bug）会存成后台的 Bug 记录，不用在终端里再刷一遍；真正的错误照常显示
+            // 「注意」级的 Bug（target = bug，客户端断开之类）会存成后台的 Bug 记录，不用在终端里再刷一遍；真正的错误照常显示
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "warn,bug=error".into()),
         )

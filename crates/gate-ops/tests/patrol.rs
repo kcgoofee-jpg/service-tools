@@ -307,7 +307,7 @@ fn restart_history_survives_corrupt_or_unwritable_state() {
 // ------------------------------------------------------------ 数据库检查
 
 #[test]
-fn upstream_capacity_v5_and_promise() {
+fn upstream_capacity_and_v5() {
     let dir = tempfile::tempdir().unwrap();
     let path = new_db(dir.path());
     let c = rw(&path);
@@ -337,16 +337,20 @@ fn upstream_capacity_v5_and_promise() {
     );
 
     let mut rep = Report::default();
-    check_upstream(&mut rep, &ro(&path), 30, 40).unwrap();
+    check_upstream(&mut rep, &ro(&path)).unwrap();
+    // 额度是 PVP（先到先得）：不拿「每人额度 × 人数」去比日容量
     assert_eq!(
         rows(&rep),
         vec![
-            (Sev::Warn, "上游", "今日已出图 900 / 1000 张（90%）· 2 个账号 × 500 张".to_string()),
-            (Sev::Warn, "上游", "V5 剩余 1.5%（恢复 12.5%/天）".to_string()),
             (
                 Sev::Warn,
-                "注册",
-                "每人 30 张 × 40 人 = 1200 张 vs 日容量 1000 张：平分每人约 25 张，只有前约 33 人能拿满".to_string()
+                "上游",
+                "今日已出图 900 / 1000 张（90%）· 2 个账号 × 500 张".to_string()
+            ),
+            (
+                Sev::Warn,
+                "上游",
+                "V5 剩余 1.5%（恢复 12.5%/天）".to_string()
             ),
         ]
     );
@@ -355,7 +359,6 @@ fn upstream_capacity_v5_and_promise() {
     assert_eq!(rep.data["capacity_used_pct"], json!(90.0));
     assert!(rep.data["capacity_used_pct"].is_f64());
     assert_eq!(rep.data["v5_percent"], json!(1.5));
-    assert_eq!(rep.data["promise_images"], json!(1200));
     // 键的顺序决定 --json 的输出顺序
     let keys: Vec<_> = rep.data.keys().map(String::as_str).collect();
     assert_eq!(
@@ -364,10 +367,7 @@ fn upstream_capacity_v5_and_promise() {
             "today_images",
             "site_daily",
             "capacity_used_pct",
-            "v5_percent",
-            "promise_images",
-            "per_person",
-            "active_members"
+            "v5_percent"
         ]
     );
 }
@@ -377,8 +377,8 @@ fn upstream_defaults_and_quirks() {
     let dir = tempfile::tempdir().unwrap();
     let path = new_db(dir.path());
     let mut rep = Report::default();
-    check_upstream(&mut rep, &ro(&path), 0, 0).unwrap();
-    // 没有任何计数行：按 1 个账号 × 默认 1000 张；没有 V5 记录、没有承诺行
+    check_upstream(&mut rep, &ro(&path)).unwrap();
+    // 没有任何计数行：按 1 个账号 × 默认 1000 张；没有 V5 记录
     assert_eq!(
         rows(&rep),
         vec![(
@@ -392,14 +392,9 @@ fn upstream_defaults_and_quirks() {
     // 日上限被设成 0：旧版 share 是整数 0，round(0, 1) 仍是整数，JSON 里是 0 而不是 0.0
     set_setting(&rw(&path), "guard_account_daily_cap", "0");
     let mut rep = Report::default();
-    check_upstream(&mut rep, &ro(&path), 30, 5).unwrap();
+    check_upstream(&mut rep, &ro(&path)).unwrap();
     assert_eq!(rep.data["capacity_used_pct"], json!(0));
     assert!(rep.data["capacity_used_pct"].is_i64());
-    assert_eq!(
-        text_of(&rep, "每人 30 张").sev,
-        Sev::Warn,
-        "承诺 150 > 日容量 0"
-    );
 }
 
 #[test]
@@ -432,7 +427,7 @@ fn v5_percent_edge_values() {
     ] {
         set_setting(&c, "quota_algo_last", raw);
         let mut rep = Report::default();
-        check_upstream(&mut rep, &ro(&path), 0, 0).unwrap();
+        check_upstream(&mut rep, &ro(&path)).unwrap();
         let v5 = rep
             .rows
             .iter()
@@ -611,7 +606,7 @@ fn members_empty_db_and_interval_bypass() {
 }
 
 #[test]
-fn registration_readiness_without_waitlist() {
+fn registration_status_without_waitlist() {
     let dir = tempfile::tempdir().unwrap();
     let path = new_db(dir.path());
     let c = rw(&path);
@@ -653,8 +648,8 @@ fn registration_readiness_without_waitlist() {
     .unwrap();
 
     let mut rep = Report::default();
-    let got = check_registration(&mut rep, &ro(&path), NOW, &env).unwrap();
-    assert_eq!(got, (20, 2));
+    check_registration(&mut rep, &ro(&path), NOW, &env).unwrap();
+    // 后台每人 20 张、环境变量写的是 30：额度是动态的，两边对不上是常态，不报
     assert_eq!(
         rows(&rep),
         vec![
@@ -667,11 +662,6 @@ fn registration_readiness_without_waitlist() {
                 Sev::Ok,
                 "注册",
                 "新注册：24 小时 2 人 · 1 小时 1 人".to_string()
-            ),
-            (
-                Sev::Warn,
-                "注册",
-                "每人额度：后台 20 / 环境变量 30（后台值被清掉会跳到 30）".to_string()
             ),
         ]
     );
@@ -701,10 +691,7 @@ fn registration_defaults_missing_secret_and_hourly_cap() {
     let path = new_db(dir.path());
     let no_env = dir.path().join("missing.env");
     let mut rep = Report::default();
-    assert_eq!(
-        check_registration(&mut rep, &ro(&path), NOW, &no_env).unwrap(),
-        (30, 0)
-    );
+    check_registration(&mut rep, &ro(&path), NOW, &no_env).unwrap();
     assert_eq!(
         rows(&rep),
         vec![
@@ -738,6 +725,22 @@ fn registration_defaults_missing_secret_and_hourly_cap() {
         "本小时领取已达上限（1/1），成员会看到限流提示"
     );
     assert_eq!(text_of(&rep, "REGISTRATION_BRIDGE_SECRET").sev, Sev::Red);
+
+    // 每小时领取上限 0 = 不限（后台显示「不限」）：本小时已领 1 人也不能报「已达上限（1/0）」
+    set_setting(&c, "issue_hourly_cap", "0");
+    let mut rep = Report::default();
+    check_registration(&mut rep, &ro(&path), NOW, &no_env).unwrap();
+    assert!(
+        rep.rows.iter().all(|r| !r.text.contains("已达上限")),
+        "{:?}",
+        rows(&rep)
+    );
+    assert!(
+        text_of(&rep, "每小时最多发")
+            .text
+            .ends_with("每小时最多发 不限")
+    );
+    assert_eq!(rep.data["issue_hourly_cap"], json!(0));
 }
 
 fn seed_error(
@@ -786,14 +789,6 @@ fn data_counts_and_bug_tracking() {
         restart + 60.0,
         false,
     );
-    seed_error(
-        &c,
-        "warn",
-        "V5：每人额度 × 人数 ≤ 全站上限（示例）",
-        2,
-        NOW - 10.0,
-        false,
-    );
     seed_error(&c, "warn", "旧问题", 1, NOW - 3000.0, false);
     seed_error(&c, "warn", "新问题", 3, NOW - 60.0, false);
     seed_error(&c, "info", "信息", 1, NOW - 30.0, false);
@@ -813,8 +808,7 @@ fn data_counts_and_bug_tracking() {
         rows(&rep),
         vec![
             (Sev::Warn, "数据", "今日计数：成员 100 · 上游 110 · 日志 3 张".to_string()),
-            (Sev::Red, "数据", "未解决 Bug：error 1 · warn 3".to_string()),
-            (Sev::Ok, "数据", "（已知，不告警）[warn] V5：每人额度 × 人数 ≤ 全站上限（示例）（2 次）— 按设计：名额超卖，已在首页写明「先到先得」，改分配结果需站长点头".to_string()),
+            (Sev::Red, "数据", "未解决 Bug：error 1 · warn 2".to_string()),
             (Sev::Ok, "数据", "[info] 信息（1 次）".to_string()),
             (Sev::Warn, "数据", "[warn] 新问题（3 次）".to_string()),
             (
@@ -829,7 +823,7 @@ fn data_counts_and_bug_tracking() {
     assert_eq!(pkeys(&rep), ["counts", "bug-count", "bug:新问题"]);
     assert_eq!(
         rep.data["bugs_open"],
-        json!({"error": 1, "info": 1, "warn": 3})
+        json!({"error": 1, "info": 1, "warn": 2})
     );
     assert_eq!(rep.data["today_counters"], json!(100));
     assert_eq!(rep.data["today_logged"], json!(3));

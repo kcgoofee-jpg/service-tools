@@ -7,15 +7,15 @@
 //! # 与旧版一致的约定
 //!
 //! - 评估周期内额度 / 处罚结果一个单位都不许变：算法一律走 gate-core 的 `decide`，这里不做任何判断。
-//! - 每个模块的运行结果记进 `kernel_last`（保留最近 36 轮）；校验不通过记进 Bug 追踪，`level` 为 warn 的校验
-//!   只在后台标黄不记 Bug（风险检查用）。
+//! - 每个模块的运行结果记进 `kernel_last`（保留最近 36 轮）。模块自己抛异常（tick 或校验函数出错）记进 Bug 追踪；
+//!   校验「没通过」只在后台「模块」页标出，不记 Bug（docs/v3-deviations.md #44）。
 //! - `kernel_last` 的键顺序、浮点格式都与旧版 `json.dumps(..., ensure_ascii=False)` 一致（上线前后混跑也不乱）。
 //!
 //! # 外部钩子（旧版 `kernel.extra`）
 //!
 //! 注册服务（领 Key）与私信函数不属于内核：[`crate::jobs::startup`] 在注册服务配齐时自动接上（[`ServiceRegistrar`]），
 //! 也可以用 [`Kernel::set_registrar`] / [`Kernel::set_dm`] 换掉。
-//! 没接时等同旧版 `extra.get("registrar") is None`（自动驾驶按「名额不限」走，两个领 Key 模块不出校验）。
+//! 没接时等同旧版 `extra.get("registrar") is None`（自动驾驶按「名额不限」走，领 Key 模块不出校验）。
 
 mod algo;
 mod modules;
@@ -102,15 +102,13 @@ impl From<KernelError> for ApiError {
 // 外部钩子
 // ---------------------------------------------------------------------------
 
-/// `registrar.settings()` 里内核用到的三项（都已经 `or 0`）。
+/// `registrar.settings()` 里内核用到的一项（已经 `or 0`）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct RegistrarSettings {
     pub max_users: i64,
-    pub daily_images: i64,
-    pub daily_v5: i64,
 }
 
-/// 注册服务（领 Key）在内核里的样子（旧版 `kernel.extra["registrar"]`）：内核模块与自动驾驶只用这三项。
+/// 注册服务（领 Key）在内核里的样子（旧版 `kernel.extra["registrar"]`）：内核模块与自动驾驶只用名额上限和占用人数。
 /// 摘身份组 / 同步 / 退群回收 / 定时清空这些要碰 Discord 的后台工作不走这里，见 [`crate::registration`]。
 /// 线上用 [`ServiceRegistrar`]（`startup` 自动接上）；对拍测试换成读库的假实现。
 pub trait KernelRegistrar: Send + Sync {
@@ -118,8 +116,6 @@ pub trait KernelRegistrar: Send + Sync {
     fn settings(&self) -> BoxFuture<'_, Result<RegistrarSettings, String>>;
     /// `registrar.count_active()`：占用名额的人数。
     fn count_active(&self) -> BoxFuture<'_, Result<i64, String>>;
-    /// 注册服务对象上的环境变量默认值：`(key_daily_images, key_daily_v5, max_users)`。
-    fn env_defaults(&self) -> (i64, i64, i64);
 }
 
 /// 真正的注册服务（`state.registration`）接进内核。
@@ -131,19 +127,12 @@ impl KernelRegistrar for ServiceRegistrar {
             let r = self.0.settings().await.map_err(|e| e.to_string())?;
             Ok(RegistrarSettings {
                 max_users: r.max_users,
-                daily_images: r.daily_images,
-                daily_v5: r.daily_v5,
             })
         })
     }
 
     fn count_active(&self) -> BoxFuture<'_, Result<i64, String>> {
         Box::pin(async move { self.0.count_active().await.map_err(|e| e.to_string()) })
-    }
-
-    fn env_defaults(&self) -> (i64, i64, i64) {
-        let e = self.0.env();
-        (e.key_daily_images, e.key_daily_v5, e.max_users)
     }
 }
 
@@ -255,8 +244,6 @@ pub struct Kernel {
     tick_lock: tokio::sync::Mutex<()>,
     /// 动态额度重算同理：后台定时、后台改参数、改 Key 额度都会调它，不能两份同时写。
     quota_lock: tokio::sync::Mutex<()>,
-    /// 「开注册就绪度」校验时记下的注册服务（旧版闭包里的 `known["reg"]`），面板参数要读它。
-    seen_registrar: Mutex<Option<Arc<dyn KernelRegistrar>>>,
 }
 
 impl Default for Kernel {
@@ -272,7 +259,6 @@ impl Kernel {
             hooks: RwLock::new(Hooks::default()),
             tick_lock: tokio::sync::Mutex::new(()),
             quota_lock: tokio::sync::Mutex::new(()),
-            seen_registrar: Mutex::new(None),
         }
     }
 
@@ -323,14 +309,6 @@ impl Kernel {
 
     pub(crate) async fn quota_guard(&self) -> tokio::sync::MutexGuard<'_, ()> {
         self.quota_lock.lock().await
-    }
-
-    pub(crate) fn remember_registrar(&self, r: Option<Arc<dyn KernelRegistrar>>) {
-        *self.seen_registrar.lock().expect("kernel seen") = r;
-    }
-
-    pub(crate) fn seen_registrar(&self) -> Option<Arc<dyn KernelRegistrar>> {
-        self.seen_registrar.lock().expect("kernel seen").clone()
     }
 
     // ---- 运行记录 ----
@@ -465,11 +443,23 @@ impl Kernel {
             }
             let mut checks = match modules::checks(state, m.name).await {
                 Ok(v) => v,
-                Err(e) => vec![Check::new(
-                    "校验本身出错",
-                    false,
-                    take_chars(&e.to_string(), 200),
-                )],
+                Err(e) => {
+                    // 校验函数自己出错（取数失败、库里的数据被改坏）是模块代码的问题，和 tick 抛异常一样记 Bug
+                    // （「注意」级，和旧版一致；后台「模块」页同时会标出「校验本身出错」）。
+                    // 下面「校验没通过」不记：后台「模块」页和总览提醒已经标出，再记只会成为永久噪音
+                    let source = format!("module:{}:checks", m.name);
+                    state.bugs.capture(crate::bugs::Report {
+                        source: &source,
+                        error: Some((&e.ty, &e.msg)),
+                        level: "warn",
+                        ..Default::default()
+                    });
+                    vec![Check::new(
+                        "校验本身出错",
+                        false,
+                        take_chars(&e.to_string(), 200),
+                    )]
+                }
             };
             for c in checks.iter_mut() {
                 if c.level.is_empty() {
@@ -482,20 +472,6 @@ impl Kernel {
             );
             for c in checks {
                 if !c.ok {
-                    if m.report_bugs {
-                        let title = take_chars(
-                            &format!("交叉校验不一致：{} · {}：{}", m.title, c.name, c.detail),
-                            200,
-                        )
-                        .to_string();
-                        let source = format!("check:{}:{}", m.name, c.name);
-                        state.bugs.capture(crate::bugs::Report {
-                            source: &source,
-                            title: &title,
-                            level: "warn",
-                            ..Default::default()
-                        });
-                    }
                     bad.push((m.name.to_string(), c));
                 }
             }

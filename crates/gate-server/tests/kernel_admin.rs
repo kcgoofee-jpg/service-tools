@@ -4,8 +4,11 @@
 
 mod common;
 use common::*;
+use futures::future::BoxFuture;
 use gate_db::repo::keys::NewKey;
+use gate_server::kernel::{KernelRegistrar, RegistrarSettings};
 use serde_json::{Value, json};
+use std::sync::Arc;
 
 struct Api<'a> {
     env: &'a Env,
@@ -226,7 +229,7 @@ async fn modules_list_toggle_and_run() {
     member(&e, 5).await;
     let api = Api::login(&e).await;
 
-    // 还没跑过：七个模块按登记顺序，面板参数是实时读的
+    // 还没跑过：六个模块按登记顺序，面板参数是实时读的
     let (status, v) = api.json("GET", "/modules", None).await;
     assert_eq!(status, 200);
     let mods = v["modules"].as_array().unwrap();
@@ -239,8 +242,7 @@ async fn modules_list_toggle_and_run() {
             "allocation",
             "autopilot",
             "risk",
-            "registration",
-            "registration_ready"
+            "registration"
         ]
     );
     let cap = &mods[1];
@@ -260,7 +262,6 @@ async fn modules_list_toggle_and_run() {
         mods[5]["enabled"], false,
         "领 Key 的开关就是 register_open，默认关"
     );
-    assert_eq!(mods[6]["params"][1]["value"], "—");
 
     // 手动跑一轮：启用的模块都有运行记录，校验结果挂在各自名下
     let (status, v) = api.json("POST", "/modules/run", None).await;
@@ -362,6 +363,86 @@ async fn modules_list_toggle_and_run() {
     );
 }
 
+/// 名额 1、已领 5：「已领人数 ≤ 名额」不通过。
+struct Overbooked;
+
+impl KernelRegistrar for Overbooked {
+    fn settings(&self) -> BoxFuture<'_, Result<RegistrarSettings, String>> {
+        Box::pin(async { Ok(RegistrarSettings { max_users: 1 }) })
+    }
+    fn count_active(&self) -> BoxFuture<'_, Result<i64, String>> {
+        Box::pin(async { Ok(5) })
+    }
+}
+
+async fn bug_sources(env: &Env) -> Vec<String> {
+    settle().await;
+    env.state
+        .db
+        .list_error_events(true, 100)
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| r["source"].as_str().unwrap_or("").to_string())
+        .collect()
+}
+
+#[tokio::test]
+async fn failing_checks_are_shown_in_the_modules_page_but_not_filed_as_bugs() {
+    let e = setup(&[]).await;
+    let api = Api::login(&e).await;
+    e.state.kernel.set_registrar(Some(Arc::new(Overbooked)));
+    let (status, _) = api
+        .json(
+            "PUT",
+            "/modules/registration",
+            Some(json!({"enabled": true})),
+        )
+        .await;
+    assert_eq!(status, 200);
+    let (status, v) = api.json("POST", "/modules/run", None).await;
+    assert_eq!(status, 200);
+    let reg = v["modules"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["name"] == "registration")
+        .unwrap();
+    let check = &reg["last"]["checks"][0];
+    assert_eq!(check["name"], "已领人数 ≤ 名额");
+    assert_eq!(
+        (&check["ok"], &check["level"]),
+        (&json!(false), &json!("bad"))
+    );
+    assert_eq!(check["detail"], "5 / 1");
+    // 后台「模块」页和总览提醒已经标出来了：不再另记一条永远处理不完的 Bug（docs/v3-deviations.md #44）
+    let sources = bug_sources(&e).await;
+    assert!(sources.is_empty(), "校验不通过不该记 Bug：{sources:?}");
+}
+
+#[tokio::test]
+async fn a_check_that_itself_errors_is_still_a_bug() {
+    let e = setup(&[]).await;
+    // 算法状态被写坏：分配模块的校验函数读它时抛 AttributeError（模块代码出错，不是「校验没通过」）
+    e.state
+        .db
+        .set_setting("quota_algo_last", "5")
+        .await
+        .unwrap();
+    let mut last = serde_json::Map::new();
+    let bad = e.state.kernel.check_all(&e.state, &mut last).await.unwrap();
+    assert!(
+        bad.iter()
+            .any(|(m, c)| m == "allocation" && c.name == "校验本身出错"),
+        "{bad:?}"
+    );
+    assert_eq!(
+        last["allocation"]["checks"][0]["name"],
+        json!("校验本身出错")
+    );
+    assert_eq!(bug_sources(&e).await, ["module:allocation:checks"]);
+}
+
 #[tokio::test]
 async fn modules_put_errors() {
     let e = setup(&[]).await;
@@ -415,12 +496,7 @@ async fn service_registrar_reads_settings_and_env_defaults() {
     .await;
     let reg = ServiceRegistrar(e.state.registration.clone().expect("注册服务配齐了"));
     let s = reg.settings().await.unwrap();
-    assert_eq!(
-        (s.max_users, s.daily_images, s.daily_v5),
-        (20, 80, 7),
-        "没有后台设置时用环境默认值"
-    );
-    assert_eq!(reg.env_defaults(), (80, 7, 20));
+    assert_eq!(s.max_users, 20, "没有后台设置时用环境默认值");
     assert_eq!(reg.count_active().await.unwrap(), 0);
     // 后台保存的优先
     e.state

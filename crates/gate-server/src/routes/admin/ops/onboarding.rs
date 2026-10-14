@@ -1,4 +1,4 @@
-//! 自助领 Key、全局功能开关、生成记录开关，以及首页「加入 Discord」按钮、交叉校验的「站长已确认」。
+//! 自助领 Key、全局功能开关、生成记录开关，以及首页「加入 Discord」按钮。
 
 use super::upstream_health;
 use crate::action_log::log_action;
@@ -10,19 +10,13 @@ use crate::session::AdminSession;
 use crate::state::AppState;
 use axum::Router;
 use axum::extract::{Request, State};
-use axum::routing::{get, post, put};
+use axum::routing::{get, put};
 use gate_core::features::{self, FEATURES};
+use gate_core::pyval;
 use gate_core::site_flags::{self, HOME_JOIN_OPEN};
-use gate_core::{pyext, pyval};
 use serde_json::{Map, Value, json};
 
 const BODY_LIMIT: usize = 1024 * 1024;
-
-/// 交叉校验的「站长已确认」键 → 说明（旧版 `_ACK_CHECKS`）。
-const ACK_CHECKS: [(&str, &str); 2] = [
-    ("v5_oversell", "V5 每人额度×人数 ≤ 全站上限"),
-    ("registration_ready", "每人承诺 ≤ 全站日容量"),
-];
 
 pub(super) fn router() -> Router<AppState> {
     Router::new()
@@ -34,7 +28,6 @@ pub(super) fn router() -> Router<AppState> {
             "/admin/api/home/join",
             get(home_join_get).post(home_join_set),
         )
-        .route("/admin/api/checks/ack", post(checks_ack))
 }
 
 /// 后台「新建 Key」弹窗的默认功能：沿用「新成员默认开通的功能」（默认只有文生图），而不是全部功能。
@@ -152,7 +145,7 @@ async fn set_audit(State(state): State<AppState>, _s: AdminSession, req: Request
     Ok(ok_json(&snapshot(&state).await?))
 }
 
-// ------------------------------------------------------------------ 首页加入按钮 / 交叉校验确认
+// ------------------------------------------------------------------ 首页加入按钮
 
 /// 首页「加入 Discord」按钮开关（独立于领 Key 开关 register_open）。
 async fn home_join_get(State(state): State<AppState>, _s: AdminSession) -> ApiResult {
@@ -185,39 +178,6 @@ async fn home_join_set(State(state): State<AppState>, _s: AdminSession, req: Req
     )
     .await;
     Ok(logged(ok_json(&json!({"ok": true, "open": on}))))
-}
-
-/// 结构性交叉校验的「站长已确认」：确认后该校验转绿（数字仍显示），不再每 10 分钟记一条 warn。
-async fn checks_ack(State(state): State<AppState>, _s: AdminSession, req: Request) -> ApiResult {
-    let (parts, body) = req.into_parts();
-    let body = read_json_body(&parts.headers, body, BODY_LIMIT).await?;
-    let key = body.get("key").map(pyext::py_str).unwrap_or_default();
-    let Some((_, label)) = ACK_CHECKS.iter().find(|(k, _)| *k == key) else {
-        return Err(HttpError::new(422, "未知的校验键").into());
-    };
-    let on = body.get("on").is_none_or(pyval::truthy);
-    // 记下确认的时间（服务器本地时间，如「10-15 00:19」）；取消确认写空串
-    let stamp = if on {
-        state.clock.format(state.now(), "%m-%d %H:%M")
-    } else {
-        String::new()
-    };
-    state.db.set_setting(&format!("ack_{key}"), &stamp).await?;
-    log_action(
-        &state.db,
-        &super::super::actor(&state, &parts),
-        if on {
-            "站长确认交叉校验"
-        } else {
-            "取消确认交叉校验"
-        },
-        label,
-        "",
-        true,
-        state.now(),
-    )
-    .await;
-    Ok(logged(ok_json(&json!({"ok": true, "on": on}))))
 }
 
 /// 处理函数已经写了一条更具体的操作日志：告诉中间件别再记一条「POST /…」。
