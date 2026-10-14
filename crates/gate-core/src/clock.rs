@@ -30,10 +30,14 @@ impl Clock {
     }
 
     fn zoned(&self, ts: f64) -> jiff::Zoned {
-        // fromtimestamp 对小数秒向下取整到微秒；日期只看到秒级，用 floor 足够
-        let secs = ts.floor() as i64;
-        let nanos = ((ts - ts.floor()) * 1e9).round() as i32;
-        Timestamp::new(secs, nanos.min(999_999_999))
+        // 与 datetime.fromtimestamp 一致：小数秒按「半偶」舍入到微秒（可能进位到下一秒）
+        let mut secs = ts.floor();
+        let mut us = ((ts - secs) * 1e6).round_ties_even();
+        if us >= 1e6 {
+            secs += 1.0;
+            us -= 1e6;
+        }
+        Timestamp::new(secs as i64, (us as i32) * 1000)
             .unwrap_or(Timestamp::UNIX_EPOCH)
             .to_zoned(self.tz.clone())
     }
