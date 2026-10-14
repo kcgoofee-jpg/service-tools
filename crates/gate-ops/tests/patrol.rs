@@ -27,6 +27,7 @@ fn cfg(dir: &Path) -> Config {
         cooldown: 1800,
         stale_seconds: 2700,
         api_base: "http://127.0.0.1:1".into(),
+        containers: vec!["nai-gate".into(), "nai-gate-discord".into(), "caddy".into()],
     }
 }
 
@@ -59,9 +60,9 @@ fn real_now() -> f64 {
 fn healthy_infra() -> Infra {
     Infra {
         containers: Some(vec![
-            ("nai-gate", true),
-            ("nai-gate-discord", true),
-            ("caddy", true),
+            ("nai-gate".to_string(), true),
+            ("nai-gate-discord".to_string(), true),
+            ("caddy".to_string(), true),
         ]),
         health_code: 200,
         queue: json!({"global": {"waiting": 0, "active": 1}, "image_cooldown_remaining": 0}),
@@ -118,9 +119,9 @@ fn queue_status_texts() {
 fn infra_rows_and_thresholds() {
     let infra = Infra {
         containers: Some(vec![
-            ("nai-gate", true),
-            ("nai-gate-discord", false),
-            ("caddy", true),
+            ("nai-gate".to_string(), true),
+            ("nai-gate-discord".to_string(), false),
+            ("caddy".to_string(), true),
         ]),
         health_code: 0,
         queue: json!({}),
@@ -1133,9 +1134,9 @@ async fn exit_codes_follow_worst_severity() {
 
     let mut red = healthy_infra();
     red.containers = Some(vec![
-        ("nai-gate", false),
-        ("nai-gate-discord", true),
-        ("caddy", true),
+        ("nai-gate".to_string(), false),
+        ("nai-gate-discord".to_string(), true),
+        ("caddy".to_string(), true),
     ]);
     assert_eq!(
         run_with(

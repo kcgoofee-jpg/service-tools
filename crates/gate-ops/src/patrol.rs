@@ -145,6 +145,8 @@ pub struct Config {
     /// 45 分钟没再出现 = 旧记录，不告警
     pub stale_seconds: i64,
     pub api_base: String,
+    /// 要检查的容器（第一个是网关，重启记录按它算）。`NAI_GATE_CONTAINERS` 逗号分隔。
+    pub containers: Vec<String>,
 }
 
 impl Config {
@@ -167,6 +169,11 @@ impl Config {
             cooldown: int("PATROL_COOLDOWN", 1800)?,
             stale_seconds: int("PATROL_STALE", 2700)?,
             api_base: discord::api_base_from_env(),
+            containers: get("NAI_GATE_CONTAINERS", "owl-gate,owl-naimei,caddy")
+                .split(',')
+                .map(|c| c.trim().to_string())
+                .filter(|c| !c.is_empty())
+                .collect(),
         })
     }
 }
@@ -233,7 +240,7 @@ fn setting_num(conn: &Connection, key: &str, default: i64) -> rusqlite::Result<i
 #[derive(Debug)]
 pub struct Infra {
     /// None = 读不到容器状态（docker 不可用）
-    pub containers: Option<Vec<(&'static str, bool)>>,
+    pub containers: Option<Vec<(String, bool)>>,
     pub health_code: u16,
     pub queue: Value,
     /// (可用内存 MB, 磁盘已用 %)；Err = 旧版会抛的异常类名
@@ -283,15 +290,15 @@ async fn http_json(http: &reqwest::Client, url: &str) -> Value {
     }
 }
 
-async fn docker_running() -> Option<Vec<(&'static str, bool)>> {
+async fn docker_running(wanted: &[String]) -> Option<Vec<(String, bool)>> {
     let out = run_cmd("docker", &["ps", "--format", "{{.Names}}"], 10)
         .await
         .ok()?;
     let names: Vec<&str> = out.split_whitespace().collect();
     Some(
-        ["nai-gate", "nai-gate-discord", "caddy"]
-            .into_iter()
-            .map(|n| (n, names.contains(&n)))
+        wanted
+            .iter()
+            .map(|n| (n.clone(), names.contains(&n.as_str())))
             .collect(),
     )
 }
@@ -325,7 +332,7 @@ async fn read_resources() -> std::result::Result<(i64, i64), &'static str> {
 
 pub async fn gather_infra(cfg: &Config, http: &reqwest::Client) -> Infra {
     Infra {
-        containers: docker_running().await,
+        containers: docker_running(&cfg.containers).await,
         health_code: http_code(http, &cfg.health_url).await,
         queue: http_json(http, &cfg.queue_url).await,
         resources: read_resources().await,
@@ -1383,7 +1390,8 @@ pub async fn run(cfg: &Config, args: &Args) -> Result<i32> {
         .timeout(Duration::from_secs(5))
         .build()?;
     let infra = gather_infra(cfg, &http).await;
-    let restarts = restart_history(&cfg.state_dir, container_started_at("nai-gate").await);
+    let gate = cfg.containers.first().map_or("owl-gate", String::as_str);
+    let restarts = restart_history(&cfg.state_dir, container_started_at(gate).await);
     run_with(
         cfg,
         args,

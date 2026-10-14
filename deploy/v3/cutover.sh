@@ -2,6 +2,7 @@
 # 3.0 切换 / 回滚（在服务器上以 root 运行）。
 #
 #   deploy/v3/cutover.sh load <owl-gate.tar.gz>   载入 CI 构建的镜像：旧的 current 改名 previous，新的成为 current
+#   deploy/v3/cutover.sh install-ops <nai-ops>     安装宿主机用的运维命令（静态二进制，巡检要用宿主机的 docker / 磁盘 / .env）
 #   deploy/v3/cutover.sh up                        2.x → 3.0：备份库 → 停 2.x → 起 3.0 → 健康检查 + 冒烟，失败自动回滚
 #   deploy/v3/cutover.sh rollback                  3.0 → 2.x：停 3.0 → 起 2.x 原容器（库是兼容的，只增不减）
 #   deploy/v3/cutover.sh previous                  3.0 回到上一版 3.0 镜像（owl-gate:previous）
@@ -37,9 +38,10 @@ patrol_v3() {
   mkdir -p "$(dirname "$PATROL_DROPIN")"
   cat >"$PATROL_DROPIN" <<'UNIT'
 [Service]
-# 3.0：巡检在网关容器里跑（同一份环境变量、只读库）。0 正常 / 1 注意 / 2 危险；3 = 巡检自身出错，算失败。
+# 3.0：巡检用 nai-ops（宿主机静态二进制，工作目录仍是 /opt/service-tools，读同一份 .env 和 data/）。
+# 0 正常 / 1 注意 / 2 危险；3 = 巡检自身出错，算失败。
 ExecStart=
-ExecStart=/usr/bin/docker exec owl-gate /usr/local/bin/nai-ops patrol --oneline --alert
+ExecStart=/opt/owl/nai-ops patrol --oneline --alert
 SuccessExitStatus=
 SuccessExitStatus=0 1 2
 UNIT
@@ -68,9 +70,17 @@ cmd_load() {
   log "✓ owl-gate:current = $loaded（$(docker image inspect -f '{{.Id}}' owl-gate:current | cut -c8-19)）"
 }
 
+cmd_install_ops() {
+  local bin=${1:?用法：cutover.sh install-ops <nai-ops>}
+  "$bin" --version >/dev/null || die "$bin 在这台机器上跑不起来"
+  install -m 755 "$bin" "$OWL_DIR/nai-ops"
+  log "✓ $OWL_DIR/nai-ops = $("$OWL_DIR/nai-ops" --version)"
+}
+
 cmd_up() {
   docker image inspect owl-gate:current >/dev/null 2>&1 || die "先 load 镜像"
   [[ -f $OWL_DIR/compose.yml ]] || die "缺 $OWL_DIR/compose.yml"
+  [[ -x $OWL_DIR/nai-ops ]] || die "先 install-ops（巡检要用）"
   mkdir -p "$BACKUPS"
   local snap
   snap="$BACKUPS/nai_gate-$(date +%Y%m%d-%H%M%S).db"
@@ -132,6 +142,7 @@ cmd_status() {
 
 case ${1:-status} in
   load) shift; cmd_load "$@" ;;
+  install-ops) shift; cmd_install_ops "$@" ;;
   up) cmd_up ;;
   rollback) cmd_rollback ;;
   previous) cmd_previous ;;

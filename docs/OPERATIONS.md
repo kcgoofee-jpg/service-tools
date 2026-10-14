@@ -16,13 +16,14 @@
 
 ```bash
 # 本机：下载最新一次 CI 构建的镜像附件
-gh run download --repo kcgoofee-jpg/service-tools -n owl-gate-image -D /tmp/owl-image
-scp /tmp/owl-image/owl-gate.tar.gz root@$OWL_HOST:/opt/owl/
+gh run download --repo kcgoofee-jpg/service-tools -n owl-gate-image -n nai-ops-linux-musl -D /tmp/owl-image
+scp /tmp/owl-image/owl-gate-image/owl-gate.tar.gz /tmp/owl-image/nai-ops-linux-musl/nai-ops root@$OWL_HOST:/opt/owl/
 ```
 
 ```bash
 # 服务器
 /opt/owl/cutover.sh load /opt/owl/owl-gate.tar.gz   # 新镜像成为 owl-gate:current，上一版留作 :previous
+/opt/owl/cutover.sh install-ops /opt/owl/nai-ops
 cd /opt/owl && docker compose -p owl --env-file /opt/service-tools/.env -f compose.yml up -d
 /opt/owl/cutover.sh status
 ```
@@ -48,14 +49,15 @@ compose 的 `stop_grace_period` 是 120 秒，所以发布时进行中的图不�
 
 ## 巡检
 
-`nai-patrol.timer` 每 5 分钟跑一次。3.0 下由 systemd drop-in（`/etc/systemd/system/nai-patrol.service.d/v3.conf`）改为在网关容器里执行：
+`nai-patrol.timer` 每 5 分钟跑一次。3.0 下由 systemd drop-in（`/etc/systemd/system/nai-patrol.service.d/v3.conf`）改为宿主机上的
+`/opt/owl/nai-ops patrol`（CI 产出的静态二进制 `nai-ops-linux-musl`，用 `cutover.sh install-ops` 安装；巡检要看宿主机的 docker、磁盘和 .env）：
 
 - 退出码 0 正常 / 1 注意 / 2 危险：都算执行成功，告警由巡检自己发；
 - 退出码 3 = 巡检自身出错（以前崩溃也被当成成功，看不出来）。
 
 ```bash
 journalctl -u nai-patrol -n 20 --no-pager
-docker exec owl-gate nai-ops patrol            # 手动跑一次，完整报告
+cd /opt/service-tools && /opt/owl/nai-ops patrol   # 手动跑一次，完整报告
 ```
 
 ## 备份与快照
