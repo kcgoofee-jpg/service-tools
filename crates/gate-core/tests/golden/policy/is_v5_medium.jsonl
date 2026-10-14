@@ -1,0 +1,53 @@
+{"fn":"is_v5_medium","args":["nai-diffusion-4-5-full"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["nai-diffusion-4-5-curated"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["nai-diffusion-4-5-full-inpainting"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["nai-diffusion-4-5-curated-inpainting"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["nai-diffusion-4-5"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["nai-diffusion-4-full"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["nai-diffusion-4-curated-preview"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["nai-diffusion-4-curated"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["nai-diffusion-4"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["nai-diffusion-4-full-inpainting"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["nai-diffusion-4-curated-inpainting"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["nai-diffusion-3"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["nai-diffusion-3-inpainting"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["nai-diffusion-furry-3"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["nai-diffusion-furry-3-inpainting"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["nai-diffusion-2"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["nai-diffusion"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["safe-diffusion"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["nai-diffusion-furry"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["nai-diffusion-5"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["nai-diffusion-5-full"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["nai-diffusion-5-curated"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["nai-diffusion-5-full-medium"],"out":true,"err":null}
+{"fn":"is_v5_medium","args":["nai-diffusion-5-full-inpainting"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["nai-diffusion-5-full-medium-inpainting"],"out":true,"err":null}
+{"fn":"is_v5_medium","args":["nai-v5"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["nai-v5-full"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["NAI-Diffusion-4-5-Full"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":[" nai-diffusion-3 "],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["nai-diffusion-6"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["made-up"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":[""],"out":false,"err":null}
+{"fn":"is_v5_medium","args":[" "],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["nai-diffusion-4-5-fullx"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["nai-diffusion-45"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["nai-diffusion-5x"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["nai-v5x"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["nai-diffusion-3-"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["nai-diffusion-furry-3-x"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["　nai-diffusion-5-full　"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["NAI-V5"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["İ"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["Σ"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["K"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["nai-diffusion-4-5\n"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["text-model"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["kayra-v1"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":[""],"out":false,"err":null}
+{"fn":"is_v5_medium","args":[null],"out":false,"err":null}
+{"fn":"is_v5_medium","args":[" nai-diffusion-5-full-medium "],"out":true,"err":null}
+{"fn":"is_v5_medium","args":["NAI-DIFFUSION-5-FULL-MEDIUM-INPAINTING"],"out":true,"err":null}
+{"fn":"is_v5_medium","args":["nai-diffusion-5-full-medium-x"],"out":false,"err":null}
+{"fn":"is_v5_medium","args":["nai-diffusion-5-medium"],"out":false,"err":null}

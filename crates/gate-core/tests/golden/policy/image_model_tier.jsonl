@@ -1,0 +1,366 @@
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-full"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-curated"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-full-inpainting"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-curated-inpainting"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-full"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-curated-preview"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-curated"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-full-inpainting"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-curated-inpainting"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-3"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-3-inpainting"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-furry-3"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-furry-3-inpainting"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-2"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["safe-diffusion"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-furry"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5-full"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5-curated"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5-full-medium"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5-full-inpainting"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5-full-medium-inpainting"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["nai-v5"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["nai-v5-full"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["NAI-Diffusion-4-5-Full"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":[" nai-diffusion-3 "],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-6"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["made-up"],"out":null,"err":null}
+{"fn":"image_model_tier","args":[""],"out":null,"err":null}
+{"fn":"image_model_tier","args":[" "],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-fullx"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-45"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5x"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-v5x"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-3-"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-furry-3-x"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["　nai-diffusion-5-full　"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["NAI-V5"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["İ"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["Σ"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["K"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5\n"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["text-model"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["kayra-v1"],"out":null,"err":null}
+{"fn":"image_model_tier","args":[""],"out":null,"err":null}
+{"fn":"image_model_tier","args":[" "],"out":null,"err":null}
+{"fn":"image_model_tier","args":[null],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-x"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-3x"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-2-x"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-furry-3"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-furry-3-"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-furry-4"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-furry"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-furry-"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["safe-diffusion-"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["NAI-DIFFUSION-3"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["Safe-Diffusion"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4 "],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":[" nai-diffusion-4"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-curated-"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":[" nai-diffusion-3 -x"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-6-inpainting"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["Σ "],"out":null,"err":null}
+{"fn":"image_model_tier","args":["kayra-v1-"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-v5-fullx"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4x"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["text-model-inpainting"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-curated-previewx"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-full-inpainting-inpainting"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-2 "],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5-fullx"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-2-"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["made-up\n"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-curated"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5x"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5x"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["İ "],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-3-"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5-full-medium\n"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5-full-mediumx"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-x"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-full-inpainting "],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["　nai-diffusion-5-full　-"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5x-inpainting"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["Σ-inpainting"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-3-"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-3--inpainting"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["text-model"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-2 "],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-curated"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-full-inpainting-inpainting"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-2-inpainting"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-3--x"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-3-inpaintingx"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-3-inpaintingx"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-v5-full "],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion "],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-furry-3-inpainting"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["text-model"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-full-inpaintingx"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-curated-x"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["K\n"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-v5-full-inpainting"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["NAI-V5"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-furry-3-inpainting"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-v5x"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["Σx"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["　nai-diffusion-5-full　-"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-full-inpainting-inpainting"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5\n-"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["safe-diffusion"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-curated-inpaintingx"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-fullx-x"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-3 "],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5-full-x"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-full"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["K "],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-furry-3-x"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["made-up-inpainting"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-v5x-x"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-3-inpainting"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["made-up-"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5-full-medium "],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5-full-inpainting-"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-curated-x"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5x "],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-45 "],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-inpainting"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-furryx"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-full-"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-2-inpainting"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["safe-diffusion "],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-curated-previewx"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["NAI-Diffusion-4-5-Full-inpainting"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-curated-preview "],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-furry-"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-furry-3-x-x"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["safe-diffusion"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-v5x-inpainting"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["safe-diffusion "],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["NAI-Diffusion-4-5-Full\n"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-45x"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5-curated-inpainting"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["made-up-x"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-furry-3-x-x"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["NAI-V5-x"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["made-up"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-v5-x"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-curated-inpainting\n"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-curated-inpainting-"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4x"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-curated"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-45 "],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-full-inpainting-inpainting"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-45-inpainting"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-3--"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5-full-inpainting-"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4\n"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-3-inpaintingx"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-fullx"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4\n"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-curated"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-furry-"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-curated "],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion\n"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5-full-medium-inpainting\n"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["Σ-x"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-3--inpainting"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["text-modelx"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":[" nai-diffusion-3 \n"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-inpainting"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4x"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5x-inpainting"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-45-inpainting"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["NAI-Diffusion-4-5-Full-inpainting"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-v5-inpainting"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5\n"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-45x"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["NAI-Diffusion-4-5-Full-x"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["İ-inpainting"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5-curated-inpainting"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-2 "],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-3--"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-3"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["made-up "],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-furry\n"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5-full-inpainting"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-6-inpainting"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-furry-3-inpaintingx"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5-full-medium-inpainting-inpainting"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-3-inpainting-inpainting"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["NAI-Diffusion-4-5-Full-x"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["-inpainting"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-3"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["　nai-diffusion-5-full　"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-full"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":[" nai-diffusion-3 -x"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-45"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-6-inpainting"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-3-x"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-full-inpainting-"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5\n"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["made-up\n"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-curated-inpainting-"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["NAI-V5x"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-furry-3-xx"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5-full-inpainting-"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["İ-"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-furry-3-inpainting"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-3-"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-full-inpainting-inpainting"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-furry-3-inpainting-x"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":[""],"out":null,"err":null}
+{"fn":"image_model_tier","args":["kayra-v1-inpainting"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["Σ-inpainting"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-3-inpainting-x"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-curated-inpaintingx"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5-full-medium-inpaintingx"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":[" nai-diffusion-3 -x"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-3-inpaintingx"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-curated-inpainting "],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-45-"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-full-inpainting"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-6-inpainting"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5\n\n"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-v5-full\n"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5-full "],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["made-up\n"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["Σ-inpainting"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-curated-inpainting-inpainting"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-x"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-45-inpainting"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-2-"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-2\n"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-3-inpainting\n"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-curated-inpaintingx"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-furry-3-x\n"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["safe-diffusion-inpainting"],"out":null,"err":null}
+{"fn":"image_model_tier","args":[" "],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-fullx"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-fullx"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["made-up "],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-furry-3x"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["　nai-diffusion-5-full　x"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["K "],"out":null,"err":null}
+{"fn":"image_model_tier","args":["text-model\n"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5-full-medium\n"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5-full-medium-inpainting-"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["Σx"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-furry-3-x\n"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-curated-"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5-curated-x"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-2x"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5\n "],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["safe-diffusion-inpainting"],"out":null,"err":null}
+{"fn":"image_model_tier","args":[" "],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-curated-inpainting-"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-full-inpainting-"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5x"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5-full-inpainting "],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-furry-3-xx"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["Σ\n"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["\n"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5\n"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["NAI-Diffusion-4-5-Full\n"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5x-x"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["İx"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4 "],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5-full-inpainting\n"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-3-x"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-furry "],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["safe-diffusion-inpainting"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-furry-3-"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-furry-3-inpainting "],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-full-inpainting-inpainting"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-v5-fullx"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-furry-3-inpainting"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-furry"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5\nx"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5xx"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-curated-inpainting "],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-curated "],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["K\n"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5-inpainting"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["nai-v5x-"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-3-x"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["Σ-"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["NAI-V5\n"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5-full"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-curated-inpainting"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5-full-medium-inpainting-inpainting"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["　nai-diffusion-5-full　x"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-fullx "],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-furry-inpainting"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["K "],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-3-"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5-full-medium"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-curated-inpainting"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-2\n"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-furry-"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["safe-diffusion\n"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-2-x"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":[""],"out":null,"err":null}
+{"fn":"image_model_tier","args":["text-model"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-furry-3-"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["NAI-V5"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-45 "],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-curated-inpainting\n"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-full-inpainting"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-v5x-x"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-curated"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["NAI-V5x"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-fullx\n"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-2x"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5-curated"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["İx"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["NAI-V5-inpainting"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-2\n"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5-curated "],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-fullx-inpainting"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":[" -"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-furry-3-inpainting\n"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["　nai-diffusion-5-full　"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":[" nai-diffusion-3 \n"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["NAI-Diffusion-4-5-Fullx"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-v5 "],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["kayra-v1"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5x\n"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-curated "],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-6-"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-furry-3\n"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-curated-inpainting-"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-curated-inpainting-inpainting"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-curated\n"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-full-"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-6\n"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-x"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-furry-3-inpainting-inpainting"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5-full-medium-inpainting-inpainting"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["x"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-2-"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-v5-full"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-furry-3-inpaintingx"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5\n-"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["NAI-V5-inpainting"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-5x"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-x"],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-v5\n"],"out":"v5","err":null}
+{"fn":"image_model_tier","args":["K-"],"out":null,"err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-4-5-fullx "],"out":"legacy","err":null}
+{"fn":"image_model_tier","args":["nai-diffusion-3-inpainting-inpainting"],"out":"legacy","err":null}
