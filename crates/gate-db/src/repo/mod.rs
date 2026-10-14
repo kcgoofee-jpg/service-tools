@@ -23,6 +23,7 @@ pub mod keys;
 pub mod misc;
 pub mod reconciliation;
 pub mod settings;
+pub mod share_state;
 pub mod upstream;
 pub mod usage;
 
