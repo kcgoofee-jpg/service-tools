@@ -31,6 +31,8 @@ pub struct UpstreamError {
     pub billing_uncertain: bool,
     /// 非出图通道的传输层错误：旧版直接把 httpx 异常抛给路由（变成 500 / 502），这里单独标记。
     pub transport: bool,
+    /// 拒绝原因码（账号保护挡住时带上 gate_core::reasons 的码；旧版靠 str 子类 Reason 携带）。
+    pub code: String,
 }
 
 impl UpstreamError {
@@ -40,6 +42,7 @@ impl UpstreamError {
             message: message.into(),
             billing_uncertain: false,
             transport: false,
+            code: String::new(),
         }
     }
     fn uncertain(status: u16, message: impl Into<String>, billing_uncertain: bool) -> Self {
@@ -48,6 +51,7 @@ impl UpstreamError {
             message: message.into(),
             billing_uncertain,
             transport: false,
+            code: String::new(),
         }
     }
     fn internal(e: impl std::fmt::Display) -> Self {
@@ -56,6 +60,7 @@ impl UpstreamError {
             message: format!("内部错误：{e}"),
             billing_uncertain: false,
             transport: true,
+            code: String::new(),
         }
     }
 }
@@ -72,12 +77,12 @@ pub trait Hooks: Send + Sync + 'static {
 
     /// 是否接了账号保护（旧版 `self.guard is not None`）。
     fn has_guard(&self) -> bool;
-    /// 账号保护：这把 Token 现在能不能出图；不能时返回给成员的原因。
+    /// 账号保护：这把 Token 现在能不能出图；不能时返回 (给成员的原因, 原因码)。
     fn token_block_reason<'a>(
         &'a self,
         token_id: &'a str,
         day: &'a str,
-    ) -> BoxFuture<'a, HookResult<Option<String>>>;
+    ) -> BoxFuture<'a, HookResult<Option<(String, String)>>>;
     /// 账号保护：记一次出图开始（按张数）。
     fn record_start(&self, token_id: &str, images: i64);
     /// 账号保护：本次出图间隔的随机抖动（秒）。
@@ -773,10 +778,10 @@ impl<H: Hooks> NaiClient<H> {
                 }
             }
             if open.is_empty() {
-                return Err(UpstreamError::new(
-                    429,
-                    reasons.into_iter().next().unwrap_or_default(),
-                ));
+                let (text, code) = reasons.into_iter().next().unwrap_or_default();
+                let mut e = UpstreamError::new(429, text);
+                e.code = code;
+                return Err(e);
             }
             usable = open;
         }
