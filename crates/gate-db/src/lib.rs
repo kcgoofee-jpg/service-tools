@@ -5,15 +5,19 @@
 //!   遇到 `SQLITE_BUSY`（备份脚本、旧版 Python 同时开着库等）按旧版的节奏重试 4 次。
 //! - **只读连接池**（默认 2 个）：WAL 下读不阻塞写，查询放在 `spawn_blocking` 里跑。
 //!
+//! `repo` 模块是旧版 `class Database`（app/database.py）的逐方法移植，`tests/repo_golden.rs` 用
+//! `tools/parity/golden/db_methods.py` 在旧 Python 上生成的夹具逐方法对拍（返回值 + 整库内容 + 原图目录）。
+//!
 //! 旧版的问题（共享主连接上一条语句失败后事务不结束 → 之后所有写都 locked，见 database.py
 //! `_rollback_on_error`）在这里不存在：事务由 `rusqlite::Transaction` 的 Drop 自动回滚。
 
 pub mod bootstrap;
+pub mod repo;
 pub mod value;
 
 use rusqlite::{Connection, OpenFlags, Transaction, TransactionBehavior};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 use tokio::sync::oneshot;
 
@@ -25,6 +29,11 @@ pub enum DbError {
     WriterGone,
     #[error("读任务异常退出")]
     ReaderPanicked,
+    /// 调用参数不合法（对应旧版里抛 ValueError / KeyError / 绑定参数失败的场景）。
+    #[error("参数错误：{0}")]
+    Invalid(String),
+    #[error("文件操作失败：{0}")]
+    Io(#[from] std::io::Error),
 }
 
 pub type Result<T> = std::result::Result<T, DbError>;
@@ -39,6 +48,10 @@ pub struct Db {
 
 struct Inner {
     path: PathBuf,
+    /// 审计原图目录：`<库所在目录>/audit_images`（旧版 `Database.image_dir`）。
+    image_dir: PathBuf,
+    /// 写进 usage_log.ver 的网关版本（旧版模块级 `RULE_VERSION`，启动时由 main 设置）。
+    rule_version: RwLock<String>,
     writer: std::sync::mpsc::SyncSender<Job>,
     readers: Mutex<Vec<Connection>>,
     reader_count: usize,
@@ -89,9 +102,18 @@ impl Db {
             })
             .expect("能创建写线程");
 
+        // 旧版：Path(path).resolve().parent / "audit_images"
+        let abs = std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+        let image_dir = abs
+            .parent()
+            .map(|p| p.join("audit_images"))
+            .unwrap_or_else(|| PathBuf::from("audit_images"));
+
         Ok(Self {
             inner: Arc::new(Inner {
                 path,
+                image_dir,
+                rule_version: RwLock::new(String::new()),
                 writer: tx,
                 reader_count: pool.len(),
                 readers: Mutex::new(pool),
@@ -101,6 +123,20 @@ impl Db {
 
     pub fn path(&self) -> &Path {
         &self.inner.path
+    }
+
+    /// 审计原图目录（与库放在一起）。
+    pub fn image_dir(&self) -> &Path {
+        &self.inner.image_dir
+    }
+
+    /// 设置写入 usage_log.ver 的网关版本（旧版启动时 `database.RULE_VERSION = ...`）。
+    pub fn set_rule_version(&self, version: impl Into<String>) {
+        *self.inner.rule_version.write().expect("版本锁") = version.into();
+    }
+
+    pub fn rule_version(&self) -> String {
+        self.inner.rule_version.read().expect("版本锁").clone()
     }
 
     /// 在写线程上执行一个事务；闭包返回 Err 或 panic 时整个事务回滚。

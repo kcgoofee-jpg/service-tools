@@ -14,9 +14,14 @@ thiserror.workspace = true
 tracing.workspace = true
 serde_json.workspace = true
 gate-core.workspace = true
+serde.workspace = true
+jiff.workspace = true
+rand.workspace = true
 
 [dev-dependencies]
 tempfile = "3"
+gate-golden = { path = "../gate-golden" }
+base64.workspace = true
 
 [lints]
 workspace = true

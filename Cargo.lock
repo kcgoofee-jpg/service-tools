@@ -856,8 +856,13 @@ dependencies = [
 name = "gate-db"
 version = "3.0.0"
 dependencies = [
+ "base64",
  "gate-core",
+ "gate-golden",
+ "jiff",
+ "rand 0.9.5",
  "rusqlite",
+ "serde",
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
