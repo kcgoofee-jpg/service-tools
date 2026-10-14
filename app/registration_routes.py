@@ -13,7 +13,7 @@ from . import site_flags
 from .action_log import log_action
 from .audit import MEMBER_DOWNLOAD_DAYS, audit_disclosure, audit_image_days
 from .policy import gen_key
-from .registration import KEY_SESSION_PREFIX, RegistrationError
+from .registration import RegistrationError
 
 router = APIRouter(prefix="/self-register")
 
@@ -341,7 +341,9 @@ def _parse_member(request: Request) -> Optional[tuple[str, str]]:
     try:
         if not _hmac.compare_digest(sig, good):
             return None
-        discord_id, exp, tag = payload.rsplit(":", 2)      # key:<id> 本身带冒号，从右边拆；旧格式（不带 Key 指纹）一律作废，重新登录
+        discord_id, exp, tag = payload.rsplit(":", 2)      # 旧格式（不带 Key 指纹）一律作废，重新登录
+        if not discord_id.isdigit():       # 10-14 起只有 Discord 登录：以前「Key 登录」签的 key:<id> 会话一律作废
+            return None
         return (discord_id, tag) if int(exp) > _time.time() else None
     except (ValueError, TypeError):
         return None
@@ -351,8 +353,7 @@ async def member_state(request: Request) -> tuple[Optional[str], Any]:
     """有效会话返回 (discord_id, Key 行)。会话签发时绑定了当时 Key 的指纹：泄露的 Key 被拿去登录后，
     成员 /resetkey 换新 Key，攻击者的会话随即失效，看不到新 Key（2026-10-10 审查 P0）。
 
-    首页首屏渲染也要用它（决定 <body class="authed haskey">），所以单独抽出来，且只查一次 Key。
-    discord_id 形如 key:<id> 的是「Key 登录」会话（Discord OAuth 回调修复期间与 OAuth 并存的备用入口）。"""
+    首页首屏渲染也要用它（决定 <body class="authed haskey">），所以单独抽出来，且只查一次 Key。"""
     parsed = _parse_member(request)
     if parsed is None:
         return None, None
@@ -419,49 +420,6 @@ async def login_callback(request: Request, code: str = "", state: str = ""):
     _set_cookie(resp, MEMBER_COOKIE, _sign_member(request, who["id"], exp, tag), SESSION_DAYS * 86400)
     resp.delete_cookie(STATE_COOKIE, path="/")
     await _log_bot(request, who["id"], "网页登录")
-    return resp
-
-
-class KeyLogin(BaseModel):
-    key: str = ""
-
-
-_KEY_LOGIN_FAILS: dict[str, list[float]] = {}     # 每个来源 IP 的失败时间（内存）：10 分钟内最多错 8 次
-
-
-@member_router.post("/login/key")
-async def login_with_key(request: Request, body: KeyLogin):
-    """用自己的 Key 登录首页（不走 Discord OAuth）：网页登录暂停期间也能看额度、打包下载原图。
-    只认已绑定 Discord 领取记录的 Key；会话按 discord_id 签发，之后 /resetkey 换 Key 也不掉线。"""
-    origin = request.headers.get("origin", "")
-    if origin and origin.split("://", 1)[-1] != request.headers.get("host", ""):
-        raise HTTPException(403, "只接受本站页面的登录")        # 挡登录 CSRF：外站不能把访客登进别人的会话
-    ip = request.client.host if request.client else "unknown"
-    now = _time.time()
-    if len(_KEY_LOGIN_FAILS) > 5000:          # 定期清掉过期的来源，避免换 IP 喷射时内存只增不减
-        for k in [k for k, v in _KEY_LOGIN_FAILS.items() if not v or now - v[-1] >= 600]:
-            _KEY_LOGIN_FAILS.pop(k, None)
-    fails = [t for t in _KEY_LOGIN_FAILS.get(ip, []) if now - t < 600]
-    if len(fails) >= 8:
-        raise HTTPException(429, "尝试次数太多，请 10 分钟后再试")
-    token = (body.key or "").strip()
-    gate = request.app.state.gate
-    row = await gate.db.get_key_by_token(token) if token.startswith("nai-") and len(token) <= 200 else None
-    reg = await gate.db._db.execute_fetchall(
-        "SELECT discord_id FROM discord_registrations WHERE key_id=?", (row["id"],)) if row is not None else []
-    # 没走 /register 的 Key（站长后台手动发、测试 Key、站长自己的 Key）也能登录：会话用 "key:<id>" 代替 discord_id
-    usable = row is not None and bool(row["enabled"])
-    unbound = usable and not reg
-    if not usable:
-        fails.append(now)
-        _KEY_LOGIN_FAILS[ip] = fails
-        raise HTTPException(401, "Key 不对，或这个 Key 已停用")
-    _KEY_LOGIN_FAILS.pop(ip, None)
-    discord_id = f"{KEY_SESSION_PREFIX}{row['id']}" if unbound else str(reg[0][0])
-    resp = JSONResponse({"ok": True})
-    exp = int(now) + SESSION_DAYS * 86400
-    _set_cookie(resp, MEMBER_COOKIE, _sign_member(request, discord_id, exp, _key_tag(row)), SESSION_DAYS * 86400)
-    await _log_bot(request, discord_id, "Key 登录网页")
     return resp
 
 
@@ -549,11 +507,6 @@ async def public_me(request: Request):
             out["timing"] = await gate.db.user_image_timing(key["id"])
         except Exception:
             out["timing"] = None
-        try:
-            if await service.is_unbound_invite(key["id"]):
-                out["invite_unbound"] = True
-        except Exception:
-            pass
     return JSONResponse(out, headers={"Cache-Control": "no-store"})
 
 
