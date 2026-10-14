@@ -109,7 +109,9 @@ async def test_public_me_returns_legacy_field():
     })
     req.app.state.gate.db.list_coupons = AsyncMock(return_value=[])
     req.app.state.gate.db.audit_image_count = AsyncMock(return_value=2)
+    req.app.state.gate.db.get_setting = AsyncMock(return_value="50")
     req.app.state.gate.guard.queue_view.return_value = {"mine": []}
+    req.app.state.gate.guard.reset_hour = 7
 
     mock_service = MagicMock()
     mock_service.registration_profile = AsyncMock(return_value={"id": "1234567890", "username": "alice"})
@@ -132,5 +134,6 @@ async def test_public_me_returns_legacy_field():
         assert body["today"]["legacy"] == 10
         assert body["today"]["images"] == 15
         assert body["today"]["v5"] == 5
+        assert body["today"]["daily_anlas"] == 50      # 没手动设置 → 全站默认 member_daily_anlas
     finally:
         rr._member_session = orig_session

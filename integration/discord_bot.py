@@ -109,12 +109,12 @@ def build_client() -> tuple[discord.Client, app_commands.CommandTree, discord.Ob
         if status != 200:
             await interaction.followup.send(str(data), ephemeral=True)
             return
-        lines = [f"今日图片：{data['images']} / {data['daily_images']}"
+        lines = [f"今日 V4.5：{data.get('legacy', data['images'])} / {data['daily_images']}"
                  + (f"（每天 {data['reset_hour']} 点重置）" if data.get("reset_hour") is not None else "")]
-        if data.get("daily_images_base"):
-            lines.append(f"（保底 {data['daily_images_base']} 张；超过后在全站空闲时可继续用到 {data['daily_images']} 张）")
         if data["daily_v5"]:
             lines.append(f"今日 V5：{data['v5']} / {data['daily_v5']}")
+        if data.get("daily_anlas"):
+            lines.append(f"今日 Anlas：{data.get('anlas', 0)} / {data['daily_anlas']}")
         if data.get("quiet_now"):
             lines.append(f"🌙 安静时段（{data.get('quiet_window', '')}）暂停出图，到点自动恢复")
         scope = "含 V5" if data["image_model_scope"] == "all" else "仅 V4.5 及以下"
