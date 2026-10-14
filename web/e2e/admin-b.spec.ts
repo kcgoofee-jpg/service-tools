@@ -2,27 +2,26 @@
  * 后台 B 组分区（上游 / 领 Key 与功能 / 额度与保护 / 模块 / Discord / 系统）的端到端检查：
  * 登录门、逐个分区无控制台报错 / 无障碍 / 窄屏不横向滚动、改一项设置并保存、危险操作的确认框。
  *
- * 前置：旧版后端 + 前端都在跑，E2E_BASE 指向前端（要用 localhost，后端按 ADMIN_ALLOWED_ORIGINS 校验 Origin）：
- *   GATE_PORT=18300 MOCK_PORT=18301 ADMIN_ALLOWED_ORIGINS=http://localhost:5176 tools/dev/run-legacy.sh /tmp/owl-dev-admin-b
- *   cd web && VITE_GATE=http://127.0.0.1:18300 pnpm exec vite --port 5176 --strictPort
- *   E2E_BASE=http://localhost:5176 pnpm exec playwright test e2e/admin-b.spec.ts
- * 会话直接用后端演示数据里生成的后台 Cookie（登录有限流：5 分钟 5 次，所以只在「登录门」里真登录一次，被限流就跳过）。
+ * 前置：后端（`cargo xtask dev`）+ 前端都在跑，E2E_BASE 指向前端（要用 localhost，后端按 ADMIN_ALLOWED_ORIGINS 校验 Origin）：
+ *   cargo xtask dev
+ *   cd web && pnpm exec vite --port 5174 --strictPort
+ *   E2E_BASE=http://localhost:5174 pnpm exec playwright test e2e/admin-b.spec.ts
+ * 会话直接用演示数据里生成的后台 Cookie（cookies.json，见 devEnv.ts；登录在开发环境里放宽了限流，
+ * 生产是 5 分钟 5 次，所以这里只在「登录门」里真登录一次，被限流就跳过）。
  * 截图（桌面 1280 / 手机 375，浅色 / 深色）写到 /tmp/owl-shots-admin-b/，不进仓库。
  *
  * 不会点发送公告 / 发测试告警 / 全站重置 / 清空原图 / 改密码 这类真正对外发消息或不可逆的按钮。
  * 用例会改设置再还原，所以同一文件里按顺序跑（共用配置是 fullyParallel）。
  */
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page, test } from "@playwright/test";
+import { readCreds } from "./devEnv";
 
 test.describe.configure({ mode: "default" });
 
 const SHOTS = process.env.E2E_SHOTS_DIR ?? "/tmp/owl-shots-admin-b";
-const CREDS = process.env.E2E_CREDS_FILE ?? "/tmp/owl-dev-admin-b/cookies.json";
-const creds: { admin?: string; admin_password?: string } = existsSync(CREDS)
-  ? JSON.parse(readFileSync(CREDS, "utf8"))
-  : {};
+const creds = readCreds();
 const PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? creds.admin_password ?? "";
 const COOKIE = process.env.E2E_ADMIN_COOKIE ?? creds.admin ?? "";
 
@@ -43,7 +42,7 @@ const SECTIONS = [
 
 type Collected = { errors: string[] };
 
-/** 收集控制台错误。旧版后端没有 SSE（/admin/api/events 404），外壳会自动退回定时刷新，这条不算。 */
+/** 收集控制台错误。实时推送（/admin/api/events）断线时外壳会自动退回定时刷新，这条不算。 */
 function collect(page: Page): Collected {
   const c: Collected = { errors: [] };
   page.on("console", (m) => {

@@ -8,7 +8,7 @@
 #       errors/signature.jsonl 是「3.5」「9.」「05」等记号随机拼成的模糊测试串，不查 IP。
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-paths=(crates/*/tests tools/parity tools/dev web/e2e web/src)
+paths=(crates/*/tests crates/xtask tools/parity web/e2e web/src)
 files=$(grep -rlE '[0-9]' "${paths[@]}" 2>/dev/null || true)
 [ -z "$files" ] && exit 0
 # shellcheck disable=SC2086

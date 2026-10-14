@@ -1,13 +1,10 @@
-import { existsSync, readFileSync } from "node:fs";
 import AxeBuilder from "@axe-core/playwright";
 import { type BrowserContext, expect, type Page, test } from "@playwright/test";
+import { COOKIES_FILE, readCreds } from "./devEnv";
 
 /** 问卷页端到端：用 Discord 会话识别身份，提交时带 Authorization: Bearer <me.key>。配置见 playwright.config.ts。 */
 
-const COOKIES = process.env.E2E_COOKIES ?? "/tmp/owl-dev-landing/cookies.json";
-const member: { member?: string; member_key?: string } = existsSync(COOKIES)
-  ? JSON.parse(readFileSync(COOKIES, "utf8"))
-  : {};
+const member = readCreds();
 const needMember = !member.member;
 
 async function asMember(context: BrowserContext) {
@@ -84,7 +81,7 @@ test.describe("游客", () => {
 });
 
 test.describe("登录成员", () => {
-  test.skip(needMember, `没有成员会话文件 ${COOKIES}（先跑 tools/dev/run-legacy.sh）`);
+  test.skip(needMember, `没有成员会话文件 ${COOKIES_FILE}（先跑 cargo xtask dev）`);
   test.beforeEach(async ({ context }) => asMember(context));
 
   test("题目：分组有 legend，输入有 label，必答题有标注", async ({ page }) => {

@@ -59,8 +59,28 @@ cd web && pnpm install && pnpm vitest run && pnpm vite build
 tools/ci/check-fixtures.sh                  # 公开仓库红线：夹具只许合成数据
 ```
 
-本地起一个连假上游的网关：`cargo run -p gate-server --bin nai-gate -- serve --bind 127.0.0.1:8000`
-（环境变量见 `.env.example`；`NAI_IMAGE_HOST` 等指向本地假服务）。前端开发：`cd web && pnpm vite`（会把接口代理到 `VITE_GATE`）。
+本地起整套开发环境（真实的网关 + 假上游 + 合成演示数据，只监听本机，Ctrl-C 退出）：
+
+```bash
+cargo xtask dev                             # 网关 127.0.0.1:18000、假上游 18001；数据目录 target/owl-dev（每次启动重建）
+cd web && pnpm vite                         # 前端 http://localhost:5173，接口代理到 VITE_GATE（默认 http://127.0.0.1:18000）
+```
+
+后台是 `/admin`，开发环境的密码是 `dev-admin-password-123`；`cargo xtask dev --help` 看端口、数据目录等选项。
+数据目录里的 `cookies.json` 有后台与成员（合成数据里的「月见草」）的会话 Cookie。
+
+前端端到端（Playwright，对着上面这套环境跑；`cargo xtask dev` 先起来）：
+
+```bash
+cd web && pnpm exec vite --port 5174 --strictPort &          # 端到端用的前端
+cd web && E2E_BASE=http://localhost:5174 pnpm exec playwright test
+```
+
+用例会改数据（停用 / 重新生成 Key 等），想回到干净的数据就重启 `cargo xtask dev`；`cargo xtask dev --data <目录>` 换了数据目录时，
+用 `E2E_COOKIES=<目录>/cookies.json` 告诉用例会话文件在哪。
+
+不要合成数据、想自己配环境（环境变量见 `.env.example`；`NAI_IMAGE_HOST` 等指向本地假服务）：
+`cargo run -p gate-server --bin nai-gate -- serve --bind 127.0.0.1:8000`。
 
 ## 文档
 
