@@ -693,7 +693,14 @@ async fn run_case(case: &Value) -> Result<(), String> {
             return Err(format!("{ctx}: {d}"));
         }
         // 告警
-        let expected_alerts: Vec<Value> = want["alerts"].as_array().unwrap().clone();
+        // 3.0 只私信重大事故（docs/v3-deviations.md）：旧版会私信、现在只写日志的从期望里去掉
+        let expected_alerts: Vec<Value> = want["alerts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|a| alert_pages(a.as_str().unwrap_or("")))
+            .cloned()
+            .collect();
         // 松的场景：告警里有 Bug 特征码（含 Python 堆栈位置）和异常消息，只比条数
         let same_alerts = if loose {
             new_alerts.len() == expected_alerts.len()
@@ -787,4 +794,13 @@ async fn kernel_replays_match_python() {
         ran,
         failures.join("\n\n")
     );
+}
+
+/// 告警正文「⚠ **猫头鹰公益站告警**（kind）…」里的 kind 是否还会私信。
+fn alert_pages(text: &str) -> bool {
+    let kind = text
+        .split_once('（')
+        .and_then(|(_, rest)| rest.split_once('）'))
+        .map_or("", |(k, _)| k);
+    gate_server::alerts::pages(kind)
 }

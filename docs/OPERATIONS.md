@@ -52,8 +52,10 @@ compose 的 `stop_grace_period` 是 120 秒，所以发布时进行中的图不�
 `nai-patrol.timer` 每 5 分钟跑一次。3.0 下由 systemd drop-in（`/etc/systemd/system/nai-patrol.service.d/v3.conf`）改为宿主机上的
 `/opt/owl/nai-ops patrol`（CI 产出的静态二进制 `nai-ops-linux-musl`，用 `cutover.sh install-ops` 安装；巡检要看宿主机的 docker、磁盘和 .env）：
 
-- 退出码 0 正常 / 1 注意 / 2 危险：都算执行成功，告警由巡检自己发；
-- 退出码 3 = 巡检自身出错（以前崩溃也被当成成功，看不出来）。
+- 退出码 0 正常 / 1 注意 / 2 危险：都算执行成功；退出码 3 = 巡检自身出错（以前崩溃也被当成成功，看不出来）。
+- **只有「危险」才私信站长**（同一批危险项 6 小时提醒一次，出现新的立刻发，解除后补一条「已恢复」）；
+  「注意」只记在巡检日志里，后台总览的「有 N 件事要处理」能看到同样的情况。网关自己的告警同理：
+  只有上游 Token 失效 / 连续 403 / Token 被改动 / 磁盘不足 10% 会私信，其余只写日志。
 
 ```bash
 journalctl -u nai-patrol -n 20 --no-pager

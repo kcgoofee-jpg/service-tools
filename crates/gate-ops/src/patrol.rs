@@ -75,14 +75,30 @@ pub struct Row {
     pub sev: Sev,
     pub area: &'static str,
     pub text: String,
+    /// 检查项的稳定标识（告警去重用）：同一项检查，数字变了也是同一个问题
+    pub key: String,
 }
 
 #[derive(Debug, Default)]
 pub struct Report {
     pub rows: Vec<Row>,
-    /// 非 ok 行的稳定标识（告警去重用，不含会变的数字）
-    pub keys: Vec<String>,
     pub data: Map<String, Value>,
+}
+
+/// 没给标识时用文本，但把数字抹掉：「成功率 60%」和「成功率 59%」是同一个问题。
+/// （10-15 的教训：带数字的文本当标识，每 5 分钟就算一个「新问题」，6 小时冷却形同虚设。）
+fn stable_key(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if c.is_ascii_digit() {
+            if !out.ends_with('#') {
+                out.push('#');
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 impl Report {
@@ -90,17 +106,31 @@ impl Report {
         self.add_key(sev, area, text, "");
     }
 
-    /// `key` 为空时用文本本身当标识（与旧版 `key or text` 一致）。
     pub fn add_key(&mut self, sev: Sev, area: &'static str, text: impl Into<String>, key: &str) {
         let text = text.into();
-        if sev != Sev::Ok {
-            self.keys.push(if key.is_empty() {
-                text.clone()
-            } else {
-                key.to_string()
-            });
-        }
-        self.rows.push(Row { sev, area, text });
+        let key = if key.is_empty() {
+            stable_key(&text)
+        } else {
+            key.to_string()
+        };
+        self.rows.push(Row {
+            sev,
+            area,
+            text,
+            key,
+        });
+    }
+
+    /// 危险项的稳定标识（排好序），私信去重用。
+    pub fn red_keys(&self) -> Vec<&str> {
+        let mut keys: Vec<&str> = self
+            .rows
+            .iter()
+            .filter(|r| r.sev == Sev::Red)
+            .map(|r| r.key.as_str())
+            .collect();
+        keys.sort_unstable();
+        keys
     }
 
     /// 已知 / 按设计 / 已不再复现的事项：照常显示给人看，但不参与告警。
@@ -112,6 +142,7 @@ impl Report {
             sev: Sev::Ok,
             area,
             text: format!("（已知，不告警）{text}"),
+            key: String::new(),
         });
     }
 
@@ -166,7 +197,7 @@ impl Config {
             health_url: get("NAI_GATE_HEALTH", "http://127.0.0.1:3003/healthz"),
             queue_url: get("NAI_GATE_QUEUE", "http://127.0.0.1:3003/queue-status"),
             state_dir: get("PATROL_STATE_DIR", "/var/lib/nai-patrol").into(),
-            cooldown: int("PATROL_COOLDOWN", 1800)?,
+            cooldown: int("PATROL_COOLDOWN", 6 * 3600)?,
             stale_seconds: int("PATROL_STALE", 2700)?,
             api_base: discord::api_base_from_env(),
             containers: get("NAI_GATE_CONTAINERS", "owl-gate,owl-naimei,caddy")
@@ -1225,23 +1256,24 @@ pub fn render_human(rep: &Report, now: f64, tz: &TimeZone) -> String {
     out
 }
 
+/// 私信正文：只列危险项（最多 12 条）；「注意」只报个数——它们在巡检日志和后台总览里。
 pub fn alert_body(rep: &Report, now: f64, tz: &TimeZone) -> String {
-    let lines = ranked(rep)
+    let red: Vec<&Row> = rep.rows.iter().filter(|r| r.sev == Sev::Red).collect();
+    let mut lines: Vec<String> = red
         .iter()
         .take(12)
-        .map(|r| {
-            format!(
-                "{} {}：{}",
-                if r.sev == Sev::Red { "❗" } else { "⚠" },
-                r.area,
-                r.text
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
+        .map(|r| format!("❗ {}：{}", r.area, r.text))
+        .collect();
+    let warn = rep.rows.iter().filter(|r| r.sev == Sev::Warn).count();
+    if warn > 0 {
+        lines.push(format!(
+            "（另有 {warn} 项「注意」，不单独提醒，后台总览可看）"
+        ));
+    }
     format!(
-        "🔎 **巡检** {}\n{lines}",
-        util::fmt_ts(now, tz, "%m-%d %H:%M")
+        "🔎 **巡检** {}\n{}",
+        util::fmt_ts(now, tz, "%m-%d %H:%M"),
+        lines.join("\n")
     )
 }
 
@@ -1324,15 +1356,14 @@ async fn send_alert(cfg: &Config, text: &str) -> bool {
     }
 }
 
-/// 同一批问题在冷却期内只发一次。
+/// 只有**危险**才私信站长（站长 10-15：后台能看，非重大事故不私信）。
 ///
-/// 去重用**检查项标识**（不含次数、张数这些每分钟都在变的数字）：以前用整段文本做哈希，
-/// 数字一变就被当成新问题，于是「V5 超卖」每 10 分钟响一次。
-/// 摘要算法与旧版（sha1）不同，状态文件格式不变；切换后最多多发一条重复告警。
-pub async fn maybe_alert(cfg: &Config, rep: &Report, text: &str, now: f64) -> Result<()> {
-    let mut keys = rep.keys.clone();
-    keys.sort();
-    let digest = hex::encode(Sha256::digest(keys.join("|").as_bytes()))[..16].to_string();
+/// - 同一批危险项（按检查项标识去重，不看数字）冷却期内只发一次，出现新的危险项立刻发；
+/// - 危险全部消失后补一条「已恢复」；
+/// - 「注意」只打印在巡检日志里。
+///
+/// 状态文件 `last_alert.json`：`{digest, at, red, summary}`；没发成功不记状态，下一轮重试。
+pub async fn maybe_alert(cfg: &Config, rep: &Report, now: f64, tz: &TimeZone) -> Result<()> {
     std::fs::create_dir_all(&cfg.state_dir)
         .with_context(|| format!("创建状态目录 {} 失败", cfg.state_dir.display()))?;
     let mark = cfg.state_dir.join("last_alert.json");
@@ -1340,17 +1371,57 @@ pub async fn maybe_alert(cfg: &Config, rep: &Report, text: &str, now: f64) -> Re
         .ok()
         .and_then(|t| serde_json::from_str::<Value>(&t).ok())
         .unwrap_or_else(|| json!({}));
-    let last_at = last.get("at").and_then(|v| v.as_f64()).unwrap_or(0.0);
-    if last.get("digest").and_then(Value::as_str) == Some(digest.as_str())
+    let was_red = last.get("red").and_then(Value::as_bool).unwrap_or(false);
+    let save = |v: Value| -> Result<()> {
+        std::fs::write(&mark, gate_core::pyjson::default_str(&v))
+            .with_context(|| format!("写 {} 失败", mark.display()))
+    };
+
+    let keys = rep.red_keys();
+    if keys.is_empty() {
+        if was_red {
+            let since = last.get("since").and_then(Value::as_f64).unwrap_or(now);
+            let summary = last.get("summary").and_then(Value::as_str).unwrap_or("");
+            let text = format!(
+                "✅ **巡检** {}\n已恢复（持续约 {} 分钟）：{summary}",
+                util::fmt_ts(now, tz, "%m-%d %H:%M"),
+                ((now - since) / 60.0).round().max(1.0) as i64
+            );
+            if send_alert(cfg, &text).await {
+                save(json!({"red": false, "at": gate_core::pyval::float(now)}))?;
+                eprintln!("[patrol] 已发送恢复通知");
+            }
+        }
+        return Ok(());
+    }
+
+    let digest = hex::encode(Sha256::digest(keys.join("|").as_bytes()))[..16].to_string();
+    let last_at = last.get("at").and_then(Value::as_f64).unwrap_or(0.0);
+    if was_red
+        && last.get("digest").and_then(Value::as_str) == Some(digest.as_str())
         && now - last_at < cfg.cooldown as f64
     {
         return Ok(());
     }
-    if send_alert(cfg, text).await {
-        let body = gate_core::pyjson::default_str(
-            &json!({"digest": digest, "at": gate_core::pyval::float(now)}),
-        );
-        std::fs::write(&mark, body).with_context(|| format!("写 {} 失败", mark.display()))?;
+    if send_alert(cfg, &alert_body(rep, now, tz)).await {
+        let since = if was_red {
+            last.get("since").and_then(Value::as_f64).unwrap_or(now)
+        } else {
+            now
+        };
+        let summary: Vec<&str> = rep
+            .rows
+            .iter()
+            .filter(|r| r.sev == Sev::Red)
+            .map(|r| r.text.as_str())
+            .collect();
+        save(json!({
+            "red": true,
+            "digest": digest,
+            "at": gate_core::pyval::float(now),
+            "since": gate_core::pyval::float(since),
+            "summary": pyc::take_chars(&summary.join("；"), 300),
+        }))?;
         eprintln!("[patrol] 已发送告警");
     }
     Ok(())
@@ -1431,9 +1502,8 @@ pub async fn run_with(
     } else {
         print!("{}", render_human(&rep, now, &tz));
     }
-    if args.alert && !rep.problems().is_empty() {
-        let body = alert_body(&rep, now, &tz);
-        maybe_alert(cfg, &rep, &body, now).await?;
+    if args.alert {
+        maybe_alert(cfg, &rep, now, &tz).await?;
     }
     Ok(worst.rank())
 }

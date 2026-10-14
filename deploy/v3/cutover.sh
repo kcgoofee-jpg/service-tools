@@ -42,7 +42,7 @@ patrol_v3() {
 # 0 正常 / 1 注意 / 2 危险；3 = 巡检自身出错，算失败。
 ExecStart=
 ExecStart=/opt/owl/nai-ops patrol --oneline --alert
-# 同样的问题（摘要不变）6 小时内只提醒一次；出现新问题摘要就变，立刻提醒
+# 只有「危险」才私信：同一批危险项 6 小时内只提醒一次，出现新的立刻提醒，解除后补一条「已恢复」
 Environment=PATROL_COOLDOWN=21600
 SuccessExitStatus=
 SuccessExitStatus=0 1 2

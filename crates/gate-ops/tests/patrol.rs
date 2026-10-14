@@ -73,6 +73,15 @@ fn healthy_infra() -> Infra {
 
 // ------------------------------------------------------------ Report / 系统探测
 
+/// 非 ok 行的稳定标识（按出现顺序）。
+fn pkeys(rep: &Report) -> Vec<String> {
+    rep.rows
+        .iter()
+        .filter(|r| r.sev != Sev::Ok)
+        .map(|r| r.key.clone())
+        .collect()
+}
+
 #[test]
 fn report_keys_use_stable_key_or_text() {
     let mut r = Report::default();
@@ -80,7 +89,9 @@ fn report_keys_use_stable_key_or_text() {
     r.add(Sev::Warn, "系统", "text with 12 numbers");
     r.add_key(Sev::Red, "数据", "bug 3 times", "bug-count");
     r.known("数据", "旧问题");
-    assert_eq!(r.keys, vec!["text with 12 numbers", "bug-count"]);
+    // 没给标识时用文本，数字抹成 #（数字变了还是同一个问题）
+    assert_eq!(pkeys(&r), vec!["text with # numbers", "bug-count"]);
+    assert_eq!(r.red_keys(), vec!["bug-count"]);
     assert_eq!(r.worst(), Sev::Red);
     assert_eq!(r.problems().len(), 2);
     let last = r.rows.last().unwrap();
@@ -815,7 +826,7 @@ fn data_counts_and_bug_tracking() {
         ]
     );
     // 告警去重用的标识：固定名字 / 标题，不含会变的数字
-    assert_eq!(rep.keys, ["counts", "bug-count", "bug:新问题"]);
+    assert_eq!(pkeys(&rep), ["counts", "bug-count", "bug:新问题"]);
     assert_eq!(
         rep.data["bugs_open"],
         json!({"error": 1, "info": 1, "warn": 3})
@@ -852,10 +863,7 @@ fn data_live_error_outside_restart_window_is_a_real_warning() {
         (r.sev, r.text.as_str()),
         (Sev::Warn, "[error] live: GET /public/live failed（7 次）")
     );
-    assert!(
-        rep.keys
-            .contains(&"bug:live: GET /public/live failed".to_string())
-    );
+    assert!(pkeys(&rep).contains(&"bug:live: GET /public/live failed".to_string()));
     // 同样的记录，重启恰好在 100 秒之前 → 部署窗口
     let ctx = Ctx {
         now: NOW,
@@ -913,7 +921,7 @@ fn channels_text_failures() {
         text_of(&rep, "最近一条文本失败").text,
         format!("最近一条文本失败：{when} {detail}（rid rid-synthetic-1）")
     );
-    assert_eq!(rep.keys, ["text-channel", "text-last-error"]);
+    assert_eq!(pkeys(&rep), ["text-channel", "text-last-error"]);
     assert_eq!(
         (
             rep.data["text_30m"].clone(),
@@ -1006,7 +1014,7 @@ fn channels_image_500_inpaint_429_and_headroom() {
         ]
     );
     assert_eq!(
-        rep.keys,
+        pkeys(&rep),
         ["image-500", "inpaint", "upstream-429", "upstream-429-count"]
     );
     assert_eq!(rep.data["inpaint_1h"], json!(3));
@@ -1316,18 +1324,20 @@ fn json_output_matches_python_dumps() {
 }
 
 #[test]
-fn alert_body_ranks_and_caps_at_twelve() {
+fn alert_body_lists_only_red_and_counts_warnings() {
     let mut r = Report::default();
-    for i in 0..14 {
+    for i in 0..3 {
         r.add(Sev::Warn, "系统", format!("w{i}"));
     }
-    r.add(Sev::Red, "通道", "boom");
+    for i in 0..14 {
+        r.add(Sev::Red, "通道", format!("boom{i}"));
+    }
     let body = alert_body(&r, NOW, &shanghai());
     let lines: Vec<_> = body.lines().collect();
     assert_eq!(lines[0], "🔎 **巡检** 09-21 22:13");
-    assert_eq!(lines[1], "❗ 通道：boom");
-    assert_eq!(lines[2], "⚠ 系统：w0");
-    assert_eq!(lines.len(), 1 + 12);
+    assert_eq!(lines[1], "❗ 通道：boom0");
+    assert_eq!(lines.len(), 1 + 12 + 1, "最多 12 条危险 + 一行「注意」计数");
+    assert_eq!(lines[13], "（另有 3 项「注意」，不单独提醒，后台总览可看）");
 }
 
 // ------------------------------------------------------------ 告警（假 Discord）
@@ -1344,25 +1354,58 @@ fn alert_env(dir: &Path, extra: &str) -> Config {
 
 fn report_with(text: &str, key: &str) -> Report {
     let mut r = Report::default();
-    r.add_key(Sev::Warn, "数据", text, key);
+    r.add_key(Sev::Red, "数据", text, key);
     r
 }
 
+fn warn_only() -> Report {
+    let mut r = Report::default();
+    r.add(
+        Sev::Warn,
+        "注册",
+        "每人 104 张 × 161 人 = 16744 张 vs 日容量 1700 张",
+    );
+    r
+}
+
+fn content(post: &Req) -> String {
+    post.body["content"].as_str().unwrap().to_string()
+}
+
 #[tokio::test]
-async fn alert_is_deduplicated_by_check_key_within_cooldown() {
+async fn warnings_alone_never_message_the_owner() {
     let dir = tempfile::tempdir().unwrap();
     let (mock, log) = discord_mock(DiscordScript::default()).await;
     let mut config = alert_env(dir.path(), "ALERT_CHANNEL_ID=900000000000000010\n");
     config.api_base = mock.base.clone();
+    for i in 0..5 {
+        maybe_alert(
+            &config,
+            &warn_only(),
+            NOW + f64::from(i) * 300.0,
+            &shanghai(),
+        )
+        .await
+        .unwrap();
+    }
+    assert!(
+        log.lock().unwrap().is_empty(),
+        "「注意」只进日志和后台，不私信"
+    );
+    assert!(!config.state_dir.join("last_alert.json").exists());
+}
 
-    maybe_alert(
-        &config,
-        &report_with("今日计数：成员 100", "counts"),
-        "body-1",
-        NOW,
-    )
-    .await
-    .unwrap();
+#[tokio::test]
+async fn red_is_deduplicated_by_check_key_and_recovery_is_announced_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mock, log) = discord_mock(DiscordScript::default()).await;
+    let mut config = alert_env(dir.path(), "ALERT_CHANNEL_ID=900000000000000010\n");
+    config.api_base = mock.base.clone();
+    let tz = shanghai();
+
+    maybe_alert(&config, &report_with("/healthz → 502", "healthz"), NOW, &tz)
+        .await
+        .unwrap();
     {
         let posts = log.lock().unwrap();
         assert_eq!(posts.len(), 1);
@@ -1375,43 +1418,54 @@ async fn alert_is_deduplicated_by_check_key_within_cooldown() {
         );
         assert_eq!(
             posts[0].body,
-            json!({"content": "body-1", "allowed_mentions": {"parse": []}})
+            json!({"content": "🔎 **巡检** 09-21 22:13\n❗ 数据：/healthz → 502", "allowed_mentions": {"parse": []}})
         );
     }
     let state: Value = serde_json::from_str(
         &std::fs::read_to_string(config.state_dir.join("last_alert.json")).unwrap(),
     )
     .unwrap();
-    assert_eq!(state["at"], json!(NOW));
+    assert_eq!(
+        (state["red"].clone(), state["at"].clone()),
+        (json!(true), json!(NOW))
+    );
     assert_eq!(state["digest"].as_str().unwrap().len(), 16);
 
-    // 冷却内、同一检查项（数字变了没关系）→ 不再发
-    maybe_alert(
-        &config,
-        &report_with("今日计数：成员 250", "counts"),
-        "body-2",
-        NOW + 10.0,
-    )
-    .await
-    .unwrap();
+    // 冷却内、同一检查项（数字变了没关系），再加几条「注意」→ 不再发
+    let mut same = report_with("/healthz → 503", "healthz");
+    same.add(Sev::Warn, "注册", "成功率 59%");
+    maybe_alert(&config, &same, NOW + 10.0, &tz).await.unwrap();
     assert_eq!(log.lock().unwrap().len(), 1);
-    // 冷却内、出现了新的问题 → 立刻发
-    let mut more = report_with("今日计数：成员 250", "counts");
-    more.add_key(Sev::Red, "通道", "上游 429", "upstream-429");
-    maybe_alert(&config, &more, "body-3", NOW + 20.0)
-        .await
-        .unwrap();
+    // 冷却内、出现了新的危险项 → 立刻发
+    let mut more = report_with("/healthz → 503", "healthz");
+    more.add_key(Sev::Red, "系统", "磁盘已用 95%", "disk");
+    maybe_alert(&config, &more, NOW + 20.0, &tz).await.unwrap();
     assert_eq!(log.lock().unwrap().len(), 2);
-    // 同一批问题，冷却过后 → 再提醒一次
-    maybe_alert(&config, &more, "body-4", NOW + 20.0 + 1801.0)
+    // 同一批问题，冷却过后 → 再提醒一次；差 1 秒 → 不发
+    let cd = config.cooldown as f64;
+    maybe_alert(&config, &more, NOW + 20.0 + cd + 1.0, &tz)
         .await
         .unwrap();
     assert_eq!(log.lock().unwrap().len(), 3);
-    // 冷却刚好差 1 秒 → 还不发
-    maybe_alert(&config, &more, "body-5", NOW + 20.0 + 1801.0 + 1799.0)
+    maybe_alert(&config, &more, NOW + 20.0 + 2.0 * cd, &tz)
         .await
         .unwrap();
     assert_eq!(log.lock().unwrap().len(), 3);
+    // 危险消失（只剩「注意」）→ 一条「已恢复」，之后不再响
+    maybe_alert(&config, &warn_only(), NOW + 600.0 + 2.0 * cd, &tz)
+        .await
+        .unwrap();
+    maybe_alert(&config, &warn_only(), NOW + 900.0 + 2.0 * cd, &tz)
+        .await
+        .unwrap();
+    let posts = log.lock().unwrap();
+    assert_eq!(posts.len(), 4);
+    let recovered = content(&posts[3]);
+    assert!(recovered.starts_with("✅ **巡检**"), "{recovered}");
+    assert!(
+        recovered.contains("/healthz → 503；磁盘已用 95%"),
+        "{recovered}"
+    );
 }
 
 #[tokio::test]
@@ -1420,7 +1474,7 @@ async fn alert_goes_to_dm_when_only_user_is_configured() {
     let (mock, log) = discord_mock(DiscordScript::default()).await;
     let mut config = alert_env(dir.path(), "ALERT_USER_ID=900000000000000011\n");
     config.api_base = mock.base.clone();
-    maybe_alert(&config, &report_with("x", "k"), "dm-body", NOW)
+    maybe_alert(&config, &report_with("x", "k"), NOW, &shanghai())
         .await
         .unwrap();
     let posts = log.lock().unwrap();
@@ -1452,8 +1506,10 @@ async fn failed_alert_leaves_no_state_so_it_retries() {
         let mut config = alert_env(dir.path(), "ALERT_CHANNEL_ID=900000000000000010\n");
         config.api_base = mock.base.clone();
         let rep = report_with("x", "k");
-        maybe_alert(&config, &rep, "b", NOW).await.unwrap();
-        maybe_alert(&config, &rep, "b", NOW + 1.0).await.unwrap();
+        maybe_alert(&config, &rep, NOW, &shanghai()).await.unwrap();
+        maybe_alert(&config, &rep, NOW + 1.0, &shanghai())
+            .await
+            .unwrap();
         assert_eq!(
             log.lock().unwrap().len(),
             2,
@@ -1469,11 +1525,11 @@ async fn unconfigured_alert_channel_sends_nothing() {
     let (mock, log) = discord_mock(DiscordScript::default()).await;
     let mut config = cfg(dir.path()); // 没有 .env
     config.api_base = mock.base.clone();
-    maybe_alert(&config, &report_with("x", "k"), "b", NOW)
+    maybe_alert(&config, &report_with("x", "k"), NOW, &shanghai())
         .await
         .unwrap();
     std::fs::write(&config.env_file, "DISCORD_BOT_TOKEN=synthetic-bot-token\n").unwrap(); // 有 token 但没有收件人
-    maybe_alert(&config, &report_with("x", "k"), "b", NOW)
+    maybe_alert(&config, &report_with("x", "k"), NOW, &shanghai())
         .await
         .unwrap();
     assert!(log.lock().unwrap().is_empty());
