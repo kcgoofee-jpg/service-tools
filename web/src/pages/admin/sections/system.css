@@ -1,0 +1,42 @@
+.incident {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.incident__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.incident__title {
+  font-size: var(--fs-md);
+  margin-right: var(--sp-2);
+}
+.incident__updates {
+  display: grid;
+  gap: var(--sp-2);
+  margin: 0;
+  padding-left: var(--sp-5);
+  font-size: var(--fs-sm);
+}
+.std-list {
+  display: grid;
+  gap: var(--sp-1);
+  margin: var(--sp-3) 0 0;
+  padding-left: var(--sp-5);
+}
+.pwform {
+  max-width: 440px;
+}
+.pwbox {
+  display: flex;
+  gap: var(--sp-2);
+}
+.pwbox .input {
+  flex: 1;
+  min-width: 0;
+}

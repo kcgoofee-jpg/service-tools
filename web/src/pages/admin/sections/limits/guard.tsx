@@ -1,0 +1,127 @@
+/** 账号保护与排队：每个上游账号的每日 / 每小时上限、安静时段、间隔抖动、排队数。 */
+import { useMemo, useState } from "preact/hooks";
+import { Badge, Card, Notice } from "../../../../ui";
+import { act, useAdmin } from "../../Admin";
+import { LoadError, Loading, Stat } from "../_kit";
+import { ConfirmDialog, Derive, NumField, SaveBar, useForm, withTone } from "../system/forms";
+import { GUARD_ADVANCED, GUARD_CORE, type Guard, guardSpecs, pacedText } from "./core";
+
+const URL = "/admin/api/guard";
+
+export default function GuardCard() {
+  const { data, error, loading } = useAdmin<Guard>(URL);
+  const specs = useMemo(() => (data ? guardSpecs(data) : {}), [data]);
+  const form = useForm(specs, data?.values ?? null);
+  const [saving, setSaving] = useState(false);
+  const [zero, setZero] = useState<string[] | null>(null);
+
+  if (loading && !data)
+    return (
+      <Card title="账号保护与排队">
+        <Loading rows={2} />
+      </Card>
+    );
+  if (!data)
+    return (
+      <Card title="账号保护与排队">
+        <LoadError error={error ?? "没有数据"} />
+      </Card>
+    );
+
+  const cap = Number(form.raw("account_daily_cap")) || 0;
+  const burst = Number(form.raw("daily_burst")) || 0;
+  const paced = pacedText(cap, burst);
+  const quietOn = data.values.quiet_start !== data.values.quiet_end;
+
+  const doSave = async () => {
+    setSaving(true);
+    const ok = await act("PUT", URL, form.changes(), "账号保护已保存，立即生效");
+    setSaving(false);
+    if (ok) form.commit();
+  };
+  const trySave = () => {
+    const ch = form.changes();
+    // 每小时 / 每日上限是保护唯一上游账号的硬闸门：填 0 = 关掉该项，必须确认
+    const zeros = ["account_hourly_cap", "account_daily_cap"].filter((k) => k in ch && ch[k] === 0);
+    if (zeros.length) setZero(zeros.map((k) => form.specs[k]?.label ?? k));
+    else void doSave();
+  };
+
+  return (
+    <Card
+      title="账号保护与排队"
+      sub="每个上游账号的出图总量与节奏：总量和节奏比单人限额更能保护账号；保存后立即生效。"
+    >
+      <div class="stack-sm">
+        <div class="stats">
+          <Stat
+            label="当前每小时上限"
+            value={data.hourly_cap_now}
+            hint="最近 60 分钟（滚动窗口），每个账号"
+          />
+          <Stat label="排队中的图片" value={data.queued_images} hint="全站正在生成或排队" />
+          <Stat
+            label="时段"
+            value={data.quiet_now ? "安静时段" : "正常时段"}
+            hint={quietOn ? `${data.values.quiet_start} 点～${data.values.quiet_end} 点` : "未设安静时段"}
+          />
+        </div>
+        {data.accounts.length > 0 && (
+          <div class="chips">
+            {data.accounts.map((a) => (
+              <Badge key={a.position} {...withTone(!a.usable && "danger")}>
+                账号 {a.position}：今天 {a.today}
+                {data.values.account_daily_cap ? ` / ${data.values.account_daily_cap}` : ""} 张 · 最近 60 分钟{" "}
+                {a.this_hour}
+                {data.hourly_cap_now ? ` / ${data.hourly_cap_now}` : ""} 张
+              </Badge>
+            ))}
+          </div>
+        )}
+
+        <form class="stack-sm" {...form.formProps} onSubmit={(e) => e.preventDefault()}>
+          <div class="form-grid">
+            {GUARD_CORE.map((n) => (
+              <NumField key={n} form={form} name={n} />
+            ))}
+          </div>
+          {paced && (
+            <Derive title="按时段放行的推算">
+              <div>{paced}</div>
+              <div class="muted">没用完的额度留给后面的时段；0 张 = 不分时段，整天先到先得。</div>
+            </Derive>
+          )}
+          <details class="more">
+            <summary class="small">更多：安静时段、间隔抖动、排队上限</summary>
+            <div class="form-grid" style={{ marginTop: "var(--sp-3)" }}>
+              {GUARD_ADVANCED.map((n) => (
+                <NumField key={n} form={form} name={n} />
+              ))}
+            </div>
+          </details>
+          <p class="muted small">
+            V4.5 每人每天保底由「动态额度」管理：现在是每人 {data.values.base_daily_images} 张。
+          </p>
+          <SaveBar form={form} onSave={trySave} saving={saving} label="保存账号保护" />
+        </form>
+      </div>
+
+      <ConfirmDialog
+        open={zero !== null}
+        title="确定关掉这项保护？"
+        confirmLabel="关掉保护并保存"
+        tone="danger"
+        onClose={() => setZero(null)}
+        onConfirm={async () => {
+          await doSave();
+          setZero(null);
+        }}
+      >
+        <Notice tone="warn">
+          「{(zero ?? []).join("」「")}」填了
+          0，等于关掉这项对上游账号的限量。上游账号被限流或封控的风险会上升。
+        </Notice>
+      </ConfirmDialog>
+    </Card>
+  );
+}

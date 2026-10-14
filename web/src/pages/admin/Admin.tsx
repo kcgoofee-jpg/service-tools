@@ -215,6 +215,50 @@ export async function act<T = unknown>(
   }
 }
 
+/* ---------------- 侧栏角标（任何分区都在提醒，直到问题处理掉） ---------------- */
+type ModulesResp = {
+  modules?: Array<{ enabled?: boolean; last?: { ok?: boolean; checks?: Array<{ level?: string }> } }>;
+};
+type BotResp = { status?: { online?: boolean } };
+
+function setNav(id: SectionId, value: number | string | null): void {
+  const next = { ...navBadges.value };
+  if (value === null || value === 0 || value === "") delete next[id];
+  else next[id] = value;
+  navBadges.value = next;
+}
+
+/** 与旧版一致：每次刷新节拍都看一次未处理 Bug、模块自检、奶妹在线、未处理捐赠。 */
+function BadgePoller() {
+  const t = tick.value;
+  useEffect(() => {
+    let alive = true;
+    const quiet = <T,>(url: string) => getJSON<T>(url).catch(() => null);
+    void Promise.all([
+      quiet<{ open?: number }>("/admin/api/errors"),
+      quiet<ModulesResp>("/admin/api/modules"),
+      quiet<BotResp>("/admin/api/discord-bot"),
+      quiet<{ open?: number }>("/admin/api/donations/count"),
+    ]).then(([bugs, mods, bot, donations]) => {
+      if (!alive) return;
+      if (bugs) setNav("logs", bugs.open ?? 0);
+      if (mods?.modules) {
+        const bad = mods.modules.filter(
+          (m) => m.enabled && (m.last?.ok === false || (m.last?.checks ?? []).some((c) => c.level === "bad")),
+        ).length;
+        setNav("modules", bad);
+      }
+      const offline = bot?.status ? !bot.status.online : false;
+      const open = donations?.open ?? 0;
+      setNav("discord", offline ? (open ? `! ${open}` : "!") : open);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [t]);
+  return null;
+}
+
 /* ---------------- 登录 ---------------- */
 const authed = signal<boolean | null>(null);
 
@@ -476,6 +520,7 @@ function Shell(props: { children: ComponentChildren }) {
         <main class="admin-content">{props.children}</main>
       </div>
       <CommandPalette open={palette} onClose={() => setPalette(false)} />
+      <BadgePoller />
     </div>
   );
 }
@@ -502,9 +547,15 @@ export function Admin() {
     <LocationProvider>
       <Shell>
         <Router>
-          {SECTIONS.map((s) => (
-            <Route key={s.id} path={s.path === "/admin" ? "/admin" : `${s.path}/*`} component={s.view} />
-          ))}
+          {SECTIONS.flatMap((s) =>
+            s.path === "/admin"
+              ? [<Route key={s.id} path="/admin" component={s.view} />]
+              : [
+                  // preact-iso 的 `/*` 至少要多一段路径：分区根路径单独注册一条
+                  <Route key={s.id} path={s.path} component={s.view} />,
+                  <Route key={`${s.id}-sub`} path={`${s.path}/*`} component={s.view} />,
+                ],
+          )}
           <Route default component={SECTIONS[0]?.view as ComponentType} />
         </Router>
       </Shell>
