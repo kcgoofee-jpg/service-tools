@@ -62,9 +62,15 @@ cd /opt/service-tools && /opt/owl/nai-ops patrol   # 手动跑一次，完整报
 
 ## 备份与快照
 
-- 每晚 04:30 `nightly_backup.sh`（2.x 目录里的脚本，库文件路径不变，3.0 下照常工作）。
-- 每天 05:10 `ro-snapshot.sh` 生成脱敏只读快照（`/opt/backups/ro/`），协作者用 `deploy/ops/pull-ro-snapshot.sh` 拉到本机。
-- 3.0 自带同样功能：`docker exec owl-gate nai-ops snapshot /app/data/…`、`nai-ops ro-sanitize`。
+cron（root）跑的都是 `/opt/owl/ops/` 里的脚本（= 仓库 `deploy/v3/ops/`），快照由宿主机的 `nai-ops` 做，不经过网关容器：
+
+| 时间 | 脚本 | 内容 |
+|---|---|---|
+| 每晚 04:30 | `nightly_backup.sh` | 一致快照（不含原图）+ `.env` / `secret_key` / 上游 Token 存档 / 3.0 部署文件 / Caddy 配置，客户端 AES-256 加密后推 S3（60 天过期） |
+| 每天 05:10 | `ro-snapshot.sh` | 脱敏只读快照 `/opt/backups/ro/owl-ro-YYYYMMDD.db.gz`（保留 7 份），本机用 `deploy/ops/pull-ro-snapshot.sh` 拉取 |
+| 每 5 分钟 | `status_mirror.sh` | 状态页静态镜像推 S3（主站挂了镜像仍在） |
+
+`/usr/local/bin/naigate-snapshot` 是这几处共用的快照入口（`nai-ops snapshot`）。恢复见 `deploy/ops/migrate_restore.sh`。
 
 ## 常用命令
 
