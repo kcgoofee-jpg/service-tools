@@ -21,7 +21,7 @@ struct Inner {
     images: Mutex<HashMap<String, i64>>,
     events: Mutex<Vec<String>>,
     starts: AtomicUsize,
-    block: Mutex<Option<String>>,
+    block: Mutex<Option<(String, String)>>,
 }
 
 impl Hooks for TestHooks {
@@ -44,7 +44,7 @@ impl Hooks for TestHooks {
         &'a self,
         _t: &'a str,
         _d: &'a str,
-    ) -> BoxFuture<'a, HookResult<Option<String>>> {
+    ) -> BoxFuture<'a, HookResult<Option<(String, String)>>> {
         let r = self.0.block.lock().unwrap().clone();
         Box::pin(async move { Ok(r) })
     }
@@ -347,7 +347,7 @@ async fn image_interval_is_enforced_between_requests() {
 async fn guard_block_reason_is_429() {
     let up = MockUpstream::start().await;
     let hooks = TestHooks::default();
-    *hooks.0.block.lock().unwrap() = Some("本小时已到上限".into());
+    *hooks.0.block.lock().unwrap() = Some(("本小时已到上限".into(), "hourly_cap".into()));
     let c = NaiClient::new(config(&up.url(), 0.0), hooks, vec![(T1.into(), 0, false)]).unwrap();
     let body = image_body(1);
     let e = c
@@ -359,7 +359,10 @@ async fn guard_block_reason_is_429() {
         )
         .await
         .unwrap_err();
-    assert_eq!((e.status, e.message.as_str()), (429, "本小时已到上限"));
+    assert_eq!(
+        (e.status, e.message.as_str(), e.code.as_str()),
+        (429, "本小时已到上限", "hourly_cap")
+    );
     assert!(up.requests().is_empty(), "被账号保护挡住时不发上游");
 }
 

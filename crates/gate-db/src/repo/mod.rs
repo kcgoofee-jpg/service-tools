@@ -19,6 +19,7 @@ pub mod counters;
 pub mod coupons;
 pub mod discord;
 pub mod feedback;
+pub mod guard;
 pub mod keys;
 pub mod misc;
 pub mod reconciliation;
