@@ -83,7 +83,7 @@
 | 领 Key 限速 | 每小时最多 12 人（`issue_hourly_cap`） |
 | 名额 | 上限 61；候补邀请**不私信**（`waitlist_dm` 默认 0），公告频道发一条汇总 |
 | 网页 Discord 登录 | **暂停**（`web_login_paused` 默认 1，设 0 才开放）：首页不显示按钮，服务端 `/login` 也直接跳回首页、不发起 OAuth。10-14 曾短暂开放，因门户侧 redirect_uri 失效（OAuth2 redirect_uri 无效）旋即暂停；修复 = 门户 OAuth2 页确认重定向列表里有 `https://gate.davidzhao.top/login/callback`（精确匹配、无尾斜杠），再设 `web_login_paused=0` |
-| 网页 Key 登录 | `POST /login/key`：粘贴 Key 换成员会话（按 discord_id 签发，30 天；后台手建未绑定的 Key 用 `key:<id>`）；每 IP 10 分钟错 8 次锁定；校验 Origin 防登录 CSRF。**2026-10-14 短暂下线后当天恢复**（Discord OAuth 回调失效，站长要求换回） |
+| 网页 Key 登录 | 已删除（2026-10-14 站长）：网页只有 Discord 登录；旧的 `key:<id>` 会话一律作废 |
 | 作品备份（beta） | 首页登录后「作品备份」：EPUB 画册（一图一页 + 提示词/参数）或原图 ZIP（+ prompts.txt），每人 60 秒 1 次，只含仍在保留期内的原图 |
 | 后台 Key 额度 | 后台新建的 Key 为手动额度（算法不覆盖）；编辑 Key 只提交改动过的字段，只有改了额度才转为手动 |
 | `/register` | **唯一的发 Key 路径**：斜杠命令 → `POST /self-register/issue` → `issue_direct` → `_provision`；回复只有本人可见，不走 OAuth、不私信。旧的 OAuth 领取（`/self-register/intent` + `/self-register/callback`，`begin`/`finish`）已删除，不要恢复 |
