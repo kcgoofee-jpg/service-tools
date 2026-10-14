@@ -212,7 +212,7 @@ async fn audited(State(state): State<AppState>, req: Request, next: Next) -> Res
         target = obj
             .get("name")
             .filter(|v| gate_core::pyval::truthy(v))
-            .map(gate_core::pyval::py_str)
+            .map(gate_core::pyext::py_str)
             .unwrap_or_default();
     }
     if path == "/keys/{key_id}" && method == "DELETE" {
