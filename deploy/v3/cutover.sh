@@ -73,7 +73,11 @@ cmd_load() {
 cmd_install_ops() {
   local bin=${1:?用法：cutover.sh install-ops <nai-ops>}
   "$bin" --version >/dev/null || die "$bin 在这台机器上跑不起来"
-  install -m 755 "$bin" "$OWL_DIR/nai-ops"
+  if [[ $(realpath "$bin") != $(realpath -m "$OWL_DIR/nai-ops") ]]; then
+    install -m 755 "$bin" "$OWL_DIR/nai-ops"
+  else
+    chmod 755 "$OWL_DIR/nai-ops"
+  fi
   log "✓ $OWL_DIR/nai-ops = $("$OWL_DIR/nai-ops" --version)"
 }
 
