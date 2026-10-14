@@ -93,9 +93,15 @@ impl HttpError {
     }
 }
 
+/// 附在 `{"detail": ...}` 错误响应上（后台操作日志据此记「失败」）。
+#[derive(Debug, Clone)]
+pub struct HttpErrorInfo(pub HttpError);
+
 impl IntoResponse for HttpError {
     fn into_response(self) -> Response {
-        json_response(self.status, &json!({"detail": self.detail}))
+        let mut resp = json_response(self.status, &json!({"detail": self.detail}));
+        resp.extensions_mut().insert(HttpErrorInfo(self));
+        resp
     }
 }
 

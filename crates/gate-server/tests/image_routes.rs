@@ -1,63 +1,15 @@
 //! 出图请求通路的端到端测试：真实的 AppState + 路由 + 记账，上游换成本地假服务。
 
+mod common;
+use common::{Env, TOKEN, setup};
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use gate_db::repo::keys::NewKey;
 use gate_db::repo::usage::LogFilter;
 use gate_server::AppState;
-use gate_server::env::EnvConfig;
-use gate_server::web::Assets;
-use gate_testkit::{MockUpstream, Reply};
+use gate_testkit::Reply;
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
-use std::collections::HashMap;
 use tower::ServiceExt;
-
-const TOKEN: &str = "nai-test-member-key-000000000000000000";
-
-struct Env {
-    state: AppState,
-    mock: MockUpstream,
-    _dir: tempfile::TempDir,
-}
-
-async fn setup(extra: &[(&str, &str)]) -> Env {
-    let mock = MockUpstream::start().await;
-    let dir = tempfile::tempdir().unwrap();
-    let mut vars: HashMap<String, String> = [
-        ("DATA_DIR", dir.path().to_str().unwrap()),
-        ("NAI_TOKENS", "pst-synthetic-upstream-token"),
-        ("NAI_IMAGE_HOST", &mock.url()),
-        ("NAI_TEXT_HOST", &mock.url()),
-        ("NAI_TEXT_HOST_LEGACY", &mock.url()),
-        ("KEY_IMAGE_MIN_INTERVAL", "0"),
-        ("IMAGE_MIN_INTERVAL", "0"),
-        ("POST_REQUEST_JITTER_MIN", "0"),
-        ("POST_REQUEST_JITTER_MAX", "0"),
-        ("QUEUE_TIMEOUT", "5"),
-        ("SECRET_KEY", "test-secret-key-test-secret-key-0123456789"),
-        ("UPSTREAM_HTTP2", "0"),
-    ]
-    .iter()
-    .map(|(k, v)| (k.to_string(), v.to_string()))
-    .collect();
-    for (k, v) in extra {
-        vars.insert(k.to_string(), v.to_string());
-    }
-    let env = EnvConfig::load(&vars);
-    let state = AppState::build(env, Assets::new(None)).await.unwrap();
-    let key: NewKey = serde_json::from_value(json!({
-        "name": "测试成员", "token": TOKEN, "daily_images": 100, "daily_v5": 10,
-        "monthly_anlas": 0.0, "daily_text_tokens": 1000, "rpm": 60,
-    }))
-    .unwrap();
-    state.db.create_key(&key, state.now()).await.unwrap();
-    Env {
-        state,
-        mock,
-        _dir: dir,
-    }
-}
 
 fn image_body(model: &str, n: i64) -> Value {
     json!({

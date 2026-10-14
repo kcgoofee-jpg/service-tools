@@ -1,6 +1,7 @@
 //! 网关应用：把各模块组装成一个 axum Router。`main.rs` 只负责命令行与进程生命周期。
 
 pub mod accounting;
+pub mod action_log;
 pub mod admission;
 pub mod alerts;
 pub mod allowance;
@@ -21,6 +22,7 @@ pub mod multipart;
 pub mod params;
 pub mod reqctx;
 pub mod runtime;
+pub mod session;
 pub mod state;
 pub mod time;
 pub mod web;
