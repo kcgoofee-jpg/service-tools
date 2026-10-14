@@ -1,28 +1,36 @@
-# 运维脚本（服务器上放在 /opt/backups/）
+# 运维脚本
 
-| 文件 | 用途 |
-|---|---|
-| `deploy.sh <版本号>` | 等队列空闲 → 备份数据库与 .env 到 `/opt/backups/pre-deploy-<时间>` → 重建容器 → 验证 |
-| `nai-watch.sh` | 实时事件流（60 秒轮询）：成员、拒绝、报错、Bug、动态额度、自动驾驶、注册就绪度、跑图分享 |
-| `patrol.py` | 只读体检（适合每 10 分钟跑一次）：系统 / 上游容量 / 注册就绪度 / 成员出图请求 / 数据一致性；退出码 0 正常 · 1 注意 · 2 危险；`--alert` 有问题时给站长发 Discord 告警（同一问题 30 分钟只发一次），`--oneline`/`--json` 给机器用 |
-| `lab-daily.sh` | 实验室日报：`sqlite3 .backup` 出副本到 /tmp → `docker compose --profile lab run --rm lab`（回放校准 + 蒙特卡洛 + 日报图，结果在 `data/lab/<日期>/`）→ `post_report.py` 默认 dry-run；`LAB_POST=1` 才真的发到公告频道 |
-| `post_report.py` | 把 `report.png` + `summary.md` 以 multipart 发到 `ANNOUNCE_CHANNEL_ID`（`allowed_mentions` 为空）；默认 `--dry-run` 只打印，`--send` 才发 |
-| `announce.py` | 往公告频道发一条消息（正文从 stdin 读）：`docker cp announce.py nai-gate:/tmp/ && docker exec -i -u 0 nai-gate python /tmp/announce.py` |
-| `incident.py` | 状态页事件（Statuspage 流程）：`open --title "出图接口例行维护"` / `update <id> --status monitoring --body "…"` / `resolve <id>` / `list`。走容器内的应用模块，不需要后台密码 |
+3.0 的运维命令都在 `nai-ops`（Rust，见 `crates/gate-ops`），服务器上的定时脚本在 `deploy/v3/ops/`。
+部署、切换、回滚、巡检、备份的完整流程见 [docs/OPERATIONS.md](../../docs/OPERATIONS.md)。这里只放三类东西：
 
-## 7×24 监控（systemd）
+| 文件 | 在哪跑 | 用途 |
+|---|---|---|
+| `migrate_restore.sh` | 新服务器 | 灾难恢复：从 S3 拉最新加密备份 → 解密 → 恢复库、`.env`、3.0 部署文件与 Caddy 配置 → 用 CI 镜像启动 |
+| `pull-ro-snapshot.sh` | 本机 | 拉每天的脱敏只读快照（`/opt/backups/ro/`）到本地，排查问题用 |
+| `pull-backup-mac.sh` | 本机 | 把加密备份多拉一份到本机（异地第三份） |
+| `systemd/nai-patrol.{service,timer}` | 服务器 | 每 5 分钟跑一次 `/opt/owl/nai-ops patrol --oneline --alert` |
+| `SYSTEM-FACTS.md` | — | 系统事实速查（数字以代码为准） |
 
-`systemd/` 里是现成的单元，装一次就会随机器重启自动拉起：
+## 巡检（systemd）
 
 ```bash
-sudo cp deploy/ops/systemd/*.service deploy/ops/systemd/*.timer /etc/systemd/system/
+sudo cp deploy/ops/systemd/nai-patrol.* /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now nai-watch.service      # 常驻：实时事件流 → journalctl -u nai-watch -f
-sudo systemctl enable --now nai-patrol.timer       # 每 10 分钟体检 → journalctl -u nai-patrol
+sudo systemctl enable --now nai-patrol.timer
+journalctl -u nai-patrol -n 20 --no-pager
 ```
 
-- 巡检状态存在 `/var/lib/nai-patrol/`（告警去重用），数据库只读打开，不写业务表。
-- 告警通道用 `.env` 里的 `DISCORD_BOT_TOKEN` + `ALERT_USER_ID`（或 `ALERT_CHANNEL_ID`）；没配就只写 journal。
-- 阈值都在 `patrol.py` 顶部的常量里；`PATROL_COOLDOWN` 控制同一问题的告警间隔（默认 1800 秒）。
+退出码 0 正常 / 1 注意 / 2 危险都算执行成功；3 = 巡检自身出错。**只有「危险」才私信站长**
+（同一批危险项 6 小时一次，解除后补一条「已恢复」），「注意」只记日志，后台总览能看到。
 
-只重启机器人：`docker compose --profile discord up -d --no-deps discord-bot`（不加 `--no-deps` 会连带重建网关）。
+## nai-ops 常用子命令
+
+```bash
+/opt/owl/nai-ops patrol                 # 完整体检报告（在 /opt/service-tools 下跑，读同一份 .env 和 data/）
+/opt/owl/nai-ops snapshot <目标>         # 一致快照（备份脚本用）
+docker exec owl-gate nai-ops incident list
+docker exec owl-gate nai-ops incident open --title "出图接口例行维护" --status investigating
+docker exec owl-gate nai-ops smoke http://127.0.0.1:8000
+```
+
+`announce` / `dm-broadcast` 默认只演练，`--send` 才真发；**不要批量私信**（Discord 应用曾被风控 680009）。

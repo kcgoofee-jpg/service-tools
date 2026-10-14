@@ -1,4 +1,4 @@
-//! 环境变量（与 Python 版、docker-compose.yml 的 `discord-bot` / `warden` 服务完全一致）。
+//! 环境变量（与 2.x 版、`deploy/v3/compose.yml` 的 `naimei` / `warden` 服务一致）。
 //!
 //! | 变量 | 谁用 | 缺省 |
 //! |---|---|---|

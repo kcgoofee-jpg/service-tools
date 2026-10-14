@@ -1,5 +1,5 @@
 //! 公开页面、实时看板（JSON + SSE）、状态、客户端兼容视图、网页报错上报、问卷、首页首屏数据。
-//! 期望值来自旧版 Python 网关实际跑出来的响应（tools/dev/run-legacy.sh 的同款演示环境）与 tests/test_*.py 的断言。
+//! 期望值来自旧版 Python 网关实际跑出来的响应（2.x 的演示环境）与旧 pytest 用例的断言（都在标签 py-final 里）。
 
 mod common;
 use axum::body::{Body, BodyDataStream};

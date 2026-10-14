@@ -4,7 +4,7 @@
 set -euo pipefail
 DEST="$HOME/Backups/naigate"
 KEY="$HOME/.ssh/naigate_ed25519"
-HOST="root@47.76.230.107"
+HOST="root@${OWL_HOST:?先设置 OWL_HOST（服务器地址，不写进仓库）}"
 OPTS=(-i "$KEY" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=20)
 mkdir -p "$DEST/daily"; chmod 700 "$DEST"
 LATEST=$(ssh "${OPTS[@]}" "$HOST" 'ls -1t /opt/backups/daily/nai_gate-*.db.gz 2>/dev/null | head -1')

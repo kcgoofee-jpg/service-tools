@@ -53,34 +53,23 @@ Key 填领到的 `nai-…`。首页用 Discord 登录后能看到自己的额度
 ## 开发
 
 ```bash
-cargo test --workspace                      # Rust：单元、golden 对拍、集成（假上游）
-cargo clippy --workspace --all-targets -- -D warnings
-cd web && pnpm install && pnpm vitest run && pnpm vite build
+cargo xtask dev                             # 本地全套：网关 :18000 + 假 NovelAI 上游 + 合成演示数据（target/owl-dev）
+cd web && pnpm vite                         # 前端热更新 :5173，接口代理到上面的网关
+```
+
+提交前：
+
+```bash
+cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace                      # 单元、golden 对拍（冻结的 2.x 输出）、集成（假上游）
+cd web && pnpm biome check . && pnpm tsc --noEmit && pnpm vitest run
+cd web && E2E_BASE=http://localhost:5174 pnpm exec playwright test   # 先跑 cargo xtask dev 和 vite --port 5174
 tools/ci/check-fixtures.sh                  # 公开仓库红线：夹具只许合成数据
 ```
 
-本地起整套开发环境（真实的网关 + 假上游 + 合成演示数据，只监听本机，Ctrl-C 退出）：
-
-```bash
-cargo xtask dev                             # 网关 127.0.0.1:18000、假上游 18001；数据目录 target/owl-dev（每次启动重建）
-cd web && pnpm vite                         # 前端 http://localhost:5173，接口代理到 VITE_GATE（默认 http://127.0.0.1:18000）
-```
-
-后台是 `/admin`，开发环境的密码是 `dev-admin-password-123`；`cargo xtask dev --help` 看端口、数据目录等选项。
-数据目录里的 `cookies.json` 有后台与成员（合成数据里的「月见草」）的会话 Cookie。
-
-前端端到端（Playwright，对着上面这套环境跑；`cargo xtask dev` 先起来）：
-
-```bash
-cd web && pnpm exec vite --port 5174 --strictPort &          # 端到端用的前端
-cd web && E2E_BASE=http://localhost:5174 pnpm exec playwright test
-```
-
-用例会改数据（停用 / 重新生成 Key 等），想回到干净的数据就重启 `cargo xtask dev`；`cargo xtask dev --data <目录>` 换了数据目录时，
-用 `E2E_COOKIES=<目录>/cookies.json` 告诉用例会话文件在哪。
-
-不要合成数据、想自己配环境（环境变量见 `.env.example`；`NAI_IMAGE_HOST` 等指向本地假服务）：
-`cargo run -p gate-server --bin nai-gate -- serve --bind 127.0.0.1:8000`。
+`web/e2e/layout.spec.ts` 是排版硬规则：各宽度下不许出现「最后一行只剩一两个字」、同一行控件必须等高对齐。
+2.x 的 Python 代码、pytest 和生成 golden 夹具的脚本都在 git 标签 `py-final` 里；夹具已冻结，行为有意改动时记进
+[docs/v3-deviations.md](docs/v3-deviations.md)。
 
 ## 文档
 
