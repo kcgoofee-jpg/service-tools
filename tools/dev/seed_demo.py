@@ -45,7 +45,7 @@ async def main(data_dir: Path) -> None:
             "INSERT INTO api_keys (name, token, enabled, daily_images, daily_v5, daily_anlas, rpm, created_at, "
             "last_used_at, last_image_at, expires_at, features, discord_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (name, token, 1, 104, 10, 50, 5, now - 86400 * (i + 2), now - 600 * i, now - 900 * i,
-             now + 86400 * 20, json.dumps(["image", "vibe", "tags"]), str(900000000000000000 + i)))
+             now + 86400 * 20, "image,vibe,tags", str(900000000000000000 + i)))
         key_ids.append(cur.lastrowid)
         await db._db.execute(
             "INSERT INTO discord_registrations (discord_id, key_id, created_at, username, display_name) VALUES (?,?,?,?,?)",

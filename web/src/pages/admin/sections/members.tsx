@@ -1,5 +1,613 @@
-import { SectionHead } from "./_kit";
+/**
+ * 成员：列表（今日 / 近 7 天 / 累计用量）、筛选搜索排序、展开详情与全部 Key 操作。
+ * 支持 ?focus=<Key 编号>（⌘K 面板跳转到这里，滚动并高亮该成员）和 ?filter=<筛选 id>（总览的「成员要处理」）。
+ */
+import { ArrowDown, ArrowUp, Plus, Search } from "lucide-preact";
+import { useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { useLocation } from "preact-iso";
+import { Badge, Button, Menu, toast } from "../../../ui";
+import { useAdmin } from "../Admin";
+import { LoadError, Loading, SectionHead } from "./_kit";
+import {
+  addTag,
+  clearShare,
+  createInvite,
+  type Res,
+  regenerateKey,
+  removeMember,
+  removeTag,
+  resetAllKeys,
+  resetDailyQuota,
+  setEnabled,
+  setQuotaAuto,
+  switchRole,
+} from "./members/actions";
+import {
+  BansDialog,
+  BindDiscordDialog,
+  CouponDialog,
+  GiftDialog,
+  KeyRevealDialog,
+  MemberConfirm,
+  TagDialog,
+} from "./members/Dialogs";
+import { inviteMessage } from "./members/invite";
+import { KeyDialog } from "./members/KeyDialog";
+import {
+  ACK_TAG,
+  allFilters,
+  buildFilters,
+  defaultDir,
+  defaultFilter,
+  findByKeyId,
+  isStaff,
+  matchesQuery,
+  memberIssues,
+  memberLabel,
+  SORT_LABEL,
+  type SortKey,
+  sortMembers,
+} from "./members/logic";
+import type { DetailActions } from "./members/MemberDetail";
+import { MemberList } from "./members/MemberList";
+import { ConfirmDialog, Empty, NARROW, Seg, useMedia } from "./members/shared";
+import type { KeysResp, MemberRow, MembersResp } from "./members/types";
+import "./members.css";
 
-export default function Section() {
-  return <SectionHead title="members" desc="待实现" />;
+type Dlg =
+  | { t: "edit"; id: number | null; manual?: boolean }
+  | { t: "reveal"; title: string; intro: string; token: string; message?: string }
+  | { t: "bind" | "coupon" | "tag" | "disable" | "regen" | "reset" | "delete" | "ban"; id: number }
+  | { t: "bans" | "gift" | "resetAll" };
+
+const PAGE = 60;
+
+export default function Members() {
+  const loc = useLocation();
+  const { query } = loc;
+  const mem = useAdmin<MembersResp>("/admin/api/members");
+  const keys = useAdmin<KeysResp>("/admin/api/keys");
+  const bans = useAdmin<{ total: number }>("/admin/api/bans");
+  const narrow = useMedia(NARROW);
+
+  const [filter, setFilter] = useState<string | null>(query.filter ?? null);
+  const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<SortKey>("today");
+  const [dir, setDir] = useState<"asc" | "desc">("desc");
+  const [open, setOpen] = useState<Set<number>>(new Set());
+  const [limit, setLimit] = useState(PAGE);
+  const [dlg, setDlg] = useState<Dlg | null>(null);
+  const [focusId, setFocusId] = useState<number | null>(null);
+  const [inviting, setInviting] = useState(false);
+
+  const now = Date.now() / 1000;
+  const idleDays = mem.data?.inactivity_days ?? 3;
+  const rows: MemberRow[] = useMemo(() => {
+    const km = new Map((keys.data?.keys ?? []).map((k) => [k.id, k]));
+    return (mem.data?.members ?? []).map((m) => ({ ...m, k: km.get(m.id) }));
+  }, [mem.data, keys.data]);
+  const byId = (id: number) => rows.find((r) => r.id === id);
+
+  const filters = useMemo(() => buildFilters(rows, now, idleDays), [rows, now, idleDays]);
+  const all = allFilters(filters);
+  const members = rows.filter((m) => !isStaff(m));
+  const count = (f: (typeof all)[number]) => (f.allKeys ? rows : members).filter(f.test).length;
+
+  // 第一次有数据：有要处理的人就直接看「需要处理」
+  useEffect(() => {
+    if (filter === null && rows.length) setFilter(defaultFilter(rows, now));
+  }, [filter, rows, now]);
+  const activeId = all.some((f) => f.id === filter) ? (filter as string) : "all";
+  const active = all.find((f) => f.id === activeId) ?? all[0];
+  const inMore = !filters.main.some((f) => f.id === activeId);
+
+  const list = useMemo(() => {
+    if (!active) return [];
+    const pool = active.allKeys ? rows : rows.filter((m) => !isStaff(m));
+    return sortMembers(
+      pool.filter(active.test).filter((m) => matchesQuery(m, search)),
+      sort,
+      dir,
+    );
+  }, [rows, active, search, sort, dir]);
+  const shown = list.slice(0, limit);
+
+  /* ?focus=<Key 编号>：展开、滚到视野中央并高亮 */
+  const focusParam = Number(query.focus) || 0;
+  const handled = useRef(0);
+  useEffect(() => {
+    if (!focusParam || !rows.length || handled.current === focusParam) return;
+    const m = findByKeyId(rows, focusParam);
+    if (!m) return;
+    handled.current = focusParam;
+    setFilter(isStaff(m) ? "staff" : "all");
+    setSearch("");
+    setOpen((s) => new Set(s).add(m.id));
+    setFocusId(m.id);
+    const idx = sortMembers(isStaff(m) ? rows : rows.filter((x) => !isStaff(x)), sort, dir).findIndex(
+      (x) => x.id === m.id,
+    );
+    if (idx >= limit) setLimit(idx + 10);
+  }, [focusParam, rows, sort, dir, limit]);
+  useEffect(() => {
+    if (focusId === null) return;
+    const t = setTimeout(() => {
+      document.getElementById(`mb-m-${focusId}`)?.scrollIntoView({
+        block: "center",
+        behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+      });
+    }, 60);
+    const clear = setTimeout(() => setFocusId(null), 6000);
+    return () => {
+      clearTimeout(t);
+      clearTimeout(clear);
+    };
+  }, [focusId]);
+
+  const toggleOpen = (id: number) =>
+    setOpen((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  const onSort = (k: SortKey) => {
+    if (k === sort) setDir(dir === "asc" ? "desc" : "asc");
+    else {
+      setSort(k);
+      setDir(defaultDir(k));
+    }
+  };
+
+  /* ---------- 操作（对话框之外的，直接出 toast） ---------- */
+  const quick = async (p: Promise<Res>, okText: string) => {
+    const r = await p;
+    if (r.ok) toast(okText);
+    else toast(r.error, { error: true });
+  };
+  const act: DetailActions = {
+    edit: (m, manual) => setDlg({ t: "edit", id: m.id, ...(manual ? { manual } : {}) }),
+    quotaAuto: (m) => quick(setQuotaAuto(m.id), `「${memberLabel(m)}」已交给算法`),
+    role: (m, r) =>
+      quick(
+        switchRole(m.id, r),
+        `已将「${memberLabel(m)}」的身份组切换为「${{ regular: "普通", invite: "邀请", test: "测试", admin: "站长" }[r]}」`,
+      ),
+    issue: (m, a) => {
+      if (a.kind === "share-clear") void quick(clearShare(m.id), "已清除风险分并解除暂停");
+      else if (a.kind === "edit") setDlg({ t: "edit", id: m.id });
+      else if (a.kind === "tag-del") void quick(removeTag(m.id, a.tag), `已移除：${a.tag}`);
+      else {
+        const need = memberIssues(m, now)
+          .filter((x) => x.need)
+          .map((x) => x.title)
+          .join("；");
+        void quick(addTag(m.id, ACK_TAG, `看过：${need}`), "好，24 小时内不再提醒");
+      }
+    },
+    bind: (m) => setDlg({ t: "bind", id: m.id }),
+    addTag: (m) => setDlg({ t: "tag", id: m.id }),
+    removeTag: (m, tag) => quick(removeTag(m.id, tag), `已移除：${tag}`),
+    coupon: (m) => setDlg({ t: "coupon", id: m.id }),
+    audit: (m) => loc.route(`/admin/logs/audit?key=${m.all_key_ids.join(",")}`),
+    resetQuota: (m) => setDlg({ t: "reset", id: m.id }),
+    toggle: (m) => {
+      if (m.enabled) setDlg({ t: "disable", id: m.id });
+      else void quick(setEnabled(m.id, true, false), `已启用「${memberLabel(m)}」`);
+    },
+    regenerate: (m) => setDlg({ t: "regen", id: m.id }),
+    remove: (m, ban) => setDlg({ t: ban ? "ban" : "delete", id: m.id }),
+  };
+
+  const newInvite = async () => {
+    setInviting(true);
+    const r = await createInvite();
+    setInviting(false);
+    if (!r.ok) return toast(r.error, { error: true });
+    const t = r.data.key.token;
+    setDlg({
+      t: "reveal",
+      title: `${r.data.key.name} 已创建`,
+      intro: "下面是发给对方的完整消息，复制后直接私信对方。",
+      token: t,
+      message: inviteMessage(`${location.origin}/`, t),
+    });
+  };
+
+  const close = () => setDlg(null);
+  const target = dlg && "id" in dlg && dlg.id !== null ? byId(dlg.id) : undefined;
+
+  /* ---------- 对话框 ---------- */
+  const renderDialog = () => {
+    if (!dlg) return null;
+    switch (dlg.t) {
+      case "edit": {
+        if (dlg.id !== null && !target) return null;
+        return (
+          <KeyDialog
+            target={dlg.id === null ? null : (target ?? null)}
+            {...(dlg.manual ? { startManual: true } : {})}
+            idleDays={idleDays}
+            onClose={close}
+            onSaved={(text) => {
+              close();
+              toast(text);
+            }}
+            onCreated={(key) => {
+              setDlg({
+                t: "reveal",
+                title: "新 Key 已创建",
+                intro: "请立即复制新 Key，发给对方：",
+                token: key.token,
+              });
+            }}
+          />
+        );
+      }
+      case "reveal":
+        return (
+          <KeyRevealDialog
+            title={dlg.title}
+            intro={dlg.intro}
+            token={dlg.token}
+            {...(dlg.message ? { message: dlg.message } : {})}
+            onClose={close}
+          />
+        );
+      case "bind":
+        if (!target) return null;
+        return (
+          <BindDiscordDialog
+            keyId={target.id}
+            name={memberLabel(target)}
+            currentId={target.discord ? String(target.discord.id) : (target.discord_id ?? "")}
+            currentUser={target.discord?.username ?? ""}
+            onClose={close}
+            onDone={(t) => toast(t)}
+          />
+        );
+      case "coupon":
+        if (!target) return null;
+        return (
+          <CouponDialog
+            keyId={target.id}
+            name={memberLabel(target)}
+            onClose={close}
+            onDone={(t) => toast(t)}
+          />
+        );
+      case "tag":
+        if (!target) return null;
+        return (
+          <TagDialog keyId={target.id} name={memberLabel(target)} onClose={close} onDone={(t) => toast(t)} />
+        );
+      case "bans":
+        return <BansDialog onClose={close} onChanged={(t) => toast(t)} />;
+      case "gift":
+        return <GiftDialog onClose={close} onDone={(t) => toast(t)} />;
+      case "resetAll":
+        return (
+          <ConfirmDialog
+            title="全站重置 Key"
+            confirmText="确认重置"
+            danger
+            phrase="确认重置"
+            onClose={close}
+            onConfirm={async () => {
+              const r = await resetAllKeys();
+              if (!r.ok) return r.error;
+              toast(r.data.message || "全站已重置", { ms: 6000 });
+              return undefined;
+            }}
+          >
+            <p>
+              <b>高危操作：</b>将失效全站所有非管理员成员的 Key，并清空 Discord 绑定。带「邀请」标签的 Key
+              不受影响（保留启用、绑定与标签）。
+            </p>
+            <p>执行后，成员需要在 Discord 输入 /register 重新领取 Key。</p>
+          </ConfirmDialog>
+        );
+      case "disable": {
+        if (!target) return null;
+        const name = memberLabel(target);
+        return (
+          <MemberConfirm
+            title={`停用「${name}」`}
+            confirmText="停用"
+            danger
+            hasDiscord={!!target.discord_id}
+            onClose={close}
+            body={<p>停用后其 Key 立即不能使用，记录和用量保留，之后可以重新启用。</p>}
+            run={async (notify) => {
+              const r = await setEnabled(target.id, false, notify);
+              if (!r.ok) return r.error;
+              toast(`已停用「${name}」`);
+              return undefined;
+            }}
+          />
+        );
+      }
+      case "regen": {
+        if (!target) return null;
+        const name = memberLabel(target);
+        return (
+          <MemberConfirm
+            title={`重新生成「${name}」的 Key`}
+            confirmText="重新生成"
+            danger
+            hasDiscord={!!target.discord_id}
+            notifyLabel="同时用奶妹私信把新 Key 发给本人"
+            // 成功后确认框会调 onClose；此时已切到「展示新 Key」，不能被它关掉
+            onClose={() => setDlg((d) => (d?.t === "reveal" ? d : null))}
+            body={
+              <p>
+                旧 Key 将立即失效，需在客户端替换。配额、权限、有效期和历史用量保留，已受理任务继续完成。新
+                Key 会显示给你，请转交给成员。
+              </p>
+            }
+            run={async (notify) => {
+              const r = await regenerateKey(target.id, notify);
+              if (!r.ok) return r.error;
+              setDlg({
+                t: "reveal",
+                title: "Key 已重新生成",
+                intro: "旧 Key 已失效，请复制新 Key 并转交给成员更新客户端：",
+                token: r.data.token,
+              });
+              return undefined;
+            }}
+          />
+        );
+      }
+      case "reset": {
+        if (!target) return null;
+        const name = memberLabel(target);
+        return (
+          <MemberConfirm
+            title={`重置「${name}」今日额度`}
+            confirmText="重置"
+            hasDiscord={!!target.discord_id}
+            onClose={close}
+            body={<p>重置今天的 V5 和 Anlas 用量。图片、文本、请求数及用量日志不会删除。</p>}
+            run={async (notify) => {
+              const r = await resetDailyQuota(target.id, notify);
+              if (!r.ok) return r.error;
+              toast(`已重置「${name}」今日的 V5 和 Anlas 用量`);
+              return undefined;
+            }}
+          />
+        );
+      }
+      case "delete":
+      case "ban": {
+        if (!target) return null;
+        const name = memberLabel(target);
+        const ban = dlg.t === "ban";
+        const dc = !!target.discord_id;
+        return (
+          <MemberConfirm
+            title={ban ? `删除「${name}」并永久禁止领取` : `删除「${name}」`}
+            confirmText={ban ? "删除并永久禁止" : "删除"}
+            danger
+            hasDiscord={dc}
+            onClose={close}
+            body={
+              ban ? (
+                <p>
+                  其 Key 将被删除，Discord 领取记录会被清除并摘除身份组。该 Discord
+                  账号以后无法再次自助领取，此操作不可恢复。
+                </p>
+              ) : dc ? (
+                <p>
+                  其 Key 将被删除，Discord 领取记录会被清除并摘除身份组。删除后该成员可以重新自助领取新的
+                  Key，历史用量不再保留。
+                </p>
+              ) : (
+                <p>其 Key 将被删除且不可恢复。</p>
+              )
+            }
+            run={async (notify) => {
+              const r = await removeMember(target.id, ban, notify);
+              if (!r.ok) return r.error;
+              setOpen((s) => {
+                const n = new Set(s);
+                n.delete(target.id);
+                return n;
+              });
+              toast(ban ? `已删除「${name}」并永久禁止领取` : `已删除「${name}」`);
+              return undefined;
+            }}
+          />
+        );
+      }
+    }
+  };
+
+  /* ---------- 页面 ---------- */
+  const mainFilters = filters.main.filter((f) => !(f.id === "disabled" && count(f) === 0));
+  const moreGroups = [
+    { label: "状态", list: filters.more },
+    { label: "站长标签", list: filters.userTags },
+    { label: "近 24 小时被拒原因", list: filters.autoTags },
+  ];
+
+  return (
+    <div class="xa-page">
+      <SectionHead
+        title="成员"
+        actions={
+          <div class="xa-toolbar">
+            <Button onClick={() => setDlg({ t: "bans" })}>
+              封禁黑名单 <Badge>{bans.data?.total ?? 0}</Badge>
+            </Button>
+            <Button onClick={newInvite} disabled={inviting}>
+              <Plus size={15} aria-hidden="true" />
+              新建邀请 Key
+            </Button>
+            <Button variant="primary" onClick={() => setDlg({ t: "edit", id: null })}>
+              <Plus size={15} aria-hidden="true" />
+              新建 Key
+            </Button>
+            <Menu
+              button={(p) => (
+                <Button variant="ghost" {...p}>
+                  更多
+                </Button>
+              )}
+              items={[
+                { label: "奖励成员…", onSelect: () => setDlg({ t: "gift" }) },
+                { label: "全站重置 Key…", onSelect: () => setDlg({ t: "resetAll" }), danger: true },
+              ]}
+            />
+          </div>
+        }
+      />
+
+      {mem.loading && !mem.data ? (
+        <Loading rows={6} />
+      ) : mem.error && !mem.data ? (
+        <LoadError error={mem.error} />
+      ) : (
+        <>
+          <div class="mb-tools">
+            <div class="xa-toolbar">
+              <label class="mb-search">
+                <Search size={15} aria-hidden="true" />
+                <input
+                  class="input"
+                  type="search"
+                  placeholder="搜索名称、Discord ID、标签或备注"
+                  aria-label="搜索成员"
+                  value={search}
+                  onInput={(e) => setSearch(e.currentTarget.value)}
+                />
+              </label>
+              <label class="mb-sort">
+                <span class="sr-only">排序</span>
+                <select
+                  class="select"
+                  aria-label="排序方式"
+                  value={sort}
+                  onChange={(e) => {
+                    setSort(e.currentTarget.value as SortKey);
+                    setDir(defaultDir(e.currentTarget.value as SortKey));
+                  }}
+                >
+                  {(Object.keys(SORT_LABEL) as SortKey[]).map((k) => (
+                    <option key={k} value={k}>
+                      按{SORT_LABEL[k]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <Button
+                variant="ghost"
+                icon
+                aria-label={dir === "asc" ? "当前升序，点击改为降序" : "当前降序，点击改为升序"}
+                onClick={() => setDir(dir === "asc" ? "desc" : "asc")}
+              >
+                {dir === "asc" ? (
+                  <ArrowUp size={16} aria-hidden="true" />
+                ) : (
+                  <ArrowDown size={16} aria-hidden="true" />
+                )}
+              </Button>
+            </div>
+            <div class="xa-toolbar">
+              <Seg
+                label="筛选成员"
+                value={inMore ? "" : activeId}
+                options={mainFilters.map((f) => {
+                  const n = count(f);
+                  return {
+                    id: f.id,
+                    label: (
+                      <>
+                        {f.label} <span class={f.id === "attention" && n ? "mb-n is-hot" : "mb-n"}>{n}</span>
+                      </>
+                    ),
+                  };
+                })}
+                onChange={(v) => {
+                  setFilter(v);
+                  setLimit(PAGE);
+                }}
+              />
+              <select
+                class="select mb-more"
+                aria-label="更多筛选"
+                value={inMore ? activeId : ""}
+                onChange={(e) => {
+                  setFilter(e.currentTarget.value || "all");
+                  setLimit(PAGE);
+                }}
+              >
+                <option value="">{inMore && active ? `更多：${active.label}` : "更多筛选"}</option>
+                {moreGroups.map((g) => {
+                  const opts = g.list.filter((f) => count(f) > 0 || f.id === activeId);
+                  return opts.length ? (
+                    <optgroup key={g.label} label={g.label}>
+                      {opts.map((f) => (
+                        <option key={f.id} value={f.id}>
+                          {f.label}（{count(f)}）
+                        </option>
+                      ))}
+                    </optgroup>
+                  ) : null;
+                })}
+              </select>
+              {inMore && (
+                <Button size="sm" variant="ghost" onClick={() => setFilter("all")}>
+                  清除筛选
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {list.length === 0 ? (
+            <div class="card">
+              <Empty
+                title={
+                  activeId === "attention"
+                    ? "没有要处理的成员"
+                    : rows.length
+                      ? "没有匹配的成员"
+                      : "还没有成员"
+                }
+              >
+                {activeId === "attention"
+                  ? "风险信号、到期、被拒过多的成员会出现在这里。"
+                  : rows.length
+                    ? "换个筛选或关键词试试。"
+                    : "成员在 Discord 领取 Key 后会出现在这里。"}
+              </Empty>
+            </div>
+          ) : (
+            <>
+              <MemberList
+                rows={shown}
+                now={now}
+                narrow={narrow}
+                sort={sort}
+                dir={dir}
+                onSort={onSort}
+                open={open}
+                onToggle={toggleOpen}
+                focusId={focusId}
+                act={act}
+              />
+              {list.length > shown.length && (
+                <div class="mb-more-row">
+                  <Button onClick={() => setLimit(limit + PAGE)}>
+                    显示更多（还有 {list.length - shown.length} 位）
+                  </Button>
+                </div>
+              )}
+            </>
+          )}
+        </>
+      )}
+      {renderDialog()}
+    </div>
+  );
 }
