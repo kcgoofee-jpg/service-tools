@@ -45,3 +45,48 @@
 - 已删除功能的残留（3 小时上限、DRR 重排、防分享证据、`anlas_auto` 自动分配、`v5_pinned`）不移植，但要在 PR 描述里列出跳过了什么。
 - 不改 `app/`、`tests/` 下的 Python 文件；只新增 golden 生成脚本和 Rust 代码。
 - 注释用中文，说清楚「为什么」；与旧版一致的怪癖要注明。
+
+---
+
+## 网关路由移植（gate-server）
+
+旧版一个路由文件 → `crates/gate-server/src/routes/<组>.rs`（或 `routes/<组>/mod.rs`），在 `routes/mod.rs` 里 `.merge(<组>::router())`。
+后台接口放 `routes/admin/<组>.rs`，在 `routes/admin/mod.rs` 的 `router()` 里 merge（这样自动经过操作日志中间件）。
+
+### 能直接用的积木
+
+| 旧版 | Rust | 说明 |
+|---|---|---|
+| `STATE` | `State(state): State<AppState>`（`crate::state`） | `state.env`（环境变量）、`db`、`clock`、`nai`（上游客户端）、`guard`、`alerter`（私信站长）、`announcer`、`bugs`、`params`、`pauses`、`cooldown`、`health`、`tasks`；`state.now()` `day()` `month()` `limits()` `record_upstream(ok)` `block_image_generation(secs)` `live_note(status)` |
+| `raise err(s, msg, code)` / `GateError` | `crate::error::GateError::new` / `with_code` | 成员接口（NovelAI 格式 + 「猫头鹰公益站提醒：」前缀）。 |
+| `HTTPException(s, detail)` | `crate::error::HttpError::new(s, detail)` | 后台 / 成员页 / 桥接：`{"detail": ...}`。`detail` 是 `Value`，需要对象时直接构造。 |
+| 未捕获异常 | `crate::error::InternalError(msg)` | 500 + 请求编号；中间件自动记 Bug。 |
+| 返回 dict | `crate::error::ok_json(&json!({...}))` / `json_response(status, &v)` | 与 Starlette 同样的序列化（紧凑、UTF-8、Python 浮点格式）。**键顺序照抄旧版。** |
+| `authenticate(request, passive=)` | `crate::auth::authenticate(&state, &parts, passive)` | 返回 `Key`（`crate::key::Key`：`id() name() int() float() flag() str() get()` 等）。 |
+| `require_feature` / `check_rpm` / `check_image_cooldown` / `limit_inflight` | `crate::auth::*` | |
+| `request.client.host` | `crate::auth::client_ip(&parts, &state.env.forwarded_allow_ips)` | |
+| `site_flags.get(db, SPEC, settings)` | `crate::auth::site_flag(&state, &SPEC)` / `site_flag_f64` | |
+| `record(key, kind, model, status, ...)` | `state.record(&ctx, &key, Entry::new(kind, model, status).detail(..).reason(..))` | `crate::accounting::Entry`；`await main.record(...)` 对应 `state.settle_record(...).await`。 |
+| `bug(source, exc, ...)` | `state.bug(source, Some((类型名, 消息)), &ctx)` 或 `state.bugs.capture(Report{..})` | |
+| `notify_owner(kind, msg, cooldown)` | `state.alerter.notify(kind, msg, cooldown)` | 测试环境不配 Discord，不会真发。 |
+| 请求上下文（rid / model / 是否已记账） | `crate::auth::ctx_of(&parts)` → `ReqCtx` | |
+| `acquire_concurrency(key)` | `crate::admission::acquire_slots(&state, &key, image)` | |
+| `read_json_body` / `read_json` | `crate::body::read_json_body`（HttpError）/ `read_json`（GateError） | 先 `let (parts, body) = req.into_parts();`。 |
+| `require_admin(request)` | 处理函数参数里加 `_s: crate::session::AdminSession` | 写请求自动做来源校验。 |
+| `member_state(request)` | `crate::session::member_state(&state, &headers)` 或提取器 `MaybeMember` | 返回 `(discord_id, Option<Key>)`。 |
+| Cookie 读写 | `crate::session::{cookie, set_cookie_header, delete_cookie_header, sign_member, key_tag}` | |
+| `log_action(db, actor, ...)` | `crate::action_log::log_action(&state.db, ...)`；`actor` 用 `routes::admin::actor(&state, &parts)` | 处理函数自己记了日志时，在响应扩展里放 `routes::admin::ActionLogged`，中间件就不再重复记。 |
+| `db._db.execute(...)` 裸 SQL | 在 **gate-db** 里加方法（只有 gate-db 写 SQL） | 新文件放 `crates/gate-db/src/repo/<组>.rs`。 |
+
+### 测试
+
+- 集成测试：`crates/gate-server/tests/<组>.rs`，`mod common; use common::*;` → `setup(&[("ENV", "值")])` 起一个完整网关 + 假上游
+  （`gate_testkit::MockUpstream`，可 `push(path, Reply::...)` 脚本化回复），`Call::new("GET", "/path").bearer(TOKEN).json(..).send(&e.state)`。
+- 状态码、JSON 结构、文案、写进库的行都要断言；能从旧版跑出期望值的就跑旧版（`tools/dev/run-legacy.sh` 起旧网关 + 假上游，或直接 `uv run` 调函数）。
+- 不打真实的 NovelAI / Discord：Discord REST 基地址要能用环境变量换成本地假服务。
+
+### 红线（公开仓库）
+
+- 不许出现真实成员数据（Discord ID / 用户名 / IP / Key / 提示词）。旧代码里写死的服务器 ID、角色 ID、站点地址**不要抄**，改成读环境变量。
+- `tools/ci/check-fixtures.sh` 必须通过。
+- 与旧版有意不同的地方，追加到 `docs/v3-deviations.md` 末尾（一条一段：旧行为、新行为、原因）。

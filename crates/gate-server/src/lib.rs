@@ -16,6 +16,7 @@ pub mod fsutil;
 pub mod gen_audit;
 pub mod guard;
 pub mod hooks;
+pub mod kernel;
 pub mod key;
 pub mod media;
 pub mod middleware;
@@ -28,7 +29,7 @@ pub mod state;
 pub mod time;
 pub mod web;
 
-mod routes;
+pub mod routes;
 
 pub use state::AppState;
 
