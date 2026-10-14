@@ -30,7 +30,7 @@ class Spec:
 
 
 WEB_LOGIN_PAUSED = Spec("web_login_paused", "flag", True, "registration_routes",
-                        "网页 Discord OAuth 登录暂停（申诉期间）。Key 登录不受影响")
+                        "网页 Discord OAuth 登录暂停（Discord 应用审核期间）。Discord OAuth 是唯一网页登录方式（Key 登录已下线）")
 DM_ENABLED = Spec("dm_enabled", "flag", False, "registration", "私信总闸门（关 = 任何私信都不发）")
 ISSUE_HOURLY_CAP = Spec("issue_hourly_cap", "int", 12, "registration", "每小时最多发放的新 Key", 0, 500)
 REGISTER_OPEN = Spec("register_open", "flag", False, "modules / registration", "开放 /register 领取")
