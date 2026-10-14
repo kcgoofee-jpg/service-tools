@@ -10,7 +10,6 @@ use axum::extract::State;
 use axum::http::Uri;
 use axum::routing::get;
 use gate_core::features::{FEATURES, KIND_FEATURE};
-use gate_core::perf::{self, PerfParams, PerfRow};
 use gate_core::site_flags::{GLOBAL_DAILY_V5, GLOBAL_MONTHLY_ANLAS};
 use gate_core::{pyc, pyext, pyval};
 use serde_json::{Map, Value, json};
@@ -287,44 +286,7 @@ async fn server_status(State(state): State<AppState>, _s: AdminSession) -> ApiRe
 
 /// 上游表现：V4.5 / V5 的生成耗时、排队、限流、成功率、产能，与过去 7 天对比。
 async fn upstream_perf(State(state): State<AppState>, _s: AdminSession) -> ApiResult {
-    let now = state.now();
-    let rows: Vec<PerfRow> = state
-        .db
-        .image_perf_rows(now - (perf::BASELINE_DAYS * perf::DAY) as f64)
-        .await?
-        .into_iter()
-        .map(
-            |(ts, model, status, images, wait_ms, dur_ms, up_status, detail)| PerfRow {
-                ts,
-                model: Some(model),
-                status,
-                images,
-                wait_ms,
-                dur_ms,
-                up_status,
-                detail: Some(detail),
-            },
-        )
-        .collect();
-    let usable: Vec<_> = state
-        .nai
-        .tokens()
-        .await
-        .into_iter()
-        .filter(|t| t.usable(now))
-        .collect();
-    let slots: i64 = usable.iter().map(|t| t.image_slots.limit() as i64).sum();
-    let limits = state.limits();
-    let report = perf::analyze(
-        &rows,
-        now,
-        &PerfParams {
-            slots: if slots != 0 { slots } else { 1 },
-            site_interval: limits.image_min_interval,
-            key_interval: limits.key_image_min_interval,
-            hourly_cap: state.guard.with(|g| g.hourly_cap(now)) * (usable.len() as i64).max(1),
-        },
-    );
+    let report = crate::kernel::collect_perf(&state, state.now()).await?;
     Ok(ok_json(
         &serde_json::to_value(report).map_err(|e| InternalError(e.to_string()))?,
     ))
