@@ -1,0 +1,1336 @@
+//! 后台「成员」接口：Key / 成员 / 黑名单 / 券 / 标签 / 奖励。
+//!
+//! 逐字节对拍旧版见 `admin_golden.rs`（夹具由旧 Python 生成）；这里按接口写成可读的用例：
+//! 鉴权、校验文案、返回结构、写进库的行、操作日志，注册服务（真实的 RegistrationService + 本机假 Discord）和动态额度占位内核。
+
+mod admin_util;
+mod common;
+use admin_util::{Admin, MockDiscord, registration_env, send};
+use common::{Env, TOKEN, setup};
+use gate_db::repo::keys::NewKey;
+use gate_server::AppState;
+use serde_json::{Value, json};
+
+const A: &str = "/admin/api";
+
+async fn mk_key(state: &AppState, name: &str, token: &str) -> i64 {
+    let k: NewKey = serde_json::from_value(json!({
+        "name": name, "token": token, "daily_images": 50, "monthly_anlas": 0.0,
+        "daily_text_tokens": 1000, "rpm": 30, "daily_v5": 5, "daily_anlas": 0.0,
+    }))
+    .unwrap();
+    let row = state.db.create_key(&k, state.now()).await.unwrap();
+    row["id"].as_i64().unwrap()
+}
+
+async fn rows(state: &AppState, sql: &str) -> Vec<Value> {
+    state.db.execute_fetchall_compat(sql, &[]).await.unwrap()
+}
+
+async fn ready() -> (Env, Admin) {
+    let e = setup(&[]).await;
+    let a = Admin::login(&e.state).await;
+    (e, a)
+}
+
+/// 配齐自助领取的网关：真实的 `RegistrationService`，Discord REST 指向本机假服务，私信总闸门打开。
+async fn ready_reg() -> (Env, Admin, MockDiscord) {
+    let d = MockDiscord::start().await;
+    let vars = registration_env(&d.url());
+    let refs: Vec<(&str, &str)> = vars.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+    let e = setup(&refs).await;
+    e.state.db.set_setting("dm_enabled", "1").await.unwrap();
+    let a = Admin::login(&e.state).await;
+    (e, a, d)
+}
+
+/// 假 Discord 收到的私信：(收信人, 文本)。一条私信 = 先建私信频道、再发消息。
+fn dms(d: &MockDiscord) -> Vec<(String, String)> {
+    d.calls()
+        .windows(2)
+        .filter(|w| w[0][1] == "/users/@me/channels" && w[1][1] == "/channels/dm-1/messages")
+        .map(|w| {
+            (
+                w[0][2]["recipient_id"].as_str().unwrap().to_string(),
+                w[1][2]["content"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn every_endpoint_requires_login_and_same_origin() {
+    let (e, a) = ready().await;
+    let none = || None;
+    let table: Vec<(&str, &str, Option<Value>)> = vec![
+        ("GET", "/keys", none()),
+        ("POST", "/keys", Some(json!({}))),
+        ("POST", "/keys/invite", Some(json!({}))),
+        ("POST", "/keys/1/regenerate", none()),
+        ("PATCH", "/keys/1", Some(json!({}))),
+        ("POST", "/keys/1/role", Some(json!({"role": "test"}))),
+        ("POST", "/keys/1/reset-daily-image-quota", none()),
+        (
+            "POST",
+            "/keys/1/bind-discord",
+            Some(json!({"discord_id": "9"})),
+        ),
+        ("GET", "/keys/1/coupons", none()),
+        ("POST", "/keys/1/coupons", Some(json!({}))),
+        ("DELETE", "/keys/1", none()),
+        ("PUT", "/keys/1/tags", Some(json!({"tag": "x"}))),
+        ("DELETE", "/keys/1/tags/x", none()),
+        ("POST", "/keys/1/share-clear", none()),
+        ("POST", "/gift", Some(json!({"discord_id": "9"}))),
+        ("GET", "/members", none()),
+        ("GET", "/bans", none()),
+        ("POST", "/bans", Some(json!({"discord_id": "9"}))),
+        ("DELETE", "/bans/9", none()),
+    ];
+    let table_len_writes = table.iter().filter(|(m, ..)| *m != "GET").count();
+    for (method, path, body) in table {
+        let url = format!("{A}{path}");
+        let anon = send(&e.state, method, &url, None, body.clone(), &[]).await;
+        anon.assert_detail(401, "未登录或会话已过期");
+        if method != "GET" {
+            // 写请求：来源不是本站，即使带着有效会话也拒绝（登录之外的写接口都要校验）
+            let evil = send(
+                &e.state,
+                method,
+                &url,
+                Some(&a.cookie),
+                body,
+                &[("origin", "https://evil.example")],
+            )
+            .await;
+            evil.assert_detail(403, "来源校验失败");
+        }
+    }
+    // 参数校验先于鉴权（FastAPI 的行为）：没登录的人拿到的也是 422
+    let r = send(
+        &e.state,
+        "GET",
+        &format!("{A}/keys/abc/coupons"),
+        None,
+        None,
+        &[],
+    )
+    .await;
+    assert_eq!(r.status, 422);
+    assert_eq!(
+        r.json(),
+        json!({"detail": [{"type": "int_parsing", "loc": ["path", "key_id"],
+            "msg": "Input should be a valid integer, unable to parse string as an integer", "input": "abc"}]})
+    );
+    // 没登录的请求不进操作日志；带着有效会话的跨站写请求每个记一条失败（外加登录那一条）
+    let acts = a.actions().await;
+    let writes = table_len_writes;
+    assert_eq!(acts.len(), writes + 1, "{acts:?}");
+    assert_eq!(
+        acts.iter()
+            .filter(|(_, _, d, ok)| d == "失败（403）：来源校验失败" && !ok)
+            .count(),
+        writes,
+        "{acts:?}"
+    );
+}
+
+#[tokio::test]
+async fn keys_list_shape_roles_and_counters() {
+    let (e, a) = ready().await;
+    let id2 = mk_key(&e.state, "邀请-7", "nai-t-2").await;
+    e.state
+        .db
+        .set_key_role(id2, "invite", e.state.now())
+        .await
+        .unwrap();
+    let id3 = mk_key(&e.state, "测试", "nai-t-3").await;
+    e.state
+        .db
+        .set_key_role(id3, "test", e.state.now())
+        .await
+        .unwrap();
+    a.sql(&format!(
+        "INSERT INTO counters(key_id, day, images, anlas, text_tokens, requests, v5, legacy_free_images) \
+         VALUES (1, '{}', 3, 1.239, 7, 4, 2, 1);\
+         INSERT INTO usage_log(ts, key_id, key_name, kind, model, status, images) VALUES (1.0, 1, 'x', 'image', 'm', 'ok', 4), (2.0, 1, 'x', 'image_stream', 'm', 'ok', 2), (3.0, 1, 'x', 'chat', 'm', 'ok', 9);",
+        e.state.day()
+    ))
+    .await;
+    let r = a.get(&format!("{A}/keys")).await;
+    assert_eq!(r.status, 200, "{}", r.text());
+    let v = r.json();
+    let keys = v["keys"].as_array().unwrap();
+    assert_eq!(
+        keys.iter()
+            .map(|k| k["name"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["测试", "邀请-7", "测试成员"],
+        "id 倒序"
+    );
+    let k = &keys[2];
+    let order: Vec<&str> = k.as_object().unwrap().keys().map(String::as_str).collect();
+    assert_eq!(
+        order,
+        [
+            "id",
+            "name",
+            "token",
+            "enabled",
+            "daily_images",
+            "daily_anlas",
+            "daily_v5",
+            "monthly_anlas",
+            "daily_text_tokens",
+            "rpm",
+            "allow_anlas",
+            "allow_img2img",
+            "exclude_global_v5",
+            "image_model_scope",
+            "is_admin",
+            "is_test",
+            "quota_auto",
+            "role",
+            "role_label",
+            "features",
+            "expires_at",
+            "created_at",
+            "last_used_at",
+            "used"
+        ]
+    );
+    assert_eq!(k["token"], TOKEN);
+    assert_eq!(k["quota_auto"], true);
+    assert_eq!(k["features"], Value::Null);
+    assert_eq!(
+        (k["role"].as_str(), k["role_label"].as_str()),
+        (Some("regular"), Some("普通"))
+    );
+    assert_eq!(
+        k["used"],
+        json!({"images": 3, "generated_images_total": 6, "legacy_free_images": 1, "anlas": 1.24, "v5": 2,
+               "text_tokens": 7, "requests": 4})
+    );
+    assert_eq!(keys[1]["role"], "invite");
+    assert_eq!(keys[1]["role_label"], "邀请");
+    assert_eq!(keys[0]["role"], "test");
+}
+
+#[tokio::test]
+async fn create_key_validates_then_stores_manual_quota() {
+    let (e, a) = ready().await;
+    for (body, detail) in [
+        (
+            json!({"daily_images": -1}),
+            "daily_images 必须在 0～1000000 之间",
+        ),
+        (
+            json!({"daily_images": "abc"}),
+            "daily_images 必须是有效数字",
+        ),
+        (json!({"daily_images": null}), "daily_images 不能为空"),
+        (json!({"daily_images": true}), "daily_images 不能为空"),
+        (json!({"daily_images": 1.5}), "daily_images 必须是整数"),
+        (
+            json!({"monthly_anlas": 100001}),
+            "monthly_anlas 必须在 0.0～100000.0 之间",
+        ),
+        (json!({"rpm": 0}), "rpm 必须在 1～600 之间"),
+        (
+            json!({"expires_days": 3651}),
+            "expires_days 必须在 0～3650 之间",
+        ),
+        (
+            json!({"allow_anlas": true, "daily_anlas": 0, "monthly_anlas": 0}),
+            // 文案写「0 = 不限」，但两项都是 0 实际被拒——与旧版一致
+            "开通 Anlas 时必须设置每日或每月 Anlas 上限（0 = 不限），不能两项都留空",
+        ),
+        (
+            json!({"features": ["nope"]}),
+            "features 必须是功能名列表：image,upscale,augment,vibe,tags,text,voice",
+        ),
+    ] {
+        a.post(&format!("{A}/keys"), body)
+            .await
+            .assert_detail(422, detail);
+    }
+    let bad = send(
+        &e.state,
+        "POST",
+        &format!("{A}/keys"),
+        Some(&a.cookie),
+        None,
+        &[],
+    )
+    .await;
+    bad.assert_detail(400, "请求体不是合法 JSON");
+
+    let r = a
+        .post(
+            &format!("{A}/keys"),
+            json!({"name": "  新成员  ", "daily_images": "12", "daily_v5": 3, "monthly_anlas": 10, "rpm": 7,
+                   "role": "TEST ", "features": ["vibe", "image"], "expires_days": 2, "image_model_scope": "all"}),
+        )
+        .await;
+    assert_eq!(r.status, 200, "{}", r.text());
+    let key = &r.json()["key"];
+    assert_eq!(key["name"], "新成员");
+    assert_eq!(key["daily_images"], 12);
+    assert_eq!(key["monthly_anlas"], 10.0);
+    assert_eq!(key["features"], json!(["image", "vibe"]));
+    assert_eq!(key["image_model_scope"], "all");
+    assert_eq!(key["is_test"], true);
+    assert_eq!(key["role"], "test");
+    assert!(key["token"].as_str().unwrap().starts_with("nai-"));
+    assert_eq!(key["token"].as_str().unwrap().len(), 36);
+    let row = e
+        .state
+        .db
+        .get_key(key["id"].as_i64().unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    // 后台手动建的 Key 标为手动额度：动态额度算法不覆盖
+    assert_eq!(row["quota_auto"], -1);
+    assert_eq!(row["anlas_auto"], 0, "3.0 已删除的列原样不动");
+    assert!(row["expires_at"].as_f64().unwrap() > e.state.now() + 86400.0);
+
+    // 没传 features：沿用「新成员默认功能」= 只有文生图；站长把默认设成 * 则不限
+    let r = a.post(&format!("{A}/keys"), json!({})).await;
+    assert_eq!(r.json()["key"]["name"], "未命名");
+    assert_eq!(r.json()["key"]["features"], json!(["image"]));
+    e.state
+        .db
+        .set_setting("register_features", "*")
+        .await
+        .unwrap();
+    let r = a
+        .post(&format!("{A}/keys"), json!({"name": "全功能"}))
+        .await;
+    assert_eq!(r.json()["key"]["features"], Value::Null);
+    let r = a
+        .post(&format!("{A}/keys"), json!({"name": "x", "features": null}))
+        .await;
+    assert_eq!(r.json()["key"]["features"], Value::Null);
+
+    let acts = a.actions().await;
+    // 对象取请求里的原始名字（没截断、没去空白）
+    assert!(acts.iter().any(|(act, t, d, ok)| act == "新建 Key"
+        && t == "  新成员  "
+        && d.starts_with("{\"name\"")
+        && *ok));
+    assert!(
+        acts.iter()
+            .any(|(act, _, d, ok)| act == "新建 Key" && d.contains("daily_images") && !ok)
+    );
+}
+
+#[tokio::test]
+async fn invite_keys_are_numbered_and_tagged() {
+    let (e, a) = ready().await;
+    mk_key(&e.state, "邀请-4 的朋友", "nai-t-2").await;
+    mk_key(&e.state, "邀请-x", "nai-t-3").await;
+    let r = a.post(&format!("{A}/keys/invite"), json!({})).await;
+    assert_eq!(r.status, 200, "{}", r.text());
+    let key = &r.json()["key"];
+    assert_eq!(key["name"], "邀请-5");
+    // 没有注册服务：沿用环境默认额度，模型范围 all，30 天有效
+    assert_eq!(key["daily_images"], 100);
+    assert_eq!(key["daily_v5"], 50);
+    assert_eq!(key["image_model_scope"], "all");
+    assert_eq!(key["daily_anlas"], 0.0);
+    assert!(key["expires_at"].as_f64().unwrap() > e.state.now() + 29.0 * 86400.0);
+    let id = key["id"].as_i64().unwrap();
+    let tags = rows(
+        &e.state,
+        &format!("SELECT tag, by FROM key_tags WHERE key_id={id}"),
+    )
+    .await;
+    assert_eq!(tags, [json!({"tag": "邀请", "by": "站长"})]);
+    // quota_auto 保持默认（额度交给算法）
+    assert_eq!(
+        e.state.db.get_key(id).await.unwrap().unwrap()["quota_auto"],
+        1
+    );
+    let r2 = a.post(&format!("{A}/keys/invite"), json!({})).await;
+    assert_eq!(r2.json()["key"]["name"], "邀请-6");
+    // 列表里认出「邀请」身份组；操作日志：处理函数自己记一条，通用包装再记一条（旧版如此）
+    let l = a.get(&format!("{A}/keys")).await.json();
+    assert_eq!(l["keys"][0]["role"], "invite");
+    let acts = a.actions().await;
+    assert!(
+        acts.iter()
+            .any(|(act, t, ..)| act == "新建邀请 Key" && t == "邀请-5")
+    );
+    assert!(acts.iter().any(|(act, ..)| act == "POST /keys/invite"));
+}
+
+#[tokio::test]
+async fn regenerate_replaces_the_key_immediately() {
+    let (e, a) = ready().await;
+    let url = format!("{A}/keys/1/regenerate");
+    a.post(&format!("{A}/keys/999/regenerate"), json!({}))
+        .await
+        .assert_detail(404, "key 不存在");
+    let r = a.req("POST", &url, None).await;
+    assert_eq!(r.status, 200);
+    assert_eq!(r.headers["cache-control"], "no-store");
+    let token = r.json()["token"].as_str().unwrap().to_string();
+    assert_ne!(token, TOKEN);
+    assert_eq!(
+        e.state.db.get_key(1).await.unwrap().unwrap()["token"],
+        token.as_str()
+    );
+    assert!(
+        e.state.db.get_key_by_token(TOKEN).await.unwrap().is_none(),
+        "旧 Key 立即失效"
+    );
+    let acts = a.actions().await;
+    assert!(
+        acts.iter()
+            .any(|(act, t, ..)| act == "重新生成 Key" && t == "Key #1 测试成员")
+    );
+    assert!(
+        acts.iter().all(|(act, ..)| act != "私信成员"),
+        "没有注册服务：不私信、也不记私信日志"
+    );
+}
+
+#[tokio::test]
+async fn regenerate_dm_goes_through_the_registration_service() {
+    let (e, a, d) = ready_reg().await;
+    let url = format!("{A}/keys/1/regenerate");
+    // 没有绑定 Discord 的 Key：只换 Key，不私信
+    a.req("POST", &url, None).await;
+    assert!(d.calls().is_empty());
+    a.post(
+        &format!("{A}/keys/1/bind-discord"),
+        json!({"discord_id": "900000000000000001", "username": "u1"}),
+    )
+    .await;
+    let r = a.req("POST", &url, None).await;
+    let token = r.json()["token"].as_str().unwrap().to_string();
+    assert_eq!(
+        dms(&d),
+        [(
+            "900000000000000001".to_string(),
+            format!(
+                "🦉 猫头鹰公益站通知：站长为你重置了 Key，旧 Key 已失效。新的 Key（请妥善保存）：`{token}`"
+            )
+        )]
+    );
+    // 操作日志里的 Key 被打码
+    let acts = a.actions().await;
+    let dm = acts
+        .iter()
+        .find(|(act, ..)| act == "私信成员")
+        .expect("私信日志");
+    assert_eq!((dm.1.as_str(), dm.3), ("Key #1", true));
+    assert!(
+        dm.2.starts_with(
+            "已私信：站长为你重置了 Key，旧 Key 已失效。新的 Key（请妥善保存）：`nai-***`"
+        ),
+        "{}",
+        dm.2
+    );
+    assert!(!acts.iter().any(|(_, _, d, _)| d.contains(&token)));
+    // ?notify=0 不私信
+    a.req("POST", &format!("{url}?notify=0"), None).await;
+    assert_eq!(dms(&d).len(), 1);
+    // 私信总闸门关着：被拦下，日志里记原因
+    e.state.db.set_setting("dm_enabled", "0").await.unwrap();
+    a.req("POST", &url, None).await;
+    assert_eq!(dms(&d).len(), 1);
+    // 对方关了私信（Discord 拒绝建频道）：记失败
+    e.state.db.set_setting("dm_enabled", "1").await.unwrap();
+    d.set_closed(true);
+    a.req("POST", &url, None).await;
+    let acts = a.actions().await;
+    assert!(acts.iter().any(|(act, _, det, ok)| act == "私信成员"
+        && det.starts_with("未私信（私信总开关已关闭）：")
+        && *ok));
+    assert!(acts.iter().any(|(act, _, det, ok)| act == "私信成员"
+        && det == "私信失败（对方可能关闭了私信）"
+        && !ok));
+}
+
+#[tokio::test]
+async fn patch_key_updates_fields_and_quota_ownership() {
+    let (e, a) = ready().await;
+    let url = format!("{A}/keys/1");
+    a.patch(&format!("{A}/keys/999"), json!({}))
+        .await
+        .assert_detail(404, "key 不存在");
+    for (body, detail) in [
+        (
+            json!({"quota": "x"}),
+            "quota 只能是 auto（算法）或 manual（手动）",
+        ),
+        (json!({"daily_v5": 1.5}), "daily_v5 必须是整数"),
+        (json!({"monthly_anlas": null}), "monthly_anlas 不能为空"),
+        (
+            json!({"role": "boss"}),
+            "身份组必须是 regular / invite / test / admin",
+        ),
+        (
+            json!({"allow_anlas": true}),
+            "开通 Anlas 时必须设置每日或每月 Anlas 上限（0 = 不限），不能两项都留空",
+        ),
+    ] {
+        a.patch(&url, body).await.assert_detail(422, detail);
+    }
+    // 普通修改：名字、开关、额度；改了额度 → 转为手动（quota_auto = -1）
+    let r = a
+        .patch(&url, json!({"name": "  改名  ", "enabled": false, "daily_images": 200, "daily_anlas": 5, "rpm": 9}))
+        .await;
+    assert_eq!(r.status, 200, "{}", r.text());
+    let key = r.json()["key"].clone();
+    assert_eq!(
+        (
+            key["name"].as_str(),
+            key["enabled"].clone(),
+            key["daily_images"].clone()
+        ),
+        (Some("改名"), json!(false), json!(200))
+    );
+    assert_eq!(key["daily_anlas"], 5.0);
+    assert_eq!(key["quota_auto"], false);
+    // 从「仅 V4.5」开到 V5：没填 daily_v5 就给默认 15
+    let r = a
+        .patch(&url, json!({"image_model_scope": "all", "daily_v5": 0}))
+        .await;
+    assert_eq!(r.json()["key"]["daily_v5"], 0, "填了 daily_v5 就用填的");
+    let r = a.patch(&url, json!({"image_model_scope": "all"})).await;
+    assert_eq!(r.json()["key"]["daily_v5"], 15);
+    // 3.0 已删除的请求字段被忽略，对应的列不动
+    let r = a
+        .patch(&url, json!({"anlas_mode": "bad", "v5_pinned": 9}))
+        .await;
+    assert_eq!(r.status, 200);
+    let row = e.state.db.get_key(1).await.unwrap().unwrap();
+    assert_eq!(
+        (row["anlas_auto"].clone(), row["v5_pinned"].clone()),
+        (json!(0), Value::Null)
+    );
+    // 有效期：天数 → 到期时间；0 = 长期
+    let r = a.patch(&url, json!({"expires_days": 3})).await;
+    assert!(r.json()["key"]["expires_at"].as_f64().unwrap() > e.state.now() + 2.9 * 86400.0);
+    let r = a.patch(&url, json!({"expires_days": 0})).await;
+    assert_eq!(r.json()["key"]["expires_at"], Value::Null);
+    // features：列表按功能顺序规整，null = 不限
+    let r = a.patch(&url, json!({"features": ["text", "image"]})).await;
+    assert_eq!(r.json()["key"]["features"], json!(["image", "text"]));
+    let r = a.patch(&url, json!({"features": null})).await;
+    assert_eq!(r.json()["key"]["features"], Value::Null);
+    // 身份组随 PATCH 一起改；is_admin 单独传被忽略
+    a.patch(&url, json!({"role": "test", "is_admin": true}))
+        .await;
+    let row = e.state.db.get_key(1).await.unwrap().unwrap();
+    assert_eq!(
+        (row["is_test"].clone(), row["is_admin"].clone()),
+        (json!(1), json!(0))
+    );
+    a.patch(&url, json!({"is_admin": true})).await;
+    assert_eq!(e.state.db.get_key(1).await.unwrap().unwrap()["is_admin"], 0);
+    // 手动：quota_auto = -1，其它额度参数照常生效
+    let r = a
+        .patch(&url, json!({"quota": "manual", "daily_images": 15}))
+        .await;
+    assert_eq!(r.json()["key"]["daily_images"], 15);
+    assert_eq!(
+        e.state.db.get_key(1).await.unwrap().unwrap()["quota_auto"],
+        -1
+    );
+    // 操作日志：修改成功一条通用记录；校验失败的记录失败原因
+    let acts = a.actions().await;
+    assert!(
+        acts.iter()
+            .any(|(act, t, ..)| act == "修改 Key" && t == "Key #1 测试成员")
+    );
+    assert!(acts.iter().any(|(act, _, d, ok)| act == "修改 Key"
+        && d == "失败（422）：quota 只能是 auto（算法）或 manual（手动）"
+        && !ok));
+}
+
+#[tokio::test]
+async fn patch_quota_auto_hands_the_key_to_the_algorithm() {
+    let (e, a) = ready().await;
+    let id = mk_key(&e.state, "测试号", "nai-t-2").await;
+    e.state
+        .db
+        .set_key_role(id, "test", e.state.now())
+        .await
+        .unwrap();
+    let url = format!("{A}/keys/{id}");
+    a.patch(&url, json!({"quota": "auto"}))
+        .await
+        .assert_detail(422, "测试 Key 不归算法管理，只能手动设置额度");
+    // 同时取消测试身份才放行（只认 JSON false）
+    a.patch(&url, json!({"quota": "auto", "is_test": 0}))
+        .await
+        .assert_detail(422, "测试 Key 不归算法管理，只能手动设置额度");
+    let before = e.state.db.get_key(1).await.unwrap().unwrap();
+    assert_eq!(before["quota_auto"], 1);
+    e.state.db.set_quota_auto(1, -1).await.unwrap();
+    let r = a
+        .patch(
+            &format!("{A}/keys/1"),
+            json!({"quota": "auto", "daily_images": 5, "allow_anlas": true, "features": ["image"], "enabled": true}),
+        )
+        .await;
+    assert_eq!(r.status, 200, "{}", r.text());
+    let key = &r.json()["key"];
+    assert_eq!(key["quota_auto"], true);
+    // 交给算法：请求里的额度字段被忽略（5 张不会生效）；Anlas 授权收回
+    assert_ne!(key["daily_images"], 5);
+    assert_eq!(
+        (
+            key["allow_anlas"].clone(),
+            key["daily_anlas"].clone(),
+            key["features"].clone()
+        ),
+        (json!(false), json!(0.0), Value::Null)
+    );
+    // 立即重算了一次：算法给这把 Key 定了额度，并留下系统的「动态额度」操作记录
+    let acts = a.actions().await;
+    assert!(
+        acts.iter().any(|(act, ..)| act == "动态额度调整"),
+        "{acts:?}"
+    );
+    // 算法出错时（比如读不到上游额度）请求本身不失败，只记 Bug：这条路径由 kernel 的测试覆盖
+    assert!(
+        rows(
+            &e.state,
+            "SELECT 1 FROM error_events WHERE source='quota_algo'"
+        )
+        .await
+        .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn patch_notifies_member_about_visible_changes() {
+    let (_e, a, d) = ready_reg().await;
+    a.post(
+        &format!("{A}/keys/1/bind-discord"),
+        json!({"discord_id": "900000000000000001"}),
+    )
+    .await;
+    a.patch(
+        &format!("{A}/keys/1"),
+        json!({"enabled": false, "daily_images": 50, "daily_anlas": 0, "image_model_scope": "all", "allow_anlas": false}),
+    )
+    .await;
+    let sent = dms(&d);
+    assert_eq!(sent.len(), 1);
+    assert_eq!(
+        sent[0].1,
+        "🦉 猫头鹰公益站通知：站长调整了你的 Key：\n• 你的 Key 已被站长暂停，暂时无法使用（有疑问请到 🛠️｜问题反馈）\n• 每日图片额度：100 → 50\n• 可用模型：含 V5"
+    );
+    // notify=false 不私信；没有可见变化也不私信
+    a.patch(
+        &format!("{A}/keys/1"),
+        json!({"enabled": true, "notify": false}),
+    )
+    .await;
+    a.patch(&format!("{A}/keys/1"), json!({"name": "只改名"}))
+        .await;
+    assert_eq!(dms(&d).len(), 1);
+}
+
+#[tokio::test]
+async fn role_reset_quota_bind_discord_and_tags() {
+    let (e, a) = ready().await;
+    a.post(&format!("{A}/keys/999/role"), json!({"role": "test"}))
+        .await
+        .assert_detail(404, "key 不存在");
+    a.post(&format!("{A}/keys/1/role"), json!({"role": "boss"}))
+        .await
+        .assert_detail(422, "身份组必须是 regular / invite / test / admin");
+    let r = a
+        .post(&format!("{A}/keys/1/role"), json!({"role": " Invite "}))
+        .await;
+    assert_eq!(
+        r.json(),
+        json!({"ok": true, "key_id": 1, "role": "invite", "role_label": "邀请"})
+    );
+    assert_eq!(
+        rows(&e.state, "SELECT tag FROM key_tags WHERE key_id=1").await,
+        [json!({"tag": "邀请"})]
+    );
+    a.post(&format!("{A}/keys/1/role"), json!({"role": "regular"}))
+        .await;
+    assert!(
+        rows(&e.state, "SELECT tag FROM key_tags WHERE key_id=1")
+            .await
+            .is_empty()
+    );
+    assert!(
+        a.actions()
+            .await
+            .iter()
+            .any(|(act, t, d, _)| act == "修改账号身份组"
+                && t == "Key #1 测试成员"
+                && d == "切换为「普通」（纳入 3 天闲置回收）")
+    );
+
+    // 重置今日额度：基线 = 当前累计；返回的 key 里 used 不再包含已重置的 V5 / Anlas
+    a.post(&format!("{A}/keys/999/reset-daily-image-quota"), json!({}))
+        .await
+        .assert_detail(404, "key 不存在");
+    a.sql(&format!(
+        "INSERT INTO counters(key_id, day, images, anlas, text_tokens, requests, v5) VALUES (1, '{}', 5, 3.5, 0, 5, 4)",
+        e.state.day()
+    ))
+    .await;
+    let r = a
+        .post(&format!("{A}/keys/1/reset-daily-image-quota"), json!({}))
+        .await;
+    assert_eq!(r.status, 200);
+    assert_eq!(
+        (
+            r.json()["ok"].clone(),
+            r.json()["key"]["used"]["v5"].clone(),
+            r.json()["key"]["used"]["anlas"].clone()
+        ),
+        (json!(true), json!(0), json!(0.0))
+    );
+    let off = rows(
+        &e.state,
+        "SELECT anlas, v5 FROM daily_quota_offsets WHERE key_id=1",
+    )
+    .await;
+    assert_eq!(off, [json!({"anlas": 3.5, "v5": 4})]);
+
+    // 手动绑定 Discord
+    let bind_url = format!("{A}/keys/1/bind-discord");
+    let bind = |body: Value| a.post(&bind_url, body);
+    bind(json!({"discord_id": "12a"}))
+        .await
+        .assert_detail(422, "Discord ID 必须是纯数字");
+    a.post(
+        &format!("{A}/keys/999/bind-discord"),
+        json!({"discord_id": "9"}),
+    )
+    .await
+    .assert_detail(404, "key 不存在");
+    let other = mk_key(&e.state, "另一把", "nai-t-2").await;
+    let r = bind(
+        json!({"discord_id": " 900000000000000001 ", "username": " u1 ", "display_name": "一号"}),
+    )
+    .await;
+    assert_eq!(r.status, 200, "{}", r.text());
+    let v = r.json();
+    assert_eq!(v["discord_id"], "900000000000000001");
+    assert_eq!(v["discord"]["username"], "u1");
+    assert_eq!(v["discord"]["display_name"], "一号");
+    assert_eq!(
+        v["discord"]["profile_url"],
+        "https://discord.com/users/900000000000000001"
+    );
+    // 没有头像：按 (id >> 22) % 6 取默认头像
+    assert_eq!(
+        v["discord"]["avatar_url"],
+        "https://cdn.discordapp.com/embed/avatars/1.png"
+    );
+    assert_eq!(
+        e.state.db.get_key(1).await.unwrap().unwrap()["discord_id"],
+        "900000000000000001"
+    );
+    a.post(
+        &format!("{A}/keys/{other}/bind-discord"),
+        json!({"discord_id": "900000000000000001"}),
+    )
+    .await
+    .assert_detail(400, "该 Discord 账号已绑定到 Key #1");
+    // 换绑：同一把 Key 改成新账号，保留领取时间
+    let r = bind(json!({"discord_id": "900000000000000002"})).await;
+    assert_eq!(
+        r.json()["discord"]["display_name"],
+        "",
+        "显示名默认用用户名（这里为空）"
+    );
+    assert_eq!(
+        rows(&e.state, "SELECT discord_id FROM discord_registrations").await,
+        [json!({"discord_id": "900000000000000002"})]
+    );
+
+    // 标签
+    let t = format!("{A}/keys/1/tags");
+    a.put(&format!("{A}/keys/999/tags"), json!({"tag": "x"}))
+        .await
+        .assert_detail(404, "key 不存在");
+    a.put(&t, json!({"tag": "  "}))
+        .await
+        .assert_detail(422, "标签不能为空");
+    let r = a
+        .put(
+            &t,
+            json!({"tag": "多  空白\t标签很长很长很长很长", "note": "  备注 "}),
+        )
+        .await;
+    assert_eq!(
+        r.json(),
+        json!({"ok": true, "tag": "多 空白 标签很长很长很"})
+    );
+    a.put(
+        &t,
+        json!({"tag": "多 空白 标签很长很长很", "note": "新备注", "by": "运维"}),
+    )
+    .await;
+    let tags = rows(
+        &e.state,
+        "SELECT tag, note, by FROM key_tags WHERE key_id=1",
+    )
+    .await;
+    assert_eq!(
+        tags,
+        [json!({"tag": "多 空白 标签很长很长很", "note": "新备注", "by": "运维"})]
+    );
+    let del = format!(
+        "{t}/{}",
+        "%E5%A4%9A%20%E7%A9%BA%E7%99%BD%20%E6%A0%87%E7%AD%BE%E5%BE%88%E9%95%BF%E5%BE%88%E9%95%BF%E5%BE%88"
+    );
+    assert_eq!(a.delete(&del).await.json(), json!({"ok": true}));
+    a.delete(&del).await.assert_detail(404, "没有这个标签");
+}
+
+#[tokio::test]
+async fn coupons_list_and_issue() {
+    let (e, a) = ready().await;
+    let c = format!("{A}/keys/1/coupons");
+    assert_eq!(a.get(&c).await.json(), json!({"coupons": []}));
+    for (body, detail) in [
+        (json!({"kind": "gold"}), "目前只有重置券（reset）"),
+        (json!({"days": 0}), "有效期 days 必须在 1～30 天之间"),
+        (json!({"days": 31}), "有效期 days 必须在 1～30 天之间"),
+        (json!({"days": "7"}), "有效期 days 必须在 1～30 天之间"),
+        (json!({"days": true}), "有效期 days 必须在 1～30 天之间"),
+    ] {
+        a.post(&c, body).await.assert_detail(422, detail);
+    }
+    a.post(&format!("{A}/keys/999/coupons"), json!({}))
+        .await
+        .assert_detail(404, "key 不存在");
+    let r = a
+        .post(
+            &c,
+            json!({"days": 12.5, "note": "唱得真好听", "by": "奶妹"}),
+        )
+        .await;
+    let coupon = r.json()["coupon"].clone();
+    assert_eq!(coupon["key_id"], 1);
+    assert_eq!(coupon["kind"], "reset");
+    assert_eq!(coupon["used_at"], Value::Null);
+    let span = coupon["expires_at"].as_f64().unwrap() - coupon["created_at"].as_f64().unwrap();
+    assert!((span - 12.5 * 86400.0).abs() < 0.01, "{span}");
+    let r = a.post(&c, json!({})).await;
+    assert_eq!(r.json()["coupon"]["note"], "");
+    let list = a.get(&c).await.json();
+    assert_eq!(list["coupons"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        list["coupons"][0]["by"], "站长",
+        "按过期时间升序：默认 7 天的在前"
+    );
+    assert_eq!(
+        rows(&e.state, "SELECT COUNT(*) AS n FROM coupons").await,
+        [json!({"n": 2})]
+    );
+}
+
+#[tokio::test]
+async fn delete_key_without_registration_service() {
+    let (e, a) = ready().await;
+    a.delete(&format!("{A}/keys/999"))
+        .await
+        .assert_detail(404, "key 不存在");
+    let r = a.delete(&format!("{A}/keys/1?ban=zz")).await;
+    assert_eq!(r.status, 422);
+    assert_eq!(r.json()["detail"][0]["type"], "bool_parsing");
+    // 直接删（带标签一起清），ban 参数被忽略
+    let k2 = mk_key(&e.state, "待删", "nai-t-2").await;
+    a.put(&format!("{A}/keys/{k2}/tags"), json!({"tag": "x"}))
+        .await;
+    let r = a.delete(&format!("{A}/keys/{k2}?ban=true")).await;
+    assert_eq!(r.json(), json!({"ok": true}));
+    assert!(e.state.db.get_key(k2).await.unwrap().is_none());
+    assert!(
+        rows(
+            &e.state,
+            &format!("SELECT 1 FROM key_tags WHERE key_id={k2}")
+        )
+        .await
+        .is_empty()
+    );
+    assert!(
+        rows(&e.state, "SELECT 1 FROM discord_bans")
+            .await
+            .is_empty()
+    );
+    // ?ban=true 的删除，操作名换成「删除 Key 并永久禁止领取」（没有注册服务时 ban 其实没生效，旧版如此）
+    let acts = a.actions().await;
+    assert!(
+        acts.iter()
+            .any(|(act, t, ..)| act == "删除 Key 并永久禁止领取" && t == &format!("Key #{k2} 待删")),
+        "{acts:?}"
+    );
+    let k3 = mk_key(&e.state, "丙", "nai-t-3").await;
+    assert_eq!(
+        a.delete(&format!("{A}/keys/{k3}")).await.json(),
+        json!({"ok": true})
+    );
+    assert!(a.actions().await.iter().any(|(act, ..)| act == "删除 Key"));
+}
+
+#[tokio::test]
+async fn delete_key_revokes_or_bans_through_the_registration_service() {
+    let (e, a, d) = ready_reg().await;
+    let k3 = mk_key(&e.state, "甲", "nai-t-3").await;
+    let k4 = mk_key(&e.state, "乙", "nai-t-4").await;
+    a.post(
+        &format!("{A}/keys/{k3}/bind-discord"),
+        json!({"discord_id": "900000000000000003"}),
+    )
+    .await;
+    a.post(
+        &format!("{A}/keys/{k4}/bind-discord"),
+        json!({"discord_id": "900000000000000004", "username": "u4"}),
+    )
+    .await;
+    // 撤销：删 Key 和领取记录；notify=0 不私信
+    let r = a.delete(&format!("{A}/keys/{k3}?notify=0")).await;
+    assert_eq!(
+        r.json(),
+        json!({"ok": true, "discord_id": "900000000000000003", "banned": false})
+    );
+    assert!(e.state.db.get_key(k3).await.unwrap().is_none());
+    assert!(
+        e.state
+            .db
+            .registration_key_id("900000000000000003")
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(d.calls().is_empty());
+    // 封禁：先私信，再写封禁表（带上领取记录里的资料）、撤销 Key
+    let r = a
+        .delete(&format!("{A}/keys/{k4}?ban=true&reason=%E5%88%B7%E9%87%8F"))
+        .await;
+    assert_eq!(
+        r.json(),
+        json!({"ok": true, "discord_id": "900000000000000004", "banned": true})
+    );
+    assert_eq!(
+        dms(&d),
+        [(
+            "900000000000000004".to_string(),
+            "🦉 猫头鹰公益站通知：你的 Key 已被站长删除，并且这个 Discord 账号不能再领取。"
+                .to_string()
+        )]
+    );
+    let bans = rows(
+        &e.state,
+        "SELECT discord_id, reason, username, banned_by FROM discord_bans",
+    )
+    .await;
+    assert_eq!(
+        bans,
+        [
+            json!({"discord_id": "900000000000000004", "reason": "刷量", "username": "u4", "banned_by": "站长"})
+        ]
+    );
+    assert!(e.state.db.get_key(k4).await.unwrap().is_none());
+    // 默认原因
+    let k5 = mk_key(&e.state, "丙", "nai-t-5").await;
+    a.post(
+        &format!("{A}/keys/{k5}/bind-discord"),
+        json!({"discord_id": "900000000000000005"}),
+    )
+    .await;
+    a.delete(&format!("{A}/keys/{k5}?ban=1&notify=0")).await;
+    let reason = rows(
+        &e.state,
+        "SELECT reason FROM discord_bans WHERE discord_id='900000000000000005'",
+    )
+    .await;
+    assert_eq!(reason, [json!({"reason": "站长手动删除并封禁"})]);
+    // 没有 Discord 绑定的 Key：不走注册服务
+    let k6 = mk_key(&e.state, "丁", "nai-t-6").await;
+    assert_eq!(
+        a.delete(&format!("{A}/keys/{k6}")).await.json(),
+        json!({"ok": true})
+    );
+    assert_eq!(dms(&d).len(), 1);
+}
+
+#[tokio::test]
+async fn bans_list_add_remove() {
+    let (e, a) = ready().await;
+    a.post(&format!("{A}/bans"), json!({"discord_id": "abc"}))
+        .await
+        .assert_detail(422, "Discord ID 必须为纯数字");
+    a.post(&format!("{A}/bans"), json!({}))
+        .await
+        .assert_detail(422, "Discord ID 必须为纯数字");
+    let r = a
+        .post(
+            &format!("{A}/bans"),
+            json!({"discord_id": " 900000000000000010 ", "reason": "  刷量 "}),
+        )
+        .await;
+    assert_eq!(
+        r.json(),
+        json!({"ok": true, "discord_id": "900000000000000010"})
+    );
+    a.post(
+        &format!("{A}/bans"),
+        json!({"discord_id": "900000000000000011"}),
+    )
+    .await;
+    let l = a.get(&format!("{A}/bans")).await.json();
+    assert_eq!(l["total"], 2);
+    assert_eq!(l["bans"][1]["reason"], "刷量");
+    assert_eq!(l["bans"][0]["reason"], "站长手动封禁");
+    assert_eq!(l["bans"][0]["banned_by"], "站长");
+    assert_eq!(
+        a.get(&format!("{A}/bans?q=%E5%88%B7")).await.json()["total"],
+        1
+    );
+    assert_eq!(
+        a.get(&format!("{A}/bans?q=zzz")).await.json(),
+        json!({"bans": [], "total": 0})
+    );
+    a.delete(&format!("{A}/bans/900000000000000099"))
+        .await
+        .assert_detail(404, "该账号不在黑名单中");
+    let r = a.delete(&format!("{A}/bans/900000000000000010")).await;
+    assert_eq!(
+        r.json(),
+        json!({"ok": true, "discord_id": "900000000000000010"})
+    );
+    assert_eq!(
+        rows(&e.state, "SELECT COUNT(*) AS n FROM discord_bans").await,
+        [json!({"n": 1})]
+    );
+    let acts = a.actions().await;
+    assert!(acts.iter().any(|(act, t, d, _)| act == "添加黑名单"
+        && t == "Discord:900000000000000010"
+        && d == "刷量"));
+    assert!(
+        acts.iter()
+            .any(|(act, _, d, _)| act == "移出黑名单" && d == "已解除封禁，允许重新领取 Key")
+    );
+}
+
+#[tokio::test]
+async fn banning_a_registered_account_also_revokes_its_key() {
+    let (e, a, _d) = ready_reg().await;
+    let k = mk_key(&e.state, "甲", "nai-t-2").await;
+    a.post(
+        &format!("{A}/keys/{k}/bind-discord"),
+        json!({"discord_id": "900000000000000012", "username": "u12", "display_name": "十二"}),
+    )
+    .await;
+    a.post(
+        &format!("{A}/bans"),
+        json!({"discord_id": "900000000000000012", "reason": "x"}),
+    )
+    .await;
+    assert!(e.state.db.get_key(k).await.unwrap().is_none());
+    let bans = rows(
+        &e.state,
+        "SELECT reason, username, display_name, banned_by FROM discord_bans",
+    )
+    .await;
+    assert_eq!(
+        bans,
+        [json!({"reason": "x", "username": "u12", "display_name": "十二", "banned_by": "站长"})]
+    );
+}
+
+#[tokio::test]
+async fn gift_needs_the_registration_service() {
+    let (_e, a) = ready().await;
+    let g = format!("{A}/gift");
+    a.post(&g, json!({}))
+        .await
+        .assert_detail(422, "需要 discord_id");
+    a.post(&g, json!({"discord_id": null}))
+        .await
+        .assert_detail(422, "需要 discord_id");
+    a.post(&g, json!({"discord_id": "9x"}))
+        .await
+        .assert_detail(422, "需要 discord_id");
+    a.post(&g, json!({"discord_id": "900000000000000070"}))
+        .await
+        .assert_detail(503, "Discord 机器人没有配置");
+}
+
+#[tokio::test]
+async fn gift_issues_key_coupon_dm_and_reply() {
+    let (e, a, d) = ready_reg().await;
+    let g = format!("{A}/gift");
+    a.post(
+        &format!("{A}/bans"),
+        json!({"discord_id": "900000000000000071"}),
+    )
+    .await;
+    a.post(&g, json!({"discord_id": "900000000000000071"}))
+        .await
+        .assert_detail(409, "这个 Discord 账号已被站长停用");
+    // 新账号：发 Key + 重置券 + 私信（带理由和券说明）
+    let r = a
+        .post(
+            &g,
+            json!({"discord_id": "900000000000000070", "username": "u70", "global_name": "七十", "reason": "唱得好听"}),
+        )
+        .await;
+    assert_eq!(r.status, 200, "{}", r.text());
+    let v = r.json();
+    assert_eq!(v["new_key"], true);
+    assert_eq!(v["dm_sent"], true);
+    assert_eq!(v["coupon"]["note"], "唱得好听");
+    assert!(v.get("key").is_none(), "私信发出去了就不回 Key 原文");
+    let key_id = v["key_id"].as_i64().unwrap();
+    let key = e.state.db.get_key(key_id).await.unwrap().unwrap();
+    assert_eq!(key["name"], "七十 (@u70)");
+    let sent = dms(&d);
+    assert_eq!(sent.len(), 1);
+    assert!(
+        sent[0].1.contains(key["token"].as_str().unwrap()),
+        "欢迎私信里有 Key"
+    );
+    assert!(sent[0].1.ends_with(
+        "\n\n🎁 这把 Key 是奶妹送你的（唱得好听），还附带一张重置券，网页登录开放后在首页登录即可使用、7 天内有效～"
+    ));
+    // 私信总闸门关着：回 Key 原文和原因，交给站长转交；不发券（coupon_days=0）；回复消息
+    e.state.db.set_setting("dm_enabled", "0").await.unwrap();
+    let r = a
+        .post(
+            &g,
+            json!({"discord_id": "900000000000000072", "coupon_days": 0,
+                   "reply": {"channel_id": "123", "message_id": 5, "text": "好耶"}}),
+        )
+        .await;
+    let v = r.json();
+    assert_eq!(v["dm_sent"], false);
+    assert_eq!(v["dm_block"], "私信总开关已关闭");
+    assert!(v["key"].as_str().unwrap().starts_with("nai-"));
+    assert!(v.get("coupon").is_none());
+    assert_eq!(v["replied"], true);
+    assert!(d.calls().contains(&json!([
+        "POST",
+        "/channels/123/messages",
+        {"content": "好耶", "message_reference": {"message_id": "5", "fail_if_not_exists": false},
+         "allowed_mentions": {"parse": [], "replied_user": true}}
+    ])));
+    // 对方关了私信：没有被拦下的原因，用默认说法
+    e.state.db.set_setting("dm_enabled", "1").await.unwrap();
+    d.set_closed(true);
+    let r = a
+        .post(&g, json!({"discord_id": "900000000000000073"}))
+        .await;
+    assert_eq!(r.json()["dm_block"], "对方关闭了私信");
+    d.set_closed(false);
+    // 名额：奖励的 Key 不占别人的名额，已领人数超过上限时上限静默加到已领人数
+    e.state
+        .db
+        .set_setting("register_max_users", "1")
+        .await
+        .unwrap();
+    let r = a
+        .post(&g, json!({"discord_id": "900000000000000074"}))
+        .await;
+    assert_eq!(r.json()["max_users"], 4);
+    assert_eq!(
+        e.state
+            .db
+            .get_setting("register_max_users")
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("4")
+    );
+    // 已经有 Key 的账号：不重复发，仍然发券，不私信
+    let before = dms(&d).len();
+    let r = a
+        .post(
+            &g,
+            json!({"discord_id": "900000000000000070", "reason": "再夸一次"}),
+        )
+        .await;
+    let v = r.json();
+    assert_eq!(
+        (v["new_key"].clone(), v.get("dm_sent").cloned()),
+        (json!(false), None)
+    );
+    assert_eq!(dms(&d).len(), before);
+    let acts = a.actions().await;
+    assert!(acts.iter().any(|(act, t, det, _)| act == "奖励成员"
+        && t == "Discord:900000000000000070"
+        && det == "新发 Key · 重置券 7 天 · 唱得好听 · 已私信"));
+    assert!(
+        acts.iter()
+            .any(|(act, _, det, _)| act == "奖励成员" && det == "重置券 7 天 · 再夸一次")
+    );
+}
+
+#[tokio::test]
+async fn members_view_shape_and_dropped_fields() {
+    let (e, a) = ready().await;
+    let k2 = mk_key(&e.state, "乙", "nai-t-2").await;
+    a.post(
+        &format!("{A}/keys/{k2}/bind-discord"),
+        json!({"discord_id": "900000000000000002", "username": "u2"}),
+    )
+    .await;
+    a.put(
+        &format!("{A}/keys/{k2}/tags"),
+        json!({"tag": "观察", "note": "n"}),
+    )
+    .await;
+    a.sql(&format!(
+        "INSERT INTO usage_log(ts, key_id, key_name, kind, model, status, images, detail, client) VALUES ({0}, {k2}, '乙', 'image', 'm', 'rejected', 0, '含 img2img 的请求', ''), ({0}, {k2}, '乙', 'image', 'm', 'ok', 1, '', '柏宝绘');\
+         INSERT INTO share_state(key_id, paused_until, pause_reason) VALUES ({k2}, {1}, '');",
+        e.state.now() - 600.0,
+        e.state.now() + 3600.0
+    ))
+    .await;
+    let r = a.get(&format!("{A}/members")).await;
+    assert_eq!(r.status, 200, "{}", r.text());
+    let v = r.json();
+    assert_eq!(v["inactivity_days"], 3);
+    let m = &v["members"];
+    // 没有 Discord 的在前，有 Discord 的在后
+    assert_eq!(m[0]["name"], "测试成员");
+    assert_eq!(m[1]["name"], "乙");
+    let keys: Vec<&str> = m[1]
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(
+        keys,
+        [
+            "id",
+            "name",
+            "enabled",
+            "is_admin",
+            "is_test",
+            "role",
+            "role_label",
+            "discord_id",
+            "discord",
+            "created_at",
+            "last_used_at",
+            "expires_at",
+            "daily_images",
+            "daily_v5",
+            "allow_anlas",
+            "daily_anlas",
+            "image_model_scope",
+            "quota_auto",
+            "today",
+            "week",
+            "total_images",
+            "registered_at",
+            "first_image_at",
+            "last_image_at",
+            "rejected_24h",
+            "rejected_why",
+            "share",
+            "reset_today",
+            "tags",
+            "auto_tags",
+            "last_client",
+            "hours24",
+            "key_count",
+            "all_key_ids"
+        ],
+        "3.0 已删除的 anlas_auto / anlas_mode / v5_pinned 不再返回"
+    );
+    assert_eq!(m[1]["discord_id"], "900000000000000002");
+    assert_eq!(m[1]["tags"][0]["tag"], "观察");
+    assert_eq!(m[1]["auto_tags"], json!([{"tag": "传了底图", "count": 1}]));
+    assert_eq!(m[1]["rejected_24h"], 1);
+    assert_eq!(
+        m[1]["share"]["paused_until"]
+            .as_f64()
+            .map(|p| p > e.state.now()),
+        Some(true)
+    );
+    assert_eq!(m[1]["last_client"], "柏宝绘");
+    assert_eq!(m[1]["hours24"].as_array().unwrap().len(), 24);
+    assert_eq!(
+        m[1]["hours24"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|n| n.as_i64().unwrap())
+            .sum::<i64>(),
+        1
+    );
+    assert_eq!(
+        (m[1]["key_count"].clone(), m[1]["all_key_ids"].clone()),
+        (json!(1), json!([k2]))
+    );
+    // 没有活动的 Key：小时条为空数组，不是 24 个 0
+    assert_eq!(m[0]["hours24"], json!([]));
+    assert_eq!(m[0]["share"], Value::Null);
+}
+
+#[tokio::test]
+async fn share_clear_lifts_the_pause() {
+    let (e, a) = ready().await;
+    e.state
+        .pauses
+        .set(1, e.state.now() + 600.0, "客户端死循环重试".into());
+    e.state
+        .db
+        .upsert_pause(1, e.state.now() + 600.0, "客户端死循环重试")
+        .await
+        .unwrap();
+    let r = a.post(&format!("{A}/keys/1/share-clear"), json!({})).await;
+    assert_eq!(r.json(), json!({"ok": true}));
+    assert!(e.state.pauses.paused(1, e.state.now()).is_none());
+    assert!(rows(&e.state, "SELECT 1 FROM share_state").await.is_empty());
+    // 没有暂停 / Key 不存在也一样成功
+    assert_eq!(
+        a.post(&format!("{A}/keys/999/share-clear"), json!({}))
+            .await
+            .status,
+        200
+    );
+    assert!(
+        a.actions()
+            .await
+            .iter()
+            .any(|(act, t, ..)| act == "防分享清零（误判）" && t == "Key #1 测试成员")
+    );
+}
+
+#[tokio::test]
+async fn oversized_ids_are_internal_errors_like_the_old_overflow() {
+    let (e, a) = ready().await;
+    let r = a
+        .get(&format!("{A}/keys/99999999999999999999/coupons"))
+        .await;
+    assert_eq!(r.status, 500);
+    assert_eq!(r.json()["error"]["status"], 500);
+    // 这种 500 不进操作日志
+    let r = a
+        .post(
+            &format!("{A}/keys/99999999999999999999/regenerate"),
+            json!({}),
+        )
+        .await;
+    assert_eq!(r.status, 500);
+    let acts = a.actions().await;
+    assert!(
+        acts.iter().all(|(act, ..)| act != "重新生成 Key"),
+        "{acts:?}"
+    );
+    drop(e);
+}

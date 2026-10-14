@@ -45,17 +45,12 @@ if ! swapon --show | grep -q swapfile; then
   echo 'vm.swappiness=10' > /etc/sysctl.d/99-swap.conf && sysctl -q -p /etc/sysctl.d/99-swap.conf
 fi
 
+# 本地每晚备份（GFS 轮换）：快照走 nai-ops（只读事务逐表复制，不锁库）——不要再装宿主机 sqlite3 .backup 的版本，
+# 库大时整库复制会把磁盘 IO 打满、网关写库超时（2026-10-10 事故）。需要先有 /opt/owl/nai-ops（cutover.sh install-ops）。
 mkdir -p /opt/backups
-cat > /usr/local/bin/naigate-backup <<CONF
-#!/bin/bash
-set -e
-DB=$APP_DIR/data/nai_gate.db
-[ -f "\$DB" ] || exit 0
-OUT=/opt/backups/nai_gate-\$(date +%F).db
-sqlite3 "\$DB" ".backup '\$OUT'" && gzip -f "\$OUT"
-find /opt/backups -name 'nai_gate-*.db.gz' -mtime +7 -delete
-CONF
-chmod +x /usr/local/bin/naigate-backup
+REPO_DIR=$(cd "$(dirname "$0")/.." && pwd)
+install -m 755 "$REPO_DIR/deploy/v3/ops/naigate-snapshot" /usr/local/bin/naigate-snapshot
+install -m 755 "$REPO_DIR/deploy/v3/ops/naigate-backup" /usr/local/bin/naigate-backup
 echo '30 3 * * * root /usr/local/bin/naigate-backup >> /var/log/naigate-backup.log 2>&1' > /etc/cron.d/naigate-backup
 
 # Docker 日志轮转，避免日志撑满磁盘（修改后需重启 docker 并重建容器）

@@ -1,0 +1,151 @@
+/*
+ * 猫头鹰公益站 · 设计令牌（全站唯一来源：首页、后台、问卷、状态页、条款页共用）
+ *
+ * 规则（站长定）：
+ * - 字号手机与桌面完全一致，只有布局随屏宽变化；
+ * - 不出现钥匙图标；
+ * - 所有文字与背景的对比度 ≥ 4.5:1（tokens.test.ts 自动校验）。
+ *
+ * 主题：跟随系统（prefers-color-scheme），用户手动切换后写 data-theme="light|dark"，
+ * 存在 localStorage 的 owl-theme 里（theme-init.js 在 <head> 里同步应用，避免闪烁）。
+ */
+
+:root {
+  color-scheme: light;
+
+  /* 表面 */
+  --bg: #f5f6fa;
+  --surface: #ffffff;
+  --surface-2: #eff1f7;
+  --surface-3: #e6e9f2;
+  --border: #dde1eb;
+  --border-strong: #c5cbd9;
+
+  /* 文字 */
+  --text: #151925;
+  --text-2: #404759;
+  --muted: #5a6175;
+
+  /* 强调色（indigo） */
+  --accent: #4b45d6;
+  --accent-hover: #3d37c0;
+  --accent-fg: #ffffff;
+  --accent-soft: #ecebff;
+  --accent-text: #3f39c4;
+
+  /* 状态 */
+  --ok: #127438;
+  --ok-soft: #e3f5ea;
+  --warn: #9a4a06;
+  --warn-soft: #fdf0dc;
+  --danger: #b4231f;
+  --danger-soft: #fde7e6;
+  --info: #04679a;
+  --info-soft: #e1f2fb;
+  --v5: #0e7490;
+
+  /* 焦点环 */
+  --focus: #4b45d6;
+
+  /* 形状与阴影 */
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --shadow-1: 0 1px 2px rgb(16 24 40 / 6%), 0 1px 1px rgb(16 24 40 / 4%);
+  --shadow-2: 0 8px 24px rgb(16 24 40 / 10%), 0 2px 6px rgb(16 24 40 / 6%);
+
+  /* 字号阶梯（手机与桌面一致） */
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-md: 15px;
+  --fs-lg: 17px;
+  --fs-xl: 20px;
+  --fs-2xl: 26px;
+  --lh: 1.6;
+  --lh-tight: 1.3;
+
+  /* 间距（4 的倍数） */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+
+  --font:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+    "Noto Sans CJK SC", "Noto Sans SC", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+
+  --content: 1080px;
+
+  /* 控件高度：同一行里的按钮、输入框、下拉框、分段按钮、复制框一律等高（不要在分区里另写 min-height） */
+  --control-h: 36px;
+  --control-h-sm: 30px;
+  --control-h-lg: 44px;
+  --control-px: 12px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0d1016;
+    --surface: #151922;
+    --surface-2: #1c212d;
+    --surface-3: #242a38;
+    --border: #2a3142;
+    --border-strong: #3a4357;
+    --text: #e9ebf2;
+    --text-2: #c0c5d3;
+    --muted: #9da4b6;
+    --accent: #8f8dfb;
+    --accent-hover: #a5a3fc;
+    --accent-fg: #0d1016;
+    --accent-soft: #24234a;
+    --accent-text: #aeacfd;
+    --ok: #4ade80;
+    --ok-soft: #12291c;
+    --warn: #fbbf24;
+    --warn-soft: #2e2410;
+    --danger: #f87171;
+    --danger-soft: #331617;
+    --info: #38bdf8;
+    --info-soft: #0f2534;
+    --v5: #22d3ee;
+    --focus: #a5a3fc;
+    --shadow-1: 0 1px 2px rgb(0 0 0 / 40%);
+    --shadow-2: 0 10px 30px rgb(0 0 0 / 45%);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0d1016;
+  --surface: #151922;
+  --surface-2: #1c212d;
+  --surface-3: #242a38;
+  --border: #2a3142;
+  --border-strong: #3a4357;
+  --text: #e9ebf2;
+  --text-2: #c0c5d3;
+  --muted: #9da4b6;
+  --accent: #8f8dfb;
+  --accent-hover: #a5a3fc;
+  --accent-fg: #0d1016;
+  --accent-soft: #24234a;
+  --accent-text: #aeacfd;
+  --ok: #4ade80;
+  --ok-soft: #12291c;
+  --warn: #fbbf24;
+  --warn-soft: #2e2410;
+  --danger: #f87171;
+  --danger-soft: #331617;
+  --info: #38bdf8;
+  --info-soft: #0f2534;
+  --v5: #22d3ee;
+  --focus: #a5a3fc;
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 40%);
+  --shadow-2: 0 10px 30px rgb(0 0 0 / 45%);
+}

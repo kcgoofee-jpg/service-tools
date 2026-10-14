@@ -1,0 +1,23 @@
+{"name":"BODY_ABORT","value":"body_abort"}
+{"name":"BREAKER","value":"breaker"}
+{"name":"BURST_CAP","value":"burst_cap"}
+{"name":"CAP_3H","value":"cap_3h"}
+{"name":"COOLDOWN","value":"cooldown"}
+{"name":"DAILY_CAP","value":"daily_cap"}
+{"name":"FEATURE_OFF","value":"feature_off"}
+{"name":"HOURLY_CAP","value":"hourly_cap"}
+{"name":"KEY_BUSY","value":"key_busy"}
+{"name":"KEY_PAUSED","value":"key_paused"}
+{"name":"KEY_RATE","value":"key_rate"}
+{"name":"MEMBER_QUOTA","value":"member_quota"}
+{"name":"OVER_BASE","value":"over_base"}
+{"name":"PACED","value":"paced"}
+{"name":"PARAM","value":"param"}
+{"name":"QUEUE_FULL","value":"queue_full"}
+{"name":"QUEUE_TIMEOUT","value":"queue_timeout"}
+{"name":"QUIET_CAP","value":"quiet_cap"}
+{"name":"SITE_QUOTA","value":"site_quota"}
+{"name":"V5_EXHAUSTED","value":"v5_exhausted"}
+{"name":"SITE_LEVEL","value":["queue_full","hourly_cap","quiet_cap","burst_cap","cap_3h","daily_cap","paced","over_base","breaker","cooldown","v5_exhausted","queue_timeout","site_quota"]}
+{"name":"LABELS","value":{"key_paused":"Key 被暂停","queue_full":"排队满","key_busy":"上一张没出完就重发","hourly_cap":"本小时全站上限","burst_cap":"突发窗口限速","quiet_cap":"安静时段上限","cap_3h":"3 小时全站上限","daily_cap":"全站每日上限","paced":"全天平滑放行","over_base":"超出保底暂缓","breaker":"全站熔断","cooldown":"上游限流暂停","v5_exhausted":"全站 V5 用完","queue_timeout":"排队超时","member_quota":"个人额度用完","site_quota":"全站额度用完","key_rate":"Key 请求过快","body_abort":"请求体中断"}}
+{"name":"BACKFILL","value":[["queue_full","%排队的人太多%"],["hourly_cap","%本小时出图量已达上限%"],["burst_cap","%本时段出图已达上限%"],["key_paused","%暂停%"],["site_quota","%全站今日 V5 额度已用完%"],["site_quota","%全站今日 Vibe 额度已抢完%"],["site_quota","%全站今日 Anlas 额度已抢完%"],["site_quota","%全站本月 Anlas 预算已耗尽%"],["member_quota","%今日 V4.5 免费图额度已用完%"],["member_quota","%已达今日 V5 额度%"],["member_quota","%今日 Anlas 额度不足%"],["member_quota","%本月 Anlas 额度不足%"],["member_quota","%今日文本额度%"],["queue_timeout","%排队超时%"],["queue_timeout","%等待超时%"],["key_rate","%请求过于频繁%"],["key_rate","%同时进行中的请求过多%"],["body_abort","%请求体传输中断%"],["over_base","%保底%已用完%"],["member_quota","%免费图额度已用完%"],["feature_off","%暂无权使用%"],["feature_off","%站长暂未开放此功能%"],["feature_off","%本站只提供免费出图%"],["key_busy","%上一张图还没出完%"],["feature_off","%模型权限：仅允许%"],["feature_off","%img2img 未开放%"],["feature_off","%未列入本站图片模型白名单%"],["param","%不支持 V4/V4.5/V5 模型%"],["param","%角色太多%"],["param","%异常权重%"],["param","%必须是非负整数%"],["param","%权重括号嵌套过深%"]]}

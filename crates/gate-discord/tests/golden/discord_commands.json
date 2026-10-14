@@ -1,0 +1,205 @@
+{
+ "discord_py": "2.7.1",
+ "sync_request": {
+  "method": "PUT",
+  "path": "/applications/900000000000000003/guilds/900000000000000001/commands",
+  "query": {},
+  "json": [
+   {
+    "name": "register",
+    "description": "领取你的猫头鹰公益站 API Key",
+    "type": 1,
+    "options": [
+     {
+      "type": 3,
+      "name": "key",
+      "description": "收到站长发的邀请 Key 时粘贴在这里，绑定到你的账号（可选）",
+      "required": false
+     }
+    ],
+    "nsfw": false,
+    "dm_permission": true,
+    "default_member_permissions": null,
+    "contexts": null,
+    "integration_types": null
+   },
+   {
+    "name": "quota",
+    "description": "查看今日额度、Key 有效期和服务状态",
+    "type": 1,
+    "options": [],
+    "nsfw": false,
+    "dm_permission": true,
+    "default_member_permissions": null,
+    "contexts": null,
+    "integration_types": null
+   },
+   {
+    "name": "反馈",
+    "description": "给站长提意见：5 道选择题，30 秒填完（只有你能看到，不会私信你）",
+    "type": 1,
+    "options": [],
+    "nsfw": false,
+    "dm_permission": true,
+    "default_member_permissions": null,
+    "contexts": null,
+    "integration_types": null
+   },
+   {
+    "name": "resetkey",
+    "description": "Key 丢了或泄露了？换一把新的（旧的立即失效）",
+    "type": 1,
+    "options": [],
+    "nsfw": false,
+    "dm_permission": true,
+    "default_member_permissions": null,
+    "contexts": null,
+    "integration_types": null
+   },
+   {
+    "name": "help",
+    "description": "怎么使用猫头鹰公益站",
+    "type": 1,
+    "options": [],
+    "nsfw": false,
+    "dm_permission": true,
+    "default_member_permissions": null,
+    "contexts": null,
+    "integration_types": null
+   },
+   {
+    "name": "open",
+    "description": "（管理员）开放或关闭领 Key",
+    "type": 1,
+    "options": [
+     {
+      "type": 3,
+      "name": "state",
+      "description": "…",
+      "required": true,
+      "choices": [
+       {
+        "name": "开放",
+        "value": "on"
+       },
+       {
+        "name": "关闭",
+        "value": "off"
+       }
+      ]
+     }
+    ],
+    "nsfw": false,
+    "dm_permission": true,
+    "default_member_permissions": 32,
+    "contexts": null,
+    "integration_types": null
+   },
+   {
+    "name": "limit",
+    "description": "（管理员）设置名额上限，0 为不限",
+    "type": 1,
+    "options": [
+     {
+      "type": 4,
+      "name": "count",
+      "description": "…",
+      "required": true,
+      "min_value": 0,
+      "max_value": 1000
+     }
+    ],
+    "nsfw": false,
+    "dm_permission": true,
+    "default_member_permissions": 32,
+    "contexts": null,
+    "integration_types": null
+   },
+   {
+    "name": "ban",
+    "description": "（管理员）永久禁止某位成员领取 Key，并撤销其现有 Key",
+    "type": 1,
+    "options": [
+     {
+      "type": 6,
+      "name": "member",
+      "description": "…",
+      "required": true
+     }
+    ],
+    "nsfw": false,
+    "dm_permission": true,
+    "default_member_permissions": 32,
+    "contexts": null,
+    "integration_types": null
+   },
+   {
+    "name": "unban",
+    "description": "（管理员）解除某位成员的领取禁令",
+    "type": 1,
+    "options": [
+     {
+      "type": 6,
+      "name": "member",
+      "description": "…",
+      "required": true
+     }
+    ],
+    "nsfw": false,
+    "dm_permission": true,
+    "default_member_permissions": 32,
+    "contexts": null,
+    "integration_types": null
+   },
+   {
+    "name": "slots",
+    "description": "（管理员）查看名额占用",
+    "type": 1,
+    "options": [],
+    "nsfw": false,
+    "dm_permission": true,
+    "default_member_permissions": 32,
+    "contexts": null,
+    "integration_types": null
+   },
+   {
+    "name": "revoke",
+    "description": "（管理员）撤销某位成员的 Key，释放名额",
+    "type": 1,
+    "options": [
+     {
+      "type": 6,
+      "name": "member",
+      "description": "…",
+      "required": true
+     }
+    ],
+    "nsfw": false,
+    "dm_permission": true,
+    "default_member_permissions": 32,
+    "contexts": null,
+    "integration_types": null
+   }
+  ]
+ },
+ "intents": 513,
+ "warden_intents": 0,
+ "warden_presence": {
+  "payload": {
+   "op": 3,
+   "d": {
+    "activities": [
+     {
+      "flags": 0,
+      "type": 3,
+      "name": "一人一 Key",
+      "buttons": []
+     }
+    ],
+    "afk": false,
+    "since": 0.0,
+    "status": "online"
+   }
+  }
+ }
+}

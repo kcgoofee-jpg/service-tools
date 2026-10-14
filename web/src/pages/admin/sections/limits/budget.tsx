@@ -1,0 +1,87 @@
+/** Anlas 与 V5 预算：全站月度 Anlas、全站每日 V5、V5 余量告警阈值、每人每日 Anlas。 */
+import { useState } from "preact/hooks";
+import { Card, Meter, Notice } from "../../../../ui";
+import { act, useAdmin } from "../../Admin";
+import { LoadError, Loading } from "../_kit";
+import { NumField, SaveBar, useForm, withTone } from "../system/forms";
+import { BUDGET_SPECS, type QuotaAlgo } from "./core";
+
+const URL = "/admin/api/settings";
+
+type Settings = {
+  global_monthly_anlas: number;
+  global_daily_v5: number;
+  member_daily_anlas: number;
+  v5_alert_threshold: number;
+  v5_capacity: { need: number; global: number; short: boolean; message: string };
+};
+type OverviewLite = { month: { anlas: number }; anlas_budget: number };
+
+export default function BudgetCard() {
+  const { data, error, loading } = useAdmin<Settings>(URL);
+  const qa = useAdmin<QuotaAlgo>("/admin/api/quota-algo");
+  const ov = useAdmin<OverviewLite>("/admin/api/overview");
+  const form = useForm(BUDGET_SPECS, data as Record<string, unknown> | null);
+  const [saving, setSaving] = useState(false);
+  if (loading && !data)
+    return (
+      <Card title="Anlas 与 V5 预算">
+        <Loading rows={2} />
+      </Card>
+    );
+  if (!data)
+    return (
+      <Card title="Anlas 与 V5 预算">
+        <LoadError error={error ?? "没有数据"} />
+      </Card>
+    );
+
+  // 动态额度开着时，算法每 10 分钟把全站 V5 日限写成它算出的值：手填的数字会被覆盖
+  const algoManaged = !!qa.data && qa.data.params.quota_auto_enabled !== 0;
+  const used = ov.data?.month.anlas;
+  const budget = Number(form.raw("global_monthly_anlas")) || 0;
+
+  const save = async () => {
+    setSaving(true);
+    // 后端的 PUT 里缺省字段保持原值，所以只发改过的
+    const ok = await act("PUT", URL, form.changes(), "预算已保存");
+    setSaving(false);
+    if (ok) form.commit();
+  };
+
+  return (
+    <Card title="Anlas 与 V5 预算" sub="全站月度 Anlas 与每日 V5 额度；0 = 不限。">
+      <div class="stack-sm">
+        {data.v5_capacity.short && <Notice tone="warn">{data.v5_capacity.message}</Notice>}
+        {used != null && budget > 0 && (
+          <Meter
+            label="本月已用 Anlas"
+            value={used}
+            max={budget}
+            {...withTone(used >= budget * 0.8 && "warn")}
+            text={`${Math.round(used * 100) / 100} / ${budget}`}
+            hint="来自总览：本月全站消耗（估算）与上面的预算对比；超过 80% 变黄"
+          />
+        )}
+        <form {...form.formProps} onSubmit={(e) => e.preventDefault()}>
+          <div class="form-grid">
+            <NumField form={form} name="global_monthly_anlas" />
+            <NumField
+              form={form}
+              name="global_daily_v5"
+              disabled={algoManaged}
+              hint={
+                algoManaged
+                  ? `由「动态额度」每 10 分钟自动设置（现在 ${data.global_daily_v5} 张）；关闭动态额度后才能手动改`
+                  : undefined
+              }
+            />
+            <NumField form={form} name="v5_alert_threshold" />
+            <NumField form={form} name="member_daily_anlas" />
+          </div>
+          <SaveBar form={form} onSave={save} saving={saving} label="保存预算" />
+        </form>
+      </div>
+    </Card>
+  );
+}

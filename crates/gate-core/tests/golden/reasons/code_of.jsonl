@@ -1,0 +1,27 @@
+{"fn":"code_of","args":["reason","排队的人太多","queue_full"],"out":"queue_full","err":null}
+{"fn":"code_of","args":["reason","x",""],"out":"","err":null}
+{"fn":"code_of","args":["reason","x",null],"out":"","err":null}
+{"fn":"code_of","args":["reason","","paced"],"out":"paced","err":null}
+{"fn":"code_of","args":["plain","普通字符串",null],"out":"","err":null}
+{"fn":"code_of","args":["plain","",null],"out":"","err":null}
+{"fn":"code_of","args":["none",null,null],"out":"","err":null}
+{"fn":"code_of","args":["reason","说明 BODY_ABORT","body_abort"],"out":"body_abort","err":null}
+{"fn":"code_of","args":["reason","说明 BREAKER","breaker"],"out":"breaker","err":null}
+{"fn":"code_of","args":["reason","说明 BURST_CAP","burst_cap"],"out":"burst_cap","err":null}
+{"fn":"code_of","args":["reason","说明 CAP_3H","cap_3h"],"out":"cap_3h","err":null}
+{"fn":"code_of","args":["reason","说明 COOLDOWN","cooldown"],"out":"cooldown","err":null}
+{"fn":"code_of","args":["reason","说明 DAILY_CAP","daily_cap"],"out":"daily_cap","err":null}
+{"fn":"code_of","args":["reason","说明 FEATURE_OFF","feature_off"],"out":"feature_off","err":null}
+{"fn":"code_of","args":["reason","说明 HOURLY_CAP","hourly_cap"],"out":"hourly_cap","err":null}
+{"fn":"code_of","args":["reason","说明 KEY_BUSY","key_busy"],"out":"key_busy","err":null}
+{"fn":"code_of","args":["reason","说明 KEY_PAUSED","key_paused"],"out":"key_paused","err":null}
+{"fn":"code_of","args":["reason","说明 KEY_RATE","key_rate"],"out":"key_rate","err":null}
+{"fn":"code_of","args":["reason","说明 MEMBER_QUOTA","member_quota"],"out":"member_quota","err":null}
+{"fn":"code_of","args":["reason","说明 OVER_BASE","over_base"],"out":"over_base","err":null}
+{"fn":"code_of","args":["reason","说明 PACED","paced"],"out":"paced","err":null}
+{"fn":"code_of","args":["reason","说明 PARAM","param"],"out":"param","err":null}
+{"fn":"code_of","args":["reason","说明 QUEUE_FULL","queue_full"],"out":"queue_full","err":null}
+{"fn":"code_of","args":["reason","说明 QUEUE_TIMEOUT","queue_timeout"],"out":"queue_timeout","err":null}
+{"fn":"code_of","args":["reason","说明 QUIET_CAP","quiet_cap"],"out":"quiet_cap","err":null}
+{"fn":"code_of","args":["reason","说明 SITE_QUOTA","site_quota"],"out":"site_quota","err":null}
+{"fn":"code_of","args":["reason","说明 V5_EXHAUSTED","v5_exhausted"],"out":"v5_exhausted","err":null}

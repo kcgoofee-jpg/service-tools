@@ -10,8 +10,11 @@ gate.davidzhao.top {
 	request_header -X-Admin-Test
 	request_header -X-Test-Channel
 
-	# 只压缩网页、后台和公开 JSON（10/10 后台无压缩，首页 247KB 原样传）；出图接口（含流式）不压缩，避免缓冲
-	@compress path / /admin /admin/* /status /status.json /public/* /static/*
+	# 只压缩网页、后台、前端资源和公开 JSON；出图接口与两条实时推送（SSE）不压缩，避免缓冲
+	@compress {
+		path / /admin /admin/* /status /status.json /public/* /_owl/* /static/*
+		not path /public/live/stream /admin/api/events
+	}
 	encode @compress zstd gzip
 	header {
 		Strict-Transport-Security "max-age=31536000"

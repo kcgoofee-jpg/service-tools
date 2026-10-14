@@ -1,0 +1,1773 @@
+//! 后台「成员」接口（旧版 `app/admin.py` 的 Key / 成员 / 黑名单 / 券 / 标签 / 奖励部分）。
+//!
+//! 照旧版逐条移植：状态码、`{"detail": ...}` 文案、JSON 键顺序、写进库的行都与旧版一致。
+//! 3.0 已删除的功能不移植：`anlas_auto` 自动分配（含 `anlas_mode`）、`v5_pinned`（V5 基础值）、
+//! 防分享证据；对应的数据库列原样留着，这里不读不写，也不再出现在返回的 JSON 里。
+
+use super::req::{Ctx, R, Reject, internal, sql_int};
+use crate::action_log::log_action;
+use crate::body::JsonObject;
+use crate::error::{HttpError, ok_json};
+use crate::ops;
+use crate::registration::{DiscordUser, Gift, RegErr};
+use crate::state::AppState;
+use axum::Router;
+use axum::extract::{Request, State};
+use axum::routing::{delete, get, patch, post, put};
+use gate_core::{features, pyc, pyext, pyval};
+use gate_db::repo::counters::Counter;
+use gate_db::repo::{
+    INVITE_TAG, ROLE_ADMIN, ROLE_INVITE, ROLE_LABELS, ROLE_REGULAR, ROLE_TEST,
+    admin_members::{BindOutcome, RegistrationRow, TagRow},
+    keys::NewKey,
+};
+use serde_json::{Map, Value, json};
+use std::collections::HashMap;
+
+pub fn router() -> Router<AppState> {
+    Router::new()
+        .route("/admin/api/keys", get(list_keys).post(create_key))
+        .route("/admin/api/keys/invite", post(create_invite_key))
+        .route(
+            "/admin/api/keys/{key_id}",
+            patch(patch_key).delete(delete_key),
+        )
+        .route("/admin/api/keys/{key_id}/regenerate", post(regenerate_key))
+        .route("/admin/api/keys/{key_id}/role", post(switch_key_role))
+        .route(
+            "/admin/api/keys/{key_id}/reset-daily-image-quota",
+            post(reset_daily_image_quota),
+        )
+        .route("/admin/api/keys/{key_id}/bind-discord", post(bind_discord))
+        .route(
+            "/admin/api/keys/{key_id}/coupons",
+            get(list_key_coupons).post(give_coupon),
+        )
+        .route("/admin/api/keys/{key_id}/tags", put(put_key_tag))
+        .route(
+            "/admin/api/keys/{key_id}/tags/{tag}",
+            delete(delete_key_tag),
+        )
+        .route(
+            "/admin/api/keys/{key_id}/share-clear",
+            post(key_share_clear),
+        )
+        .route("/admin/api/gift", post(gift_member))
+        .route("/admin/api/members", get(members))
+        .route("/admin/api/bans", get(list_bans).post(create_ban))
+        .route("/admin/api/bans/{discord_id}", delete(delete_ban))
+}
+
+fn http(status: u16, detail: impl Into<String>) -> Reject {
+    HttpError::new(status, detail).into()
+}
+
+const NO_KEY: &str = "key 不存在";
+const ANLAS_CAP: &str = "开通 Anlas 时必须设置每日或每月 Anlas 上限（0 = 不限），不能两项都留空";
+const FEATURES_HINT: &str = "image,upscale,augment,vibe,tags,text,voice";
+const ROLE_HINT: &str = "身份组必须是 regular / invite / test / admin";
+
+// ----------------------------------------------------------------------------- 小工具
+
+fn jget(row: &Value, name: &str) -> Value {
+    row.get(name).cloned().unwrap_or(Value::Null)
+}
+
+fn jflag(row: &Value, name: &str) -> bool {
+    row.get(name).is_some_and(pyval::truthy)
+}
+
+/// `str(body.get(key) or "")`
+fn pstr(body: &JsonObject, key: &str) -> String {
+    match body.get(key) {
+        Some(v) if pyval::truthy(v) => pyext::py_str(v),
+        _ => String::new(),
+    }
+}
+
+/// `str(body.get(key) or default)`
+fn pstr_or(body: &JsonObject, key: &str, default: &str) -> String {
+    match body.get(key) {
+        Some(v) if pyval::truthy(v) => pyext::py_str(v),
+        _ => default.to_string(),
+    }
+}
+
+/// `str.isdecimal()`：非空且全是 Unicode 十进制数字。
+fn is_decimal(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(pyext::is_nd)
+}
+
+fn role_label(role: &str) -> &'static str {
+    ROLE_LABELS
+        .iter()
+        .find(|(r, _)| *r == role)
+        .map_or("普通", |(_, l)| l)
+}
+
+fn valid_role(role: &str) -> bool {
+    matches!(role, ROLE_ADMIN | ROLE_TEST | ROLE_INVITE | ROLE_REGULAR)
+}
+
+/// `str(x).strip().lower()`
+fn norm_role(v: &str) -> String {
+    pyc::strip(v).to_lowercase()
+}
+
+/// `gen_key("nai")`
+pub(super) fn gen_key() -> String {
+    gate_core::policy::gen_key("nai", &rand::random::<[u8; 24]>())
+}
+
+fn py_float(v: &Value) -> Option<f64> {
+    match v {
+        Value::Bool(b) => Some(f64::from(u8::from(*b))),
+        Value::Number(n) => n.as_f64(),
+        Value::String(s) => pyc::parse_float(s),
+        _ => None,
+    }
+}
+
+/// 旧版 `_num`：严格解析后台数值——空值、布尔、非数字、小数（整数字段）、越界一律 422。
+/// 这些字段里 0 代表「不限」，绝不能把空值或非法值静默变成 0。
+fn num(value: &Value, is_int: bool, lo: f64, hi: f64, name: &str) -> Result<f64, Reject> {
+    let empty = match value {
+        Value::Null | Value::Bool(_) => true,
+        Value::String(s) => pyc::strip(s).is_empty(),
+        _ => false,
+    };
+    if empty {
+        return Err(http(422, format!("{name} 不能为空")));
+    }
+    let v = py_float(value)
+        .filter(|v| v.is_finite())
+        .ok_or_else(|| http(422, format!("{name} 必须是有效数字")))?;
+    if is_int && v.fract() != 0.0 {
+        return Err(http(422, format!("{name} 必须是整数")));
+    }
+    if !(lo <= v && v <= hi) {
+        let (l, h) = if is_int {
+            (format!("{}", lo as i64), format!("{}", hi as i64))
+        } else {
+            (pyc::float_repr(lo), pyc::float_repr(hi))
+        };
+        return Err(http(422, format!("{name} 必须在 {l}～{h} 之间")));
+    }
+    Ok(v)
+}
+
+fn num_int(value: &Value, lo: i64, hi: i64, name: &str) -> Result<i64, Reject> {
+    Ok(num(value, true, lo as f64, hi as f64, name)? as i64)
+}
+
+fn num_float(value: &Value, lo: f64, hi: f64, name: &str) -> Result<f64, Reject> {
+    num(value, false, lo, hi, name)
+}
+
+/// 旧版 `_features_field`：缺省 / null = 沿用旧行为（全局开启的都可用）；列表 = 仅允许所列功能。
+fn features_field(body: &JsonObject) -> Result<Option<String>, Reject> {
+    let Some(value) = body.get("features").filter(|v| !v.is_null()) else {
+        return Ok(None);
+    };
+    let ok = value.as_array().is_some_and(|a| {
+        a.iter().all(|v| {
+            v.as_str()
+                .is_some_and(|s| features::FEATURES.iter().any(|(n, _)| *n == s))
+        })
+    });
+    if !ok {
+        return Err(http(
+            422,
+            format!("features 必须是功能名列表：{FEATURES_HINT}"),
+        ));
+    }
+    let names: Vec<&str> = value
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
+    Ok(features::dump(Some(names)))
+}
+
+/// 新建 Key 未指定功能时，沿用「新成员默认开通的功能」（默认只有文生图），而不是全部功能。
+async fn new_key_features(state: &AppState, body: &JsonObject) -> Result<Option<String>, Reject> {
+    if body.contains_key("features") {
+        return features_field(body);
+    }
+    let reg = ops::registration_settings(state).await?;
+    if reg.features.is_none()
+        && state.db.get_setting("register_features").await?.as_deref() == Some("*")
+    {
+        return Ok(None); // 站长明确把默认设为「全部已开放功能」
+    }
+    let list = reg
+        .features
+        .filter(|f| !f.is_empty())
+        .unwrap_or_else(|| vec!["image".to_string()]);
+    Ok(features::dump(Some(list)))
+}
+
+/// 成员的 Discord 资料：显示名、用户名、头像地址、个人资料链接（点开可直接私信）。
+fn discord_profile(row: &RegistrationRow) -> Value {
+    let id = &row.discord_id;
+    let avatar_url = match row.avatar.as_deref().filter(|a| !a.is_empty()) {
+        Some(a) => format!("https://cdn.discordapp.com/avatars/{id}/{a}.png?size=64"),
+        None => {
+            let n = pyext::py_int_str(id).unwrap_or(0);
+            format!(
+                "https://cdn.discordapp.com/embed/avatars/{}.png",
+                (n >> 22).rem_euclid(6)
+            )
+        }
+    };
+    json!({
+        "id": id,
+        "username": row.username,
+        "display_name": row.display_name,
+        "avatar_url": avatar_url,
+        "profile_url": format!("https://discord.com/users/{id}"),
+    })
+}
+
+fn base_role(row: &Value) -> &'static str {
+    if jflag(row, "is_admin") {
+        ROLE_ADMIN
+    } else if jflag(row, "is_test") {
+        ROLE_TEST
+    } else {
+        ROLE_REGULAR
+    }
+}
+
+/// 旧版 `_key_json`。`role` 给了就覆盖（Key 列表按「邀请」标签识别身份组）；
+/// 不给时只分 站长 / 测试 / 普通——旧版如此，所以修改 / 新建接口返回的 role 不会是「邀请」。
+fn key_json(row: &Value, c: &Counter, generated: i64, role: Option<&str>) -> Value {
+    let role = role.unwrap_or_else(|| base_role(row));
+    // 旧版 `max(0, x)`：x <= 0（含 NaN）取 0
+    let anlas = if c.anlas > 0.0 { c.anlas } else { 0.0 };
+    json!({
+        "id": jget(row, "id"),
+        "name": jget(row, "name"),
+        "token": jget(row, "token"),
+        "enabled": jflag(row, "enabled"),
+        "daily_images": jget(row, "daily_images"),
+        "daily_anlas": jget(row, "daily_anlas"),
+        "daily_v5": jget(row, "daily_v5"),
+        "monthly_anlas": jget(row, "monthly_anlas"),
+        "daily_text_tokens": jget(row, "daily_text_tokens"),
+        "rpm": jget(row, "rpm"),
+        "allow_anlas": jflag(row, "allow_anlas"),
+        "allow_img2img": jflag(row, "allow_img2img"),
+        "exclude_global_v5": jflag(row, "exclude_global_v5"),
+        "image_model_scope": jget(row, "image_model_scope"),
+        "is_admin": jflag(row, "is_admin"),
+        "is_test": jflag(row, "is_test"),
+        "quota_auto": pyext::num_eq_int(row.get("quota_auto"), 1),
+        "role": role,
+        "role_label": role_label(role),
+        "features": features::key_features(row),
+        "expires_at": jget(row, "expires_at"),
+        "created_at": jget(row, "created_at"),
+        "last_used_at": jget(row, "last_used_at"),
+        "used": {
+            "images": c.images,
+            "generated_images_total": generated,
+            "legacy_free_images": c.legacy_free_images,
+            "anlas": pyval::float(pyc::round(anlas, 2)),
+            "v5": c.v5,
+            "text_tokens": c.text_tokens,
+            "requests": c.requests,
+        },
+    })
+}
+
+async fn load_key(state: &AppState, key_id: i64) -> Result<Option<Value>, Reject> {
+    Ok(state.db.get_key(key_id).await?)
+}
+
+/// 一把 Key 的完整 JSON（今日计数 + 累计生成张数）。
+async fn full_key_json(state: &AppState, row: &Value, key_id: i64) -> Result<Value, Reject> {
+    let c = state.db.get_counter(key_id, &state.day()).await?;
+    let totals = state.db.generated_image_totals(Some(key_id)).await?;
+    let generated = totals
+        .iter()
+        .find(|(k, _)| *k == key_id)
+        .map_or(0, |(_, n)| *n);
+    Ok(key_json(row, &c, generated, None))
+}
+
+/// 后台对 Discord 成员做了会影响使用的操作时，机器人私信本人（`?notify=0` / `body.notify=false` 可关闭）。
+/// 私信失败绝不能让后台操作本身失败。
+async fn notify_member(state: &AppState, key_id: i64, text: &str) {
+    let Some(reg) = state.registration.clone() else {
+        return;
+    };
+    let Ok(Some(discord_id)) = state.db.registered_discord_for_key(key_id).await else {
+        return;
+    };
+    let sent = reg
+        .send_dm(&discord_id, &format!("🦉 猫头鹰公益站通知：{text}"))
+        .await;
+    let blocked = if sent {
+        String::new()
+    } else {
+        reg.last_dm_block()
+    };
+    // 操作日志里绝不能出现明文 Key
+    let summary = pyc::take_chars(&mask_keys(text), 80).to_string();
+    let (detail, ok) = if sent {
+        (format!("已私信：{summary}"), true)
+    } else if !blocked.is_empty() {
+        (format!("未私信（{blocked}）：{summary}"), true)
+    } else {
+        ("私信失败（对方可能关闭了私信）".to_string(), false)
+    };
+    log_action(
+        &state.db,
+        "系统",
+        "私信成员",
+        &format!("Key #{key_id}"),
+        &detail,
+        ok,
+        state.now(),
+    )
+    .await;
+}
+
+/// `re.sub(r"nai-[A-Za-z0-9_\-]+", "nai-***", text)`
+fn mask_keys(text: &str) -> String {
+    let b = text.as_bytes();
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    let mut last = 0;
+    while i < b.len() {
+        if b[i..].starts_with(b"nai-") {
+            let run = b[i + 4..]
+                .iter()
+                .take_while(|c| c.is_ascii_alphanumeric() || **c == b'_' || **c == b'-')
+                .count();
+            if run > 0 {
+                out.push_str(&text[last..i]);
+                out.push_str("nai-***");
+                i += 4 + run;
+                last = i;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    out.push_str(&text[last..]);
+    out
+}
+
+fn notify_enabled(cx: &Ctx) -> bool {
+    cx.query("notify").unwrap_or("1") != "0"
+}
+
+// ----------------------------------------------------------------------------- Key 列表 / 新建
+
+async fn list_keys(State(state): State<AppState>, req: Request) -> R {
+    let mut cx = Ctx::new(state, req).await?;
+    cx.admin().await?;
+    let st = &cx.state;
+    let rows = st.db.list_keys().await?;
+    let today = st.day();
+    let totals: HashMap<i64, i64> = st
+        .db
+        .generated_image_totals(None)
+        .await?
+        .into_iter()
+        .collect();
+    let invite: std::collections::HashSet<i64> =
+        st.db.invite_key_ids().await?.into_iter().collect();
+    let mut out = Vec::with_capacity(rows.len());
+    for r in &rows {
+        let id = r.get("id").and_then(Value::as_i64).unwrap_or(0);
+        let c = st.db.get_counter(id, &today).await?;
+        let role = if jflag(r, "is_admin") {
+            ROLE_ADMIN
+        } else if jflag(r, "is_test") {
+            ROLE_TEST
+        } else if invite.contains(&id) {
+            ROLE_INVITE
+        } else {
+            ROLE_REGULAR
+        };
+        out.push(key_json(
+            r,
+            &c,
+            totals.get(&id).copied().unwrap_or(0),
+            Some(role),
+        ));
+    }
+    Ok(ok_json(&json!({"keys": out})))
+}
+
+/// 一键新建邀请 Key（10-11 站长）：自动编号「邀请-N」、打「邀请」标签、额度交给算法，其余和 /register 发的一样。
+/// 成员拿到后在 Discord 用 /register 填这把 Key 完成绑定，后台自动认出是谁。
+async fn create_invite_key(State(state): State<AppState>, req: Request) -> R {
+    let mut cx = Ctx::new(state, req).await?;
+    cx.admin().await?;
+    let st = &cx.state;
+    let (daily_images, daily_v5, features_list, image_scope, expires_days) =
+        if st.registration.is_some() {
+            let cfg = ops::registration_settings(st).await?;
+            (
+                cfg.daily_images,
+                cfg.daily_v5,
+                cfg.features,
+                cfg.image_scope,
+                cfg.expires_days,
+            )
+        } else {
+            (
+                st.env.default_daily_images,
+                st.env.default_daily_v5,
+                None,
+                "all".to_string(),
+                30,
+            )
+        };
+    // 旧版 `re.match(r"邀请-(\d+)", name)`：只看开头，数字可以是任何 Unicode 十进制数字
+    let max_no = st
+        .db
+        .key_names()
+        .await?
+        .iter()
+        .filter_map(|n| {
+            let rest = n.strip_prefix("邀请-")?;
+            let digits: String = rest.chars().take_while(|c| pyext::is_nd(*c)).collect();
+            pyc::parse_int(&digits)
+        })
+        .max()
+        .unwrap_or(0);
+    let name = format!("邀请-{}", max_no + 1);
+    let now = st.now();
+    let new = NewKey {
+        name: name.clone(),
+        token: gen_key(),
+        enabled: true,
+        daily_images,
+        daily_anlas: 0.0,
+        daily_v5,
+        monthly_anlas: 0.0,
+        daily_text_tokens: 0,
+        rpm: st.env.default_rpm,
+        allow_anlas: false,
+        allow_img2img: false,
+        exclude_global_v5: false,
+        image_model_scope: image_scope,
+        is_admin: false,
+        expires_at: (expires_days > 0).then_some(now + expires_days as f64 * 86400.0),
+        features: features::dump(features_list),
+        is_test: false,
+        discord_id: None,
+    };
+    let row = st.db.create_key(&new, now).await?;
+    let id = row.get("id").and_then(Value::as_i64).unwrap_or(0);
+    st.db
+        .upsert_key_tag(
+            id,
+            INVITE_TAG,
+            "站长发的邀请 Key：成员用 /register 填它完成绑定；只由站长手动删除",
+            "站长",
+            now,
+        )
+        .await?;
+    log_action(&st.db, "站长", "新建邀请 Key", &name, "", true, st.now()).await;
+    let row = st.db.get_key(id).await?.unwrap_or(Value::Null);
+    let c = st.db.get_counter(id, &st.day()).await?;
+    Ok(ok_json(&json!({"key": key_json(&row, &c, 0, None)})))
+}
+
+async fn create_key(State(state): State<AppState>, req: Request) -> R {
+    let mut cx = Ctx::new(state, req).await?;
+    cx.admin().await?;
+    let body = cx.json().await?;
+    let st = &cx.state;
+    let env = &st.env;
+    let field = |name: &str, default: Value| body.get(name).cloned().unwrap_or(default);
+
+    let daily_images = num_int(
+        &field("daily_images", json!(env.default_daily_images)),
+        0,
+        1_000_000,
+        "daily_images",
+    )?;
+    let monthly_anlas = num_float(
+        &field("monthly_anlas", json!(env.default_monthly_anlas)),
+        0.0,
+        100_000.0,
+        "monthly_anlas",
+    )?;
+    let daily_anlas = num_float(
+        &field("daily_anlas", json!(env.default_daily_anlas)),
+        0.0,
+        100_000.0,
+        "daily_anlas",
+    )?;
+    let daily_v5 = num_int(
+        &field("daily_v5", json!(env.default_daily_v5)),
+        0,
+        100_000,
+        "daily_v5",
+    )?;
+    let daily_text = num_int(
+        &field("daily_text_tokens", json!(env.default_daily_text_tokens)),
+        0,
+        100_000_000,
+        "daily_text_tokens",
+    )?;
+    let rpm = num_int(&field("rpm", json!(env.default_rpm)), 1, 600, "rpm")?;
+    let expires_days = num_int(
+        &field("expires_days", json!(env.default_expires_days)),
+        0,
+        3650,
+        "expires_days",
+    )?;
+    let now = st.now();
+    let expires_at = (expires_days > 0).then_some(now + expires_days as f64 * 86400.0);
+    let scope = if body.get("image_model_scope") == Some(&json!("all")) {
+        "all"
+    } else {
+        "legacy"
+    };
+    let truthy = |name: &str| body.get(name).is_some_and(pyval::truthy);
+    // 配额检查只认 > 0 的上限：allow_anlas 开着而日 / 月上限都是 0 = 个人 Anlas 完全无上限，
+    // 可无限烧共享账号的付费点数（旧版的文案写「0 = 不限」，但实际 0 + 0 会被拒，照旧）
+    if truthy("allow_anlas") && daily_anlas <= 0.0 && monthly_anlas <= 0.0 {
+        return Err(http(422, ANLAS_CAP));
+    }
+    let name = {
+        let n = pyc::take_chars(pyc::strip(&pstr(&body, "name")), 60).to_string();
+        if n.is_empty() {
+            "未命名".to_string()
+        } else {
+            n
+        }
+    };
+    let new = NewKey {
+        name,
+        token: gen_key(),
+        enabled: true,
+        daily_images,
+        daily_anlas,
+        daily_v5,
+        monthly_anlas,
+        daily_text_tokens: daily_text,
+        rpm,
+        allow_anlas: truthy("allow_anlas"),
+        allow_img2img: truthy("allow_img2img"),
+        exclude_global_v5: truthy("exclude_global_v5"),
+        image_model_scope: scope.to_string(),
+        is_admin: false,
+        expires_at,
+        features: new_key_features(st, &body).await?,
+        is_test: truthy("is_test"),
+        discord_id: None,
+    };
+    let row = st.db.create_key(&new, now).await?;
+    let id = row.get("id").and_then(Value::as_i64).unwrap_or(0);
+    // 后台手动建的 Key 用站长填的额度和模型范围：标为手动，动态额度算法不覆盖（否则 10 分钟内会被改成算法默认值、
+    // 连 V4.5-only 也会被开成 V5）。要交给算法，可在成员页切回「自动」。
+    st.db.set_quota_auto(id, -1).await?;
+    if let Some(v) = body.get("role") {
+        let role = norm_role(&if pyval::truthy(v) {
+            pyext::py_str(v)
+        } else {
+            String::new()
+        });
+        if valid_role(&role) {
+            st.db.set_key_role(id, &role, st.now()).await?;
+        }
+    }
+    let row = st.db.get_key(id).await?.unwrap_or(Value::Null);
+    let c = st.db.get_counter(id, &st.day()).await?;
+    Ok(ok_json(&json!({"key": key_json(&row, &c, 0, None)})))
+}
+
+// ----------------------------------------------------------------------------- 单把 Key 的操作
+
+async fn regenerate_key(State(state): State<AppState>, req: Request) -> R {
+    let mut cx = Ctx::new(state, req).await?;
+    let key_id = cx.path_int("key_id");
+    cx.admin().await?;
+    let key_id = sql_int(key_id)?;
+    let token = gen_key();
+    if !cx.state.db.rotate_key_token(key_id, &token).await? {
+        return Err(http(404, NO_KEY));
+    }
+    if notify_enabled(&cx) {
+        notify_member(
+            &cx.state,
+            key_id,
+            &format!("站长为你重置了 Key，旧 Key 已失效。新的 Key（请妥善保存）：`{token}`"),
+        )
+        .await;
+    }
+    let mut resp = ok_json(&json!({"token": token}));
+    resp.headers_mut().insert(
+        "cache-control",
+        axum::http::HeaderValue::from_static("no-store"),
+    );
+    Ok(resp)
+}
+
+/// 从「仅 V4.5」开到 V5 时给一个默认日额度，和早期成员一致。
+const QUICK_V5_DAILY: i64 = 15;
+
+/// 旧版 `_describe_changes`：对成员可见的改动说明（私信用）。
+fn describe_changes(before: &Value, fields: &Map<String, Value>, now: f64) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Some(v) = fields.get("enabled") {
+        let new = pyval::truthy(v);
+        if jflag(before, "enabled") != new {
+            out.push(format!(
+                "你的 Key 已被站长{}",
+                if new {
+                    "恢复，可以继续使用"
+                } else {
+                    "暂停，暂时无法使用（有疑问请到 🛠️｜问题反馈）"
+                }
+            ));
+        }
+    }
+    for (name, label) in [
+        ("daily_images", "每日图片"),
+        ("daily_v5", "每日 V5"),
+        ("daily_anlas", "每日 Anlas"),
+    ] {
+        if let Some(new) = fields.get(name) {
+            let old = before.get(name).unwrap_or(&Value::Null);
+            if !py_eq(old, new) {
+                let show = |v: &Value| {
+                    if pyval::truthy(v) {
+                        pyext::py_str(v)
+                    } else {
+                        "不限".to_string()
+                    }
+                };
+                out.push(format!("{label}额度：{} → {}", show(old), show(new)));
+            }
+        }
+    }
+    if let Some(v) = fields.get("allow_anlas") {
+        let new = pyval::truthy(v);
+        if jflag(before, "allow_anlas") != new {
+            out.push(format!(
+                "已为你{} Anlas（付费规格）",
+                if new { "开通" } else { "关闭" }
+            ));
+        }
+    }
+    if let Some(v) = fields.get("image_model_scope")
+        && !py_eq(before.get("image_model_scope").unwrap_or(&Value::Null), v)
+    {
+        out.push(format!(
+            "可用模型：{}",
+            if v.as_str() == Some("all") {
+                "含 V5"
+            } else {
+                "仅 V4.5 及以下"
+            }
+        ));
+    }
+    let old_exp = before.get("expires_at").and_then(pyval::number_like);
+    let in_fields = fields.contains_key("expires_at");
+    let new_exp = if in_fields {
+        fields.get("expires_at").and_then(pyval::number_like)
+    } else {
+        old_exp
+    };
+    // 编辑框每次都按「剩余天数」重算到期时间，相差不到 1 天视为没改
+    // 旧版条件：`"expires_at" in fields and (old is None) != (new is None) or (old and new and abs(old - new) > 86400)`
+    let changed = (in_fields && old_exp.is_none() != new_exp.is_none())
+        || matches!((old_exp, new_exp), (Some(o), Some(n)) if o != 0.0 && n != 0.0 && (o - n).abs() > 86400.0);
+    if changed {
+        let tail = match fields.get("expires_at").and_then(pyval::number_like) {
+            Some(e) if e != 0.0 => {
+                let days = pyc::round0((e - now) / 86400.0).max(0);
+                format!("，约 {days} 天后到期")
+            }
+            _ => "为长期有效".to_string(),
+        };
+        out.push(format!("Key 有效期已调整{tail}"));
+    }
+    out
+}
+
+/// Python 的 `a == b`（数字按数值比较，bool 当 0/1）。
+fn py_eq(a: &Value, b: &Value) -> bool {
+    match (pyval::number_like(a), pyval::number_like(b)) {
+        (Some(x), Some(y)) => x == y,
+        _ => a == b,
+    }
+}
+
+async fn patch_key(State(state): State<AppState>, req: Request) -> R {
+    let mut cx = Ctx::new(state, req).await?;
+    let key_id = cx.path_int("key_id");
+    cx.admin().await?;
+    let key_id = sql_int(key_id)?;
+    let st = cx.state.clone();
+    if load_key(&st, key_id).await?.is_none() {
+        return Err(http(404, NO_KEY));
+    }
+    let mut body = cx.json().await?;
+    let quota = body.get("quota").cloned().unwrap_or(Value::Null);
+    let quota_s = quota.as_str();
+    if !(quota.is_null() || matches!(quota_s, Some("auto" | "manual"))) {
+        return Err(http(422, "quota 只能是 auto（算法）或 manual（手动）"));
+    }
+    if quota_s == Some("auto") {
+        let Some(cur) = load_key(&st, key_id).await? else {
+            return Err(http(404, NO_KEY));
+        };
+        // `body.get("is_test", True) is not False`：只有明确传 false 才放行
+        if jflag(&cur, "is_test") && body.get("is_test") != Some(&Value::Bool(false)) {
+            return Err(http(422, "测试 Key 不归算法管理，只能手动设置额度"));
+        }
+    }
+    if !quota.is_null() {
+        // 2026-10-11 站长：额度只有两种——「算法」全部交给算法；「手动」填多少就是多少，不和算法混用
+        for k in ["anlas_mode", "v5_pinned", "quota_mode"] {
+            pyval::pop(&mut body, k);
+        }
+        if quota_s == Some("auto") {
+            for k in [
+                "daily_images",
+                "daily_v5",
+                "daily_anlas",
+                "monthly_anlas",
+                "allow_anlas",
+                "exclude_global_v5",
+                "image_model_scope",
+                "features",
+            ] {
+                pyval::pop(&mut body, k);
+            }
+        }
+    }
+    let mut fields: Map<String, Value> = Map::new();
+    if let Some(v) = body.get("name") {
+        let n = pyc::take_chars(
+            pyc::strip(&if pyval::truthy(v) {
+                pyext::py_str(v)
+            } else {
+                String::new()
+            }),
+            60,
+        )
+        .to_string();
+        fields.insert(
+            "name".into(),
+            Value::String(if n.is_empty() { "未命名".into() } else { n }),
+        );
+    }
+    if let Some(v) = body.get("enabled") {
+        fields.insert("enabled".into(), Value::Bool(pyval::truthy(v)));
+    }
+    if let Some(v) = body.get("daily_images") {
+        fields.insert(
+            "daily_images".into(),
+            json!(num_int(v, 0, 1_000_000, "daily_images")?),
+        );
+    }
+    if let Some(v) = body.get("daily_anlas") {
+        fields.insert(
+            "daily_anlas".into(),
+            pyval::float(num_float(v, 0.0, 100_000.0, "daily_anlas")?),
+        );
+    }
+    if let Some(v) = body.get("daily_v5") {
+        fields.insert(
+            "daily_v5".into(),
+            json!(num_int(v, 0, 100_000, "daily_v5")?),
+        );
+    }
+    if let Some(v) = body.get("monthly_anlas") {
+        fields.insert(
+            "monthly_anlas".into(),
+            pyval::float(num_float(v, 0.0, 100_000.0, "monthly_anlas")?),
+        );
+    }
+    if let Some(v) = body.get("daily_text_tokens") {
+        fields.insert(
+            "daily_text_tokens".into(),
+            json!(num_int(v, 0, 100_000_000, "daily_text_tokens")?),
+        );
+    }
+    if let Some(v) = body.get("rpm") {
+        fields.insert("rpm".into(), json!(num_int(v, 1, 600, "rpm")?));
+    }
+    for k in [
+        "allow_anlas",
+        "allow_img2img",
+        "exclude_global_v5",
+        "is_test",
+        "is_admin",
+    ] {
+        if let Some(v) = body.get(k) {
+            fields.insert(k.into(), Value::Bool(pyval::truthy(v)));
+        }
+    }
+    if let Some(v) = body.get("role") {
+        let role = norm_role(&if pyval::truthy(v) {
+            pyext::py_str(v)
+        } else {
+            String::new()
+        });
+        if !valid_role(&role) {
+            return Err(http(422, ROLE_HINT));
+        }
+        st.db.set_key_role(key_id, &role, st.now()).await?;
+        // set_key_role 已处理 is_admin, is_test 和 key_tags，从 fields 中去掉避免覆写
+        pyval::pop(&mut fields, "is_admin");
+        pyval::pop(&mut fields, "is_test");
+    }
+    if let Some(v) = body.get("image_model_scope") {
+        let scope = if v.as_str() == Some("all") {
+            "all"
+        } else {
+            "legacy"
+        };
+        fields.insert("image_model_scope".into(), json!(scope));
+    }
+    if body.contains_key("features") {
+        fields.insert("features".into(), json!(features_field(&body)?));
+    }
+    if body.get("image_model_scope") == Some(&json!("all")) && !body.contains_key("daily_v5") {
+        let before_v5 = load_key(&st, key_id).await?;
+        if before_v5.is_some_and(|b| !jflag(&b, "daily_v5")) {
+            fields.insert("daily_v5".into(), json!(QUICK_V5_DAILY)); // 从「仅 V4.5」开到 V5 时给一个默认日额度
+        }
+    }
+    if let Some(v) = body.get("expires_days") {
+        let d = num_int(v, 0, 3650, "expires_days")?;
+        fields.insert(
+            "expires_at".into(),
+            if d > 0 {
+                pyval::float(st.now() + d as f64 * 86400.0)
+            } else {
+                Value::Null
+            },
+        );
+    }
+    let before = load_key(&st, key_id).await?.unwrap_or(Value::Null);
+    if quota_s == Some("auto") {
+        // Anlas 也交给算法：先收回手动授权（Sonnet 审查 P1：否则手动的 150/天永久保留）
+        fields.insert("exclude_global_v5".into(), json!(false));
+        fields.insert("features".into(), Value::Null);
+        fields.insert("allow_anlas".into(), json!(false));
+        fields.insert("daily_anlas".into(), pyval::float(0.0));
+    }
+    // 同 create_key：开 Anlas 必须留一道上限，日 / 月全为 0 等于个人无上限（2026-10-13 审查）
+    let pick = |name: &str| {
+        fields
+            .get(name)
+            .or_else(|| before.get(name))
+            .cloned()
+            .unwrap_or(Value::Null)
+    };
+    let le0 = |v: Value| pyval::number_like(&v).is_some_and(|x| x <= 0.0);
+    if pyval::truthy(&pick("allow_anlas")) && le0(pick("daily_anlas")) && le0(pick("monthly_anlas"))
+    {
+        return Err(http(422, ANLAS_CAP));
+    }
+    st.db.update_key(key_id, &fields).await?;
+    // `quota_mode` 只在没传 `quota` 时有效（传了 quota 上面已经把它删掉）
+    let quota_mode_auto = match body.get("quota_mode") {
+        Some(v) if pyval::truthy(v) => v.as_str() == Some("auto"),
+        _ => quota_s == Some("auto"),
+    };
+    if quota_s == Some("manual") {
+        st.db.set_quota_auto(key_id, -1).await?;
+    } else {
+        // 只有额度 / 模型的值真的变了才转为手动（2026-10-10：提交了一个没变的「模型 = 全部」就被冻结在 18 张）
+        let quota_changed = ["daily_images", "daily_v5", "image_model_scope"]
+            .iter()
+            .any(|k| {
+                fields
+                    .get(*k)
+                    .is_some_and(|v| !py_eq(v, before.get(*k).unwrap_or(&Value::Null)))
+            });
+        if quota_mode_auto || quota_changed {
+            // 手动改了额度或模型 → 这把 Key 由站长管理（-1），动态额度算法不再覆盖；选「交给算法」恢复为 1 并立即重算
+            st.db
+                .set_quota_auto(key_id, if quota_mode_auto { 1 } else { -1 })
+                .await?;
+            if quota_mode_auto && let Err(e) = crate::kernel::run_quota_algo(&st).await {
+                let (ty, msg) = match &e {
+                    crate::error::ApiError::Internal(i) => ("InternalError", i.0.clone()),
+                    crate::error::ApiError::Http(h) => ("HTTPException", pyval::py_str(&h.detail)),
+                    crate::error::ApiError::Gate(g) => ("GateError", g.message.clone()),
+                };
+                st.bugs.capture(crate::bugs::Report {
+                    source: "quota_algo",
+                    error: Some((ty, &msg)),
+                    ..Default::default()
+                });
+            }
+        }
+    }
+    let changes = describe_changes(&before, &fields, st.now());
+    if !changes.is_empty() && body.get("notify") != Some(&Value::Bool(false)) {
+        notify_member(
+            &st,
+            key_id,
+            &format!("站长调整了你的 Key：\n• {}", changes.join("\n• ")),
+        )
+        .await;
+    }
+    let row = load_key(&st, key_id).await?.unwrap_or(Value::Null);
+    Ok(ok_json(
+        &json!({"key": full_key_json(&st, &row, key_id).await?}),
+    ))
+}
+
+/// 手动切换账号身份组（站长 / 测试、邀请、普通）。
+async fn switch_key_role(State(state): State<AppState>, req: Request) -> R {
+    let mut cx = Ctx::new(state, req).await?;
+    let key_id = cx.path_int("key_id");
+    cx.admin().await?;
+    let key_id = sql_int(key_id)?;
+    let st = cx.state.clone();
+    let Some(key) = load_key(&st, key_id).await? else {
+        return Err(http(404, NO_KEY));
+    };
+    let body = cx.json().await?;
+    let role = norm_role(&pstr(&body, "role"));
+    if !valid_role(&role) {
+        return Err(http(422, ROLE_HINT));
+    }
+    st.db.set_key_role(key_id, &role, st.now()).await?;
+    let label = role_label(&role);
+    let exemption = if role == ROLE_REGULAR {
+        "（纳入 3 天闲置回收）"
+    } else {
+        "（豁免 3 天闲置回收）"
+    };
+    log_action(
+        &st.db,
+        "站长",
+        "修改账号身份组",
+        &format!("Key #{key_id} {}", pyval::py_str(&jget(&key, "name"))),
+        &format!("切换为「{label}」{exemption}"),
+        true,
+        st.now(),
+    )
+    .await;
+    Ok(ok_json(
+        &json!({"ok": true, "key_id": key_id, "role": role, "role_label": label}),
+    ))
+}
+
+/// 仅重置指定 Key 今日的 V5 与 Anlas 配额计数，保留审计日志。
+async fn reset_daily_image_quota(State(state): State<AppState>, req: Request) -> R {
+    let mut cx = Ctx::new(state, req).await?;
+    let key_id = cx.path_int("key_id");
+    cx.admin().await?;
+    let key_id = sql_int(key_id)?;
+    let st = cx.state.clone();
+    let Some(row) = load_key(&st, key_id).await? else {
+        return Err(http(404, NO_KEY));
+    };
+    st.db.reset_daily_image_quota(key_id, &st.day()).await?;
+    let key = full_key_json(&st, &row, key_id).await?;
+    if notify_enabled(&cx) {
+        notify_member(&st, key_id, "站长已为你重置了今天的额度，可以继续使用。").await;
+    }
+    Ok(ok_json(&json!({"ok": true, "key": key})))
+}
+
+/// 管理员手动给指定 Key 绑定或换绑 Discord 账号。
+async fn bind_discord(State(state): State<AppState>, req: Request) -> R {
+    let mut cx = Ctx::new(state, req).await?;
+    let key_id = cx.path_int("key_id");
+    cx.admin().await?;
+    let key_id = sql_int(key_id)?;
+    let body = cx.json().await?;
+    let discord_id = pyc::strip(&pstr(&body, "discord_id")).to_string();
+    if !is_decimal(&discord_id) {
+        return Err(http(422, "Discord ID 必须是纯数字"));
+    }
+    let username = pyc::take_chars(pyc::strip(&pstr(&body, "username")), 80).to_string();
+    let display_name = pyc::take_chars(&pstr_or(&body, "display_name", &username), 80).to_string();
+    let st = cx.state.clone();
+    let Some(row) = load_key(&st, key_id).await? else {
+        return Err(http(404, NO_KEY));
+    };
+    let reg = match st
+        .db
+        .bind_discord(key_id, &discord_id, &username, &display_name, st.now())
+        .await?
+    {
+        BindOutcome::Taken(other) => {
+            return Err(http(400, format!("该 Discord 账号已绑定到 Key #{other}")));
+        }
+        BindOutcome::Bound(reg) => reg,
+    };
+    log_action(
+        &st.db,
+        "站长",
+        "手动绑定 Discord",
+        &format!("Key #{key_id} {}", pyval::py_str(&jget(&row, "name"))),
+        &format!("@{username} ({discord_id})"),
+        true,
+        st.now(),
+    )
+    .await;
+    Ok(ok_json(&json!({
+        "ok": true,
+        "discord_id": discord_id,
+        "discord": reg.as_ref().map(discord_profile),
+    })))
+}
+
+// ----------------------------------------------------------------------------- 券
+
+/// 给成员发一张券（现在只有重置券）：`{"kind": "reset", "days": 7, "note": "唱得真好听"}`。成员在首页自己使用。
+async fn give_coupon(State(state): State<AppState>, req: Request) -> R {
+    let mut cx = Ctx::new(state, req).await?;
+    let key_id = cx.path_int("key_id");
+    cx.admin().await?;
+    let key_id = sql_int(key_id)?;
+    let body = cx.json().await?;
+    let kind = body.get("kind").cloned().unwrap_or_else(|| json!("reset"));
+    let days = body.get("days").cloned().unwrap_or_else(|| json!(7));
+    if kind.as_str() != Some("reset") {
+        return Err(http(422, "目前只有重置券（reset）"));
+    }
+    // `type(days) not in (int, float)`：布尔、字符串都不行
+    let days_f = match &days {
+        Value::Number(n) => n.as_f64(),
+        _ => None,
+    };
+    let Some(days_f) = days_f.filter(|d| 0.0 < *d && *d <= 30.0) else {
+        return Err(http(422, "有效期 days 必须在 1～30 天之间"));
+    };
+    let st = cx.state.clone();
+    if load_key(&st, key_id).await?.is_none() {
+        return Err(http(404, NO_KEY));
+    }
+    let note = pyc::take_chars(&pstr(&body, "note"), 200).to_string();
+    let by = pyc::take_chars(&pstr_or(&body, "by", "站长"), 40).to_string();
+    let c = st
+        .db
+        .add_coupon(key_id, "reset", days_f, &note, &by, st.now())
+        .await?;
+    Ok(ok_json(&json!({"ok": true, "coupon": c})))
+}
+
+async fn list_key_coupons(State(state): State<AppState>, req: Request) -> R {
+    let mut cx = Ctx::new(state, req).await?;
+    let key_id = cx.path_int("key_id");
+    cx.admin().await?;
+    let key_id = sql_int(key_id)?;
+    let rows = cx
+        .state
+        .db
+        .list_coupons(key_id, false, cx.state.now())
+        .await?;
+    Ok(ok_json(&json!({"coupons": rows})))
+}
+
+// ----------------------------------------------------------------------------- 删除 Key
+
+/// 删除成员 / Key。Discord 自助领取的成员会同时清掉领取记录并摘除身份组；`ban=true` 则永久禁止该账号再次领取。
+async fn delete_key(State(state): State<AppState>, req: Request) -> R {
+    let mut cx = Ctx::new(state, req).await?;
+    let key_id = cx.path_int("key_id");
+    let ban = cx.query_bool("ban", false);
+    cx.admin().await?;
+    let key_id = sql_int(key_id)?;
+    let st = cx.state.clone();
+    if load_key(&st, key_id).await?.is_none() {
+        return Err(http(404, NO_KEY));
+    }
+    let registrar = st.registration.clone();
+    let discord_id = match &registrar {
+        Some(_) => st.db.registered_discord_for_key(key_id).await?,
+        None => None,
+    };
+    if let (Some(reg), Some(discord_id)) = (registrar, discord_id) {
+        if notify_enabled(&cx) {
+            notify_member(
+                &st,
+                key_id,
+                &format!(
+                    "你的 Key 已被站长{}",
+                    if ban {
+                        "删除，并且这个 Discord 账号不能再领取。"
+                    } else {
+                        "删除。如需继续使用，可以在任意频道重新 /register。"
+                    }
+                ),
+            )
+            .await;
+        }
+        let reason = cx
+            .query("reason")
+            .unwrap_or("站长手动删除并封禁")
+            .to_string();
+        if ban {
+            reg.ban(&discord_id, &reason, "站长").await?;
+        } else {
+            reg.revoke(&discord_id, true).await?;
+        }
+        return Ok(ok_json(
+            &json!({"ok": true, "discord_id": discord_id, "banned": ban}),
+        ));
+    }
+    st.db.delete_key(key_id).await?;
+    Ok(ok_json(&json!({"ok": true})))
+}
+
+// ----------------------------------------------------------------------------- 黑名单
+
+/// 获取黑名单列表，支持按 ID、用户名、原因搜索。
+async fn list_bans(State(state): State<AppState>, req: Request) -> R {
+    let mut cx = Ctx::new(state, req).await?;
+    cx.admin().await?;
+    let bans = cx.state.db.list_bans(cx.query("q").unwrap_or("")).await?;
+    Ok(ok_json(&json!({"bans": bans, "total": bans.len()})))
+}
+
+/// 手动将某个 Discord ID 加入黑名单。
+async fn create_ban(State(state): State<AppState>, req: Request) -> R {
+    let mut cx = Ctx::new(state, req).await?;
+    cx.admin().await?;
+    let body = cx.json().await?;
+    let st = cx.state.clone();
+    let discord_id = pyc::strip(&pstr(&body, "discord_id")).to_string();
+    if !is_decimal(&discord_id) {
+        return Err(http(422, "Discord ID 必须为纯数字"));
+    }
+    let reason =
+        pyc::take_chars(pyc::strip(&pstr_or(&body, "reason", "站长手动封禁")), 100).to_string();
+    match st.registration.clone() {
+        Some(reg) => reg.ban(&discord_id, &reason, "站长").await?,
+        None => {
+            let info = gate_db::repo::discord::BanInfo {
+                reason: reason.clone(),
+                banned_by: "站长".into(),
+                ..Default::default()
+            };
+            st.db.ban_discord(&discord_id, &info, st.now()).await?;
+        }
+    }
+    log_action(
+        &st.db,
+        "站长",
+        "添加黑名单",
+        &format!("Discord:{discord_id}"),
+        &reason,
+        true,
+        st.now(),
+    )
+    .await;
+    Ok(ok_json(&json!({"ok": true, "discord_id": discord_id})))
+}
+
+/// 将某个 Discord ID 移出黑名单（解封）。
+async fn delete_ban(State(state): State<AppState>, req: Request) -> R {
+    let mut cx = Ctx::new(state, req).await?;
+    cx.admin().await?;
+    let st = cx.state.clone();
+    let discord_id = pyc::strip(&cx.path("discord_id")).to_string();
+    if !st.db.unban_discord(&discord_id).await? {
+        return Err(http(404, "该账号不在黑名单中"));
+    }
+    log_action(
+        &st.db,
+        "站长",
+        "移出黑名单",
+        &format!("Discord:{discord_id}"),
+        "已解除封禁，允许重新领取 Key",
+        true,
+        st.now(),
+    )
+    .await;
+    Ok(ok_json(&json!({"ok": true, "discord_id": discord_id})))
+}
+
+// ----------------------------------------------------------------------------- 奖励
+
+/// 奖励一位 Discord 用户（站长手动触发，先做成接口，以后机器人夸人也走这里）：
+/// `{"discord_id", "username"?, "global_name"?, "reason", "coupon_days": 7, "reply": {"channel_id", "message_id", "text"}?}`
+/// 没有 Key → 直接发一把（不受名额限制）并私信 Key；然后发一张重置券（note = reason）；有 reply 就让奶妹回复那条消息。
+async fn gift_member(State(state): State<AppState>, req: Request) -> R {
+    let mut cx = Ctx::new(state, req).await?;
+    cx.admin().await?;
+    let body = cx.json().await?;
+    let did_raw = body
+        .get("discord_id")
+        .map_or_else(String::new, pyext::py_str);
+    if !is_decimal(&did_raw) {
+        return Err(http(422, "需要 discord_id"));
+    }
+    let st = cx.state.clone();
+    let Some(reg) = st.registration.clone() else {
+        return Err(http(503, "Discord 机器人没有配置"));
+    };
+    let user = DiscordUser {
+        id: did_raw.clone(),
+        username: pstr(&body, "username"),
+        global_name: pstr(&body, "global_name"),
+        avatar: String::new(),
+    };
+    let (is_new, key_id, key, message) = match reg.gift(&user).await {
+        Ok(Gift::Existing { key_id }) => (false, key_id, String::new(), String::new()),
+        Ok(Gift::New {
+            key_id,
+            key,
+            message,
+        }) => (true, key_id, key, message),
+        Err(RegErr::Denied(msg)) => return Err(http(409, msg)),
+        Err(RegErr::Internal(msg)) => return Err(internal(msg)),
+    };
+    let reason = pyc::take_chars(&pstr(&body, "reason"), 200).to_string();
+    let mut out = Map::new();
+    out.insert("new_key".into(), json!(is_new));
+    out.insert("key_id".into(), json!(key_id));
+    let days = body.get("coupon_days").cloned().unwrap_or_else(|| json!(7));
+    let days_on = pyval::truthy(&days);
+    if days_on {
+        let d = py_float(&days).ok_or_else(|| internal("ValueError: coupon_days"))?;
+        let c = st
+            .db
+            .add_coupon(key_id, "reset", d, &reason, "奶妹", st.now())
+            .await?;
+        out.insert("coupon".into(), json!(c));
+    }
+    if is_new {
+        // 奖励的 Key 不占别人的名额：名额上限跟着加 1，否则「已领人数 ≤ 名额」的交叉校验会报警（10/10 实际触发）
+        let cfg = reg.settings().await?;
+        let active = reg.count_active().await?;
+        if cfg.max_users != 0 && active > cfg.max_users {
+            // 静默调整：奖励发 Key 不是「放名额」，不发名额公告（10/10 站长反馈）
+            let patch = json!({"max_users": active, "notify": false});
+            let patch = patch.as_object().cloned().unwrap_or_default();
+            ops::set_registration(&st, &patch)
+                .await
+                .map_err(|e| match e {
+                    // 旧版这里的 ValueError 没人接，是 500 而不是 422
+                    ops::OpsError::Invalid(m) => internal(m),
+                    other => Reject::from(crate::error::ApiError::from(other)),
+                })?;
+            out.insert("max_users".into(), json!(active));
+        }
+        let extra = format!(
+            "{}{}",
+            if reason.is_empty() {
+                String::new()
+            } else {
+                format!("\n\n🎁 这把 Key 是奶妹送你的（{reason}）")
+            },
+            if days_on {
+                "，还附带一张重置券，网页登录开放后在首页登录即可使用、7 天内有效～"
+            } else {
+                ""
+            }
+        );
+        let sent = reg.send_dm(&user.id, &format!("{message}{extra}")).await;
+        out.insert("dm_sent".into(), json!(sent));
+        if !sent {
+            let block = reg.last_dm_block();
+            out.insert(
+                "dm_block".into(),
+                json!(if block.is_empty() {
+                    "对方关闭了私信".to_string()
+                } else {
+                    block
+                }),
+            );
+            out.insert("key".into(), json!(key)); // 私信没发出去：交给站长手动转交
+        }
+    }
+    if let Some(rp) = body.get("reply").and_then(Value::as_object) {
+        let part = |k: &str| rp.get(k).filter(|v| pyval::truthy(v)).map(pyext::py_str);
+        if let (Some(ch), Some(msg), Some(text)) =
+            (part("channel_id"), part("message_id"), part("text"))
+        {
+            let replied = reg.reply_in_channel(&ch, &msg, &text).await;
+            out.insert("replied".into(), json!(replied));
+        }
+    }
+    let sent = out.get("dm_sent") == Some(&json!(true));
+    let replied = out.get("replied") == Some(&json!(true));
+    log_action(
+        &st.db,
+        "后台",
+        "奖励成员",
+        &format!("Discord:{}", user.id),
+        &format!(
+            "{}重置券 {} 天 · {reason}{}{}",
+            if is_new { "新发 Key · " } else { "" },
+            pyext::py_str(&days),
+            if sent { " · 已私信" } else { "" },
+            if replied { " · 已回复" } else { "" },
+        ),
+        true,
+        st.now(),
+    )
+    .await;
+    Ok(ok_json(&Value::Object(out)))
+}
+
+// ----------------------------------------------------------------------------- 标签
+
+const TAG_MAX_LEN: usize = 12;
+const TAG_NOTE_MAX: usize = 200;
+
+/// 自动标签：近 24 小时因这些「成员自己能改」的原因被拒 / 失败（按 detail 识别；顺序即优先级）。
+/// 「开着 Vibe」已移除（2026-10-14）：Vibe 氛围参考已全员开放，正常用 Vibe 不再是「成员自己能改的问题」。
+const AUTO_TAG_PATTERNS: [(&str, &str); 5] = [
+    ("传了底图", "%img2img%"),
+    ("画师串 NaN", "%NaN%"),
+    ("角色超 6 个", "%角色太多%"),
+    ("请求过快", "%请求过于频繁%"),
+    ("调文本接口", "%文本生成%"),
+];
+
+/// 给成员打 / 改手动标签（只在后台显示）。body: `{tag, note}`
+async fn put_key_tag(State(state): State<AppState>, req: Request) -> R {
+    let mut cx = Ctx::new(state, req).await?;
+    let key_id = cx.path_int("key_id");
+    cx.admin().await?;
+    let key_id = sql_int(key_id)?;
+    let st = cx.state.clone();
+    if load_key(&st, key_id).await?.is_none() {
+        return Err(http(404, NO_KEY));
+    }
+    let body = cx.json().await?;
+    // `" ".join(str(...).split())[:12]`：任何空白折成一个空格
+    let joined = pstr(&body, "tag")
+        .split(pyc::is_space)
+        .filter(|w| !w.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let tag = pyc::take_chars(&joined, TAG_MAX_LEN).to_string();
+    if tag.is_empty() {
+        return Err(http(422, "标签不能为空"));
+    }
+    let note = pyc::take_chars(pyc::strip(&pstr(&body, "note")), TAG_NOTE_MAX).to_string();
+    let by = {
+        let b = pyc::take_chars(pyc::strip(&pstr_or(&body, "by", "站长")), 20).to_string();
+        if b.is_empty() {
+            "站长".to_string()
+        } else {
+            b
+        }
+    };
+    st.db
+        .upsert_key_tag(key_id, &tag, &note, &by, st.now())
+        .await?;
+    Ok(ok_json(&json!({"ok": true, "tag": tag})))
+}
+
+async fn delete_key_tag(State(state): State<AppState>, req: Request) -> R {
+    let mut cx = Ctx::new(state, req).await?;
+    let key_id = cx.path_int("key_id");
+    cx.admin().await?;
+    let key_id = sql_int(key_id)?;
+    let tag = cx.path("tag");
+    if !cx.state.db.delete_key_tag(key_id, &tag).await? {
+        return Err(http(404, "没有这个标签"));
+    }
+    Ok(ok_json(&json!({"ok": true})))
+}
+
+/// 误判：解除暂停（风险分、证据在 3.0 已随防分享一起删除，只剩 Key 暂停闸门）。
+async fn key_share_clear(State(state): State<AppState>, req: Request) -> R {
+    let mut cx = Ctx::new(state, req).await?;
+    let key_id = cx.path_int("key_id");
+    cx.admin().await?;
+    let key_id = sql_int(key_id)?;
+    cx.state.pauses.remove(key_id);
+    cx.state.db.clear_pause(key_id).await?;
+    Ok(ok_json(&json!({"ok": true})))
+}
+
+// ----------------------------------------------------------------------------- 成员页
+
+type Obj = Map<String, Value>;
+
+fn as_obj(v: &Value) -> &Obj {
+    static EMPTY: std::sync::LazyLock<Obj> = std::sync::LazyLock::new(Map::new);
+    v.as_object().unwrap_or(&EMPTY)
+}
+
+/// Python `a + b`：整数相加仍是整数，有浮点则是浮点。
+fn num_add(a: &Value, b: &Value) -> Value {
+    match (
+        a.as_i64().filter(|_| !a.is_f64()),
+        b.as_i64().filter(|_| !b.is_f64()),
+    ) {
+        (Some(x), Some(y)) => json!(x + y),
+        _ => pyval::float(
+            pyval::number_like(a).unwrap_or(0.0) + pyval::number_like(b).unwrap_or(0.0),
+        ),
+    }
+}
+
+/// `x or 0`
+fn or0(v: &Value) -> Value {
+    if pyval::truthy(v) {
+        v.clone()
+    } else {
+        json!(0)
+    }
+}
+
+fn fnum(v: &Value) -> f64 {
+    pyval::number_like(v).unwrap_or(0.0)
+}
+
+/// 每位成员（Key）的今日 / 近 7 天 / 累计用量，以及来源。
+async fn members(State(state): State<AppState>, req: Request) -> R {
+    let mut cx = Ctx::new(state, req).await?;
+    cx.admin().await?;
+    let st = cx.state.clone();
+    let now = st.now();
+    let today = st.day();
+    let week_start = st.clock.last_days(now, 7).remove(0);
+    let week: HashMap<i64, Value> = st.db.member_usage(&week_start).await?.into_iter().collect();
+    let totals: HashMap<i64, i64> = st
+        .db
+        .generated_image_totals(None)
+        .await?
+        .into_iter()
+        .collect();
+    let reg: HashMap<i64, RegistrationRow> = st
+        .db
+        .registration_rows()
+        .await?
+        .into_iter()
+        .map(|r| (r.key_id, r))
+        .collect();
+    let since = now - 24.0 * 3600.0;
+    let milestones: HashMap<i64, _> = st
+        .db
+        .member_milestones(since, &|c, d| gate_core::reasons::reason_label(c, d))
+        .await?
+        .into_iter()
+        .collect();
+    let clients: HashMap<i64, String> = st.db.latest_member_clients().await?.into_iter().collect();
+    // 旧版 `paused if paused > time.time() else 0`：过期的是整数 0，没过期的是浮点
+    let share_map: HashMap<i64, Value> = st
+        .db
+        .share_pause_rows()
+        .await?
+        .into_iter()
+        .map(|(k, paused)| {
+            let v = if paused > now {
+                pyval::float(paused)
+            } else {
+                json!(0)
+            };
+            (k, v)
+        })
+        .collect();
+
+    // 标签：手动（key_tags，站长 / 运维打的）+ 自动（since 之后因已知的成员侧原因被拒 / 失败）
+    let mut manual_tags: HashMap<i64, Vec<TagRow>> = HashMap::new();
+    for t in st.db.key_tag_rows().await? {
+        manual_tags.entry(t.key_id).or_default().push(t);
+    }
+    let mut auto_tags: HashMap<i64, Vec<Value>> = HashMap::new();
+    for (kid, label, n) in st.db.auto_tag_counts(since, &AUTO_TAG_PATTERNS).await? {
+        auto_tags
+            .entry(kid)
+            .or_default()
+            .push(json!({"tag": label, "count": n}));
+    }
+
+    // 今日「重置今日额度」痕迹：按服务日起点统计次数与最近一次（从操作日志取，只读）。
+    // 与旧版一致：旧版用「今天的重置时刻」当起点，凌晨 0 点到重置点之间起点在未来，那段时间统计为空。
+    let calendar_today = st.clock.format(now, "%Y-%m-%d");
+    let day_start = st.clock.service_day_start(&calendar_today).unwrap_or(0.0);
+    let mut reset_map: HashMap<i64, (i64, f64)> = HashMap::new();
+    for (a_ts, target) in st.db.quota_reset_marks(day_start).await? {
+        let Some(rest) = target.strip_prefix("Key #") else {
+            continue;
+        };
+        let digits: String = rest.chars().take_while(|c| pyext::is_nd(*c)).collect();
+        let Some(id) = pyc::parse_int(&digits) else {
+            continue;
+        };
+        let e = reset_map.entry(id).or_insert((0, 0.0));
+        e.0 += 1;
+        if a_ts > e.1 {
+            e.1 = a_ts;
+        }
+    }
+    let today_counters: HashMap<i64, (i64, i64, f64, i64, i64)> = st
+        .db
+        .counter_rows(&today)
+        .await?
+        .into_iter()
+        .map(|(k, images, v5, anlas, tokens, requests)| (k, (images, v5, anlas, tokens, requests)))
+        .collect();
+
+    // 生图速率：每人最近 24 小时逐小时成功生图数（前端画 24 根小时条；跨天的开头几格是昨天同时段）
+    let hour0 = (now / 3600.0).floor() as i64 * 3600 - 23 * 3600;
+    let mut rate_map: HashMap<i64, Vec<i64>> = HashMap::new();
+    for (key_id, bucket, n) in st.db.hourly_image_counts(hour0).await? {
+        let bars = rate_map.entry(key_id).or_insert_with(|| vec![0; 24]);
+        if (0..24).contains(&bucket) {
+            bars[bucket as usize] = n;
+        }
+    }
+
+    let mut out: Vec<Obj> = Vec::new();
+    for row in st.db.list_keys().await? {
+        let id = row.get("id").and_then(Value::as_i64).unwrap_or(0);
+        let (images, v5, anlas, text_tokens, requests) = today_counters
+            .get(&id)
+            .copied()
+            .unwrap_or((0, 0, 0.0, 0, 0));
+        let w = week.get(&id).cloned().unwrap_or(Value::Null);
+        let wi = |k: &str| pyval::number_like(&jget(&w, k)).map_or(0, |x| x as i64);
+        let wf = |k: &str| pyval::number_like(&jget(&w, k)).unwrap_or(0.0);
+        let my_tags = manual_tags.get(&id);
+        let role = if jflag(&row, "is_admin") {
+            ROLE_ADMIN
+        } else if jflag(&row, "is_test") {
+            ROLE_TEST
+        } else if my_tags.is_some_and(|t| t.iter().any(|x| x.tag == INVITE_TAG)) {
+            ROLE_INVITE
+        } else {
+            ROLE_REGULAR
+        };
+        let reg_row = reg.get(&id);
+        let ms = milestones.get(&id);
+        let mut m = Obj::new();
+        let mut put = |k: &str, v: Value| {
+            m.insert(k.to_string(), v);
+        };
+        put("id", jget(&row, "id"));
+        put("name", jget(&row, "name"));
+        put("enabled", json!(jflag(&row, "enabled")));
+        put("is_admin", json!(jflag(&row, "is_admin")));
+        put("is_test", json!(jflag(&row, "is_test")));
+        put("role", json!(role));
+        put("role_label", json!(role_label(role)));
+        put("discord_id", json!(reg_row.map(|r| r.discord_id.clone())));
+        put("discord", json!(reg_row.map(discord_profile)));
+        put("created_at", jget(&row, "created_at"));
+        put("last_used_at", jget(&row, "last_used_at"));
+        put("expires_at", jget(&row, "expires_at"));
+        put("daily_images", jget(&row, "daily_images"));
+        put("daily_v5", jget(&row, "daily_v5"));
+        put("allow_anlas", json!(jflag(&row, "allow_anlas")));
+        put("daily_anlas", jget(&row, "daily_anlas"));
+        put("image_model_scope", jget(&row, "image_model_scope"));
+        put(
+            "quota_auto",
+            json!(pyext::num_eq_int(row.get("quota_auto"), 1)),
+        );
+        put(
+            "today",
+            json!({"images": images, "v5": v5, "anlas": pyval::float(pyc::round(anlas, 2)),
+                   "text_tokens": text_tokens, "requests": requests}),
+        );
+        put(
+            "week",
+            json!({"images": wi("images"), "v5": wi("v5"),
+                   "anlas": pyval::float(pyc::round(wf("anlas"), 2)), "requests": wi("requests")}),
+        );
+        put("total_images", json!(totals.get(&id).copied().unwrap_or(0)));
+        // 筛选用：领取时间（Discord 领取优先，否则建 Key 时间）、首次 / 最近成功出图、24h 被拒次数
+        put(
+            "registered_at",
+            match reg_row {
+                Some(r) => json!(r.created_at),
+                None => jget(&row, "created_at"),
+            },
+        );
+        put("first_image_at", json!(ms.and_then(|m| m.first_image_at)));
+        put("last_image_at", json!(ms.and_then(|m| m.last_image_at)));
+        put("rejected_24h", json!(ms.map_or(0, |m| m.rejected_24h)));
+        put(
+            "rejected_why",
+            json!(ms.and_then(|m| m.rejected_why.clone()).unwrap_or_default()),
+        );
+        put(
+            "share",
+            share_map
+                .get(&id)
+                .map_or(Value::Null, |p| json!({"paused_until": p})),
+        );
+        put(
+            "reset_today",
+            reset_map.get(&id).map_or(
+                Value::Null,
+                |(c, t)| json!({"count": c, "last_ts": pyval::float(*t)}),
+            ),
+        );
+        put(
+            "tags",
+            Value::Array(
+                my_tags
+                    .into_iter()
+                    .flatten()
+                    .map(|t| json!({"tag": t.tag, "note": t.note, "by": t.by, "ts": pyval::float(t.ts)}))
+                    .collect(),
+            ),
+        );
+        put(
+            "auto_tags",
+            Value::Array(auto_tags.get(&id).cloned().unwrap_or_default()),
+        );
+        put(
+            "last_client",
+            json!(clients.get(&id).cloned().unwrap_or_default()),
+        );
+        put(
+            "hours24",
+            json!(rate_map.get(&id).cloned().unwrap_or_default()),
+        );
+        out.push(m);
+    }
+
+    // 成员为中心合并（10-14 站长）：同一 Discord 成员重置 / 换 Key 留下的多把 Key 归并成一条，
+    // 用量与统计跨 Key 汇总；key_count / all_key_ids 供前端展示与跨 Key 查生成记录。
+    let mut order: Vec<String> = Vec::new();
+    let mut by_discord: HashMap<String, Vec<Obj>> = HashMap::new();
+    let mut singles: Vec<Obj> = Vec::new();
+    for e in out {
+        match e
+            .get("discord_id")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+        {
+            None => singles.push(e),
+            Some(did) => {
+                if !by_discord.contains_key(&did) {
+                    order.push(did.clone());
+                }
+                by_discord.entry(did).or_default().push(e);
+            }
+        }
+    }
+    let mut merged: Vec<Obj> = Vec::new();
+    for did in order {
+        let mut entries = by_discord.remove(&did).unwrap_or_default();
+        if entries.len() == 1 {
+            let mut e = entries.remove(0);
+            let id = e["id"].clone();
+            e.insert("key_count".into(), json!(1));
+            e.insert("all_key_ids".into(), json!([id]));
+            singles.push(e);
+            continue;
+        }
+        // 已启用的在前，同组里最近用过的在前（稳定排序）
+        entries.sort_by(|a, b| {
+            let key = |e: &Obj| {
+                (
+                    !e["enabled"].as_bool().unwrap_or(false),
+                    -fnum(&or0(&e["last_used_at"])),
+                )
+            };
+            let (ka, kb) = (key(a), key(b));
+            ka.0.cmp(&kb.0)
+                .then(ka.1.partial_cmp(&kb.1).unwrap_or(std::cmp::Ordering::Equal))
+        });
+        let mut head = entries[0].clone();
+        head.insert("key_count".into(), json!(entries.len()));
+        head.insert(
+            "all_key_ids".into(),
+            Value::Array(entries.iter().map(|e| e["id"].clone()).collect()),
+        );
+        for other in &entries[1..] {
+            let enabled = head["enabled"].as_bool().unwrap_or(false)
+                || other["enabled"].as_bool().unwrap_or(false);
+            head.insert("enabled".into(), json!(enabled));
+            for f in ["today", "week"] {
+                let mut h = as_obj(&head[f]).clone();
+                for (k, v) in as_obj(&other[f]) {
+                    if v.is_number() && h.get(k).is_some_and(Value::is_number) {
+                        let sum = num_add(&h[k], v);
+                        h.insert(k.clone(), sum);
+                    }
+                }
+                head.insert(f.into(), Value::Object(h));
+            }
+            head.insert(
+                "total_images".into(),
+                num_add(&head["total_images"], &other["total_images"]),
+            );
+            head.insert(
+                "rejected_24h".into(),
+                num_add(&head["rejected_24h"], &other["rejected_24h"]),
+            );
+            // max(a or 0, b or 0)：b 严格更大才取 b
+            let (a, b) = (or0(&head["last_used_at"]), or0(&other["last_used_at"]));
+            head.insert(
+                "last_used_at".into(),
+                if fnum(&b) > fnum(&a) { b } else { a },
+            );
+            if pyval::truthy(&other["last_image_at"]) {
+                let a = or0(&head["last_image_at"]);
+                let b = other["last_image_at"].clone();
+                head.insert(
+                    "last_image_at".into(),
+                    if fnum(&b) > fnum(&a) { b } else { a },
+                );
+            }
+            if pyval::truthy(&other["first_image_at"]) {
+                let b = other["first_image_at"].clone();
+                let a = if pyval::truthy(&head["first_image_at"]) {
+                    head["first_image_at"].clone()
+                } else {
+                    b.clone()
+                };
+                head.insert(
+                    "first_image_at".into(),
+                    if fnum(&b) < fnum(&a) { b } else { a },
+                );
+            }
+            if !pyval::truthy(&head["last_client"]) {
+                head.insert("last_client".into(), other["last_client"].clone());
+            }
+            let seen: Vec<Value> = head["tags"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|t| t["tag"].clone())
+                .collect();
+            let mut tags: Vec<Value> = head["tags"].as_array().cloned().unwrap_or_default();
+            tags.extend(
+                other["tags"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|t| !seen.contains(&t["tag"]))
+                    .cloned(),
+            );
+            head.insert("tags".into(), Value::Array(tags));
+            if other["hours24"].as_array().is_some_and(|a| !a.is_empty()) {
+                let zeros: Vec<Value> = vec![json!(0); 24];
+                let hv = head["hours24"]
+                    .as_array()
+                    .filter(|a| !a.is_empty())
+                    .cloned()
+                    .unwrap_or(zeros);
+                let merged_bars: Vec<Value> = hv
+                    .iter()
+                    .zip(other["hours24"].as_array().into_iter().flatten())
+                    .map(|(a, b)| num_add(&or0(a), &or0(b)))
+                    .collect();
+                head.insert("hours24".into(), Value::Array(merged_bars));
+            }
+        }
+        merged.push(head);
+    }
+    singles.extend(merged);
+    Ok(ok_json(&json!({
+        "members": singles,
+        "inactivity_days": st.env.key_inactivity_delete_days,
+    })))
+}

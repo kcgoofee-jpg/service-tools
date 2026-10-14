@@ -1,0 +1,63 @@
+[package]
+name = "gate-server"
+description = "网关主程序：axum 路由、鉴权、准入、记账、后台任务、状态页、内嵌前端。"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "nai-gate"
+path = "src/main.rs"
+
+[lib]
+name = "gate_server"
+path = "src/lib.rs"
+
+[dependencies]
+gate-core.workspace = true
+gate-db.workspace = true
+gate-upstream.workspace = true
+anyhow.workspace = true
+axum.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+futures.workspace = true
+bytes.workspace = true
+http.workspace = true
+http-body-util.workspace = true
+multer.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+clap.workspace = true
+rust-embed.workspace = true
+maud.workspace = true
+hmac.workspace = true
+sha2.workspace = true
+scrypt.workspace = true
+subtle.workspace = true
+hex.workspace = true
+rand.workspace = true
+arc-swap.workspace = true
+jiff.workspace = true
+thiserror.workspace = true
+image.workspace = true
+zip = { workspace = true, features = ["deflate"] }
+base64.workspace = true
+reqwest.workspace = true
+rustix = { version = "1", default-features = false, features = ["std", "fs"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+gate-testkit = { path = "../gate-testkit" }
+gate-golden = { path = "../gate-golden" }
+tempfile = "3"
+flate2 = "1"
+
+[lints]
+workspace = true

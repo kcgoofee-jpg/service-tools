@@ -1,0 +1,2991 @@
+//! Discord 自助领 Key：机器人桥接 `/self-register/*`、成员网页登录与个人状态、捐赠、原图打包。
+//!
+//! 真实的 AppState + 路由 + 数据库；Discord REST 换成本机的假服务（`DISCORD_API_BASE`），它记录每个请求，
+//! 所以也能断言「哪些请求发出去了、哪些没有」。期望值来自旧 Python（`registration_routes.py` 在同样的场景下
+//! 的真实输出），合成数据：Discord ID 一律 9000000000000000xx。
+
+mod common;
+use axum::body::{Body, Bytes};
+use axum::extract::{Request, State};
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::Response;
+use common::{Call, Env, setup};
+use gate_server::registration::{DiscordUser, Gift, Issued, RegErr};
+use serde_json::{Value, json};
+use std::net::SocketAddr;
+use std::sync::{Arc, Mutex};
+
+const GUILD: &str = "900000000000000001";
+const ADMIN: &str = "900000000000000010";
+const MEMBER: &str = "900000000000000005";
+const OTHER: &str = "900000000000000006";
+const SECRET: &str = "contract-secret-contract-secret-0001";
+
+// ------------------------------------------------------------------ 假 Discord
+
+#[derive(Clone, Debug)]
+struct Seen {
+    method: String,
+    path: String,
+    auth: String,
+    reason: String,
+    ctype: String,
+    body: Bytes,
+}
+
+impl Seen {
+    fn json(&self) -> Value {
+        serde_json::from_slice(&self.body).unwrap_or(Value::Null)
+    }
+    fn form(&self) -> Vec<(String, String)> {
+        String::from_utf8_lossy(&self.body)
+            .split('&')
+            .filter_map(|p| p.split_once('='))
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+}
+
+struct Scripted {
+    method: &'static str,
+    path: String,
+    status: u16,
+    body: String,
+    once: bool,
+}
+
+#[derive(Default)]
+struct DState {
+    seen: Mutex<Vec<Seen>>,
+    scripts: Mutex<Vec<Scripted>>,
+}
+
+struct Discord {
+    addr: SocketAddr,
+    state: Arc<DState>,
+    _shutdown: tokio::sync::oneshot::Sender<()>,
+}
+
+fn reply(status: u16, body: &str) -> Response {
+    let mut r = Response::new(Body::from(body.to_string()));
+    *r.status_mut() = StatusCode::from_u16(status).unwrap();
+    r.headers_mut()
+        .insert("content-type", "application/json".parse().unwrap());
+    r
+}
+
+async fn discord_handler(State(st): State<Arc<DState>>, req: Request) -> Response {
+    let (parts, body) = req.into_parts();
+    let bytes = axum::body::to_bytes(body, 1 << 20).await.unwrap();
+    let h = |n: &str| {
+        parts
+            .headers
+            .get(n)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string()
+    };
+    let (method, path) = (parts.method.to_string(), parts.uri.path().to_string());
+    st.seen.lock().unwrap().push(Seen {
+        method: method.clone(),
+        path: path.clone(),
+        auth: h("authorization"),
+        reason: h("x-audit-log-reason"),
+        ctype: h("content-type"),
+        body: bytes,
+    });
+    {
+        let mut scripts = st.scripts.lock().unwrap();
+        if let Some(i) = scripts
+            .iter()
+            .position(|s| s.method == method && s.path == path)
+        {
+            let (status, body) = (scripts[i].status, scripts[i].body.clone());
+            if scripts[i].once {
+                scripts.remove(i);
+            }
+            return reply(status, &body);
+        }
+    }
+    let segs: Vec<&str> = path.trim_start_matches('/').split('/').collect();
+    match (method.as_str(), segs.as_slice()) {
+        ("GET", ["guilds", _, "members", _]) => reply(200, r#"{"roles": []}"#),
+        ("PUT" | "DELETE", ["guilds", _, "members", _, "roles", _]) => reply(204, ""),
+        ("POST", ["users", "@me", "channels"]) => reply(200, r#"{"id": "dm-1"}"#),
+        ("POST", ["channels", _, "messages"]) => reply(200, "{}"),
+        ("POST", ["oauth2", "token"]) => reply(200, r#"{"access_token": "tok"}"#),
+        ("GET", ["users", "@me"]) => reply(
+            200,
+            &json!({"id": MEMBER, "username": "alice", "global_name": "Alice", "avatar": "a1"})
+                .to_string(),
+        ),
+        ("GET", ["users", id]) => reply(
+            200,
+            &json!({"id": id, "username": "profile-user", "global_name": "Profile", "avatar": "av1"})
+                .to_string(),
+        ),
+        _ => reply(404, "{}"),
+    }
+}
+
+impl Discord {
+    async fn start() -> Self {
+        let state = Arc::new(DState::default());
+        let app = axum::Router::new()
+            .fallback(discord_handler)
+            .with_state(state.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app)
+                .with_graceful_shutdown(async {
+                    let _ = rx.await;
+                })
+                .await;
+        });
+        Self {
+            addr,
+            state,
+            _shutdown: tx,
+        }
+    }
+    fn url(&self) -> String {
+        format!("http://{}", self.addr)
+    }
+    fn script(&self, method: &'static str, path: &str, status: u16, body: Value) {
+        self.push(method, path, status, body, false);
+    }
+    fn push(&self, method: &'static str, path: &str, status: u16, body: Value, once: bool) {
+        self.state.scripts.lock().unwrap().push(Scripted {
+            method,
+            path: path.to_string(),
+            status,
+            body: body.to_string(),
+            once,
+        });
+    }
+    fn clear_scripts(&self) {
+        self.state.scripts.lock().unwrap().clear();
+    }
+    fn seen(&self) -> Vec<Seen> {
+        self.state.seen.lock().unwrap().clone()
+    }
+    fn calls(&self) -> Vec<String> {
+        self.seen()
+            .iter()
+            .map(|s| format!("{} {}", s.method, s.path))
+            .collect()
+    }
+    fn reset(&self) {
+        self.state.seen.lock().unwrap().clear();
+    }
+}
+
+// ------------------------------------------------------------------ 公共小件
+
+async fn setup_reg(extra: &[(&str, &str)]) -> (Env, Discord) {
+    let d = Discord::start().await;
+    let base = d.url();
+    let mut vars: Vec<(&str, &str)> = vec![
+        ("DISCORD_CLIENT_ID", "client-id"),
+        ("DISCORD_CLIENT_SECRET", "client-secret"),
+        ("DISCORD_BOT_TOKEN", "fake-bot-token"),
+        ("REGISTRATION_BRIDGE_SECRET", SECRET),
+        ("DISCORD_GUILD_ID", GUILD),
+        ("SITE_URL", "https://gate.test"),
+        ("DISCORD_API_BASE", &base),
+        ("ADMIN_DISCORD_IDS", ADMIN),
+        ("REGISTER_RESET_AT", "07:00"),
+    ];
+    vars.extend_from_slice(extra);
+    let e = setup(&vars).await;
+    (e, d)
+}
+
+fn who(id: &str, actor: &str) -> Value {
+    json!({"discord_id": id, "guild_id": GUILD, "actor_id": actor})
+}
+
+fn merge(mut a: Value, b: Value) -> Value {
+    a.as_object_mut()
+        .unwrap()
+        .extend(b.as_object().unwrap().clone());
+    a
+}
+
+type Resp = (u16, HeaderMap, Value);
+
+fn parse(r: (StatusCode, HeaderMap, Vec<u8>)) -> Resp {
+    let v = serde_json::from_slice(&r.2).unwrap_or(Value::Null);
+    (r.0.as_u16(), r.1, v)
+}
+
+async fn bridge(e: &Env, path: &str, body: Value) -> Resp {
+    parse(
+        Call::new("POST", path)
+            .bearer(SECRET)
+            .json(body)
+            .send(&e.state)
+            .await,
+    )
+}
+
+async fn bridge_get(e: &Env, path: &str) -> Resp {
+    parse(Call::new("GET", path).bearer(SECRET).send(&e.state).await)
+}
+
+fn detail(r: &Resp) -> &str {
+    r.2["detail"].as_str().unwrap_or("")
+}
+
+fn keys(v: &Value) -> Vec<&str> {
+    v.as_object().unwrap().keys().map(String::as_str).collect()
+}
+
+async fn open_registration(e: &Env) {
+    e.state.db.set_setting("register_open", "1").await.unwrap();
+}
+
+async fn issue(e: &Env, id: &str) -> Resp {
+    bridge(
+        e,
+        "/self-register/issue",
+        json!({"discord_id": id, "guild_id": GUILD, "username": "alice", "global_name": "Alice",
+               "avatar": "a1b2", "name": "alice"}),
+    )
+    .await
+}
+
+fn svc(e: &Env) -> &gate_server::registration::RegistrationService {
+    e.state.registration.as_deref().expect("已配置")
+}
+
+fn user(id: &str) -> DiscordUser {
+    DiscordUser {
+        id: id.into(),
+        username: "bob".into(),
+        global_name: "Bob".into(),
+        avatar: "bb".into(),
+    }
+}
+
+async fn actions(e: &Env) -> Vec<Value> {
+    let mut v = e.state.db.list_admin_actions(200, 0).await.unwrap();
+    v.reverse();
+    v
+}
+
+fn action_tuple(a: &Value) -> (String, String, String, String, i64) {
+    let s = |k: &str| a[k].as_str().unwrap_or("").to_string();
+    (
+        s("actor"),
+        s("action"),
+        s("target"),
+        s("detail"),
+        a["ok"].as_i64().unwrap_or(-1),
+    )
+}
+
+// ------------------------------------------------------------------ 桥接：鉴权与请求体校验
+
+#[tokio::test]
+async fn bridge_is_503_when_not_configured() {
+    let e = setup(&[]).await;
+    assert!(e.state.registration.is_none());
+    let r = bridge(&e, "/self-register/info", who(MEMBER, MEMBER)).await;
+    assert_eq!(r.0, 503);
+    assert_eq!(r.2, json!({"detail": "自助领 Key 尚未配置"}));
+    // 网页登录同样没配置
+    let (s, _, b) = Call::new("GET", "/login").send(&e.state).await;
+    assert_eq!(s, 503);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&b).unwrap(),
+        json!({"detail": "登录尚未配置"})
+    );
+}
+
+#[tokio::test]
+async fn bridge_checks_body_first_then_secret_then_guild() {
+    let (e, d) = setup_reg(&[]).await;
+    let good = who(MEMBER, MEMBER);
+    // 密钥：没带 / 不对 → 401「未授权」
+    let none = parse(
+        Call::new("POST", "/self-register/info")
+            .json(good.clone())
+            .send(&e.state)
+            .await,
+    );
+    assert_eq!((none.0, none.2), (401, json!({"detail": "未授权"})));
+    let wrong = parse(
+        Call::new("POST", "/self-register/info")
+            .bearer("nope")
+            .json(good.clone())
+            .send(&e.state)
+            .await,
+    );
+    assert_eq!(wrong.0, 401);
+    // 请求体错误先于鉴权（旧版 FastAPI 先校验请求体）：缺字段的 422 用 pydantic 的形状
+    let miss = parse(
+        Call::new("POST", "/self-register/ops")
+            .bearer("nope")
+            .json(who(ADMIN, ADMIN))
+            .send(&e.state)
+            .await,
+    );
+    assert_eq!(miss.0, 422);
+    assert_eq!(
+        miss.2,
+        json!({"detail": [{"type": "missing", "loc": ["body", "action"], "msg": "Field required",
+                           "input": who(ADMIN, ADMIN)}]})
+    );
+    let no_body = parse(
+        Call::new("POST", "/self-register/ops")
+            .bearer(SECRET)
+            .send(&e.state)
+            .await,
+    );
+    assert_eq!(
+        no_body.2,
+        json!({"detail": [{"type": "missing", "loc": ["body"], "msg": "Field required", "input": null}]})
+    );
+    let list = bridge(&e, "/self-register/ops", json!([1])).await;
+    assert_eq!(
+        list.2,
+        json!({"detail": [{"type": "model_attributes_type", "loc": ["body"],
+                           "msg": "Input should be a valid dictionary or object to extract fields from",
+                           "input": [1]}]})
+    );
+    let num = bridge(
+        &e,
+        "/self-register/ops",
+        json!({"discord_id": 5, "guild_id": GUILD, "action": "open"}),
+    )
+    .await;
+    assert_eq!(
+        num.2,
+        json!({"detail": [{"type": "string_type", "loc": ["body", "discord_id"],
+                           "msg": "Input should be a valid string", "input": 5}]})
+    );
+    // 服务器不对 / ID 不是数字 → 403
+    let wrong_guild = bridge(
+        &e,
+        "/self-register/quota",
+        json!({"discord_id": MEMBER, "guild_id": "2"}),
+    )
+    .await;
+    assert_eq!(
+        (wrong_guild.0, wrong_guild.2),
+        (403, json!({"detail": "请在指定服务器使用该命令。"}))
+    );
+    let bad_id = bridge(
+        &e,
+        "/self-register/quota",
+        json!({"discord_id": "abc", "guild_id": GUILD}),
+    )
+    .await;
+    assert_eq!(bad_id.0, 403);
+    // 以上没有任何一个请求去过 Discord
+    assert!(d.seen().is_empty());
+}
+
+#[tokio::test]
+async fn wrong_bridge_secret_counts_toward_auth_block() {
+    let (e, _d) = setup_reg(&[("AUTH_FAIL_MAX", "3")]).await;
+    let ip: SocketAddr = "203.0.113.9:4000".parse().unwrap();
+    for _ in 0..3 {
+        let mut req = Request::builder()
+            .method("POST")
+            .uri("/self-register/info")
+            .header("authorization", "Bearer nope")
+            .header("content-type", "application/json")
+            .body(Body::from(who(MEMBER, MEMBER).to_string()))
+            .unwrap();
+        req.extensions_mut().insert(axum::extract::ConnectInfo(ip));
+        let resp = tower::ServiceExt::oneshot(gate_server::app(e.state.clone()), req)
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), 401);
+    }
+    assert!(e.state.auth_guard.blocked("203.0.113.9", e.state.now()) > 0);
+    assert_eq!(e.state.auth_guard.blocked("203.0.113.10", e.state.now()), 0);
+}
+
+// ------------------------------------------------------------------ 桥接：info / ops / slots
+
+#[tokio::test]
+async fn info_ops_slots_match_legacy() {
+    let (e, d) = setup_reg(&[("REGISTER_MAX_USERS", "10")]).await;
+    let info = bridge(&e, "/self-register/info", who(MEMBER, MEMBER)).await;
+    assert_eq!(info.0, 200);
+    assert_eq!(info.1["cache-control"], "no-store");
+    assert_eq!(
+        info.2,
+        json!({"open": false, "active": 0, "max": 10,
+               "default_features": [{"id": "image", "label": "文生图", "on": true}],
+               "daily_images": 30, "daily_v5": 0, "notice": "",
+               "upstream": {"status": "idle", "recent": 0, "failed": 0, "image_cooldown_seconds": 0}})
+    );
+    assert_eq!(
+        keys(&info.2),
+        [
+            "open",
+            "active",
+            "max",
+            "default_features",
+            "daily_images",
+            "daily_v5",
+            "notice",
+            "upstream"
+        ]
+    );
+    // 管理命令
+    let adm = who(ADMIN, ADMIN);
+    let op = |a: Value| bridge(&e, "/self-register/ops", merge(adm.clone(), a));
+    assert_eq!(
+        op(json!({"action": "open", "value": "on"})).await.2,
+        json!({"message": "已开放领 Key。"})
+    );
+    assert_eq!(
+        e.state
+            .db
+            .get_setting("register_open")
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("1")
+    );
+    let limit = op(json!({"action": "limit", "value": "5"})).await;
+    assert_eq!(limit.2, json!({"message": "名额上限已设为 5。"}));
+    assert!(
+        limit.1.get("cache-control").is_none(),
+        "ops 回复没有 no-store"
+    );
+    assert_eq!(
+        e.state
+            .db
+            .get_setting("register_max_users")
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("5")
+    );
+    let abc = op(json!({"action": "limit", "value": "abc"})).await;
+    assert_eq!((abc.0, abc.2), (422, json!({"detail": "请输入数字"})));
+    // 旧版对超过 1000 的名额是未捕获的 ValueError（500）；这里回 422 + 原因（见 docs/v3-deviations.md）
+    let big = op(json!({"action": "limit", "value": "5000"})).await;
+    assert_eq!(
+        (big.0, big.2),
+        (422, json!({"detail": "max_users 超出范围 0～1000"}))
+    );
+    let unknown = op(json!({"action": "zzz"})).await;
+    assert_eq!((unknown.0, unknown.2), (422, json!({"detail": "未知操作"})));
+    let no_target = op(json!({"action": "ban"})).await;
+    assert_eq!(
+        (no_target.0, no_target.2),
+        (422, json!({"detail": "缺少目标成员"}))
+    );
+    // 非管理员
+    for (path, extra) in [
+        (
+            "/self-register/ops",
+            json!({"action": "open", "value": "on"}),
+        ),
+        ("/self-register/slots", json!({})),
+        ("/self-register/revoke", json!({})),
+    ] {
+        let r = bridge(&e, path, merge(who(MEMBER, MEMBER), extra)).await;
+        assert_eq!(
+            (r.0, r.2),
+            (403, json!({"detail": "没有管理员权限。"})),
+            "{path}"
+        );
+    }
+    // actor_id 缺省 = 空串，也不是管理员
+    let no_actor = bridge(
+        &e,
+        "/self-register/slots",
+        json!({"discord_id": ADMIN, "guild_id": GUILD}),
+    )
+    .await;
+    assert_eq!(no_actor.0, 403);
+    let slots = bridge(&e, "/self-register/slots", adm.clone()).await;
+    assert_eq!(slots.1["cache-control"], "no-store");
+    assert_eq!(
+        slots.2,
+        json!({"active": 0, "max": 5, "open": true, "reset_at": "07:00"})
+    );
+    assert_eq!(
+        op(json!({"action": "limit", "value": "0"})).await.2,
+        json!({"message": "名额上限已设为 不限。"})
+    );
+    assert_eq!(
+        op(json!({"action": "open", "value": "off"})).await.2,
+        json!({"message": "已关闭领 Key（已领取的人不受影响）。"})
+    );
+    // 操作日志：成功记「机器人·<action>」，失败记失败原因
+    let log: Vec<_> = actions(&e).await.iter().map(action_tuple).collect();
+    let me = format!("Discord:{ADMIN}");
+    assert_eq!(
+        log[0],
+        (
+            me.clone(),
+            "机器人·open".into(),
+            String::new(),
+            "on".into(),
+            1
+        )
+    );
+    assert_eq!(
+        log[1],
+        (
+            me.clone(),
+            "机器人·limit".into(),
+            String::new(),
+            "5".into(),
+            1
+        )
+    );
+    assert_eq!(
+        log[2],
+        (
+            me.clone(),
+            "机器人·limit".into(),
+            String::new(),
+            "失败（422）：请输入数字".into(),
+            0
+        )
+    );
+    assert!(d.seen().is_empty(), "管理命令不碰 Discord");
+}
+
+#[tokio::test]
+async fn ops_is_denied_for_everyone_when_no_admin_ids_configured() {
+    let (e, _d) = setup_reg(&[("ADMIN_DISCORD_IDS", "")]).await;
+    let r = bridge(
+        &e,
+        "/self-register/ops",
+        merge(who(ADMIN, ADMIN), json!({"action": "open", "value": "on"})),
+    )
+    .await;
+    assert_eq!((r.0, r.2), (403, json!({"detail": "没有管理员权限。"})));
+}
+
+#[tokio::test]
+async fn ops_grant_ban_unban_audit() {
+    let (e, _d) = setup_reg(&[]).await;
+    open_registration(&e).await;
+    assert_eq!(issue(&e, MEMBER).await.0, 200);
+    let adm = who(ADMIN, ADMIN);
+    let op = |a: Value| bridge(&e, "/self-register/ops", merge(adm.clone(), a));
+    let grant =
+        op(json!({"action": "grant", "target": MEMBER, "feature": "upscale", "value": "on"})).await;
+    assert_eq!(grant.2, json!({"message": "已开通：放大。"}));
+    let key = e
+        .state
+        .db
+        .key_row_for_discord(MEMBER)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(key["features"], "image,upscale");
+    let off =
+        op(json!({"action": "grant", "target": MEMBER, "feature": "image", "value": "off"})).await;
+    assert_eq!(off.2, json!({"message": "已关闭：文生图。"}));
+    let key = e
+        .state
+        .db
+        .key_row_for_discord(MEMBER)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(key["features"], "upscale");
+    let bad =
+        op(json!({"action": "grant", "target": MEMBER, "feature": "zzz", "value": "on"})).await;
+    assert_eq!(
+        (bad.0, bad.2),
+        (
+            422,
+            json!({"detail": "未知功能：image,upscale,augment,vibe,tags,text,voice"})
+        )
+    );
+    let nobody =
+        op(json!({"action": "grant", "target": OTHER, "feature": "image", "value": "on"})).await;
+    assert_eq!(
+        (nobody.0, nobody.2),
+        (404, json!({"detail": "该成员还没有领取 Key。"}))
+    );
+    // 生成记录开关
+    let on = op(json!({"action": "audit", "value": "on"})).await;
+    assert_eq!(
+        on.2,
+        json!({"message": "已开启生成记录并通知成员。", "prompts": true, "thumbs": true,
+               "retention_days": 7, "image_retention_days": 0, "image_cap_mb": 8192,
+               "image_keep_hours": 24, "member_download": false})
+    );
+    assert_eq!(
+        e.state
+            .db
+            .get_setting("audit_prompts")
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("1")
+    );
+    let off = op(json!({"action": "audit", "value": "0"})).await;
+    assert_eq!(off.2["message"], "已关闭生成记录并通知成员。");
+    assert_eq!(off.2["prompts"], false);
+    // 封禁：撤销 Key、写黑名单；之后领不了；解除后恢复
+    let ban = op(json!({"action": "ban", "target": MEMBER})).await;
+    assert_eq!(
+        ban.2,
+        json!({"message": "已永久禁止该账号领取，并撤销其 Key 与身份组。"})
+    );
+    assert!(
+        e.state
+            .db
+            .key_row_for_discord(MEMBER)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let bans = e.state.db.list_bans("").await.unwrap();
+    assert_eq!(bans.len(), 1);
+    assert_eq!(bans[0]["reason"], "站长手动封禁");
+    assert_eq!(bans[0]["banned_by"], "站长");
+    assert_eq!(bans[0]["username"], "alice");
+    assert_eq!(bans[0]["display_name"], "Alice");
+    let again = issue(&e, MEMBER).await;
+    assert_eq!(
+        (again.0, detail(&again)),
+        (403, "这个 Discord 账号已被站长停用，无法领取 Key。")
+    );
+    assert_eq!(
+        op(json!({"action": "unban", "target": MEMBER})).await.2,
+        json!({"message": "已解除禁止。"})
+    );
+    assert_eq!(
+        op(json!({"action": "unban", "target": MEMBER})).await.2,
+        json!({"message": "该账号不在禁止名单中。"})
+    );
+    assert_eq!(issue(&e, MEMBER).await.0, 200);
+}
+
+// ------------------------------------------------------------------ 桥接：发 Key
+
+const WELCOME: &str = "🦉 **欢迎来到猫头鹰公益站！** 这是你的 API Key（只发这一次，请先保存）：\n`<KEY>`\n\n**三步开始出图（以柏宝绘为例）**\n1. 打开柏宝绘 → 渠道 → 配置 → 新建接入点\n2. 接口地址填 `https://gate.test/`（**不要**加 /v1）\n3. API Key 填上面 `nai-` 开头的整串，保存后随便生成一张图试试\n其他支持自定义 NovelAI 地址的客户端同样这样填。\n\n**不确定填对没有？** 在 Discord 输入 `/quota`，能看到额度就说明 Key 正常；网页登录开放后还能在 https://gate.test/ 用 Discord 一键登录、打包下载自己的作品。\n\n**规则**\n• 每日额度：V4.5 及以下 30 张（次日自动恢复）\n• 已开通功能：文生图\n• 有效期 30 天，到期后可重新 /register\n• 连续 3 天没有使用会被自动回收（回收前 1 天私信提醒）\n• 每把 Key 同时生成 1 张，多发的会被退回，等前一张出完再发\n• 只提供免费出图：总像素 ≤1024×1024（尺寸可自定义，超出自动等比缩小）、≤28 步、每次 1 张；图生图、Vibe 等会消耗 Anlas 的功能不开放\n• Key 只给本服务器成员：退出服务器后 Key 自动失效\n• 一人一把，请勿分享（本站记录打码后的来源网段防分享，不存完整 IP，7 天后删除）\n\n**常用命令**：`/quota` 看额度和服务状态 · `/resetkey` Key 丢了或泄露时换新 · `/help` 简要说明\n遇到问题到 🛠️｜问题反馈 发截图（记得打码 Key）。";
+
+#[tokio::test]
+async fn issue_mints_a_key_exactly_like_legacy() {
+    let (e, d) = setup_reg(&[]).await;
+    // 领 Key 默认关闭
+    let closed = issue(&e, MEMBER).await;
+    assert_eq!(
+        (closed.0, closed.2),
+        (
+            403,
+            json!({"detail": "领 Key 当前已关闭，开放时间看站长公告。"})
+        )
+    );
+    open_registration(&e).await;
+    let r = issue(&e, MEMBER).await;
+    assert_eq!(r.0, 200, "{:?}", r.2);
+    assert_eq!(r.1["cache-control"], "no-store");
+    assert_eq!(keys(&r.2), ["key", "message"]);
+    let key = r.2["key"].as_str().unwrap().to_string();
+    assert!(key.starts_with("nai-") && key.len() == 36, "{key}");
+    assert_eq!(
+        r.2["message"].as_str().unwrap(),
+        WELCOME.replace("<KEY>", &key)
+    );
+    // 落库
+    let row = e
+        .state
+        .db
+        .key_row_for_discord(MEMBER)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(row["token"], key.as_str());
+    assert_eq!(row["name"], "Alice (@alice)");
+    assert_eq!(row["discord_id"], MEMBER);
+    assert_eq!(row["enabled"], 1);
+    assert_eq!(row["daily_images"], 30);
+    assert_eq!(row["daily_v5"], 0);
+    assert_eq!(row["rpm"], 5);
+    assert_eq!(row["allow_anlas"], 0);
+    assert_eq!(row["allow_img2img"], 0);
+    assert_eq!(row["exclude_global_v5"], 0);
+    assert_eq!(row["image_model_scope"], "legacy");
+    assert_eq!(row["features"], "image");
+    let left = row["expires_at"].as_f64().unwrap() - e.state.now();
+    assert!((left - 30.0 * 86400.0).abs() < 60.0, "{left}");
+    let p = e
+        .state
+        .db
+        .discord_profile_row(MEMBER)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (p.0.as_deref(), p.1.as_deref(), p.2.as_deref()),
+        (Some("alice"), Some("Alice"), Some("a1b2"))
+    );
+    // 再领 / 别的服务器 / 密钥不对
+    let again = issue(&e, MEMBER).await;
+    assert_eq!(
+        (again.0, detail(&again)),
+        (
+            403,
+            "这个 Discord 账号已经领取过 Key，可用 /quota 查看、/resetkey 重置。"
+        )
+    );
+    let wrong = bridge(
+        &e,
+        "/self-register/issue",
+        json!({"discord_id": MEMBER, "guild_id": "1"}),
+    )
+    .await;
+    assert_eq!(
+        (wrong.0, detail(&wrong)),
+        (403, "请在指定服务器使用 /register。")
+    );
+    let bad_auth = parse(
+        Call::new("POST", "/self-register/issue")
+            .header("authorization", "x".to_string())
+            .json(json!({"discord_id": MEMBER, "guild_id": GUILD}))
+            .send(&e.state)
+            .await,
+    );
+    assert_eq!((bad_auth.0, bad_auth.2), (401, json!({"detail": "未授权"})));
+    // 日志：成功与失败各记一条（失败带原因）
+    let log: Vec<_> = actions(&e).await.iter().map(action_tuple).collect();
+    let me = format!("Discord:{MEMBER}");
+    assert!(log.contains(&(
+        me.clone(),
+        "领取 Key 失败（/register）".into(),
+        String::new(),
+        "领 Key 当前已关闭，开放时间看站长公告。".into(),
+        1
+    )));
+    assert!(log.contains(&(
+        me.clone(),
+        "领取 Key（/register 直发）".into(),
+        String::new(),
+        String::new(),
+        1
+    )));
+    // 发 Key 不私信、不碰 Discord（没有身份组门槛 / 成员身份组）
+    assert!(d.seen().is_empty(), "{:?}", d.calls());
+}
+
+#[tokio::test]
+async fn issue_enforces_capacity_age_hourly_cap_and_expiry_rotation() {
+    let (e, _d) = setup_reg(&[("REGISTER_MAX_USERS", "1")]).await;
+    open_registration(&e).await;
+    assert_eq!(issue(&e, MEMBER).await.0, 200);
+    // 名额满：先到先得
+    let full = issue(&e, OTHER).await;
+    assert_eq!(
+        (full.0, detail(&full)),
+        (
+            403,
+            "名额已满（上限 1 人），请过段时间再试。闲置的 Key 会被自动回收，空出的名额先到先得。"
+        )
+    );
+    // 撤销释放名额
+    let revoke = bridge(
+        &e,
+        "/self-register/revoke",
+        merge(who(MEMBER, ADMIN), json!({})),
+    )
+    .await;
+    assert_eq!((revoke.0, revoke.2), (200, json!({"ok": true})));
+    let again = bridge(
+        &e,
+        "/self-register/revoke",
+        merge(who(MEMBER, ADMIN), json!({})),
+    )
+    .await;
+    assert_eq!(
+        (again.0, again.2),
+        (404, json!({"detail": "该用户没有已领取的 Key。"}))
+    );
+    assert_eq!(issue(&e, OTHER).await.0, 200);
+    // Key 过期：释放名额，成员可以重新领
+    let row = e
+        .state
+        .db
+        .key_row_for_discord(OTHER)
+        .await
+        .unwrap()
+        .unwrap();
+    let mut f = serde_json::Map::new();
+    f.insert("expires_at".into(), json!(e.state.now() - 5.0));
+    e.state
+        .db
+        .update_key(row["id"].as_i64().unwrap(), &f)
+        .await
+        .unwrap();
+    assert_eq!(svc(&e).count_active().await.unwrap(), 0);
+    let renewed = issue(&e, OTHER).await;
+    assert_eq!(renewed.0, 200);
+    assert!(
+        actions(&e)
+            .await
+            .iter()
+            .map(action_tuple)
+            .any(|a| a.1 == "Key 到期释放名额" && a.4 == 1)
+    );
+    // 被站长停用的成员不会因为过期被放走
+    let row = e
+        .state
+        .db
+        .key_row_for_discord(OTHER)
+        .await
+        .unwrap()
+        .unwrap();
+    let mut f = serde_json::Map::new();
+    f.insert("enabled".into(), json!(0));
+    f.insert("expires_at".into(), json!(e.state.now() - 5.0));
+    e.state
+        .db
+        .update_key(row["id"].as_i64().unwrap(), &f)
+        .await
+        .unwrap();
+    let held = issue(&e, OTHER).await;
+    assert_eq!(
+        (held.0, detail(&held)),
+        (
+            403,
+            "这个 Discord 账号已经领取过 Key，可用 /quota 查看、/resetkey 重置。"
+        )
+    );
+    // 每小时领取上限
+    let (e2, _d2) = setup_reg(&[("REGISTER_MAX_USERS", "0")]).await;
+    open_registration(&e2).await;
+    e2.state
+        .db
+        .set_setting("issue_hourly_cap", "2")
+        .await
+        .unwrap();
+    assert_eq!(issue(&e2, "900000000000000101").await.0, 200);
+    assert_eq!(issue(&e2, "900000000000000102").await.0, 200);
+    let limited = issue(&e2, "900000000000000103").await;
+    assert_eq!(
+        (limited.0, detail(&limited)),
+        (
+            403,
+            "本小时领取人数较多，为保护服务稳定已暂时限流，请过几分钟再用 /register 领取。"
+        )
+    );
+    e2.state
+        .db
+        .set_setting("issue_hourly_cap", "0")
+        .await
+        .unwrap();
+    assert_eq!(issue(&e2, "900000000000000103").await.0, 200);
+}
+
+#[tokio::test]
+async fn young_discord_accounts_are_refused() {
+    let (e, _d) = setup_reg(&[("REGISTER_MIN_ACCOUNT_DAYS", "7")]).await;
+    open_registration(&e).await;
+    let snowflake = |age_days: f64| {
+        let ms = e.state.now() * 1000.0 - age_days * 86_400_000.0;
+        (((ms as u64) - 1_420_070_400_000) << 22).to_string()
+    };
+    let young = issue(&e, &snowflake(1.0)).await;
+    assert_eq!(
+        (young.0, detail(&young)),
+        (403, "Discord 账号创建满 7 天后才能领 Key，请稍后再来。")
+    );
+    assert_eq!(issue(&e, &snowflake(30.0)).await.0, 200);
+}
+
+#[tokio::test]
+async fn role_gate_uses_bot_token_against_the_configured_server() {
+    let (e, d) = setup_reg(&[("DISCORD_ROLE_ID", "900000000000000077")]).await;
+    open_registration(&e).await;
+    let path = format!("/guilds/{GUILD}/members/{MEMBER}");
+    // 不在服务器
+    d.script("GET", &path, 404, json!({"code": 10007}));
+    let r = issue(&e, MEMBER).await;
+    assert_eq!(
+        (r.0, detail(&r)),
+        (
+            403,
+            "目前只开放给「指定身份组」：请先加入对应的社区服务器后再用 /register。"
+        )
+    );
+    // 在服务器但没有身份组
+    d.clear_scripts();
+    d.script("GET", &path, 200, json!({"roles": ["1"]}));
+    let r = issue(&e, MEMBER).await;
+    assert_eq!(
+        (r.0, detail(&r)),
+        (
+            403,
+            "目前只开放给「指定身份组」，没有检测到这个身份组，暂时不能领取 Key。"
+        )
+    );
+    // 限流 / 故障：不能误报成「你不在服务器」
+    d.clear_scripts();
+    d.script("GET", &path, 429, json!({"retry_after": 1}));
+    let r = issue(&e, MEMBER).await;
+    assert_eq!(
+        (r.0, detail(&r)),
+        (
+            403,
+            "Discord 暂时无法核验身份组，请过几分钟再用 /register。"
+        )
+    );
+    assert!(
+        e.state
+            .db
+            .key_row_for_discord(MEMBER)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    d.clear_scripts();
+    d.script("GET", &path, 200, json!({"roles": ["900000000000000077"]}));
+    assert_eq!(issue(&e, MEMBER).await.0, 200);
+    let seen = d.seen();
+    assert!(
+        seen.iter()
+            .all(|s| s.auth == "Bot fake-bot-token" && s.path == path)
+    );
+    assert_eq!(seen.len(), 4);
+}
+
+#[tokio::test]
+async fn role_gate_can_target_another_community_via_settings() {
+    let (e, d) = setup_reg(&[]).await;
+    open_registration(&e).await;
+    let other_guild = "900000000000000222";
+    for (k, v) in [
+        ("register_role_guild", other_guild),
+        ("register_role_id", "900000000000000333"),
+        ("register_role_note", "创作者"),
+    ] {
+        e.state.db.set_setting(k, v).await.unwrap();
+    }
+    let path = format!("/guilds/{other_guild}/members/{MEMBER}");
+    d.script("GET", &path, 404, json!({}));
+    let r = issue(&e, MEMBER).await;
+    assert_eq!(
+        (r.0, detail(&r)),
+        (
+            403,
+            "目前只开放给「创作者」：请先加入对应的社区服务器后再用 /register。"
+        )
+    );
+    d.clear_scripts();
+    d.script("GET", &path, 200, json!({"roles": ["900000000000000333"]}));
+    assert_eq!(issue(&e, MEMBER).await.0, 200);
+}
+
+#[tokio::test]
+async fn unreachable_discord_never_mints_when_a_role_is_required() {
+    // 基地址指向没人监听的端口：既证明请求只会发往 DISCORD_API_BASE，也验证网络错误的处理
+    let (e, _d) = setup_reg(&[
+        ("DISCORD_ROLE_ID", "900000000000000077"),
+        ("DISCORD_API_BASE", "http://127.0.0.1:1"),
+    ])
+    .await;
+    open_registration(&e).await;
+    let r = issue(&e, MEMBER).await;
+    assert_eq!(
+        (r.0, detail(&r)),
+        (403, "Discord 暂时连不上，请过几分钟再用 /register。")
+    );
+    assert!(
+        e.state
+            .db
+            .key_row_for_discord(MEMBER)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    // 私信 / 身份组失败都只返回 false，不抛错
+    e.state.db.set_setting("dm_enabled", "1").await.unwrap();
+    assert!(!svc(&e).send_dm(MEMBER, "hi").await);
+}
+
+#[tokio::test]
+async fn invite_key_binds_without_minting_and_ignores_the_closed_switch() {
+    let (e, _d) = setup_reg(&[]).await;
+    // 站长发的邀请 Key：带「邀请」标签、没绑定 Discord
+    let invite: gate_db::repo::keys::NewKey = serde_json::from_value(json!({
+        "name": "邀请-朋友", "token": "nai-invite-xyz", "daily_images": 1,
+        "monthly_anlas": 0.0, "daily_text_tokens": 0, "rpm": 5,
+    }))
+    .unwrap();
+    let row = e.state.db.create_key(&invite, e.state.now()).await.unwrap();
+    let key_id = row["id"].as_i64().unwrap();
+    e.state
+        .db
+        .write(move |tx| {
+            tx.execute(
+                "INSERT INTO key_tags(key_id, tag, note, by, ts) VALUES (?, '邀请', '', '站长', 0)",
+                [key_id],
+            )
+            .map(|_| ())
+        })
+        .await
+        .unwrap();
+    assert!(svc(&e).is_unbound_invite(key_id).await.unwrap());
+    // 写错的 Key
+    let wrong = bridge(
+        &e,
+        "/self-register/issue",
+        json!({"discord_id": MEMBER, "guild_id": GUILD, "username": "bob", "invite_key": "nai-wrong"}),
+    )
+    .await;
+    assert_eq!(
+        (wrong.0, detail(&wrong)),
+        (
+            403,
+            "这不是一把待绑定的邀请 Key。请检查是否复制完整；普通领取请不填这一项。"
+        )
+    );
+    // 领 Key 关着也能绑；回复里没有新 Key
+    let ok = bridge(
+        &e,
+        "/self-register/issue",
+        json!({"discord_id": MEMBER, "guild_id": GUILD, "username": "bob", "global_name": "Bob",
+               "invite_key": "nai-invite-xyz"}),
+    )
+    .await;
+    assert_eq!(ok.0, 200);
+    assert_eq!(
+        ok.2,
+        json!({"message": "✅ 邀请 Key 已绑定到你的 Discord 账号，Key 不变，客户端里不用改。用 /quota 查看额度，Key 泄露可用 /resetkey 重置。"})
+    );
+    assert_eq!(ok.1["cache-control"], "no-store");
+    let bound = e
+        .state
+        .db
+        .key_row_for_discord(MEMBER)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(bound["id"], key_id);
+    assert_eq!(bound["name"], "Bob (@bob)");
+    assert_eq!(bound["discord_id"], MEMBER);
+    assert!(!svc(&e).is_unbound_invite(key_id).await.unwrap());
+    // 别人不能再绑同一把；已绑过的人不能再绑
+    let thief = bridge(
+        &e,
+        "/self-register/issue",
+        json!({"discord_id": OTHER, "guild_id": GUILD, "invite_key": "nai-invite-xyz"}),
+    )
+    .await;
+    assert_eq!(thief.0, 403);
+    let twice = bridge(
+        &e,
+        "/self-register/issue",
+        json!({"discord_id": MEMBER, "guild_id": GUILD, "invite_key": "nai-invite-xyz"}),
+    )
+    .await;
+    assert_eq!(
+        (twice.0, detail(&twice)),
+        (
+            403,
+            "这个 Discord 账号已经领取过 Key，可用 /quota 查看、/resetkey 重置。"
+        )
+    );
+    // 邀请 Key 不受每日清空影响
+    assert_eq!(svc(&e).reset_all().await.unwrap(), 0);
+    assert!(e.state.db.get_key(key_id).await.unwrap().is_some());
+    assert!(
+        actions(&e)
+            .await
+            .iter()
+            .map(action_tuple)
+            .any(|a| a.1 == "绑定邀请 Key（/register）" && a.2 == format!("Key #{key_id}"))
+    );
+}
+
+#[tokio::test]
+async fn gift_issues_even_when_closed_and_is_idempotent() {
+    let (e, _d) = setup_reg(&[]).await;
+    let u = DiscordUser {
+        id: "900000000000000150".into(),
+        username: "sese".into(),
+        global_name: "涩涩".into(),
+        avatar: String::new(),
+    };
+    let first = svc(&e).gift(&u).await.unwrap();
+    let Gift::New {
+        key_id,
+        key,
+        message,
+    } = first
+    else {
+        panic!("应当新发");
+    };
+    assert!(message.contains(&key));
+    assert_eq!(svc(&e).gift(&u).await.unwrap(), Gift::Existing { key_id });
+    let bad = svc(&e)
+        .gift(&DiscordUser {
+            id: "abc".into(),
+            ..u.clone()
+        })
+        .await;
+    assert_eq!(bad, Err(RegErr::Denied("Discord ID 不对".into())));
+    svc(&e).ban(&u.id, "", "").await.unwrap();
+    let banned = svc(&e).gift(&u).await;
+    assert_eq!(
+        banned,
+        Err(RegErr::Denied("这个 Discord 账号已被站长停用".into()))
+    );
+    // 直发的路径同样认封禁
+    assert!(matches!(
+        svc(&e).issue_direct(&u.id, GUILD, &u, "").await,
+        Err(RegErr::Denied(_))
+    ));
+}
+
+// ------------------------------------------------------------------ 桥接：quota / resetkey / revoke
+
+#[tokio::test]
+async fn quota_and_resetkey_match_legacy() {
+    let (e, _d) = setup_reg(&[]).await;
+    open_registration(&e).await;
+    let r = issue(&e, MEMBER).await;
+    let old_key = r.2["key"].as_str().unwrap().to_string();
+    let q = bridge(&e, "/self-register/quota", who(MEMBER, MEMBER)).await;
+    assert_eq!(q.0, 200);
+    assert_eq!(q.1["cache-control"], "no-store");
+    assert_eq!(
+        keys(&q.2),
+        [
+            "enabled",
+            "expires_at",
+            "daily_images",
+            "images",
+            "legacy",
+            "anlas",
+            "daily_anlas",
+            "daily_v5",
+            "v5",
+            "image_model_scope",
+            "reset_hour",
+            "quiet_now",
+            "quiet_window",
+            "features"
+        ]
+    );
+    let mut got = q.2.clone();
+    assert!(got["expires_at"].as_f64().unwrap() > e.state.now());
+    got["expires_at"] = json!("<ts>");
+    assert_eq!(
+        got,
+        json!({"enabled": true, "expires_at": "<ts>", "daily_images": 30, "images": 0, "legacy": 0,
+               "anlas": 0, "daily_anlas": 50, "daily_v5": 0, "v5": 0, "image_model_scope": "legacy",
+               "reset_hour": 7, "quiet_now": false, "quiet_window": "",
+               "features": [
+                   {"id": "image", "label": "文生图", "on": true},
+                   {"id": "upscale", "label": "放大", "on": false},
+                   {"id": "augment", "label": "导演工具（线稿、上色等）", "on": false},
+                   {"id": "vibe", "label": "Vibe 编码", "on": false},
+                   {"id": "tags", "label": "标签补全", "on": false},
+                   {"id": "text", "label": "文本生成 / OpenAI 兼容聊天", "on": false},
+                   {"id": "voice", "label": "语音合成", "on": false}]})
+    );
+    // 全站关掉某功能后，即使这把 Key 授权了也显示关
+    e.state
+        .db
+        .set_setting("features_global", r#"{"image": false}"#)
+        .await
+        .unwrap();
+    let q2 = bridge(&e, "/self-register/quota", who(MEMBER, MEMBER)).await;
+    assert_eq!(
+        q2.2["features"][0],
+        json!({"id": "image", "label": "文生图", "on": false})
+    );
+    // 没领 Key
+    let none = bridge(&e, "/self-register/quota", who(OTHER, OTHER)).await;
+    assert_eq!(
+        (none.0, none.2),
+        (
+            404,
+            json!({"detail": "你还没有领取 Key，请先使用 /register。"})
+        )
+    );
+    // 重置：id 不变、token 换新、旧 token 查不到
+    let id = e
+        .state
+        .db
+        .get_key_by_token(&old_key)
+        .await
+        .unwrap()
+        .unwrap()["id"]
+        .clone();
+    let reset = bridge(&e, "/self-register/resetkey", who(MEMBER, MEMBER)).await;
+    assert_eq!(reset.0, 200);
+    assert_eq!(reset.1["cache-control"], "no-store");
+    let new_key = reset.2["key"].as_str().unwrap();
+    assert_ne!(new_key, old_key);
+    assert!(
+        e.state
+            .db
+            .get_key_by_token(&old_key)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        e.state.db.get_key_by_token(new_key).await.unwrap().unwrap()["id"],
+        id
+    );
+    let none = bridge(&e, "/self-register/resetkey", who(OTHER, OTHER)).await;
+    assert_eq!(none.0, 404);
+    assert!(
+        actions(&e)
+            .await
+            .iter()
+            .map(action_tuple)
+            .any(|a| a.1 == "成员重置 Key（/resetkey）" && a.2 == "Key #2 Alice (@alice)")
+    );
+}
+
+#[tokio::test]
+async fn quota_shows_quiet_window_and_member_default_anlas() {
+    let (e, _d) = setup_reg(&[]).await;
+    open_registration(&e).await;
+    issue(&e, MEMBER).await;
+    // 安静时段覆盖全天：quiet_start=0, quiet_end=24 不合法，用 0–23 外的组合覆盖当前小时
+    let hour = e.state.clock.local_hour(e.state.now());
+    let (start, end) = (hour, (hour + 1) % 24);
+    e.state
+        .guard
+        .save(
+            json!({"quiet_start": start, "quiet_end": end})
+                .as_object()
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let q = bridge(&e, "/self-register/quota", who(MEMBER, MEMBER)).await;
+    assert_eq!(q.2["quiet_now"], true);
+    assert_eq!(q.2["quiet_window"], format!("{start}:00–{end}:00"));
+    // Key 手动设置的 Anlas 日额度优先于全站默认
+    let row = e
+        .state
+        .db
+        .key_row_for_discord(MEMBER)
+        .await
+        .unwrap()
+        .unwrap();
+    let mut f = serde_json::Map::new();
+    f.insert("daily_anlas".into(), json!(12.9));
+    e.state
+        .db
+        .update_key(row["id"].as_i64().unwrap(), &f)
+        .await
+        .unwrap();
+    let q = bridge(&e, "/self-register/quota", who(MEMBER, MEMBER)).await;
+    assert_eq!(q.2["daily_anlas"], 12);
+}
+
+// ------------------------------------------------------------------ 桥接：反馈 / 机器人配置
+
+#[tokio::test]
+async fn feedback_flow_matches_legacy() {
+    let (e, _d) = setup_reg(&[]).await;
+    let q = bridge(&e, "/self-register/feedback/questions", who(MEMBER, MEMBER)).await;
+    assert_eq!(q.0, 200);
+    let qs = q.2["questions"].as_array().unwrap();
+    assert_eq!(qs.len(), 5);
+    assert_eq!(qs[0]["id"], "score");
+    assert_eq!(qs[0]["label"], "整体用下来感觉怎么样？");
+    assert_eq!(
+        qs[0]["options"],
+        json!(["非常满意", "满意", "一般", "不太满意", "很不满意"])
+    );
+    // 问卷题目也要鉴权
+    let anon = parse(
+        Call::new("POST", "/self-register/feedback/questions")
+            .send(&e.state)
+            .await,
+    );
+    assert_eq!(anon.0, 401);
+    let full = json!({"score": "满意", "pain": "没什么困扰", "wish": "保持现状就好",
+                      "client": "手机 App", "freq": "偶尔用"});
+    let ok = bridge(
+        &e,
+        "/self-register/feedback",
+        merge(
+            who(MEMBER, MEMBER),
+            json!({"username": "alice", "answers": full}),
+        ),
+    )
+    .await;
+    assert_eq!(
+        (ok.0, ok.2),
+        (
+            200,
+            json!({"message": "收到啦，谢谢你的反馈～奶妹会转给站长 ✨"})
+        )
+    );
+    let rows = e.state.db.list_feedback(10).await.unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["discord_id"], MEMBER);
+    assert!(rows[0]["key_id"].is_null(), "没领 Key 也能提交");
+    // 存的 JSON 与 Python json.dumps(ensure_ascii=False) 逐字节一致（带空格的分隔符）
+    assert_eq!(
+        rows[0]["answers"].as_str().unwrap(),
+        r#"{"score": "满意", "pain": "没什么困扰", "wish": "保持现状就好", "client": "手机 App", "freq": "偶尔用"}"#
+    );
+    let again = bridge(
+        &e,
+        "/self-register/feedback",
+        merge(
+            who(MEMBER, MEMBER),
+            json!({"username": "alice", "answers": full}),
+        ),
+    )
+    .await;
+    assert_eq!(
+        (again.0, again.2),
+        (
+            400,
+            json!({"detail": "刚刚已经收到你的反馈啦，过 10 分钟再提交新的吧。"})
+        )
+    );
+    let partial = bridge(
+        &e,
+        "/self-register/feedback",
+        merge(who(OTHER, OTHER), json!({"answers": {"score": "满意"}})),
+    )
+    .await;
+    assert_eq!(
+        (partial.0, partial.2),
+        (
+            400,
+            json!({"detail": "有题目没选，请重新打开 /反馈 选完再提交。"})
+        )
+    );
+    let typed = bridge(
+        &e,
+        "/self-register/feedback",
+        merge(who(OTHER, OTHER), json!({"answers": "x"})),
+    )
+    .await;
+    assert_eq!(
+        typed.2,
+        json!({"detail": [{"type": "dict_type", "loc": ["body", "answers"],
+                           "msg": "Input should be a valid dictionary", "input": "x"}]})
+    );
+    // 领了 Key 的人：反馈记上 key_id
+    open_registration(&e).await;
+    issue(&e, OTHER).await;
+    let ok = bridge(
+        &e,
+        "/self-register/feedback",
+        merge(
+            who(OTHER, OTHER),
+            json!({"username": "bob", "answers": full}),
+        ),
+    )
+    .await;
+    assert_eq!(ok.0, 200);
+    let rows = e.state.db.list_feedback(10).await.unwrap();
+    assert_eq!(rows[0]["discord_id"], OTHER);
+    assert_eq!(rows[0]["key_id"], 2);
+}
+
+#[tokio::test]
+async fn bot_config_and_report_match_legacy() {
+    let (e, _d) = setup_reg(&[]).await;
+    let cfg = bridge_get(&e, "/self-register/bot/config").await;
+    assert_eq!(cfg.0, 200);
+    assert_eq!(cfg.1["cache-control"], "no-store");
+    assert_eq!(
+        cfg.2,
+        json!({"gallery_forum": "跑图分享", "gallery_like": 0, "gallery_ai": 0,
+               "gallery_ai_daily": 30, "gallery_ai_model": "LongCat-2.5-Preview"})
+    );
+    let anon = parse(
+        Call::new("GET", "/self-register/bot/config")
+            .send(&e.state)
+            .await,
+    );
+    assert_eq!((anon.0, anon.2), (401, json!({"detail": "未授权"})));
+    // 站长在后台改过的配置（site_settings 的 bot_* 键）机器人下次来读就生效
+    e.state
+        .db
+        .set_setting("bot_gallery_like", "1")
+        .await
+        .unwrap();
+    assert_eq!(
+        bridge_get(&e, "/self-register/bot/config").await.2["gallery_like"],
+        1
+    );
+    // 心跳：只留白名单字段，加上 seen_at
+    let report = bridge(
+        &e,
+        "/self-register/bot/report",
+        json!({"status": {"user": "naimei", "guild": "测试服", "latency_ms": 42, "ready_at": 1.5,
+                          "ai_ready": false, "ai_today": 0, "extra": 1}}),
+    )
+    .await;
+    assert_eq!((report.0, report.2), (200, json!({"ok": true})));
+    let stored: Value =
+        serde_json::from_str(&e.state.db.get_setting("bot_status").await.unwrap().unwrap())
+            .unwrap();
+    assert_eq!(
+        keys(&stored),
+        [
+            "user",
+            "guild",
+            "latency_ms",
+            "ready_at",
+            "ai_ready",
+            "ai_today",
+            "seen_at"
+        ]
+    );
+    assert_eq!(stored["guild"], "测试服");
+    // 没有 status 也没有 event 的上报同样 200
+    assert_eq!(
+        bridge(&e, "/self-register/bot/report", json!({})).await.2,
+        json!({"ok": true})
+    );
+    // 事件（旧版仍接受）：最多留 50 条
+    let ev = bridge(
+        &e,
+        "/self-register/bot/report",
+        json!({"event": {"kind": "like", "title": "## 标题"}}),
+    )
+    .await;
+    assert_eq!(ev.0, 200);
+    let events: Value =
+        serde_json::from_str(&e.state.db.get_setting("bot_events").await.unwrap().unwrap())
+            .unwrap();
+    assert_eq!(events[0]["title"], "标题");
+    let bad = bridge(&e, "/self-register/bot/report", json!({"status": "x"})).await;
+    assert_eq!(
+        bad.2,
+        json!({"detail": [{"type": "dict_type", "loc": ["body", "status"],
+                           "msg": "Input should be a valid dictionary", "input": "x"}]})
+    );
+}
+
+// ------------------------------------------------------------------ 身份组 / 退群回收 / 资料补全 / 清空
+
+#[tokio::test]
+async fn member_role_is_granted_removed_and_retried() {
+    let (e, d) = setup_reg(&[("DISCORD_MEMBER_ROLE_ID", "900000000000000055")]).await;
+    open_registration(&e).await;
+    let role_path = format!("/guilds/{GUILD}/members/{MEMBER}/roles/900000000000000055");
+    assert_eq!(issue(&e, MEMBER).await.0, 200);
+    let put = d.seen().into_iter().find(|s| s.method == "PUT").unwrap();
+    assert_eq!(put.path, role_path);
+    assert_eq!(put.auth, "Bot fake-bot-token");
+    assert_eq!(put.reason, "NAI Gate key issued");
+    let flag = |id: &'static str| {
+        let db = e.state.db.clone();
+        async move {
+            db.read(move |c| {
+                c.query_row(
+                    "SELECT role_granted FROM discord_registrations WHERE discord_id=?",
+                    [id],
+                    |r| r.get::<_, i64>(0),
+                )
+            })
+            .await
+            .unwrap()
+        }
+    };
+    assert_eq!(flag(MEMBER).await, 1);
+    // 过期：同步时摘身份组；再同步是空操作（标志已清）
+    let row = e
+        .state
+        .db
+        .key_row_for_discord(MEMBER)
+        .await
+        .unwrap()
+        .unwrap();
+    let mut f = serde_json::Map::new();
+    f.insert("expires_at".into(), json!(e.state.now() - 5.0));
+    e.state
+        .db
+        .update_key(row["id"].as_i64().unwrap(), &f)
+        .await
+        .unwrap();
+    assert_eq!(svc(&e).sync_roles().await.unwrap(), 1);
+    let del = d
+        .seen()
+        .into_iter()
+        .rfind(|s| s.method == "DELETE")
+        .unwrap();
+    assert_eq!(
+        (del.path.as_str(), del.reason.as_str()),
+        (role_path.as_str(), "NAI Gate key ended")
+    );
+    assert_eq!(svc(&e).sync_roles().await.unwrap(), 0);
+    // 撤销时摘除失败 → 登记待办，下次同步重试
+    e.state.db.set_setting("register_open", "1").await.unwrap();
+    assert_eq!(issue(&e, OTHER).await.0, 200);
+    d.script(
+        "DELETE",
+        &format!("/guilds/{GUILD}/members/{OTHER}/roles/900000000000000055"),
+        429,
+        json!({}),
+    );
+    assert!(svc(&e).revoke(OTHER, true).await.unwrap());
+    assert_eq!(e.state.db.pending_role_removals().await.unwrap(), [OTHER]);
+    d.clear_scripts();
+    assert_eq!(svc(&e).sync_roles().await.unwrap(), 1);
+    assert!(e.state.db.pending_role_removals().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn failed_role_grant_does_not_block_registration() {
+    let (e, d) = setup_reg(&[("DISCORD_MEMBER_ROLE_ID", "900000000000000055")]).await;
+    open_registration(&e).await;
+    d.script(
+        "PUT",
+        &format!("/guilds/{GUILD}/members/{MEMBER}/roles/900000000000000055"),
+        403,
+        json!({}),
+    );
+    assert_eq!(issue(&e, MEMBER).await.0, 200);
+    // 标志先打上，之后过期同步一定会去摘
+    let granted: i64 = e
+        .state
+        .db
+        .read(|c| {
+            c.query_row("SELECT role_granted FROM discord_registrations", (), |r| {
+                r.get::<_, i64>(0)
+            })
+        })
+        .await
+        .unwrap();
+    assert_eq!(granted, 1);
+}
+
+#[tokio::test]
+async fn departed_sweep_only_revokes_confirmed_departures() {
+    let (e, d) = setup_reg(&[("REGISTER_MAX_USERS", "0")]).await;
+    open_registration(&e).await;
+    let ids = [
+        "900000000000000201",
+        "900000000000000202",
+        "900000000000000203",
+        "900000000000000204",
+    ];
+    for id in ids {
+        assert_eq!(issue(&e, id).await.0, 200);
+    }
+    d.script(
+        "GET",
+        &format!("/guilds/{GUILD}/members/{}", ids[0]),
+        404,
+        json!({"code": 10007, "message": "Unknown Member"}),
+    );
+    d.script(
+        "GET",
+        &format!("/guilds/{GUILD}/members/{}", ids[1]),
+        404,
+        json!({"code": 10004, "message": "Unknown Guild"}),
+    );
+    d.script(
+        "GET",
+        &format!("/guilds/{GUILD}/members/{}", ids[2]),
+        429,
+        json!({"retry_after": 1}),
+    );
+    let now = e.state.now();
+    let mut removed = 0;
+    for _ in 0..4 {
+        removed += svc(&e).sweep_departed(now, 1).await.unwrap();
+    }
+    assert_eq!(removed, 1);
+    assert!(
+        e.state
+            .db
+            .key_row_for_discord(ids[0])
+            .await
+            .unwrap()
+            .is_none()
+    );
+    for id in &ids[1..] {
+        assert!(e.state.db.key_row_for_discord(id).await.unwrap().is_some());
+    }
+    let checked: Vec<(String, f64)> = e
+        .state
+        .db
+        .read(|c| {
+            let mut s = c.prepare("SELECT discord_id, member_checked_at FROM discord_registrations ORDER BY discord_id")?;
+            s.query_map((), |r| Ok((r.get(0)?, r.get(1)?)))?.collect()
+        })
+        .await
+        .unwrap();
+    let at = |id: &str| checked.iter().find(|(i, _)| i == id).unwrap().1;
+    assert_eq!(at(ids[3]), now, "在服务器：今天不再查");
+    assert_eq!(at(ids[1]), now - 86400.0 + 3600.0, "没查清：1 小时后重查");
+    assert_eq!(at(ids[2]), now - 86400.0 + 3600.0);
+    let log: Vec<_> = actions(&e).await.iter().map(action_tuple).collect();
+    assert!(log.iter().any(|a| a.0 == "系统"
+        && a.1 == "退群回收 Key"
+        && a.2 == format!("Discord:{} Alice", ids[0])
+        && a.3 == "已不在服务器，Key 已删除、名额释放"));
+    // 没有私信，也没有别的请求
+    assert!(d.calls().iter().all(|c| c.starts_with("GET /guilds/")));
+    // 总开关
+    d.clear_scripts();
+    d.script(
+        "GET",
+        &format!("/guilds/{GUILD}/members/{}", ids[3]),
+        404,
+        json!({"code": 10007}),
+    );
+    e.state.db.set_setting("member_sweep", "0").await.unwrap();
+    assert_eq!(
+        svc(&e)
+            .sweep_departed(now + 3.0 * 86400.0, 5)
+            .await
+            .unwrap(),
+        0
+    );
+    assert!(
+        e.state
+            .db
+            .key_row_for_discord(ids[3])
+            .await
+            .unwrap()
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn sweep_treats_unreadable_404_as_unknown() {
+    let (e, d) = setup_reg(&[]).await;
+    let u = user("900000000000000250");
+    svc(&e).gift(&u).await.unwrap();
+    let path = format!("/guilds/{GUILD}/members/{}", u.id);
+    d.state.scripts.lock().unwrap().push(Scripted {
+        method: "GET",
+        path,
+        status: 404,
+        body: "<html>not json</html>".into(),
+        once: false,
+    });
+    assert_eq!(svc(&e).sweep_departed(e.state.now(), 1).await.unwrap(), 0);
+    assert!(
+        e.state
+            .db
+            .key_row_for_discord(&u.id)
+            .await
+            .unwrap()
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn profile_backfill_names_default_keys() {
+    let (e, d) = setup_reg(&[]).await;
+    let bare = DiscordUser {
+        id: "900000000000000260".into(),
+        ..Default::default()
+    };
+    svc(&e).gift(&bare).await.unwrap();
+    let before = e
+        .state
+        .db
+        .key_row_for_discord(&bare.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(before["name"], "Discord:900000000000000260");
+    assert_eq!(svc(&e).backfill_profiles(5).await.unwrap(), 1);
+    let after = e
+        .state
+        .db
+        .key_row_for_discord(&bare.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(after["name"], "Profile (@profile-user)");
+    let p = e
+        .state
+        .db
+        .discord_profile_row(&bare.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(p.0.as_deref(), Some("profile-user"));
+    assert_eq!(
+        svc(&e).backfill_profiles(5).await.unwrap(),
+        0,
+        "已补全的不再查"
+    );
+    assert_eq!(d.calls(), ["GET /users/900000000000000260"]);
+}
+
+#[tokio::test]
+async fn reset_all_clears_regular_members_but_spares_disabled_and_invites() {
+    let (e, _d) = setup_reg(&[("REGISTER_MAX_USERS", "0")]).await;
+    open_registration(&e).await;
+    for id in ["900000000000000301", "900000000000000302"] {
+        assert_eq!(issue(&e, id).await.0, 200);
+    }
+    // 其中一人被停用：不在清空范围
+    let row = e
+        .state
+        .db
+        .key_row_for_discord("900000000000000302")
+        .await
+        .unwrap()
+        .unwrap();
+    let mut f = serde_json::Map::new();
+    f.insert("enabled".into(), json!(0));
+    e.state
+        .db
+        .update_key(row["id"].as_i64().unwrap(), &f)
+        .await
+        .unwrap();
+    assert_eq!(svc(&e).reset_all().await.unwrap(), 1);
+    assert!(
+        e.state
+            .db
+            .key_row_for_discord("900000000000000301")
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        e.state
+            .db
+            .key_row_for_discord("900000000000000302")
+            .await
+            .unwrap()
+            .is_some()
+    );
+    // 用量账本保留、成员可以重新领
+    assert_eq!(issue(&e, "900000000000000301").await.0, 200);
+    assert!(
+        actions(&e)
+            .await
+            .iter()
+            .map(action_tuple)
+            .any(|a| a.0 == "系统"
+                && a.1 == "每日清空自助注册"
+                && a.3 == "清空 1 人（REGISTER_RESET_AT）")
+    );
+    // 封禁不会被清空解除
+    svc(&e)
+        .ban("900000000000000301", "测试", "站长")
+        .await
+        .unwrap();
+    assert_eq!(svc(&e).reset_all().await.unwrap(), 0);
+    assert!(svc(&e).is_banned("900000000000000301").await.unwrap());
+    // 调度：HH:MM 按 TZ，格式不对返回 None
+    let tz = e.state.clock.tz();
+    let wait = gate_server::registration::reset_delay_secs(svc(&e).reset_at(), tz, e.state.now());
+    assert!(wait.is_some_and(|w| w > 0.0 && w <= 86400.0));
+    assert_eq!(
+        gate_server::registration::reset_delay_secs("", tz, 0.0),
+        None
+    );
+    assert_eq!(
+        gate_server::registration::scheduled_reset(&e.state).await,
+        Some(0)
+    );
+}
+
+#[tokio::test]
+async fn background_jobs_do_not_panic_and_report_through_the_service() {
+    let (e, d) = setup_reg(&[("DISCORD_MEMBER_ROLE_ID", "900000000000000055")]).await;
+    open_registration(&e).await;
+    let bare = DiscordUser {
+        id: "900000000000000270".into(),
+        ..Default::default()
+    };
+    svc(&e).gift(&bare).await.unwrap();
+    gate_server::registration::registrar_jobs(&e.state).await;
+    // 资料补全了；退群核对也做了（读成员，在服务器）
+    let calls = d.calls();
+    assert!(
+        calls.contains(&"GET /users/900000000000000270".to_string()),
+        "{calls:?}"
+    );
+    assert!(
+        calls.contains(&format!("GET /guilds/{GUILD}/members/900000000000000270")),
+        "{calls:?}"
+    );
+}
+
+// ------------------------------------------------------------------ 私信总闸门
+
+#[tokio::test]
+async fn dm_kill_switch_and_rate_limits() {
+    let (e, d) = setup_reg(&[]).await;
+    // 默认关：什么都不发
+    assert!(!svc(&e).send_dm(MEMBER, "hi").await);
+    assert_eq!(svc(&e).last_dm_block(), "私信总开关已关闭");
+    assert!(d.seen().is_empty());
+    // 打开后：先开私信频道，再发消息；正文截断到 1900 字，不 @ 任何人
+    e.state.db.set_setting("dm_enabled", "1").await.unwrap();
+    let long = "长".repeat(2000);
+    assert!(svc(&e).send_dm(MEMBER, &long).await);
+    assert_eq!(svc(&e).last_dm_block(), "");
+    let seen = d.seen();
+    assert_eq!(seen.len(), 2);
+    assert_eq!(
+        (seen[0].method.as_str(), seen[0].path.as_str()),
+        ("POST", "/users/@me/channels")
+    );
+    assert_eq!(seen[0].json(), json!({"recipient_id": MEMBER}));
+    assert_eq!(seen[0].auth, "Bot fake-bot-token");
+    assert!(seen[0].ctype.starts_with("application/json"));
+    assert_eq!(seen[1].path, "/channels/dm-1/messages");
+    assert_eq!(
+        seen[1].json()["content"].as_str().unwrap().chars().count(),
+        1900
+    );
+    assert_eq!(seen[1].json()["allowed_mentions"], json!({"parse": []}));
+    // 10 分钟最多 3 条
+    assert!(svc(&e).send_dm(MEMBER, "2").await);
+    assert!(svc(&e).send_dm(MEMBER, "3").await);
+    d.reset();
+    assert!(!svc(&e).send_dm(MEMBER, "4").await);
+    assert_eq!(svc(&e).last_dm_block(), "10 分钟内已发 3 条私信，达到上限");
+    assert!(d.seen().is_empty(), "被拦下就一个请求都不发");
+    // 关掉后立刻生效
+    e.state.db.set_setting("dm_enabled", "0").await.unwrap();
+    assert_eq!(
+        svc(&e).dm_block_reason(e.state.now()).await.unwrap(),
+        "私信总开关已关闭"
+    );
+}
+
+#[tokio::test]
+async fn dm_failures_return_false() {
+    let (e, d) = setup_reg(&[]).await;
+    e.state.db.set_setting("dm_enabled", "1").await.unwrap();
+    // 对方关了私信：开频道成功、发消息 403
+    d.script(
+        "POST",
+        "/channels/dm-1/messages",
+        403,
+        json!({"code": 50007}),
+    );
+    assert!(!svc(&e).send_dm(MEMBER, "hi").await);
+    assert_eq!(svc(&e).last_dm_block(), "");
+    d.clear_scripts();
+    d.script("POST", "/users/@me/channels", 400, json!({}));
+    assert!(!svc(&e).send_dm(MEMBER, "hi").await);
+}
+
+// ------------------------------------------------------------------ 网页登录
+
+fn set_cookies(h: &HeaderMap) -> Vec<String> {
+    h.get_all("set-cookie")
+        .iter()
+        .map(|v| v.to_str().unwrap().to_string())
+        .collect()
+}
+
+fn cookie_value(h: &HeaderMap, name: &str) -> String {
+    set_cookies(h)
+        .iter()
+        .find_map(|c| c.strip_prefix(&format!("{name}=")))
+        .map(|rest| rest.split(';').next().unwrap().to_string())
+        .unwrap_or_default()
+}
+
+async fn get_raw(e: &Env, path: &str, cookie: Option<&str>) -> (u16, HeaderMap, Vec<u8>) {
+    let mut c = Call::new("GET", path);
+    if let Some(v) = cookie {
+        c = c.header("cookie", v.to_string());
+    }
+    let r = c.send(&e.state).await;
+    (r.0.as_u16(), r.1, r.2)
+}
+
+#[tokio::test]
+async fn web_login_is_paused_by_default_and_never_starts_oauth() {
+    let (e, d) = setup_reg(&[]).await;
+    let (s, h, _) = get_raw(&e, "/login", None).await;
+    assert_eq!(s, 307);
+    assert_eq!(h["location"], "/?login=paused#live");
+    assert!(set_cookies(&h).is_empty());
+    let (s, h, _) = get_raw(&e, "/login/callback?code=c&state=s", None).await;
+    assert_eq!(
+        (s, h["location"].to_str().unwrap()),
+        (307, "/?login=paused#live")
+    );
+    assert!(d.seen().is_empty());
+}
+
+#[tokio::test]
+async fn web_login_flow_matches_legacy() {
+    let (e, d) = setup_reg(&[]).await;
+    e.state
+        .db
+        .set_setting("web_login_paused", "0")
+        .await
+        .unwrap();
+    // 起点：跳去 Discord 授权，带 state，并种下 state Cookie
+    let (s, h, _) = get_raw(&e, "/login", None).await;
+    assert_eq!(s, 307);
+    let state = cookie_value(&h, "owl_login_state");
+    assert_eq!(state.len(), 32);
+    let loc = h["location"].to_str().unwrap().to_string();
+    assert_eq!(
+        loc,
+        format!(
+            "https://discord.com/oauth2/authorize?client_id=client-id&redirect_uri=https%3A%2F%2Fgate.test%2Flogin%2Fcallback&response_type=code&scope=identify&state={state}"
+        )
+    );
+    assert_eq!(
+        set_cookies(&h),
+        [format!(
+            "owl_login_state={state}; HttpOnly; Max-Age=600; Path=/; SameSite=lax; Secure"
+        )]
+    );
+    // 回调：缺参数 / state 不对 → 失败
+    for path in [
+        "/login/callback".to_string(),
+        "/login/callback?code=c&state=zzz".to_string(),
+        format!("/login/callback?state={state}"),
+        "/login/callback?error=access_denied".to_string(),
+    ] {
+        let (s, h, _) = get_raw(&e, &path, Some(&format!("owl_login_state={state}"))).await;
+        assert_eq!(
+            (s, h["location"].to_str().unwrap()),
+            (307, "/?login=failed"),
+            "{path}"
+        );
+    }
+    assert!(d.seen().is_empty(), "校验失败不去换授权码");
+    // 成功：换授权码、查身份，种会话 Cookie、清 state Cookie
+    let (s, h, _) = get_raw(
+        &e,
+        &format!("/login/callback?code=abc&state={state}"),
+        Some(&format!("owl_login_state={state}")),
+    )
+    .await;
+    assert_eq!((s, h["location"].to_str().unwrap()), (307, "/"));
+    let cookies = set_cookies(&h);
+    assert_eq!(cookies.len(), 2);
+    assert!(
+        cookies[0].starts_with("owl_member=")
+            && cookies[0].ends_with("; HttpOnly; Max-Age=2592000; Path=/; SameSite=lax; Secure")
+    );
+    assert_eq!(
+        cookies[1],
+        "owl_login_state=\"\"; expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=0; Path=/; SameSite=lax"
+    );
+    let seen = d.seen();
+    assert_eq!(d.calls(), ["POST /oauth2/token", "GET /users/@me"]);
+    assert!(
+        seen[0]
+            .ctype
+            .starts_with("application/x-www-form-urlencoded")
+    );
+    let form = seen[0].form();
+    for (k, v) in [
+        ("client_id", "client-id"),
+        ("client_secret", "client-secret"),
+        ("grant_type", "authorization_code"),
+        ("code", "abc"),
+        ("redirect_uri", "https%3A%2F%2Fgate.test%2Flogin%2Fcallback"),
+    ] {
+        assert!(form.contains(&(k.to_string(), v.to_string())), "{k}");
+    }
+    assert_eq!(seen[1].auth, "Bearer tok");
+    assert!(actions(&e).await.iter().map(action_tuple).any(|a| a
+        == (
+            format!("Discord:{MEMBER}"),
+            "网页登录".into(),
+            String::new(),
+            String::new(),
+            1
+        )));
+    // 会话 Cookie 能让 /public/me 认出人（没有 Key 时指纹是 "-"）
+    let member_cookie = format!("owl_member={}", cookie_value(&h, "owl_member"));
+    let me = parse(
+        Call::new("GET", "/public/me")
+            .header("cookie", member_cookie.clone())
+            .send(&e.state)
+            .await,
+    );
+    assert_eq!(
+        me.2,
+        json!({"logged_in": true, "discord": {"id": MEMBER}, "has_key": false})
+    );
+    assert_eq!(me.1["cache-control"], "no-store");
+    // 退出
+    let out = Call::new("POST", "/logout").send(&e.state).await;
+    assert_eq!(out.0, 200);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&out.2).unwrap(),
+        json!({"ok": true})
+    );
+    assert_eq!(
+        set_cookies(&out.1),
+        ["owl_member=\"\"; expires=Thu, 01 Jan 1970 00:00:00 GMT; Max-Age=0; Path=/; SameSite=lax"]
+    );
+}
+
+#[tokio::test]
+async fn web_login_rejections() {
+    let (e, d) = setup_reg(&[("DISCORD_ROLE_ID", "900000000000000077")]).await;
+    e.state
+        .db
+        .set_setting("web_login_paused", "0")
+        .await
+        .unwrap();
+    let ck = "owl_login_state=st";
+    // 授权码被 Discord 拒绝
+    d.script(
+        "POST",
+        "/oauth2/token",
+        400,
+        json!({"error": "invalid_grant"}),
+    );
+    let (s, h, _) = get_raw(&e, "/login/callback?code=bad&state=st", Some(ck)).await;
+    assert_eq!(
+        (s, h["location"].to_str().unwrap()),
+        (307, "/?login=failed")
+    );
+    d.clear_scripts();
+    // 配了身份组门槛、但账号不在那个服务器 → 不发会话
+    d.script(
+        "GET",
+        &format!("/users/@me/guilds/{GUILD}/member"),
+        404,
+        json!({"code": 10007}),
+    );
+    let (s, h, _) = get_raw(&e, "/login/callback?code=ok&state=st", Some(ck)).await;
+    assert_eq!(
+        (s, h["location"].to_str().unwrap()),
+        (307, "/?login=failed")
+    );
+    assert!(set_cookies(&h).is_empty());
+    // 在服务器（不要求带身份组）→ 发会话
+    d.clear_scripts();
+    d.script(
+        "GET",
+        &format!("/users/@me/guilds/{GUILD}/member"),
+        200,
+        json!({"roles": []}),
+    );
+    let (s, h, _) = get_raw(&e, "/login/callback?code=ok&state=st", Some(ck)).await;
+    assert_eq!((s, h["location"].to_str().unwrap()), (307, "/"));
+    assert_eq!(set_cookies(&h).len(), 2);
+    let me_call = d
+        .seen()
+        .into_iter()
+        .rfind(|s| s.path.ends_with("/member"))
+        .unwrap();
+    assert_eq!(me_call.auth, "Bearer tok");
+}
+
+#[tokio::test]
+async fn member_session_dies_when_the_key_is_reset() {
+    let (e, _d) = setup_reg(&[]).await;
+    e.state
+        .db
+        .set_setting("web_login_paused", "0")
+        .await
+        .unwrap();
+    open_registration(&e).await;
+    issue(&e, MEMBER).await;
+    let (_, h, _) = get_raw(
+        &e,
+        "/login/callback?code=ok&state=st",
+        Some("owl_login_state=st"),
+    )
+    .await;
+    let cookie = format!("owl_member={}", cookie_value(&h, "owl_member"));
+    let me = |c: &str| {
+        let c = c.to_string();
+        let st = e.state.clone();
+        async move {
+            parse(
+                Call::new("GET", "/public/me")
+                    .header("cookie", c)
+                    .send(&st)
+                    .await,
+            )
+        }
+    };
+    let before = me(&cookie).await;
+    assert_eq!(before.2["logged_in"], true);
+    assert_eq!(before.2["has_key"], true);
+    // /resetkey 换了 Key，旧会话立刻失效
+    assert_eq!(
+        bridge(&e, "/self-register/resetkey", who(MEMBER, MEMBER))
+            .await
+            .0,
+        200
+    );
+    assert_eq!(me(&cookie).await.2, json!({"logged_in": false}));
+    // 篡改过的 Cookie 也不行
+    assert_eq!(
+        me("owl_member=900000000000000005:9999999999:-.deadbeef")
+            .await
+            .2,
+        json!({"logged_in": false})
+    );
+}
+
+// ------------------------------------------------------------------ 个人状态 / 重置券
+
+async fn login_member(e: &Env, id: &str) -> String {
+    let exp = e.state.now() as i64 + 3600;
+    let key = e
+        .state
+        .db
+        .key_row_for_discord(id)
+        .await
+        .unwrap()
+        .map(gate_server::key::Key);
+    let tag = gate_server::session::key_tag(key.as_ref());
+    format!(
+        "owl_member={}",
+        gate_server::session::sign_member(&e.state, id, exp, &tag)
+    )
+}
+
+#[tokio::test]
+async fn public_me_matches_legacy_and_coupons_work() {
+    let (e, _d) = setup_reg(&[]).await;
+    open_registration(&e).await;
+    let anon = parse(Call::new("GET", "/public/me").send(&e.state).await);
+    assert_eq!((anon.0, anon.2), (200, json!({"logged_in": false})));
+    assert_eq!(anon.1["cache-control"], "no-store");
+    issue(&e, MEMBER).await;
+    let cookie = login_member(&e, MEMBER).await;
+    let me = parse(
+        Call::new("GET", "/public/me")
+            .header("cookie", cookie.clone())
+            .send(&e.state)
+            .await,
+    );
+    assert_eq!(me.0, 200);
+    assert_eq!(
+        keys(&me.2),
+        [
+            "logged_in",
+            "discord",
+            "has_key",
+            "key",
+            "name",
+            "expires_at",
+            "image_scope",
+            "today",
+            "queue",
+            "coupons",
+            "images_stored",
+            "image_retention_days",
+            "timing"
+        ]
+    );
+    let key = e
+        .state
+        .db
+        .key_row_for_discord(MEMBER)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(me.2["key"], key["token"]);
+    assert_eq!(me.2["name"], "Alice (@alice)");
+    assert_eq!(
+        me.2["discord"],
+        json!({"id": MEMBER, "username": "alice", "display_name": "Alice", "avatar": "a1b2"})
+    );
+    assert_eq!(
+        me.2["today"],
+        json!({"images": 0, "v5": 0, "legacy": 0, "daily_images": 30, "daily_v5": 0, "anlas": 0,
+               "daily_anlas": 50, "reset_hour": 7})
+    );
+    assert_eq!(me.2["queue"], json!([]));
+    assert_eq!(me.2["coupons"], json!([]));
+    assert_eq!(me.2["images_stored"], 0);
+    assert_eq!(me.2["image_retention_days"], 0);
+    assert_eq!(
+        me.2["timing"],
+        json!({"count": 0, "avg_dur_s": null, "avg_wait_s": null, "site_avg_dur_s": 9.0})
+    );
+    // 被停用的 Key：只说没有 Key
+    // 券：别人的 / 过期的 / 用过的都不行
+    let key_id = key["id"].as_i64().unwrap();
+    let c = e
+        .state
+        .db
+        .add_coupon(key_id, "reset", 7.0, "唱得真好听", "奶妹", e.state.now())
+        .await
+        .unwrap();
+    let me = parse(
+        Call::new("GET", "/public/me")
+            .header("cookie", cookie.clone())
+            .send(&e.state)
+            .await,
+    );
+    assert_eq!(me.2["coupons"][0]["note"], "唱得真好听");
+    assert_eq!(me.2["coupons"][0]["by"], "奶妹");
+    let use_path = format!("/public/me/coupons/{}/use", c.id);
+    // 先用掉一些额度，确认用券会重置
+    e.state
+        .db
+        .bump_counters(
+            key_id,
+            &e.state.day(),
+            &gate_db::repo::counters::CounterDelta {
+                v5: 3,
+                anlas: 9.0,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let anon = parse(Call::new("POST", &use_path).send(&e.state).await);
+    assert_eq!((anon.0, anon.2), (401, json!({"detail": "请先登录"})));
+    let used = parse(
+        Call::new("POST", &use_path)
+            .header("cookie", cookie.clone())
+            .send(&e.state)
+            .await,
+    );
+    assert_eq!((used.0, used.2), (200, json!({"ok": true})));
+    assert_eq!(used.1["cache-control"], "no-store");
+    let counter = e
+        .state
+        .db
+        .get_counter(key_id, &e.state.day())
+        .await
+        .unwrap();
+    assert_eq!(
+        (counter.v5, counter.anlas),
+        (0, 0.0),
+        "用券重置今天的 V5 与 Anlas"
+    );
+    let again = parse(
+        Call::new("POST", &use_path)
+            .header("cookie", cookie.clone())
+            .send(&e.state)
+            .await,
+    );
+    assert_eq!(
+        (again.0, again.2),
+        (409, json!({"detail": "这张券已经用过或过期了"}))
+    );
+    let bad = parse(
+        Call::new("POST", "/public/me/coupons/abc/use")
+            .header("cookie", cookie.clone())
+            .send(&e.state)
+            .await,
+    );
+    assert_eq!(
+        bad.2,
+        json!({"detail": [{"type": "int_parsing", "loc": ["path", "coupon_id"],
+                           "msg": "Input should be a valid integer, unable to parse string as an integer",
+                           "input": "abc"}]})
+    );
+    let log: Vec<_> = actions(&e).await.iter().map(action_tuple).collect();
+    assert!(log.contains(&(
+        format!("Discord:{MEMBER}"),
+        "成员使用重置券".into(),
+        "Alice (@alice)".into(),
+        "券 #1（唱得真好听）".into(),
+        1
+    )));
+    // 没有 Key 的会话不能用券
+    let nokey = login_member(&e, OTHER).await;
+    let r = parse(
+        Call::new("POST", &use_path)
+            .header("cookie", nokey)
+            .send(&e.state)
+            .await,
+    );
+    assert_eq!((r.0, r.2), (404, json!({"detail": "你还没有可用的 Key"})));
+    // Key 被停用后个人页只显示没有 Key
+    let mut f = serde_json::Map::new();
+    f.insert("enabled".into(), json!(0));
+    e.state.db.update_key(key_id, &f).await.unwrap();
+    let off = parse(
+        Call::new("GET", "/public/me")
+            .header("cookie", cookie)
+            .send(&e.state)
+            .await,
+    );
+    assert_eq!(
+        off.2,
+        json!({"logged_in": true, "discord": {"id": MEMBER, "username": "alice",
+        "display_name": "Alice", "avatar": "a1b2"}, "has_key": false})
+    );
+}
+
+// ------------------------------------------------------------------ 捐赠
+
+const DONATE_TOKEN: &str = "pst-synthetic-donation-token-0000000";
+
+#[tokio::test]
+async fn donate_validates_limits_and_never_logs_the_token() {
+    let (e, _d) = setup_reg(&[]).await;
+    let post = |body: Value, origin: Option<&'static str>| {
+        let st = e.state.clone();
+        async move {
+            let mut c = Call::new("POST", "/public/donate").header("host", "gate.test".to_string());
+            if let Some(o) = origin {
+                c = c.header("origin", o.to_string());
+            }
+            parse(c.json(body).send(&st).await)
+        }
+    };
+    let ok = post(
+        json!({"token": DONATE_TOKEN, "message": "只用 4.5", "contact": "dc:abc"}),
+        Some("https://gate.test"),
+    )
+    .await;
+    assert_eq!((ok.0, ok.2.clone()), (200, json!({"ok": true})));
+    assert_eq!(ok.1["cache-control"], "no-store");
+    let saved = e.state.db.list_donations().await.unwrap();
+    assert_eq!(saved.unhandled.len(), 1);
+    assert_eq!(saved.unhandled[0]["token"], DONATE_TOKEN);
+    assert_eq!(saved.unhandled[0]["message"], "只用 4.5");
+    assert_eq!(saved.unhandled[0]["contact"], "dc:abc");
+    let log: Vec<_> = actions(&e).await.iter().map(action_tuple).collect();
+    assert_eq!(log.len(), 1);
+    assert_eq!(log[0].1, "收到捐赠 Key");
+    assert_eq!(log[0].2, format!("{} 字符", DONATE_TOKEN.chars().count()));
+    assert_eq!(log[0].3, "要求：只用 4.5");
+    assert!(!log.iter().any(|a| a.0.contains(DONATE_TOKEN)
+        || a.2.contains(DONATE_TOKEN)
+        || a.3.contains(DONATE_TOKEN)));
+    // 校验
+    let short = post(json!({"token": "too-short", "message": "x"}), None).await;
+    assert_eq!(
+        (short.0, short.2),
+        (
+            422,
+            json!({"detail": "Token 看起来不完整：请从 NovelAI 官网把整段 Token 复制过来"})
+        )
+    );
+    let blank = post(json!({"token": DONATE_TOKEN, "message": "  "}), None).await;
+    assert_eq!(
+        blank.2,
+        json!({"detail": "请写一句留言 / 使用要求（500 字以内），站长好接进合适的池子"})
+    );
+    let long_contact = post(
+        json!({"token": DONATE_TOKEN, "message": "x", "contact": "c".repeat(101)}),
+        None,
+    )
+    .await;
+    assert_eq!(
+        long_contact.2,
+        json!({"detail": "联系方式请控制在 100 字以内"})
+    );
+    let missing = post(json!({"token": DONATE_TOKEN}), None).await;
+    assert_eq!(
+        missing.2,
+        json!({"detail": [{"type": "missing", "loc": ["body", "message"], "msg": "Field required",
+                           "input": {"token": DONATE_TOKEN}}]})
+    );
+    let evil = post(
+        json!({"token": DONATE_TOKEN, "message": "x"}),
+        Some("https://evil.example"),
+    )
+    .await;
+    assert_eq!(
+        (evil.0, evil.2),
+        (403, json!({"detail": "只接受本站页面的提交"}))
+    );
+    // 失败的请求不占次数：已成功 1 次 + 再成功 4 次 = 5 次/小时，第 6 次 429
+    for _ in 0..4 {
+        assert_eq!(
+            post(json!({"token": DONATE_TOKEN, "message": "x"}), None)
+                .await
+                .0,
+            200
+        );
+    }
+    let flood = post(json!({"token": DONATE_TOKEN, "message": "x"}), None).await;
+    assert_eq!(
+        (flood.0, flood.2),
+        (429, json!({"detail": "提交太频繁，请一小时后再试"}))
+    );
+    assert_eq!(
+        e.state.db.list_donations().await.unwrap().unhandled.len(),
+        5
+    );
+}
+
+#[tokio::test]
+async fn donate_limit_is_per_source_ip() {
+    let (e, _d) = setup_reg(&[]).await;
+    let send = |ip: &'static str| {
+        let st = e.state.clone();
+        async move {
+            let mut req = Request::builder()
+                .method("POST")
+                .uri("/public/donate")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"token": DONATE_TOKEN, "message": "x"}).to_string(),
+                ))
+                .unwrap();
+            req.extensions_mut().insert(axum::extract::ConnectInfo(
+                format!("{ip}:1").parse::<SocketAddr>().unwrap(),
+            ));
+            tower::ServiceExt::oneshot(gate_server::app(st), req)
+                .await
+                .unwrap()
+                .status()
+        }
+    };
+    for _ in 0..5 {
+        assert_eq!(send("203.0.113.1").await, 200);
+    }
+    assert_eq!(send("203.0.113.1").await, 429);
+    assert_eq!(send("203.0.113.2").await, 200, "换一个来源地址不受影响");
+}
+
+// ------------------------------------------------------------------ 原图打包
+
+const PNG: &[u8] = &[
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d, 0x49, 0x48, 0x44, 0x52, 0, 0, 0,
+    1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 0x1f, 0x15, 0xc4, 0x89,
+];
+
+async fn add_image(e: &Env, key_id: i64, prompt: &str, size: usize, age_secs: f64) {
+    let mut img = PNG.to_vec();
+    img.resize(size.max(PNG.len()), 0);
+    e.state
+        .db
+        .add_audit(
+            &gate_db::repo::audit::NewAudit {
+                key_id: Some(key_id),
+                key_name: "k",
+                kind: "image",
+                model: "m",
+                status: "ok",
+                prompt,
+                negative: "lowres",
+                extra: r#"{"params":{"seed":1,"width":832,"height":1216}}"#,
+                image: Some(&img),
+                image_type: "image/png",
+                ..Default::default()
+            },
+            e.state.now() - age_secs,
+            &e.state.clock,
+        )
+        .await
+        .unwrap();
+}
+
+fn zip_names(bytes: &[u8]) -> Vec<String> {
+    let z = zip::ZipArchive::new(std::io::Cursor::new(bytes.to_vec())).unwrap();
+    z.file_names()
+        .filter_map(Result::ok)
+        .map(|c| c.into_owned())
+        .collect()
+}
+
+#[tokio::test]
+async fn export_enforces_session_format_switch_and_per_member_interval() {
+    let (e, _d) = setup_reg(&[]).await;
+    open_registration(&e).await;
+    issue(&e, MEMBER).await;
+    let cookie = login_member(&e, MEMBER).await;
+    let get = |path: &str, c: Option<&str>| {
+        let (st, path, c) = (e.state.clone(), path.to_string(), c.map(str::to_string));
+        async move {
+            let mut call = Call::new("GET", &path);
+            if let Some(c) = &c {
+                call = call.header("cookie", c.clone());
+            }
+            let r = call.send(&st).await;
+            (r.0.as_u16(), r.1, r.2)
+        }
+    };
+    let j = |b: &[u8]| serde_json::from_slice::<Value>(b).unwrap();
+    // 没登录 / 格式不对 / 下载没开
+    let r = get("/public/my-export", None).await;
+    assert_eq!(
+        (r.0, j(&r.2)),
+        (401, json!({"detail": "请先用 Discord 登录"}))
+    );
+    let r = get("/public/my-export?format=pdf", Some(&cookie)).await;
+    assert_eq!(
+        (r.0, j(&r.2)),
+        (400, json!({"detail": "format 只能是 zip 或 epub"}))
+    );
+    let r = get("/public/my-export", Some(&cookie)).await;
+    assert_eq!((r.0, j(&r.2)), (403, json!({"detail": "原图下载暂未开放"})));
+    e.state
+        .db
+        .set_setting("member_image_download", "1")
+        .await
+        .unwrap();
+    let r = get("/public/my-export", Some(&cookie)).await;
+    assert_eq!(
+        (r.0, j(&r.2)),
+        (
+            404,
+            json!({"detail": "最近 2 天没有可打包的原图（打包只用来找回最近误删的图）"})
+        )
+    );
+    // 打包成功：zip，内容是原图 + prompts.txt；Content-Disposition 里是张数
+    let key_id = e
+        .state
+        .db
+        .key_row_for_discord(MEMBER)
+        .await
+        .unwrap()
+        .unwrap()["id"]
+        .as_i64()
+        .unwrap();
+    add_image(&e, key_id, "1girl, forest", 100, 60.0).await;
+    let r = get("/public/my-export?format=zip", Some(&cookie)).await;
+    assert_eq!(r.0, 200);
+    assert_eq!(r.1["content-type"], "application/zip");
+    assert_eq!(
+        r.1["content-disposition"],
+        "attachment; filename=\"owl-1.zip\""
+    );
+    assert_eq!(r.1["cache-control"], "no-store");
+    let names = zip_names(&r.2);
+    assert_eq!(names.len(), 2);
+    assert!(names[0].starts_with("0001_") && names[0].ends_with(".png"));
+    assert_eq!(names[1], "prompts.txt");
+    // 每人 60 秒一次（429 不吃掉重新计时）
+    let r = get("/public/my-export?format=zip", Some(&cookie)).await;
+    assert_eq!(
+        (r.0, j(&r.2)),
+        (429, json!({"detail": "打包有点重，请 1 分钟后再试"}))
+    );
+    // 过了 60 秒可以再打；epub 同样
+    e.state
+        .member_web
+        .export_at
+        .lock()
+        .unwrap()
+        .insert(MEMBER.to_string(), e.state.now() - 61.0);
+    let r = get("/public/my-export?format=epub", Some(&cookie)).await;
+    assert_eq!(r.0, 200);
+    assert_eq!(r.1["content-type"], "application/epub+zip");
+    assert_eq!(
+        r.1["content-disposition"],
+        "attachment; filename=\"owl-1.epub\""
+    );
+    let names = zip_names(&r.2);
+    assert_eq!(names[0], "mimetype");
+    assert!(names.contains(&"OEBPS/content.opf".to_string()));
+}
+
+#[tokio::test]
+async fn export_is_serial_site_wide_and_capped() {
+    let (e, _d) = setup_reg(&[]).await;
+    open_registration(&e).await;
+    e.state
+        .db
+        .set_setting("member_image_download", "1")
+        .await
+        .unwrap();
+    issue(&e, MEMBER).await;
+    issue(&e, OTHER).await;
+    let (a, b) = (
+        login_member(&e, MEMBER).await,
+        login_member(&e, OTHER).await,
+    );
+    let key_id = e
+        .state
+        .db
+        .key_row_for_discord(MEMBER)
+        .await
+        .unwrap()
+        .unwrap()["id"]
+        .as_i64()
+        .unwrap();
+    for (i, age) in [300.0, 200.0, 100.0].iter().enumerate() {
+        add_image(&e, key_id, &format!("p{i}"), 1000, *age).await;
+    }
+    // 全站同一时刻只打一份：别人正在打包时回 429，且不占用这位成员的 60 秒间隔
+    {
+        let _busy = e.state.member_web.export_lock.lock().await;
+        let r = Call::new("GET", "/public/my-export")
+            .header("cookie", b.clone())
+            .send(&e.state)
+            .await;
+        assert_eq!(r.0, 429);
+        assert_eq!(
+            serde_json::from_slice::<Value>(&r.2).unwrap(),
+            json!({"detail": "有人正在打包，请过半分钟再试"})
+        );
+        assert!(
+            e.state
+                .member_web
+                .export_at
+                .lock()
+                .unwrap()
+                .get(OTHER)
+                .is_none()
+        );
+    }
+    // 总字节数上限：只打最新的、合计不超过上限的那些（至少一张）。线上上限是 200 MB（常量见下），测试里调小
+    assert_eq!(gate_server::routes::EXPORT_MAX_BYTES, 200 * 1024 * 1024);
+    assert_eq!(
+        e.state
+            .member_web
+            .export_max_bytes
+            .load(std::sync::atomic::Ordering::Relaxed),
+        200 * 1024 * 1024
+    );
+    e.state
+        .member_web
+        .export_max_bytes
+        .store(2500, std::sync::atomic::Ordering::Relaxed);
+    let r = Call::new("GET", "/public/my-export")
+        .header("cookie", a.clone())
+        .send(&e.state)
+        .await;
+    assert_eq!(r.0, 200);
+    assert_eq!(
+        r.1["content-disposition"],
+        "attachment; filename=\"owl-2.zip\""
+    );
+    let mut z = zip::ZipArchive::new(std::io::Cursor::new(r.2.clone())).unwrap();
+    let mut prompts = String::new();
+    std::io::Read::read_to_string(&mut z.by_name("prompts.txt").unwrap(), &mut prompts).unwrap();
+    assert!(
+        prompts.contains("正面：p1\n")
+            && prompts.contains("正面：p2\n")
+            && !prompts.contains("正面：p0\n"),
+        "{prompts}"
+    );
+    // 锁用完就放开了
+    assert!(e.state.member_web.export_lock.try_lock().is_ok());
+}
+
+// ------------------------------------------------------------------ 没有请求会发到真实 Discord
+
+#[tokio::test]
+async fn discord_base_comes_from_the_environment() {
+    // 默认值是官方 v10；测试环境一律通过 DISCORD_API_BASE 换成本机假服务
+    let plain =
+        gate_server::env::EnvConfig::load(&std::collections::HashMap::<String, String>::new());
+    assert_eq!(plain.discord_api_base, "https://discord.com/api/v10");
+    // 跑一遍会碰 Discord 的流程：每个请求都落在假服务上
+    let (e, d) = setup_reg(&[
+        ("DISCORD_ROLE_ID", "900000000000000077"),
+        ("DISCORD_MEMBER_ROLE_ID", "900000000000000055"),
+    ])
+    .await;
+    open_registration(&e).await;
+    e.state.db.set_setting("dm_enabled", "1").await.unwrap();
+    d.script(
+        "GET",
+        &format!("/guilds/{GUILD}/members/{MEMBER}"),
+        200,
+        json!({"roles": ["900000000000000077"]}),
+    );
+    assert_eq!(issue(&e, MEMBER).await.0, 200);
+    assert!(svc(&e).send_dm(MEMBER, "hi").await);
+    assert!(svc(&e).revoke(MEMBER, true).await.unwrap());
+    let calls = d.calls();
+    assert!(calls.len() >= 4, "{calls:?}");
+    assert!(d.seen().iter().all(|s| s.auth == "Bot fake-bot-token"));
+}
+
+#[tokio::test]
+async fn issue_result_enum_is_provisioned_for_plain_requests() {
+    let (e, _d) = setup_reg(&[]).await;
+    open_registration(&e).await;
+    let r = svc(&e)
+        .issue_direct(MEMBER, GUILD, &user(MEMBER), "")
+        .await
+        .unwrap();
+    assert!(matches!(r, Issued::Provisioned(_)));
+    // 非数字 ID 直接拒绝，不查库
+    let bad = svc(&e).issue_direct("12a", GUILD, &user("12a"), "").await;
+    assert_eq!(
+        bad,
+        Err(RegErr::Denied("请在指定服务器使用 /register。".into()))
+    );
+}
+
+// ------------------------------------------------------------------ 文案 / 打包：对拍旧版 golden
+
+/// `tools/parity/golden/registration.py` 在旧 Python 上生成：欢迎文案、成员名、zip / epub 的条目与文本内容。
+fn golden() -> Value {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/registration_text.json"
+    );
+    serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+}
+
+#[test]
+fn welcome_text_and_member_labels_match_legacy_golden() {
+    let g = golden();
+    for c in g["welcome"].as_array().unwrap() {
+        let a = c["args"].as_array().unwrap();
+        let s = |i: usize| a[i].as_str().unwrap();
+        let out = gate_server::registration::welcome_dm(
+            s(0),
+            s(1),
+            s(2),
+            a[3].as_i64().unwrap(),
+            a[4].as_i64().unwrap(),
+            s(5),
+            s(6),
+        );
+        assert_eq!(out, c["out"].as_str().unwrap(), "{a:?}");
+    }
+    for c in g["labels"].as_array().unwrap() {
+        let u = &c["user"];
+        let s = |k: &str| u.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+        let user = DiscordUser {
+            id: s("id"),
+            username: s("username"),
+            global_name: s("global_name"),
+            avatar: String::new(),
+        };
+        assert_eq!(
+            gate_server::registration::member_label(&user),
+            c["out"].as_str().unwrap(),
+            "{u}"
+        );
+    }
+}
+
+fn archive(bytes: Vec<u8>) -> (Vec<String>, serde_json::Map<String, Value>) {
+    let mut z = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+    let (mut names, mut files) = (Vec::new(), serde_json::Map::new());
+    for i in 0..z.len() {
+        let mut f = z.by_index(i).unwrap();
+        let name = f.name().unwrap().into_owned();
+        let mut data = Vec::new();
+        std::io::Read::read_to_end(&mut f, &mut data).unwrap();
+        let v = if [".png", ".jpg", ".webp"].iter().any(|e| name.ends_with(e)) {
+            json!(data.len())
+        } else {
+            json!(String::from_utf8(data).unwrap())
+        };
+        names.push(name.clone());
+        files.insert(name, v);
+    }
+    (names, files)
+}
+
+#[test]
+fn export_archives_match_legacy_golden() {
+    let g = golden();
+    let ex = &g["export"];
+    let rows: Vec<gate_db::repo::audit::AuditImage> = ex["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| gate_db::repo::audit::AuditImage {
+            id: r["id"].as_i64().unwrap(),
+            ts: r["ts"].as_f64().unwrap(),
+            image_type: r["type"].as_str().unwrap().into(),
+            prompt: r["prompt"].as_str().unwrap().into(),
+            negative: r["negative"].as_str().unwrap().into(),
+            extra: r["extra"].as_str().unwrap().into(),
+            image: r["image"].as_str().unwrap().as_bytes().to_vec(),
+        })
+        .collect();
+    let clock = gate_core::clock::Clock::new("Asia/Shanghai", 7);
+    let (now, who) = (ex["now"].as_f64().unwrap(), ex["who"].as_str().unwrap());
+    for (kind, bytes) in [
+        (
+            "zip",
+            gate_server::exporter::build_zip(&rows, who, &clock, now),
+        ),
+        (
+            "epub",
+            gate_server::exporter::build_epub(&rows, who, &clock, now),
+        ),
+    ] {
+        let (names, files) = archive(bytes);
+        let want = &ex[kind];
+        let want_names: Vec<String> = want["names"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|n| n.as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(names, want_names, "{kind} 条目顺序");
+        for (name, content) in want["files"].as_object().unwrap() {
+            assert_eq!(&files[name], content, "{kind}: {name}");
+        }
+    }
+}
+
+// ------------------------------------------------------------------ 设置：名额 × V5 提示、校验、欢迎文案变体、记录开关（对拍旧版 ops.py）
+
+fn obj(v: Value) -> serde_json::Map<String, Value> {
+    v.as_object().unwrap().clone()
+}
+
+#[tokio::test]
+async fn registration_settings_ops_match_legacy() {
+    let (e, _d) = setup_reg(&[]).await;
+    let adm = who(ADMIN, ADMIN);
+    let op = |a: Value| bridge(&e, "/self-register/ops", merge(adm.clone(), a));
+    e.state.db.set_setting("register_open", "1").await.unwrap();
+    e.state
+        .db
+        .set_setting("register_image_scope", "all")
+        .await
+        .unwrap();
+    e.state
+        .db
+        .set_setting("register_daily_v5", "3")
+        .await
+        .unwrap();
+    // 名额 × 每人 V5 超过全站 V5 日限（150）：回复里带提醒
+    assert_eq!(
+        op(json!({"action": "limit", "value": "60"})).await.2,
+        json!({"message": "名额上限已设为 60。\n⚠ 名额 60 × 每人 V5 3 = 180 张/天，超过全站 V5 日限 150：先用的人用满后，后面的人当天没有 V5。建议把全站 V5 调到 180，或降低每人 V5。（全站 V5 在网页后台「设置」修改）"})
+    );
+    assert_eq!(
+        op(json!({"action": "limit", "value": "50"})).await.2,
+        json!({"message": "名额上限已设为 50。"})
+    );
+    // 校验（旧版抛 ValueError，消息原样）
+    let set = |b: Value| {
+        let st = e.state.clone();
+        async move { gate_server::ops::set_registration(&st, &obj(b)).await }
+    };
+    let invalid = |r: Result<(), gate_server::ops::OpsError>| match r {
+        Err(gate_server::ops::OpsError::Invalid(m)) => m,
+        other => panic!("应当是校验失败：{other:?}"),
+    };
+    assert_eq!(
+        invalid(set(json!({"max_users": -1})).await),
+        "max_users 超出范围 0～1000"
+    );
+    assert_eq!(
+        invalid(set(json!({"role_id": "abc"})).await),
+        "role_id 需要是 Discord 的数字 ID"
+    );
+    assert_eq!(
+        invalid(set(json!({"role_guild": "900000000000000222"})).await),
+        "限定身份组的服务器 ID 与身份组 ID 必须同时填写，或全部留空"
+    );
+    assert_eq!(
+        invalid(set(json!({"expires_days": 99999})).await),
+        "expires_days 超出范围 0～3650"
+    );
+    set(json!({"image_scope": "x"})).await.unwrap();
+    assert_eq!(
+        e.state
+            .db
+            .get_setting("register_image_scope")
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("legacy"),
+        "不认识的范围一律存成 legacy"
+    );
+    // 全部已开放功能 + 不过期 + 100 张
+    set(json!({"features": null, "daily_images": 100, "expires_days": 0}))
+        .await
+        .unwrap();
+    e.state
+        .db
+        .set_setting("register_image_scope", "legacy")
+        .await
+        .unwrap();
+    e.state
+        .db
+        .set_setting("register_daily_v5", "0")
+        .await
+        .unwrap();
+    e.state
+        .db
+        .set_setting("guard_base_daily_images", "20")
+        .await
+        .unwrap();
+    // 记录开关：提示词记录 5 天 + 成员下载开
+    let audit = gate_server::ops::set_audit(
+        &e.state,
+        &obj(
+            json!({"prompts": true, "thumbs": false, "retention_days": 5, "member_download": true}),
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        audit,
+        json!({"prompts": true, "thumbs": false, "retention_days": 5, "image_retention_days": 2,
+               "image_cap_mb": 8192, "image_keep_hours": 24, "member_download": true})
+    );
+    // 欢迎文案：保底 20 张、全部功能、没有有效期这一行、带记录声明
+    let r = bridge(
+        &e,
+        "/self-register/issue",
+        json!({"discord_id": "900000000000000401", "guild_id": GUILD, "username": "neo"}),
+    )
+    .await;
+    assert_eq!(r.0, 200, "{:?}", r.2);
+    let key = r.2["key"].as_str().unwrap();
+    let want = "🦉 **欢迎来到猫头鹰公益站！** 这是你的 API Key（只发这一次，请先保存）：\n`<KEY>`\n\n**三步开始出图（以柏宝绘为例）**\n1. 打开柏宝绘 → 渠道 → 配置 → 新建接入点\n2. 接口地址填 `https://gate.test/`（**不要**加 /v1）\n3. API Key 填上面 `nai-` 开头的整串，保存后随便生成一张图试试\n其他支持自定义 NovelAI 地址的客户端同样这样填。\n\n**不确定填对没有？** 在 Discord 输入 `/quota`，能看到额度就说明 Key 正常；网页登录开放后还能在 https://gate.test/ 用 Discord 一键登录、打包下载自己的作品。\n\n**规则**\n• 每日额度：V4.5 及以下保底 20 张、全站空闲时最多 100 张（次日自动恢复）\n• 已开通功能：全部已开放功能\n• 连续 3 天没有使用会被自动回收（回收前 1 天私信提醒）\n• 每把 Key 同时生成 1 张，多发的会被退回，等前一张出完再发\n• 只提供免费出图：总像素 ≤1024×1024（尺寸可自定义，超出自动等比缩小）、≤28 步、每次 1 张；图生图、Vibe 等会消耗 Anlas 的功能不开放\n• Key 只给本服务器成员：退出服务器后 Key 自动失效\n• 一人一把，请勿分享（本站记录打码后的来源网段防分享，不存完整 IP，7 天后删除）\n\n**常用命令**：`/quota` 看额度和服务状态 · `/resetkey` Key 丢了或泄露时换新 · `/help` 简要说明\n遇到问题到 🛠️｜问题反馈 发截图（记得打码 Key）。\n为防止滥用和优化调度，本站会保留你的图片提示词（5 天后自动删除），仅站长可见。";
+    assert_eq!(r.2["message"].as_str().unwrap(), want.replace("<KEY>", key));
+    let row = e
+        .state
+        .db
+        .key_row_for_discord("900000000000000401")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(row["features"].is_null(), "全部已开放功能 = NULL");
+    assert!(row["expires_at"].is_null(), "expires_days=0 = 不过期");
+    // 生效的设置
+    assert_eq!(
+        Value::Object(svc(&e).settings().await.unwrap().to_map()),
+        json!({"configured": true, "open": true, "max_users": 50, "features": null, "daily_images": 100,
+               "daily_v5": 0, "image_scope": "legacy", "expires_days": 0, "role_guild": "",
+               "role_id": "", "role_note": ""})
+    );
+    // 数值被夹在范围里
+    let audit = gate_server::ops::set_audit(
+        &e.state,
+        &obj(json!({"retention_days": "9999", "image_cap_mb": 7, "image_keep_hours": 99999})),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        audit,
+        json!({"prompts": true, "thumbs": false, "retention_days": 3650, "image_retention_days": 2,
+               "image_cap_mb": 7, "image_keep_hours": 8760, "member_download": true})
+    );
+}
+
+#[tokio::test]
+async fn trailing_slash_in_api_base_is_tolerated() {
+    let d = Discord::start().await;
+    let base = format!("{}/", d.url());
+    let e = setup(&[
+        ("DISCORD_CLIENT_ID", "client-id"),
+        ("DISCORD_CLIENT_SECRET", "client-secret"),
+        ("DISCORD_BOT_TOKEN", "fake-bot-token"),
+        ("REGISTRATION_BRIDGE_SECRET", SECRET),
+        ("DISCORD_GUILD_ID", GUILD),
+        ("SITE_URL", "https://gate.test"),
+        ("DISCORD_API_BASE", &base),
+        ("DISCORD_ROLE_ID", "900000000000000077"),
+    ])
+    .await;
+    open_registration(&e).await;
+    d.script(
+        "GET",
+        &format!("/guilds/{GUILD}/members/{MEMBER}"),
+        200,
+        json!({"roles": ["900000000000000077"]}),
+    );
+    assert_eq!(issue(&e, MEMBER).await.0, 200);
+    assert_eq!(d.calls(), [format!("GET /guilds/{GUILD}/members/{MEMBER}")]);
+}

@@ -1,0 +1,85 @@
+# 猫头鹰公益站 3.0（Rust）：一个镜像三个进程。放在服务器 /opt/owl/compose.yml，项目名 owl。
+#
+# 与 2.x 共用：/opt/service-tools/.env（同一份配置）、/opt/service-tools/data（同一个库、同一个 secret_key，
+# 成员和站长都不用重新登录）、Caddy 直连的固定地址 172.30.0.10（service-tools_edge 网络）。
+# 2.x 的容器只是停掉、不删除：回滚就是停 3.0、启 2.x（见 deploy/v3/cutover.sh rollback）。
+#
+# 镜像不在服务器上编译（2 核）：CI 构建的 owl-gate 镜像以 tar 附件下载后 docker load，
+# 打成 owl-gate:current；上一版留作 owl-gate:previous。
+
+name: owl
+
+x-env: &env
+  env_file: /opt/service-tools/.env
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: {max-size: "20m", max-file: "5"}
+
+services:
+  gate:
+    <<: *env
+    image: owl-gate:current
+    container_name: owl-gate
+    # 部署 / 重启时给正在生成的图留足时间收尾并记账（网关内部最多等 110 秒）
+    stop_grace_period: 120s
+    ports:
+      - "127.0.0.1:3003:8000"
+    environment:
+      - DATA_DIR=/app/data
+      - TZ=Asia/Shanghai
+      # 只信任本机和 Docker 网桥上的 Caddy 带来的 X-Forwarded-For
+      - FORWARDED_ALLOW_IPS=127.0.0.1,172.30.0.1
+    volumes:
+      - /opt/service-tools/data:/app/data
+    mem_limit: 768m
+    networks:
+      edge:
+        ipv4_address: 172.30.0.10
+      internal:
+        aliases: [nai-gate]
+
+  # 奶妹：日常（/register、/quota …）。只拿它需要的变量，不带上游 Token。
+  naimei:
+    image: owl-gate:current
+    container_name: owl-naimei
+    restart: unless-stopped
+    entrypoint: ["/usr/local/bin/nai-bots"]
+    command: ["naimei"]
+    # 镜像自带的健康检查是查网关的 /healthz，机器人进程用不上
+    healthcheck: {disable: true}
+    depends_on: [gate]
+    environment:
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
+      - DISCORD_GUILD_ID=${DISCORD_GUILD_ID}
+      - REGISTRATION_BRIDGE_SECRET=${REGISTRATION_BRIDGE_SECRET}
+      - REGISTRATION_BACKEND_URL=http://nai-gate:8000
+      - SITE_URL=${SITE_URL}
+      - TZ=Asia/Shanghai
+    mem_limit: 128m
+    networks: [internal]
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+
+  # 燕双鹰：执法（零 Intent，只在线；公告由运维命令经 REST 发）
+  warden:
+    image: owl-gate:current
+    container_name: owl-warden
+    restart: unless-stopped
+    entrypoint: ["/usr/local/bin/nai-bots"]
+    command: ["warden"]
+    healthcheck: {disable: true}
+    environment:
+      - WARDEN_BOT_TOKEN=${WARDEN_BOT_TOKEN}
+    mem_limit: 64m
+    networks: [internal]
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+
+networks:
+  edge:
+    external: true
+    name: service-tools_edge
+  internal: {}
