@@ -6,4 +6,5 @@
 
 pub mod clock;
 pub mod pyc;
+pub mod pyjson;
 pub mod pyval;
