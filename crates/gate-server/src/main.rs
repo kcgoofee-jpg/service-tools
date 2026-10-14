@@ -68,14 +68,8 @@ fn serve(bind: SocketAddr) -> anyhow::Result<()> {
         .build()?;
     rt.block_on(async move {
         let env = EnvConfig::from_process();
-        std::fs::create_dir_all(&env.data_dir)?;
-        let db = gate_db::Db::open(
-            env.db_path(),
-            gate_server::time::now(),
-            gate_core::reasons::BACKFILL,
-        )?;
         let assets = Assets::new(std::env::var_os("STATIC_DIR").map(Into::into));
-        let state = gate_server::AppState::new(env, db, assets);
+        let state = gate_server::AppState::build(env, assets).await?;
         let app = gate_server::app(state);
         let listener = tokio::net::TcpListener::bind(bind).await?;
         tracing::info!(%bind, version = gate_server::state::VERSION, "猫头鹰公益站网关已启动");
