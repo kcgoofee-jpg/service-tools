@@ -22,6 +22,9 @@ pub struct GateError {
     pub message: String,
     pub code: String,
     pub billing_uncertain: bool,
+    /// 失败的原因在上游（上游返回 5xx / 连不上 / 返回内容无效）。给成员的响应不变，
+    /// 但错误账本（[`crate::accounting::error_ledger`]）不把它记成 Bug：上游故障在用量日志和「上游」页里看得到，不是本站的缺陷。
+    pub upstream: bool,
 }
 
 impl GateError {
@@ -31,6 +34,7 @@ impl GateError {
             message: message.into(),
             code: String::new(),
             billing_uncertain: false,
+            upstream: false,
         }
     }
 
@@ -40,7 +44,14 @@ impl GateError {
             message: message.into(),
             code: code.into(),
             billing_uncertain: false,
+            upstream: false,
         }
+    }
+
+    /// 标记「原因在上游」，见 [`GateError::upstream`]。
+    pub fn from_upstream(mut self, yes: bool) -> Self {
+        self.upstream = yes;
+        self
     }
 
     pub fn uncertain(mut self, yes: bool) -> Self {
@@ -136,6 +147,13 @@ impl IntoResponse for InternalError {
         resp.extensions_mut().insert(InternalErrorInfo(self.0));
         resp
     }
+}
+
+/// 上游传输层失败（连不上 / 超时 / 读断）。对成员仍是 500（与旧版一致），但原因在上游：
+/// 在请求上下文里留个记号，错误账本据此不记 Bug（用量日志里照常有一条 error）。
+pub fn upstream_transport(ctx: &crate::reqctx::ReqCtx, message: String) -> ApiError {
+    ctx.mark_upstream_fault();
+    InternalError(message).into()
 }
 
 /// 与 Starlette `JSONResponse` 相同的序列化（紧凑、UTF-8、Python 浮点格式）。

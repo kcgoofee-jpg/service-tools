@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bugSource, formatClient, kindLabel, shortModel, timing } from "./format";
+import { autoReason, bugSource, formatClient, kindLabel, shortModel, timing } from "./format";
 
 describe("shortModel", () => {
   it("把 NovelAI 模型名缩成版本号", () => {
@@ -48,5 +48,18 @@ describe("bugSource", () => {
     expect(bugSource("web:admin")).toBe("网页脚本 · 后台");
     expect(bugSource("check:foo")).toBe("交叉校验 · foo");
     expect(bugSource("zzz")).toBe("zzz");
+  });
+});
+
+describe("autoReason", () => {
+  it("原因码 → 页面文案", () => {
+    expect(autoReason("network")).toBe("网络断开，不算 Bug");
+    expect(autoReason("upstream")).toBe("上游故障，不算 Bug");
+    expect(autoReason("foreign_script")).toBe("非本站脚本");
+    expect(autoReason("stale_warn")).toBe("24 小时未再出现");
+    expect(autoReason("stale_error")).toBe("7 天未再出现");
+  });
+  it("不认识的码不留空", () => {
+    expect(autoReason("something_new")).toBe("自动处理");
   });
 });

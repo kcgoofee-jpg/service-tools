@@ -17,11 +17,12 @@
 
 use anyhow::{Context, Result};
 use gate_core::clock::Clock;
+use gate_core::errors::AutoReason;
 use gate_core::reasons;
 use gate_db::Db;
 use gate_db::repo::audit::NewAudit;
 use gate_db::repo::discord::BanInfo;
-use gate_db::repo::errors::ErrorRow;
+use gate_db::repo::errors::{AutoResolve, ErrorRow};
 use gate_db::repo::feedback::Survey;
 use gate_db::repo::keys::NewKey;
 use gate_db::repo::registration::NewRegistration;
@@ -554,6 +555,30 @@ async fn seed_records(db: &Db, now: f64, keys: &[SeededKey], rng: &mut StdRng) -
             db.resolve_error_event(sig, now - 43200.0).await?;
         }
     }
+    // 一条网关自动关闭的（注意级超过 24 小时没再出现）：「含已处理」里带「自动处理」徽标和原因
+    let seen = now - 30.0 * 3600.0;
+    db.store_error_event(&ErrorRow {
+        sig: "TypeError@web.landing.render".into(),
+        source: "web:landing".into(),
+        level: "warn".into(),
+        title: "TypeError: Cannot read properties of null（演示数据）".into(),
+        detail: "https://owl.example/_owl/landing-demo.js:1\nMozilla/5.0 (synthetic)\n演示数据"
+            .into(),
+        path: "landing".into(),
+        key_id: None,
+        rid: String::new(),
+        ts: seen,
+    })
+    .await?;
+    db.auto_resolve_errors(
+        &[AutoResolve {
+            sig: "TypeError@web.landing.render".into(),
+            last_seen: seen,
+            reason: AutoReason::StaleWarn.code(),
+        }],
+        now - 6.0 * 3600.0,
+    )
+    .await?;
     Ok(())
 }
 

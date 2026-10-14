@@ -171,3 +171,15 @@ export function bugSource(s: string): string {
   if (s.startsWith("check:")) return `交叉校验 · ${s.slice(6)}`;
   return s;
 }
+
+/** Bug 自动处理的原因码（gate_core::errors::AutoReason::code）→ 页面上显示的原因 */
+const AUTO_REASON: Record<string, string> = {
+  network: "网络断开，不算 Bug",
+  upstream: "上游故障，不算 Bug",
+  foreign_script: "非本站脚本",
+  stale_warn: "24 小时未再出现",
+  stale_error: "7 天未再出现",
+};
+export function autoReason(code: string): string {
+  return AUTO_REASON[code] ?? "自动处理";
+}

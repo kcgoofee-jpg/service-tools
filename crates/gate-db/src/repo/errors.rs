@@ -18,6 +18,25 @@ pub struct ErrorRow {
     pub ts: f64,
 }
 
+/// 自动处理时读出的一条未处理 Bug。
+#[derive(Debug, Clone)]
+pub struct OpenError {
+    pub sig: String,
+    pub source: String,
+    pub level: String,
+    pub title: String,
+    pub detail: String,
+    pub last_seen: f64,
+}
+
+/// 要自动关闭的一条：`last_seen` 是读到时的值（并发保护，见 [`Db::auto_resolve_errors`]）。
+#[derive(Debug, Clone)]
+pub struct AutoResolve {
+    pub sig: String,
+    pub last_seen: f64,
+    pub reason: &'static str,
+}
+
 /// 入库结果：新 bug / 已处理后复发 / 普通累加。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Stored {
@@ -50,7 +69,7 @@ impl Db {
                 Some(resolved) => {
                     tx.execute(
                         "UPDATE error_events SET count=count+1, last_seen=?, title=?, detail=?, last_rid=?, \
-                         last_key=?, last_path=?, resolved_at=NULL WHERE sig=?",
+                         last_key=?, last_path=?, resolved_at=NULL, auto_resolved=NULL WHERE sig=?",
                         rusqlite::params![e.ts, e.title, e.detail, e.rid, e.key_id, e.path, e.sig],
                     )?;
                     Ok(if resolved.is_some() { Stored::Regressed } else { Stored::Repeat })
@@ -77,7 +96,7 @@ impl Db {
         };
         let sql = format!(
             "SELECT sig, source, level, title, detail, count, first_seen, last_seen, last_rid, last_key, \
-             last_path, resolved_at FROM error_events{where_} {order} LIMIT ?"
+             last_path, resolved_at, auto_resolved FROM error_events{where_} {order} LIMIT ?"
         );
         let limit = limit.clamp(1, 500);
         self.read(move |c| {
@@ -119,7 +138,7 @@ impl Db {
                 Some(Some(_)) => Ok(true),
                 Some(None) => {
                     tx.execute(
-                        "UPDATE error_events SET resolved_at=? WHERE sig=?",
+                        "UPDATE error_events SET resolved_at=?, auto_resolved=NULL WHERE sig=?",
                         rusqlite::params![now, sig],
                     )?;
                     Ok(true)
@@ -132,9 +151,50 @@ impl Db {
     pub async fn resolve_all_error_events(&self, now: f64) -> Result<usize> {
         self.write(move |tx| {
             tx.execute(
-                "UPDATE error_events SET resolved_at=? WHERE resolved_at IS NULL",
+                "UPDATE error_events SET resolved_at=?, auto_resolved=NULL WHERE resolved_at IS NULL",
                 [now],
             )
+        })
+        .await
+    }
+
+    /// 自动处理的候选：所有还没处理的 Bug（`detail` 最长 4000 字符，一次最多取 2000 条）。
+    pub async fn open_errors_for_triage(&self) -> Result<Vec<OpenError>> {
+        self.read(|c| {
+            let mut stmt = c.prepare(
+                "SELECT sig, source, level, title, detail, last_seen FROM error_events \
+                 WHERE resolved_at IS NULL ORDER BY last_seen LIMIT 2000",
+            )?;
+            let rows = stmt.query_map([], |r| {
+                Ok(OpenError {
+                    sig: r.get(0)?,
+                    source: r.get(1)?,
+                    level: r.get(2)?,
+                    title: r.get(3)?,
+                    detail: r.get(4)?,
+                    last_seen: r.get(5)?,
+                })
+            })?;
+            rows.collect()
+        })
+        .await
+    }
+
+    /// 自动关闭一批 Bug，`reason` 是 [`gate_core::errors::AutoReason::code`]。返回真正关掉的条数。
+    /// 只关「读到时是什么样、现在还是什么样」的行：`last_seen` 变了说明读完之后又出现过，留给下一轮，
+    /// 不能把刚发生的一次一并关掉。
+    pub async fn auto_resolve_errors(&self, items: &[AutoResolve], now: f64) -> Result<usize> {
+        let items = items.to_vec();
+        self.write(move |tx| {
+            let mut stmt = tx.prepare(
+                "UPDATE error_events SET resolved_at=?, auto_resolved=? \
+                 WHERE sig=? AND resolved_at IS NULL AND last_seen=?",
+            )?;
+            let mut n = 0;
+            for it in &items {
+                n += stmt.execute(rusqlite::params![now, it.reason, it.sig, it.last_seen])?;
+            }
+            Ok(n)
         })
         .await
     }

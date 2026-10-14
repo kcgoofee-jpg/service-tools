@@ -27,6 +27,8 @@ struct Inner {
     client: String,
     up_status: u16,
     logged: bool,
+    /// 本请求的 5xx 是上游造成的（见 `error::upstream_transport`）：错误账本不记 Bug。
+    upstream_fault: bool,
     model: String,
     key_id: Option<i64>,
     key_name: String,
@@ -55,6 +57,7 @@ impl ReqCtx {
             client,
             up_status: 0,
             logged: false,
+            upstream_fault: false,
             model: String::new(),
             key_id: None,
             key_name: String::new(),
@@ -121,6 +124,15 @@ impl ReqCtx {
 
     pub fn logged(&self) -> bool {
         self.with(|i| i.logged)
+    }
+
+    /// 标记本请求的失败原因在上游。
+    pub fn mark_upstream_fault(&self) {
+        self.with(|i| i.upstream_fault = true);
+    }
+
+    pub fn upstream_fault(&self) -> bool {
+        self.with(|i| i.upstream_fault)
     }
 
     /// 记下本请求的模型（截到 80 个码点），被拒的请求也能按模型统计。

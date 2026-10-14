@@ -656,6 +656,9 @@ fn injected_script_error(msg: &str, stack: &str, host: &str) -> bool {
 }
 
 /// 首页 / 后台网页的脚本报错上报（只收本站页面的错误；每 IP 每 10 分钟 10 条，全站每 10 分钟 100 条）。
+///
+/// 3.0 起另外丢弃两类（docs/v3-deviations.md #45）：浏览器网络失败（断网 / 请求被取消，不是我们的缺陷），
+/// 以及出错脚本不在 `/_owl/` 下的 `Uncaught …`（旧版缓存页、浏览器插件）。
 async fn client_error(State(state): State<AppState>, req: Request) -> Response {
     let (parts, body) = req.into_parts();
     let h = &parts.headers;
@@ -693,9 +696,18 @@ async fn client_error(State(state): State<AppState>, req: Request) -> Response {
     let msg = client_name(&text_of(d, "msg"));
     let msg = take_chars(&msg, 200);
     let msg = if msg.is_empty() { "unknown" } else { msg };
-    let place = client_name(&format!("{}:{}", text_of(d, "src"), text_of(d, "line")));
+    let src = text_of(d, "src");
+    let place = client_name(&format!("{src}:{}", text_of(d, "line")));
     let stack = take_chars(&text_of(d, "stack"), 1500).to_string();
-    if injected_script_error(msg, &stack, &host) {
+    // 3.0 前端对脚本错误（ErrorEvent）带 `filename`，Promise 拒绝没有
+    let filename = match d.get("filename") {
+        Some(Obj::Str(f)) => Some(f.as_str()),
+        _ => None,
+    };
+    if gate_core::errors::is_network_failure(msg)
+        || injected_script_error(msg, &stack, &host)
+        || gate_core::errors::is_foreign_script_report(msg, filename, &src, &stack)
+    {
         return no_content();
     }
     let ua = client_name(&header_str(h, "user-agent"));

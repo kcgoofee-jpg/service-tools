@@ -158,6 +158,12 @@ async fn snapshot(db: &Db, errors: bool) -> Value {
                     o.shift_remove("anlas_auto");
                     o.shift_remove("v5_pinned");
                 }
+                // 3.0 新增的列（docs/v3-deviations.md #45）：旧版没有，比较时去掉
+                if t == ERRORS_TABLE
+                    && let Some(o) = r.as_object_mut()
+                {
+                    o.shift_remove("auto_resolved");
+                }
                 r
             })
             .collect();
@@ -183,6 +189,22 @@ fn zip_view(blob: &[u8]) -> Value {
         files.insert(name, v);
     }
     Value::Object(files)
+}
+
+/// `/admin/api/errors` 的每一行在 3.0 多了 `auto_resolved`（自动处理的原因码，docs/v3-deviations.md #45）：
+/// 旧版没有这个字段，比较时从新版结果里去掉；与成员页一样经 serde 重新序列化后比结构、键顺序和数值类型。
+fn drop_rust_added_error_fields(text: &str) -> String {
+    let Ok(mut v) = serde_json::from_str::<Value>(text) else {
+        return text.to_string();
+    };
+    if let Some(rows) = v.get_mut("errors").and_then(Value::as_array_mut) {
+        for r in rows {
+            if let Some(o) = r.as_object_mut() {
+                o.shift_remove("auto_resolved");
+            }
+        }
+    }
+    v.to_string()
 }
 
 /// 旧版成员页里 3.0 已删除功能的字段（自动分配 Anlas、V5 基础值）：新版不再返回，比较时从旧版结果里去掉。
@@ -309,14 +331,21 @@ async fn run_variant(lines: &[Value], variant: &str, diffs: &mut Vec<String>) ->
         }
         if let Some(want) = l["text"].as_str() {
             let got = norm_text(&String::from_utf8_lossy(&body));
+            let is_errors_list = l["path"]
+                .as_str()
+                .is_some_and(|p| p == "/admin/api/errors" || p.starts_with("/admin/api/errors?"));
             let want = if l["path"] == "/admin/api/members" {
                 drop_deleted_member_fields(want)
+            } else if is_errors_list {
+                serde_json::from_str::<Value>(want).map_or(want.to_string(), |v| v.to_string())
             } else {
                 want.to_string()
             };
             let got = if l["path"] == "/admin/api/members" {
                 // 与上面同样经 serde 重新序列化，只比结构、键顺序和数值类型
                 serde_json::from_str::<Value>(&got).map_or(got, |v| v.to_string())
+            } else if is_errors_list {
+                drop_rust_added_error_fields(&got)
             } else {
                 got
             };
