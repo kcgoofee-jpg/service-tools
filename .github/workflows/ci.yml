@@ -76,6 +76,25 @@ jobs:
       - name: 夹具与测试数据只允许合成数据
         run: tools/ci/check-fixtures.sh
 
+  ops-binary:
+    name: 运维命令静态二进制（宿主机上的巡检用）
+    runs-on: ubuntu-24.04
+    needs: [rust]
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends musl-tools
+      - run: rustup target add x86_64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: musl
+      - run: cargo build --release --locked --target x86_64-unknown-linux-musl -p gate-ops --bin nai-ops
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nai-ops-linux-musl
+          path: target/x86_64-unknown-linux-musl/release/nai-ops
+          retention-days: 7
+
   image:
     name: 镜像（GHCR）
     runs-on: ubuntu-24.04
