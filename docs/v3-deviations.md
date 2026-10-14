@@ -5,7 +5,7 @@
 | # | 位置 | 2.x 行为 | 3.0 行为 | 原因 |
 |---|---|---|---|---|
 | 1 | 上游 Retry-After | 超长数字（>4300 位）或越界日期使 `parse_retry_after` 抛异常，429 冷却没生效、请求 500 | 解析失败按默认 20 秒冷却 | 旧行为是 bug：被限流时反而不冷却 |
-| 2 | `/public/my-export` | 必定 500（全局变量被误删） | 恢复 200 MB 上限 + 全站串行 + 每人 60 秒一次 | 线上 bug |
+| 2 | `/public/my-export` | 必定 500：提交 98e6f2e 删防分享体系时把 `_EXPORT_AT` / `_EXPORT_LOCK` / `EXPORT_MAX_BYTES` 三个全局量一起删了，接口还在引用 | 恢复原意（取自提交 4033417）：单次最多打包最新的 **200 MB** 原图；**全站同一时刻只打包一份**（别人正在打包回 429「有人正在打包，请过半分钟再试」）；**每人每 60 秒一次**（429「打包有点重，请 1 分钟后再试」，失败的请求不占间隔）。文案与旧版一致 | 线上 bug |
 | 3 | 上游 TLS / HTTP2 指纹 | Python OpenSSL 指纹 + Chrome 请求头 | wreq 模拟 Chrome 129/128 指纹，请求头集合 / 顺序 / 取值不变 | 站长 10-14 批准 |
 | 4 | 前端 CSP | `'unsafe-inline'` | `script-src 'self'; style-src 'self'`，首屏数据用 JSON 注入 | 安全加固 |
 | 5 | 巡检 `patrol` | 查已删除的表崩溃，systemd 当成功 | 去掉死表检查；内部错误退出码 3 | 线上 bug |
@@ -30,3 +30,8 @@
 | 24 | `PUT /admin/api/ops/registration` 的 `features` 含列表 / 对象元素（如 `[["a"]]`） | `x not in dict` 抛 `unhashable type`，500 并记 Bug | 422「features 必须是功能名列表」 | 与其它非法元素（数字、未知功能名）同一处理；请求体里这样写只可能是误操作 |
 | 25 | 后台「首页加入按钮」「确认交叉校验」「发送公告」的操作日志 | 处理函数记一条、中间件再记一条「POST /…」 | 只留处理函数那条（更具体） | 重复行没有信息量，淹没真正的操作 |
 | 26 | Discord REST 基地址 | 告警用不带版本的 `/api`，注册用 `/api/v10`，混用 | 全部 `/api/v10`，可用 `DISCORD_API_BASE` 指向本地假服务 | 不带版本的请求走 Discord 的旧默认版本 |
+| 27 | 自助领 Key 的 Discord 请求头 | httpx 默认 User-Agent | 带 `DiscordBot (nai-gate, <版本>)`；不跟随重定向（httpx 默认也不跟，避免把机器人 Token 带到别处） | Discord 要求机器人带可识别的 User-Agent，reqwest 默认不带 |
+| 28 | 机器人 `/ops limit` 名额超过 1000 | `set_registration` 抛未捕获的 `ValueError`，接口 500、机器人只显示「出了点问题」 | 422 `{"detail": "max_users 超出范围 0～1000"}`，机器人把原因原样转给管理员；操作日志照记「失败（422）」 | 旧行为是输入校验漏接 |
+| 29 | 桥接 / 成员页 JSON 请求体 | 没有大小上限 | 上限 1 MiB（超出 413）；请求体校验错误仍是 FastAPI 的 422 列表形状 | 加固，正常请求只有几百字节 |
+| 30 | 身份组核验时 Discord 回 200 但响应体不是 JSON | 未捕获的 `ValueError`，`/issue` 500 | 按「Discord 暂时无法核验身份组」拒绝（403） | 不让 Discord 的异常响应变成我们的 500 |
+| 31 | 发 Key / 绑定邀请 Key 落库 | 建 Key、登记领取、改名分几次提交；中途失败会留下没人认领的 `Discord:<id>` Key | 登记领取 + 改名 + 身份组标志在一个事务里；登记失败就把刚建的 Key 删掉 | 不留孤儿 Key |

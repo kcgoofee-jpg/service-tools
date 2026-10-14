@@ -9,6 +9,7 @@ use crate::guard::Guard;
 use crate::hooks::GateHooks;
 use crate::middleware::StatusStats;
 use crate::params::ParamsStore;
+use crate::registration::{MemberWeb, RegistrationService};
 use crate::runtime::{
     AuthGuard, ImageCooldown, Inflight, KeyPacing, KeyPauses, SlidingWindow, TagQueue,
     UpstreamHealth,
@@ -110,6 +111,10 @@ pub struct Inner {
     pub recent_5xx: Mutex<std::collections::VecDeque<(f64, i64)>>,
     /// 实时看板快照（`/public/live` 与 SSE 共用）、`/public/status` 缓存、前端报错限流。
     pub live: crate::live::Hub,
+    /// Discord 自助领 Key（`env.registration` 配齐才有；否则 `/self-register/*` 回 503）。
+    pub registration: Option<Arc<RegistrationService>>,
+    /// 成员网页接口的进程内限流状态（捐赠提交、原图打包）。
+    pub member_web: MemberWeb,
 }
 
 impl Deref for AppState {
@@ -202,6 +207,7 @@ impl AppState {
         let secret_key = resolve_secret(&env)?;
         let global = env.global_concurrency.max(1) as usize;
         let allowance = crate::allowance::ServerAllowance::new(db.clone(), alerter.clone());
+        let registration = RegistrationService::from_env(&env, db.clone()).map(Arc::new);
         let state = Self(Arc::new(Inner {
             clock,
             assets,
@@ -238,6 +244,8 @@ impl AppState {
             live_events: Mutex::new(std::collections::VecDeque::new()),
             recent_5xx: Mutex::new(std::collections::VecDeque::new()),
             live: crate::live::Hub::new(),
+            registration,
+            member_web: MemberWeb::default(),
             env,
             db,
         }));

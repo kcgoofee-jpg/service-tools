@@ -1,6 +1,35 @@
-//! Discord 领取记录（`discord_registrations`）的查询（旧版 registration.py 里的裸 SQL）。
+//! Discord 领取记录（`discord_registrations`）、待摘身份组（`pending_role_removals`）与成员反馈（`feedback`）。
+//!
+//! 旧版 `registration.py` / `feedback.py` 里的裸 SQL 收口到这里。旧版「几条语句 + 一次 commit」= 这里一个事务；
+//! 中间夹着 Discord 请求的地方，旧版本来就是分几次提交（不能在持有未提交写事务时等网络），这里也分成几个方法。
 
-use crate::{Db, Result};
+use super::INVITE_TAG;
+use crate::{Db, Result, value};
+use rusqlite::{OptionalExtension, params};
+use serde_json::Value;
+
+/// 领取记录里的 Discord 资料（`SELECT username, display_name, avatar`）。
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RegistrationProfile {
+    pub username: Option<String>,
+    pub display_name: Option<String>,
+    pub avatar: Option<String>,
+}
+
+/// 新 Key 的领取记录与改名（`_provision` / `bind_invite` 落库的那几条语句）。
+#[derive(Debug, Clone)]
+pub struct NewRegistration<'a> {
+    pub discord_id: &'a str,
+    pub key_id: i64,
+    pub now: f64,
+    pub username: Option<&'a str>,
+    pub display_name: Option<&'a str>,
+    pub avatar: Option<&'a str>,
+    /// `member_label(user)`：写回 Key 的名字。
+    pub key_name: &'a str,
+    /// 配了「已领 Key」身份组：清掉旧的待摘除并标记 `role_granted=1`。
+    pub member_role: bool,
+}
 
 impl Db {
     /// 这个 Discord 账号领到的 Key（`SELECT key_id FROM discord_registrations WHERE discord_id=?`）。
@@ -25,4 +54,374 @@ impl Db {
             None => Ok(None),
         }
     }
+
+    /// `registration_for_key(key_id)`：这把 Key 属于哪个 Discord 账号。
+    pub async fn registered_discord_for_key(&self, key_id: i64) -> Result<Option<String>> {
+        self.read(move |c| {
+            c.query_row(
+                "SELECT discord_id FROM discord_registrations WHERE key_id=?",
+                [key_id],
+                |r| value::text_or(r, 0, "None"),
+            )
+            .optional()
+        })
+        .await
+    }
+
+    /// 有没有领取记录。
+    pub async fn registration_exists(&self, discord_id: &str) -> Result<bool> {
+        let id = discord_id.to_string();
+        self.read(move |c| {
+            c.query_row(
+                "SELECT 1 FROM discord_registrations WHERE discord_id=?",
+                [id],
+                |_| Ok(()),
+            )
+            .optional()
+            .map(|r| r.is_some())
+        })
+        .await
+    }
+
+    /// 近一小时新发出的 Key 数（每小时领取上限用）：`COUNT(*) FROM discord_registrations WHERE created_at>=?`。
+    pub async fn registrations_since(&self, since: f64) -> Result<i64> {
+        self.read(move |c| {
+            c.query_row(
+                "SELECT COUNT(*) FROM discord_registrations WHERE created_at>=?",
+                [since],
+                |r| value::i64_or(r, 0, 0),
+            )
+        })
+        .await
+    }
+
+    pub async fn is_discord_banned(&self, discord_id: &str) -> Result<bool> {
+        let id = discord_id.to_string();
+        self.read(move |c| {
+            c.query_row(
+                "SELECT 1 FROM discord_bans WHERE discord_id=?",
+                [id],
+                |_| Ok(()),
+            )
+            .optional()
+            .map(|r| r.is_some())
+        })
+        .await
+    }
+
+    /// 撤销：删除该用户的 Key（连带标签 / 领取记录）。返回被删的 Key；没有领取记录为 None。
+    pub async fn revoke_registration(&self, discord_id: &str) -> Result<Option<i64>> {
+        match self.registration_key_id(discord_id).await? {
+            Some(key_id) => {
+                // 旧版 delete_key 之后还会再按 discord_id 删一次领取记录；key_id 是唯一键，
+                // delete_key 已经按 key_id 删过了，那一步是空操作，不重复。
+                self.delete_key(key_id).await?;
+                Ok(Some(key_id))
+            }
+            None => Ok(None),
+        }
+    }
+
+    // ------------------------------------------------------------------ 身份组待办
+
+    /// `INSERT OR REPLACE INTO pending_role_removals`。
+    pub async fn queue_role_removal(&self, discord_id: &str, now: f64) -> Result<()> {
+        let id = discord_id.to_string();
+        self.write(move |tx| {
+            tx.execute(
+                "INSERT OR REPLACE INTO pending_role_removals(discord_id, created_at) VALUES (?,?)",
+                params![id, now],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// 摘除成功后划掉待办。
+    pub async fn finish_role_removal(&self, discord_id: &str) -> Result<()> {
+        let id = discord_id.to_string();
+        self.write(move |tx| {
+            tx.execute(
+                "DELETE FROM pending_role_removals WHERE discord_id=?",
+                [&id],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
+    pub async fn pending_role_removals(&self) -> Result<Vec<String>> {
+        self.read(|c| {
+            let mut stmt = c.prepare("SELECT discord_id FROM pending_role_removals")?;
+            stmt.query_map([], |r| value::text_or(r, 0, "None"))?
+                .collect()
+        })
+        .await
+    }
+
+    /// `sync_roles` 的第一步：Key 已过期 / 被停用 / 被删除、却还标着「已挂身份组」的成员，
+    /// 登记摘除待办并清掉标志（一个事务）。返回这些成员。
+    pub async fn queue_expired_role_removals(&self, now: f64) -> Result<Vec<String>> {
+        self.write(move |tx| {
+            let ids: Vec<String> = {
+                let mut stmt = tx.prepare(
+                    "SELECT r.discord_id FROM discord_registrations r LEFT JOIN api_keys k ON k.id=r.key_id \
+                     WHERE r.role_granted=1 AND (k.id IS NULL OR k.enabled=0 \
+                           OR (k.expires_at IS NOT NULL AND k.expires_at < ?))",
+                )?;
+                stmt.query_map([now], |r| value::text_or(r, 0, "None"))?
+                    .collect::<rusqlite::Result<_>>()?
+            };
+            for id in &ids {
+                tx.execute(
+                    "INSERT OR REPLACE INTO pending_role_removals(discord_id, created_at) VALUES (?,?)",
+                    params![id, now],
+                )?;
+                tx.execute(
+                    "UPDATE discord_registrations SET role_granted=0 WHERE discord_id=?",
+                    [id],
+                )?;
+            }
+            Ok(ids)
+        })
+        .await
+    }
+
+    // ------------------------------------------------------------------ 退群回收 / 资料补全
+
+    /// 该核对「是否还在服务器」的领取记录（最久没核对的在前）。
+    pub async fn departed_candidates(&self, now: f64, batch: i64) -> Result<Vec<String>> {
+        self.read(move |c| {
+            let mut stmt = c.prepare(
+                "SELECT discord_id FROM discord_registrations WHERE COALESCE(member_checked_at, 0) < ? \
+                 ORDER BY COALESCE(member_checked_at, 0) LIMIT ?",
+            )?;
+            stmt.query_map(params![now - 86400.0, batch], |r| {
+                value::text_or(r, 0, "None")
+            })?
+            .collect()
+        })
+        .await
+    }
+
+    pub async fn set_member_checked(&self, discord_id: &str, at: f64) -> Result<()> {
+        let id = discord_id.to_string();
+        self.write(move |tx| {
+            tx.execute(
+                "UPDATE discord_registrations SET member_checked_at=? WHERE discord_id=?",
+                params![at, id],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// 还没有 Discord 用户名的领取记录：`(discord_id, key_id)`。
+    pub async fn profile_backfill_candidates(&self, limit: i64) -> Result<Vec<(String, i64)>> {
+        self.read(move |c| {
+            let mut stmt = c.prepare(
+                "SELECT discord_id, key_id FROM discord_registrations WHERE username IS NULL LIMIT ?",
+            )?;
+            stmt.query_map([limit], |r| {
+                Ok((value::text_or(r, 0, "None")?, value::i64_or(r, 1, 0)?))
+            })?
+            .collect()
+        })
+        .await
+    }
+
+    /// 补全资料；Key 名字还是默认的「Discord:<id>」时顺带改成 `new_key_name`（一个事务）。
+    pub async fn apply_profile_backfill(
+        &self,
+        discord_id: &str,
+        key_id: i64,
+        profile: &RegistrationProfile,
+        new_key_name: &str,
+    ) -> Result<()> {
+        let (id, p, name) = (
+            discord_id.to_string(),
+            profile.clone(),
+            new_key_name.to_string(),
+        );
+        self.write(move |tx| {
+            tx.execute(
+                "UPDATE discord_registrations SET username=?, display_name=?, avatar=? WHERE discord_id=?",
+                params![p.username, p.display_name, p.avatar, id],
+            )?;
+            let current: Option<String> = tx
+                .query_row("SELECT name FROM api_keys WHERE id=?", [key_id], |r| {
+                    value::text_opt(r, 0)
+                })
+                .optional()?
+                .flatten();
+            if current.is_some_and(|n| n.starts_with("Discord:")) {
+                tx.execute("UPDATE api_keys SET name=? WHERE id=?", params![name, key_id])?;
+            }
+            Ok(())
+        })
+        .await
+    }
+
+    /// 每日清空的范围：Key 缺失或启用中、且不带「邀请」标签的在册成员（被停用的成员 / 邀请 Key 豁免）。
+    pub async fn reset_all_candidates(&self) -> Result<Vec<String>> {
+        self.read(|c| {
+            let mut stmt = c.prepare(
+                "SELECT r.discord_id FROM discord_registrations r LEFT JOIN api_keys k ON k.id=r.key_id \
+                 WHERE (k.id IS NULL OR k.enabled=1) \
+                   AND NOT EXISTS (SELECT 1 FROM key_tags t WHERE t.key_id=r.key_id AND t.tag=?)",
+            )?;
+            stmt.query_map([INVITE_TAG], |r| value::text_or(r, 0, "None"))?
+                .collect()
+        })
+        .await
+    }
+
+    // ------------------------------------------------------------------ 邀请 Key / 发 Key
+
+    /// 站长发的邀请 Key（带「邀请」标签）还没绑定 Discord 账号。
+    pub async fn is_unbound_invite(&self, key_id: i64) -> Result<bool> {
+        self.read(move |c| {
+            c.query_row(
+                "SELECT 1 FROM key_tags WHERE key_id=? AND tag=? \
+                 AND NOT EXISTS (SELECT 1 FROM discord_registrations WHERE key_id=?)",
+                params![key_id, INVITE_TAG, key_id],
+                |_| Ok(()),
+            )
+            .optional()
+            .map(|r| r.is_some())
+        })
+        .await
+    }
+
+    /// 按 token 找 Key：`(id, enabled)`。
+    pub async fn key_id_enabled_by_token(&self, token: &str) -> Result<Option<(i64, bool)>> {
+        let token = token.to_string();
+        self.read(move |c| {
+            c.query_row(
+                "SELECT id, enabled FROM api_keys WHERE token=?",
+                [token],
+                |r| Ok((value::i64_or(r, 0, 0)?, value::flag(r, 1)?)),
+            )
+            .optional()
+        })
+        .await
+    }
+
+    /// `bind_invite` 落库：登记领取、Key 改名、写 `api_keys.discord_id`、身份组标志（一个事务）。
+    pub async fn bind_invite_registration(&self, r: &NewRegistration<'_>) -> Result<()> {
+        let (id, username, display, avatar, name) = (
+            r.discord_id.to_string(),
+            r.username.map(str::to_string),
+            r.display_name.map(str::to_string),
+            r.avatar.map(str::to_string),
+            r.key_name.to_string(),
+        );
+        let (key_id, now, member_role) = (r.key_id, r.now, r.member_role);
+        self.write(move |tx| {
+            tx.execute(
+                "INSERT INTO discord_registrations(discord_id,key_id,created_at,username,display_name,avatar) \
+                 VALUES (?,?,?,?,?,?)",
+                params![id, key_id, now, username, display, avatar],
+            )?;
+            tx.execute("UPDATE api_keys SET name=? WHERE id=?", params![name, key_id])?;
+            tx.execute(
+                "UPDATE api_keys SET discord_id=? WHERE id=?",
+                params![id, key_id],
+            )?;
+            mark_role_granted(tx, &id, member_role)
+        })
+        .await
+    }
+
+    /// `_provision` 落库：登记领取、Key 改名、身份组标志（一个事务）。Key 本身由 `create_key` 先建好。
+    pub async fn provision_registration(&self, r: &NewRegistration<'_>) -> Result<()> {
+        let (id, username, display, avatar, name) = (
+            r.discord_id.to_string(),
+            r.username.map(str::to_string),
+            r.display_name.map(str::to_string),
+            r.avatar.map(str::to_string),
+            r.key_name.to_string(),
+        );
+        let (key_id, now, member_role) = (r.key_id, r.now, r.member_role);
+        self.write(move |tx| {
+            tx.execute(
+                "INSERT INTO discord_registrations(discord_id,key_id,created_at,username,display_name,avatar) \
+                 VALUES (?,?,?,?,?,?)",
+                params![id, key_id, now, username, display, avatar],
+            )?;
+            tx.execute("UPDATE api_keys SET name=? WHERE id=?", params![name, key_id])?;
+            mark_role_granted(tx, &id, member_role)
+        })
+        .await
+    }
+
+    // ------------------------------------------------------------------ 成员反馈
+
+    /// 这个人最近一份反馈的时间。
+    pub async fn last_feedback_ts(&self, discord_id: &str) -> Result<Option<f64>> {
+        let id = discord_id.to_string();
+        self.read(move |c| {
+            c.query_row(
+                "SELECT MAX(ts) FROM feedback WHERE discord_id=?",
+                [id],
+                |r| value::f64_opt(r, 0),
+            )
+        })
+        .await
+    }
+
+    /// 存一份反馈（`answers` 是已序列化的 JSON）。
+    pub async fn insert_feedback(
+        &self,
+        ts: f64,
+        discord_id: &str,
+        username: &str,
+        key_id: Option<i64>,
+        answers: &str,
+    ) -> Result<()> {
+        let (id, username, answers) = (
+            discord_id.to_string(),
+            username.to_string(),
+            answers.to_string(),
+        );
+        self.write(move |tx| {
+            tx.execute(
+                "INSERT INTO feedback (ts, discord_id, username, key_id, answers) VALUES (?,?,?,?,?)",
+                params![ts, id, username, key_id, answers],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// 后台查看：新 → 旧，附 Key 名字（列顺序：id, ts, discord_id, username, key_id, answers, name）。
+    pub async fn list_feedback(&self, limit: i64) -> Result<Vec<Value>> {
+        self.read(move |c| {
+            let mut stmt = c.prepare(
+                "SELECT f.id, f.ts, f.discord_id, f.username, f.key_id, f.answers, k.name FROM feedback f \
+                 LEFT JOIN api_keys k ON k.id=f.key_id ORDER BY f.ts DESC LIMIT ?",
+            )?;
+            stmt.query_map([limit], value::row_json)?.collect()
+        })
+        .await
+    }
+}
+
+/// 配了身份组：清掉旧的待摘除，标记 `role_granted=1`。
+fn mark_role_granted(
+    tx: &rusqlite::Transaction<'_>,
+    discord_id: &str,
+    member_role: bool,
+) -> rusqlite::Result<()> {
+    if member_role {
+        tx.execute(
+            "DELETE FROM pending_role_removals WHERE discord_id=?",
+            [discord_id],
+        )?;
+        tx.execute(
+            "UPDATE discord_registrations SET role_granted=1 WHERE discord_id=?",
+            [discord_id],
+        )?;
+    }
+    Ok(())
 }

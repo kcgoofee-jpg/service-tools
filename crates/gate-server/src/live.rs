@@ -17,9 +17,7 @@ use gate_core::features::{self, FEATURES};
 use gate_core::pyc;
 use gate_core::pyval;
 use gate_core::reasons::Reason;
-use gate_core::site_flags::{
-    ALGO_NOTICE, GLOBAL_DAILY_V5, HOME_JOIN_OPEN, REGISTER_OPEN, WEB_LOGIN_PAUSED,
-};
+use gate_core::site_flags::{ALGO_NOTICE, GLOBAL_DAILY_V5, HOME_JOIN_OPEN, WEB_LOGIN_PAUSED};
 use serde_json::{Map, Value, json};
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -74,36 +72,17 @@ pub struct RegSettings {
     pub features: Option<Vec<String>>,
 }
 
-/// 生效的注册设置：数据库里保存的优先，其次是环境默认值。
+/// 生效的注册设置：数据库里保存的优先，其次是环境默认值。读法和后台 / 机器人共用 `ops::registration_settings`，
+/// 这里只取首页用得到的三项。
 pub async fn registration_settings(state: &AppState) -> Result<Option<RegSettings>, InternalError> {
-    let Some(env) = &state.env.registration else {
+    if state.env.registration.is_none() {
         return Ok(None);
-    };
-    let open_raw = state.db.get_setting("register_open").await?;
-    let open = gate_core::site_flags::parse(
-        &REGISTER_OPEN,
-        &open_raw.map_or(Value::Null, Value::String),
-        Value::Bool(false), // 默认关闭：站长明确开放后才接受注册
-    )
-    .as_bool()
-    .unwrap_or(false);
-    // `max(0, int(float(value)))`，读不懂用环境默认值
-    let max_users = match state.db.get_setting("register_max_users").await? {
-        Some(raw) => match pyc::parse_float(&raw) {
-            Some(f) if f.is_finite() => (f.trunc() as i64).max(0),
-            _ => env.max_users,
-        },
-        None => env.max_users,
-    };
-    let feats = match state.db.get_setting("register_features").await? {
-        Some(raw) if raw == "*" => None,
-        Some(raw) => features::parse_list(&Value::String(raw)),
-        None => features::parse_list(&Value::String(env.key_features.clone())),
-    };
+    }
+    let r = crate::ops::registration_settings(state).await?;
     Ok(Some(RegSettings {
-        open,
-        max_users,
-        features: feats,
+        open: r.open,
+        max_users: r.max_users,
+        features: r.features,
     }))
 }
 
