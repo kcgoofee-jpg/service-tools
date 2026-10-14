@@ -1,10 +1,6 @@
-__pycache__/
-*.pyc
 data/
 .env
-.venv/
 *.db
-.pytest_cache/
 .local/
 *.packed.html
 .DS_Store

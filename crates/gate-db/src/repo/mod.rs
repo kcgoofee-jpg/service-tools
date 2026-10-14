@@ -1,6 +1,6 @@
 //! 旧版 `app/database.py` 里 `class Database` 的逐方法移植。
 //!
-//! 约定（与 docs/PORTING.md 一致）：
+//! 约定：
 //! - 方法名、参数顺序、SQL 语义与旧版一致；旧版里的 `time.time()` 一律改成调用方传入的 `now: f64`，
 //!   按日 / 按月的计算用 [`gate_core::clock::Clock`]。
 //! - 旧版一个方法里「多条语句 + 一次 commit」= 这里一个 `db.write` 闭包 = 一个事务；

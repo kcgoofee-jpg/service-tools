@@ -8,5 +8,4 @@ useDefault = true
 description = "合成测试数据"
 paths = [
   '''crates/[^/]+/tests/''',
-  '''tools/parity/golden/''',
 ]

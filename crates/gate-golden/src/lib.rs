@@ -1,6 +1,8 @@
 //! Golden 夹具读取与 Python 语义比较。
 //!
-//! 夹具由 `tools/parity/golden/*.py` 在旧 Python 代码上生成，一行一个用例：
+//! 夹具由 `tools/parity/golden/*.py` 在旧 Python 代码上生成（3.0 上线后 Python 已整体删除，生成脚本和旧代码都在
+//! git 标签 `py-final` 里；夹具从此冻结，不再重新生成——行为有意改动时，在测试里把期望侧对应部分去掉并注明
+//! `docs/v3-deviations.md` 的编号）。一行一个用例：
 //! `{"fn": "...", "args": [...], "kwargs": {...}, "out": ..., "err": null | {"type": "...", "msg": "..."}}`
 //! 另可带 `"after": {...}`（原地修改型函数：调用后的入参）与 `"note"`。
 //!

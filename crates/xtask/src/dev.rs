@@ -3,7 +3,7 @@
 //! 1. 假上游（`gate_testkit::MockUpstream`，默认 18001）：出图 / 文本 / 订阅查询都有默认回复，不连真实 NovelAI；
 //! 2. 合成演示数据（`seed`）：每次启动都重建数据目录（默认 `target/owl-dev`），并写出 `cookies.json`
 //!    （后台与成员会话，Playwright 端到端读它）；
-//! 3. 真正的网关（`AppState::build` + `app`，默认 18000，只监听本机），环境变量与旧 `run-legacy.sh` 一致：
+//! 3. 真正的网关（`AppState::build` + `app`，默认 18000，只监听本机），环境变量与 2.x 的本地演示脚本一致：
 //!    假 Discord 配置让「领 Key / 网页登录」路径处于已配置状态，`DISCORD_API_BASE` 指向一个没人听的本机端口，
 //!    所以任何 Discord 请求都会立刻失败，不会出本机；官方状态页地址同样指向死端口。
 //!
@@ -103,7 +103,7 @@ fn dead_local_port() -> Result<u16> {
     Ok(l.local_addr()?.port())
 }
 
-/// 旧 `run-legacy.sh` 的环境变量，加上 Rust 网关里需要显式关掉的几项（上游抖动、HTTP/2）。
+/// 2.x 本地演示脚本的环境变量，加上 Rust 网关里需要显式关掉的几项（上游抖动、HTTP/2）。
 fn gateway_env(
     args: &Args,
     data: &Path,
