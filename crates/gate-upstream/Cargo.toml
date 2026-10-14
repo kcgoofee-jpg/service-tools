@@ -25,6 +25,7 @@ http.workspace = true
 [dev-dependencies]
 axum.workspace = true
 tempfile = "3"
+gate-testkit = { path = "../gate-testkit" }
 
 [lints]
 workspace = true

@@ -13,7 +13,10 @@ use serde_json::Value;
 /// `json.dumps(v, ensure_ascii=False)`。
 /// 实现统一在 [`crate::pyjson`]（同一个格式化器，只是参数组合不同）。
 pub fn dumps(v: &Value) -> String {
-    let style = crate::pyjson::Style { compact: false, ensure_ascii: false };
+    let style = crate::pyjson::Style {
+        compact: false,
+        ensure_ascii: false,
+    };
     String::from_utf8(crate::pyjson::dumps_with(v, style)).expect("serde_json 只输出合法 UTF-8")
 }
 
