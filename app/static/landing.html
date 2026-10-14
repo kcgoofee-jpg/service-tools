@@ -37,7 +37,7 @@ try{var t=localStorage.getItem('nai-gate-theme');if(t==='light'||t==='dark')docu
   --accent:#4f46e5; --accent-hover:#4338ca; --accent-soft:#eceeff; --accent-text:#4338ca; --on-accent:#fff;
   --ok:#15803d; --ok-soft:#e6f6ec; --warn:#b45309; --warn-soft:#fef3dc; --bad:#c2263a; --bad-soft:#fdeaed;
   --info-soft:#eaf1fb; --v5:#0f9b8e;
-  --dc:#5865F2; --dc-hover:#4752c4;
+  --dc:#5865F2; --dc-hover:#4752c4; --on-warn:#fff;
   --toast-bg:var(--text); --toast-fg:var(--bg); --toast-bd:transparent;
   --shadow-sm:0 1px 2px rgba(20,28,50,.05);
   --shadow:0 1px 3px rgba(20,28,50,.06),0 6px 20px -8px rgba(20,28,50,.10);
@@ -71,7 +71,7 @@ try{var t=localStorage.getItem('nai-gate-theme');if(t==='light'||t==='dark')docu
     --accent:#818cf8; --accent-hover:#a5acff; --accent-soft:#222650; --accent-text:#b4bbff; --on-accent:#10122a;
     --ok:#4ade80; --ok-soft:#14301f; --warn:#fbbf24; --warn-soft:#38290c; --bad:#fb7185; --bad-soft:#3b1820;
     --info-soft:#17263d; --v5:#2dd4bf;
-    --dc:#5865F2; --dc-hover:#4752c4;
+    --dc:#5865F2; --dc-hover:#4752c4; --on-warn:#1a1300;
     --toast-bg:var(--surface-3); --toast-fg:var(--text); --toast-bd:var(--border-strong);
     --shadow-sm:0 1px 2px rgba(0,0,0,.4); --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 24px -10px rgba(0,0,0,.6);
     color-scheme:dark;
@@ -84,7 +84,7 @@ try{var t=localStorage.getItem('nai-gate-theme');if(t==='light'||t==='dark')docu
   --accent:#818cf8; --accent-hover:#a5acff; --accent-soft:#222650; --accent-text:#b4bbff; --on-accent:#10122a;
   --ok:#4ade80; --ok-soft:#14301f; --warn:#fbbf24; --warn-soft:#38290c; --bad:#fb7185; --bad-soft:#3b1820;
   --info-soft:#17263d; --v5:#2dd4bf;
-  --dc:#5865F2; --dc-hover:#4752c4;
+  --dc:#5865F2; --dc-hover:#4752c4; --on-warn:#1a1300;
   --toast-bg:var(--surface-3); --toast-fg:var(--text); --toast-bd:var(--border-strong);
   --shadow-sm:0 1px 2px rgba(0,0,0,.4); --shadow:0 1px 3px rgba(0,0,0,.4),0 8px 24px -10px rgba(0,0,0,.6);
   color-scheme:dark;
@@ -188,12 +188,10 @@ footer{max-width:var(--container-max,880px);margin:0 auto;padding:var(--sp-6) va
 /* ───────── 卡片：全站一套（同圆角、同内边距、同阴影） ───────── */
 .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-sm);
   padding:var(--pad-card);transition:border-color .2s,box-shadow .2s}
-.card.step{display:flex;flex-direction:column;gap:var(--sp-2);justify-content:space-between;min-height:88px;transition:border-color .15s,box-shadow .15s}
+.card.step{display:flex;flex-direction:column;gap:var(--sp-3);justify-content:flex-start;transition:border-color .15s,box-shadow .15s}
 .card.step:hover{border-color:var(--border-strong);box-shadow:var(--shadow)}
 
 /* ───────── 实时看板 ───────── */
-/* 看板卡片标题（#liveTitle）：以前样式写在 .live-head .t 上，而元素是 .live-h → 一直没生效 */
-.live-h{display:flex;align-items:center;gap:var(--sp-2);font-weight:600;font-size:var(--fs-h3);margin-bottom:var(--sp-2)}
 .board-card{display:flex;flex-direction:column;gap:var(--sp-2)}
 .board-top{display:flex;justify-content:space-between;align-items:flex-start;gap:var(--sp-2)}
 .board-st{display:flex;flex-direction:column;gap:2px;min-width:0}
@@ -233,28 +231,30 @@ footer{max-width:var(--container-max,880px);margin:0 auto;padding:var(--sp-6) va
 
 /* ───────── 三步上手 ───────── */
 .steps{display:grid;gap:var(--gap-card);grid-template-columns:1fr;margin:0}
+.guide details.more:first-child{margin-top:0;border-top:0;padding-top:0}
 .step h3{font-size:var(--fs-h3);font-weight:700;display:flex;align-items:center;gap:var(--sp-2);color:var(--text)}
 .step h3 .n,.step .n{width:22px;height:22px;border-radius:50%;background:color-mix(in srgb,var(--accent) 20%,transparent);
   color:var(--accent);display:grid;place-items:center;font-weight:700;font-size:var(--fs-micro);flex:none}
 .step-desc{font-size:var(--fs-sm);color:var(--muted);margin:0}
 .step-desc code{font-size:var(--fs-xs);background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-xs);padding:2px 7px;color:var(--text)}
 .step small{display:block;color:var(--muted);font-size:var(--fs-xs);margin-top:2px}
-.step-act{margin-top:auto}
-.step-act .btn{width:100%}
+.step-act{margin:0}
+.step-act .btn{width:100%;min-height:var(--tap)}
+.step-desc{min-height:var(--tap);display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .copyline{display:flex;align-items:center;gap:var(--sp-2);background:var(--surface-2);border:1px solid var(--border);
   border-radius:var(--radius-sm);padding:4px 4px 4px 12px;margin-top:var(--sp-1);transition:border-color .15s,background .15s}
-#headKey.copyline{margin:0 0 var(--sp-3)}   /* 站长截图：Key 行和额度块黏在一起，这里留出段间距 */
+   /* 站长截图：Key 行和额度块黏在一起，这里留出段间距 */
 .copyline:hover{border-color:var(--border-strong);background:var(--surface-3)}
 .copyline .mono{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:var(--fs-xs);user-select:all}
-#headKey .mono{font-size:var(--fs-sm)}
-.step .copyline{margin-top:auto;min-height:var(--tap)}
+.step .copyline{margin:0;min-height:var(--tap)}
 .step-copy-btn{width:36px;height:36px;border-radius:var(--radius-xs);border:0;background:transparent;color:var(--muted);cursor:pointer;
   display:inline-flex;align-items:center;justify-content:center;flex:none;transition:color .15s,background .15s}
 .step-copy-btn:hover{color:var(--text);background:var(--surface-3)}
 .step-copy-btn svg.ic,.step-copy-btn [data-ic]{width:16px;height:16px}
 
 /* 示例 / 说明折叠 */
-.guide{display:grid;gap:var(--sp-4);margin-top:var(--sp-4);grid-template-columns:1fr}
+.guide{display:grid;gap:0;margin-top:var(--sp-3);grid-template-columns:1fr;padding-block:var(--sp-1)}
+.guide details.more{margin-top:0;padding-block:var(--sp-2)}
 .guide h3{font-size:var(--fs-h3);margin-bottom:var(--sp-2);display:flex;gap:var(--sp-2);align-items:center}
 .guide ol{counter-reset:s;display:flex;flex-direction:column;gap:var(--sp-2);color:var(--text-2);font-size:var(--fs-sm)}
 .guide ol li{counter-increment:s;padding-left:28px;position:relative}
@@ -276,42 +276,31 @@ details.more p{font-size:var(--fs-sm);color:var(--muted);margin:var(--sp-1) 0 va
 .rules b{color:var(--text)}
 
 /* ───────── 我的额度 / 登录 ───────── */
-.loginrow{display:flex;align-items:center;gap:var(--sp-2);flex-wrap:wrap;margin:0}
 .login-hint{margin:0;color:var(--muted);font-size:var(--fs-sm)}
-.keylogin{display:flex;gap:var(--sp-2);flex:1;min-width:0}
-.keylogin input[type=password]{flex:1;min-width:0;min-height:var(--tap);padding:8px 14px;font-size:var(--fs-body);border-radius:var(--radius-sm);background:var(--surface-2);border:1px solid var(--border);color:var(--text);outline:none;box-shadow:none;appearance:none}
-.keylogin input[type=password]:focus{border-color:var(--accent)}
-.keylogin input::placeholder{color:var(--muted)}
-.keylogin .btn{flex:none}
-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.login-bar{display:flex;align-items:center;gap:var(--sp-2);padding:10px var(--sp-4);border-radius:var(--radius-sm);
+  background:var(--warn-soft);color:var(--warn);font-size:var(--fs-sm)}
+.top-login{min-height:36px;padding:6px 14px;font-size:var(--fs-sm)}
 .me{margin:0;padding:0;border:0;background:none}
 .me-empty{font-size:var(--fs-sm);color:var(--text-2);margin:var(--sp-1) 0}
-.me-tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--sp-3);margin-bottom:var(--sp-3)}
+.me-head{display:flex;justify-content:space-between;align-items:baseline;gap:var(--sp-2);margin-bottom:var(--sp-3)}
+.me-head h2{font-size:var(--fs-h2)}
+.me-head span{font-size:var(--fs-xs);color:var(--muted)}
+.meters{display:flex;flex-direction:column;gap:var(--sp-3)}
+.meter-top{display:flex;justify-content:space-between;align-items:baseline;font-variant-numeric:tabular-nums}
+.meter-top .m-tag{font-weight:700;font-size:var(--fs-sm)}
+.meter-top b{font-size:var(--fs-h1);font-weight:800}
+.meter-top small{color:var(--muted);font-size:var(--fs-xs)}
+.meter-bar{height:6px;border-radius:var(--radius-pill);background:var(--surface-3);overflow:hidden;margin-top:4px}
+.meter-bar i{display:block;height:100%;background:var(--accent);transition:width .4s}
+.meter.v5 .m-tag,.meter.v5 b{color:var(--v5)}.meter.v5 .meter-bar i{background:var(--v5)}
+.meter.an .m-tag{color:var(--warn)}.meter.an .meter-bar i{background:var(--warn)}
+.me-key{margin-top:var(--sp-4);padding-top:var(--sp-3);border-top:1px solid var(--border);display:flex;flex-direction:column;gap:var(--sp-2)}
+.me-key .copyline{margin:0}
+.me-tiles{display:grid;gap:var(--sp-3)}   /* 服务端首屏骨架屏（public_routes._ME_CARD_SKELETON） */
 .me-tile{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 16px;
   display:flex;align-items:center;justify-content:space-between;min-height:52px}
-.me-tile .me-tag{font-size:var(--fs-xs);font-weight:700;color:var(--muted);letter-spacing:.02em}
-.me-tile.v5 .me-tag{color:var(--v5)}
-.me-tile .me-num{display:flex;align-items:baseline;gap:4px}
-.me-tile .me-num b{font-size:var(--fs-display);font-weight:800;color:var(--text);font-variant-numeric:tabular-nums;line-height:1}
-.me-tile.v5 .me-num b{color:var(--v5)}
-.me-tile .me-num span{font-size:var(--fs-micro);font-weight:600;color:var(--muted);font-variant-numeric:tabular-nums}
 .me-tile.skel-tile{border-color:transparent;background:linear-gradient(90deg,var(--surface-3),var(--surface-2),var(--surface-3));
   background-size:200% 100%;animation:sh 1.4s infinite linear}
-.me-foot{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-2);font-size:var(--fs-xs);color:var(--muted);padding:var(--sp-1) 2px 0;flex-wrap:wrap}
-.me-foot b{color:var(--text);font-weight:500;font-variant-numeric:tabular-nums}
-.me-foot .btn-text:hover{background:var(--surface-3)}
-.me-busy{margin-top:var(--sp-2);padding:8px 12px;border-radius:var(--radius-xs);background:var(--warn-soft);color:var(--warn);
-  font-size:var(--fs-sm);font-weight:600;display:flex;align-items:center;gap:6px}
-.me-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:var(--sp-2);margin-bottom:var(--sp-3)}
-.me-grid:last-child{margin-bottom:0}
-.me-grid>div{background:var(--surface);border-radius:var(--radius-xs);padding:8px 10px}
-.me-grid span{display:block;font-size:var(--fs-micro);color:var(--text-2)}
-.me-grid b{font-size:var(--fs-h2);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
-.me-grid b small{font-size:var(--fs-micro);font-weight:400;color:var(--text-2);margin-left:3px}
-.me .tag.ok{font-size:var(--fs-micro);padding:2px 8px;border-radius:var(--radius-pill);background:var(--ok-soft);color:var(--ok)}
-.me .link{background:none;border:0;color:var(--text-2);cursor:pointer;font-size:var(--fs-sm);margin-left:auto;text-decoration:underline;text-underline-offset:2px;transition:color .15s}
-.me .link:hover{color:var(--text)}
-
 /* 作品备份 */
 .me-export{margin-top:var(--sp-3);padding-top:var(--sp-3);border-top:1px solid var(--border)}
 .me-export p{margin-top:var(--sp-1)}
@@ -322,10 +311,6 @@ input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 .me-export-btns .btn small{display:block;font-weight:400;font-size:var(--fs-xs);color:var(--text-2)}
 
 /* 邀请 Key 未绑定提示（JS 用了这个类，之前完全没样式 → 现在与「网络确认」同款） */
-.invite-bind{margin-top:var(--sp-3);padding:var(--pad-card-tight);border:1px solid var(--accent);border-radius:var(--radius-sm);
-  background:var(--accent-soft);color:var(--text-2);font-size:var(--fs-sm);line-height:1.5;display:flex;gap:var(--sp-2);align-items:flex-start}
-.invite-bind svg.ic{color:var(--accent);margin-top:1px}
-
 /* 网络确认（防分享核对） */
 .share-check{margin-top:var(--sp-3);padding:var(--pad-card-tight);border:1px solid var(--warn);border-radius:var(--radius-sm);display:grid;gap:var(--sp-2)}
 .share-check b{display:flex;align-items:center;gap:6px;font-size:var(--fs-h3)}
@@ -353,6 +338,7 @@ input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
    两道保险：body（服务端注入 + JS 校正）与 html（旧客户端/JS 禁用时仍生效）。 */
 .guest-only{}
 body.authed .guest-only,html.authed .guest-only{display:none!important}
+body:not(.authed) .member-only{display:none!important}   /* 额度卡：服务端首屏写了 authed 才显示（含骨架屏） */
 body.haskey #algoNote,html.haskey #algoNote{display:none!important}
 
 /* ───────── 提示条 ───────── */
@@ -370,7 +356,6 @@ body.haskey #algoNote,html.haskey #algoNote{display:none!important}
   .rules,.guide{padding:var(--pad-card-tight)}
   .rules{padding:var(--pad-card-tight) var(--sp-4)}
   .me-export-btns{grid-template-columns:1fr}
-  .me-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
   #navStatus{display:inline-flex}
 }
 /* 触屏：小按钮也保证 40px 触控高度 */
@@ -386,25 +371,31 @@ body.haskey #algoNote,html.haskey #algoNote{display:none!important}
   body{font-size:15px}
   .top-link{display:inline-flex}
   .steps{grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1.35fr);gap:var(--gap-card)}
-  .guide{grid-template-columns:1fr 1fr;gap:var(--sp-5)}
   .rules{grid-template-columns:1fr 1fr;gap:var(--sp-2) var(--sp-6);padding:var(--sp-5) var(--sp-6)}
   .card{padding:var(--pad-card)}
-  .me-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
 }
 @media (min-width:1024px){
-  :root{--container-max:920px;--gap-section:16px;--pad-card:18px}
+  :root{--container-max:1040px;--gap-section:16px;--pad-card:18px}
+  body.authed .top-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:var(--gap-section);align-items:start}
+  body.authed .top-grid>section{margin-top:var(--gap-section)}
   .sec-head{margin-bottom:var(--sp-4)}
-  .me-grid{grid-template-columns:repeat(5,minmax(0,1fr))}
 }
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}
 }
-/* ── 捐赠 Key ── */
-#donate .donate-intro{margin:6px 0 12px;color:var(--tx-2,#9a9aa3);font-size:.92rem;line-height:1.7}
-#donate form{display:flex;flex-direction:column;gap:12px;margin-top:4px}
-#donate label{display:flex;flex-direction:column;gap:6px;font-size:.88rem}
-#donate textarea,#donate input{width:100%;background:var(--bg-inset,rgba(255,255,255,.04));border:1px solid var(--bd,rgba(255,255,255,.12));border-radius:10px;padding:10px 12px;color:inherit;font:inherit;resize:vertical}
-#donate textarea:focus,#donate input:focus{outline:none;border-color:var(--accent,#8ab4ff)}
+/* ── 捐赠：站长要求显眼（10-14） ── */
+#donate .card{border:1.5px solid color-mix(in srgb,var(--warn) 55%,transparent);
+  background:linear-gradient(135deg,color-mix(in srgb,var(--warn) 12%,var(--surface)),var(--surface) 70%)}
+.donate-top{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-3);flex-wrap:wrap}
+.donate-top h2{font-size:var(--fs-h2);display:flex;align-items:center;gap:var(--sp-2)}
+.donate-intro{margin:var(--sp-2) 0 0;color:var(--text-2);font-size:var(--fs-sm);line-height:1.7}
+.btn.donate{background:var(--warn);border-color:var(--warn);color:var(--on-warn);font-weight:700}
+.btn.donate:hover{filter:brightness(1.06);background:var(--warn);border-color:var(--warn);color:var(--on-warn)}
+.top-link.donate-link{color:var(--warn);font-weight:600}
+#donate form{display:flex;flex-direction:column;gap:12px;margin-top:var(--sp-3)}
+#donate label{display:flex;flex-direction:column;gap:6px;font-size:var(--fs-sm)}
+#donate textarea,#donate input{width:100%;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;color:var(--text);font:inherit;resize:vertical}
+#donate textarea:focus,#donate input:focus{outline:none;border-color:var(--accent)}
 #donate .donate-actions{display:flex;gap:8px}
 .btn.off{opacity:.55;pointer-events:none;filter:grayscale(.4);cursor:default}
 </style>
@@ -413,9 +404,11 @@ body.haskey #algoNote,html.haskey #algoNote{display:none!important}
 <header class="topbar">
   <div class="topbar-in">
     <div class="brand"><a class="brand-link" href="/" aria-label="猫头鹰公益站 · 回到首页"><span class="brand-mark" aria-hidden="true">🦉</span>猫头鹰公益站</a></div>
+    <a class="top-link donate-link" href="#donate">捐赠</a>
     <a class="top-link" id="navStatus" href="/status" target="_blank" rel="noopener">运行情况</a>
     <a class="top-link" href="/workbench" id="navWorkbench" hidden title="NAI 工作台（内测，只有站长能打开）"><span data-ic="brush"></span>工作台</a>
     <button class="btn ghost icon" id="themeBtn" type="button" aria-label="切换明暗主题" title="切换明暗主题"><span data-ic="theme"></span></button>
+    <a class="btn dc top-login" id="loginBtn" href="/login" hidden><span data-ic="discord"></span>Discord 登录</a>
     <div class="userchip" id="userChip" hidden>
       <button class="chip-btn" id="chipBtn" type="button" aria-haspopup="true" aria-expanded="false">
         <span class="av" id="chipAv" aria-hidden="true"></span><span class="chip-name" id="chipName"></span><span class="caret" aria-hidden="true"></span></button>
@@ -425,28 +418,17 @@ body.haskey #algoNote,html.haskey #algoNote{display:none!important}
 </header>
 
 <main>
-  <section id="live">
+  <p class="login-bar" id="loginHint" hidden>Discord 登录维护中，开放后点右上角登录查看自己的额度</p>
+  <p class="login-bar" id="loginFail" role="alert" hidden>Discord 登录没有成功，请再点一次右上角「Discord 登录」</p>
+  <div class="top-grid">
+  <section id="live" class="member-only">
     <div class="card">
-      <!-- 标题与打码 Key：JS 会按登录状态写文案（查额度 / 我的额度）。
-           2026-10-12 修复：这些 id 只出现在 JS 里、页面上不存在，导致 my key / 标题整段不渲染。 -->
-      <div class="live-h" id="liveTitle">查额度</div>
-      <div class="copyline" id="headKey" hidden></div>
       <div class="me" id="meCard" hidden></div>
-      <div class="loginrow" id="loginRow" hidden>
-        <a class="btn primary dc" id="loginBtn" href="/login" hidden><span data-ic="discord"></span>用 Discord 登录</a>
-        <form class="keylogin" id="keyLogin" autocomplete="off">
-          <input type="password" id="keyLoginIn" placeholder="粘贴你的 Key（nai-…）" aria-label="你的 Key" spellcheck="false">
-          <button class="btn primary" type="submit" id="keyLoginBtn">登录</button>
-        </form>
-        <p class="login-hint" id="loginHint" hidden>Discord 登录维护中，先用 Key 登录；开放后可点上方按钮</p>
-        <p class="login-hint" id="loginFail" role="alert" hidden>Discord 登录没有成功：请再点一次按钮重试，或先用 Key 登录。</p>
-      </div>
     </div>
   </section>
 
   <section id="board" aria-labelledby="stBig">
     <div class="card board-card">
-      <!-- 实时状态行：大字 + 单行理由 + 0人排队 -->
       <div class="board-top">
         <div class="board-st">
           <div class="board-h">
@@ -459,8 +441,6 @@ body.haskey #algoNote,html.haskey #algoNote{display:none!important}
           <div id="stQueue">0 人排队</div>
         </div>
       </div>
-
-      <!-- 全站大盘：左右两端对齐 + 单行双色堆叠条 -->
       <div class="board-quota">
         <div class="board-quota-txt">
           <span class="q-total">全站今日已用 <b id="dTotal">0</b> / <span id="dTotalCap">0</span></span>
@@ -475,6 +455,7 @@ body.haskey #algoNote,html.haskey #algoNote{display:none!important}
       <p class="algo-note" id="algoNote" hidden></p>
     </div>
   </section>
+  </div>
 
   <section id="announce" hidden>
     <div class="card"><div class="ah"><span data-ic="megaphone"></span>站长公告</div><div id="annBox"></div></div>
@@ -482,9 +463,11 @@ body.haskey #algoNote,html.haskey #algoNote{display:none!important}
 
   <section id="donate">
     <div class="card">
-      <div class="ah">捐赠 Key · 让公益站跑得更久</div>
-      <p class="donate-intro">站点的出图名额全部来自大家捐赠的号池。愿意捐一个 NovelAI 账号的话（<b>V4.5 无限出图</b>最帮得上忙），把 Token 粘给站长并附一句<b>使用要求</b>（比如「只用 4.5」「周末别用」）。提交只进站长后台，人工验证后才接入，不会自动生效。</p>
-      <button class="btn" id="donateBtn" type="button">💝 我要捐赠</button>
+      <div class="donate-top">
+        <h2>💝 捐一个 NovelAI 账号，让更多人能画</h2>
+        <button class="btn donate" id="donateBtn" type="button">我要捐赠</button>
+      </div>
+      <p class="donate-intro">本站所有出图额度都来自大家捐赠的账号。<b>V4.5 无限出图</b>的账号最帮得上忙；可以附一句使用要求（比如「只用 4.5」「周末别用」）。提交只给站长看，人工验证后才接入。</p>
       <form id="donateForm" hidden autocomplete="off">
         <label>NovelAI Token（登录 novelai.net → Account 页整段复制，只给站长看）
           <textarea id="donateToken" rows="3" spellcheck="false" placeholder="粘贴整段 Token（约几百个字符）"></textarea></label>
@@ -523,8 +506,8 @@ body.haskey #algoNote,html.haskey #algoNote{display:none!important}
       </li>
     </ol>
     <div class="card guide">
-      <div>
-        <h3><span data-ic="image"></span>示例：柏宝绘</h3>
+      <details class="more">
+        <summary><span data-ic="image"></span>柏宝绘</summary>
         <ol>
           <li>打开「渠道」→「配置」</li>
           <li>点击「新建接入点」</li>
@@ -532,7 +515,7 @@ body.haskey #algoNote,html.haskey #algoNote{display:none!important}
           <li>「API Key」填写你的 Key</li>
         </ol>
         <p>任何支持自定义 NovelAI 地址的客户端都可以按同样方式填写。</p>
-      </div>
+      </details>
       <details class="more">
         <summary><span data-ic="code"></span>文本客户端（OpenAI 兼容）</summary>
         <p>只给聊天、写作类客户端用；生图客户端请填步骤 3 里不带 /v1 的地址。</p>
@@ -552,14 +535,14 @@ body.haskey #algoNote,html.haskey #algoNote{display:none!important}
   </section>
 
   <section id="rules" class="guest-only">
-    <div class="sec-head"><h2>使用须知</h2><p>请仔细阅读以下规范，合理使用公益资源，避免被限流或封禁。</p></div>
+    <div class="sec-head"><h2>使用须知</h2></div>
     <ul class="rules card">
-      <li><span class="ri" data-ic="code"></span><span><b>客户端怎么填</b>：生图客户端（Aaalice 启动器 / 酒馆 SillyTavern / DSH 插件 / 柏宝绘 / 智绘姬 等）接口地址填 <code id="siteTxt3">—</code>（末尾不要加 <code>/v1</code>），API Key 填你领到的专属 Key。</span></li>
-      <li><span class="ri" data-ic="image"></span><span><b>出图模型规格</b>：推荐 <code>V4.5 Full</code> 与极速 <code>V5 Full</code>（V5 仅需 4~5 秒完成出图，适合找灵感与快速 Roll 图）。免费尺寸上限 1024×1024 或等总像素（如 832×1216），步数建议 ≤ 28。<b>Vibe 氛围参考已开放</b>：编码参考图会消耗 Anlas 点数（全站每日 1000 点，先到先得，抢完明天恢复）；图生图等其余付费功能仍需站长开通。</span></li>
-      <li><span class="ri" data-ic="clock"></span><span><b>一次一张，别狂重试</b>：单并发控制，每把 Key 同时只排队或生成 1 张，出完再发下一张。如遇排队请耐心等待——1 小时内连续被拒 60 次会自动触发 1 小时安全冷却，到点自动恢复。</span></li>
-      <li><span class="ri" data-ic="info"></span><span><b>查额度、自助换 Key</b>：在 Discord 输入 <code>/quota</code> 随时查看今日剩余免费额度与状态；若怀疑 Key 泄露或遇到配置异常，在 Discord 输入 <code>/resetkey</code> 可一键自助更换新 Key。</span></li>
-      <li><span><b>一人一把，严禁转售与共用</b>：公益资源有限，Key 仅限本人使用（挂梯子换节点、手机电脑多设备正常使用完全不受影响；多人同时共用或转售会被系统记录证据并回收 Key）。退出 Discord 服务器或长期闲置后 Key 会被自动回收<span id="ruleIdle" hidden>（连续 <b id="idleDays"></b> 天没生图）</span>。</span></li>
-      <li><span class="ri" data-ic="ban"></span><span><b>合规安全，禁止违禁</b>：严禁生成违反法律法规或极端有害的内容，违规账号将被永久封禁并不再恢复。</span></li>
+      <li><span class="ri" data-ic="code"></span><span><b>地址</b>：生图客户端填 <code id="siteTxt3">—</code>（不加 <code>/v1</code>），API Key 填你的 Key。</span></li>
+      <li><span class="ri" data-ic="image"></span><span><b>规格</b>：推荐 <code>V4.5 Full</code> / <code>V5 Full</code>，免费尺寸 ≤ 1024×1024（或等像素），步数 ≤ 28。Vibe 消耗 Anlas，每人每天有上限。</span></li>
+      <li><span class="ri" data-ic="clock"></span><span><b>一次一张</b>：每把 Key 同时只排 1 张；1 小时内被拒 60 次会冷却 1 小时。</span></li>
+      <li><span class="ri" data-ic="info"></span><span><b>查额度 / 换 Key</b>：Discord 里 <code>/quota</code> 查额度，<code>/resetkey</code> 换新 Key。</span></li>
+      <li><span class="ri" data-ic="ban"></span><span><b>一人一把</b>：共用或转售会被记录证据并回收 Key；退出服务器或长期闲置也会回收<span id="ruleIdle" hidden>（连续 <b id="idleDays"></b> 天没生图）</span>。</span></li>
+      <li><span class="ri" data-ic="ban"></span><span><b>合规</b>：禁止违法或极端有害内容，违规永久封禁。</span></li>
       <!-- 记录披露（开启「生成记录」时由服务端下发 audit_notice；关着不显示） -->
       <li id="audit" hidden><span class="ri" data-ic="info"></span><span id="auditTxt"></span></li>
     </ul>
@@ -569,7 +552,7 @@ body.haskey #algoNote,html.haskey #algoNote{display:none!important}
 
 </main>
 
-<footer>猫头鹰公益站 · 非商业公益服务，不保证可用性</footer>
+<footer>猫头鹰公益站 · 非商业公益服务，不保证可用性 · <a href="#donate">捐赠 NovelAI 账号</a></footer>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script>
@@ -686,11 +669,8 @@ function renderStatus(d){
     $('audit').hidden = !an;
     if($('auditTxt')) $('auditTxt').textContent = an;
   }
-  var paused = d.web_login !== true;          // 只有服务端明确说开放才显示登录按钮
-  if($('loginBtn')) $('loginBtn').hidden = paused;
-  if($('loginHint')) $('loginHint').hidden = !paused;
-  /* /login/callback 失败会回到 /?login=failed：以前页面不读这个参数，成员点完授权只看到首页、不知道没登上 */
-  if($('loginFail')) $('loginFail').hidden = paused || !/[?&]login=failed\b/.test(location.search);
+  LOGIN_OPEN = d.web_login === true;          // 只有服务端明确说开放才显示登录按钮
+  syncLogin();
   try{ document.dispatchEvent(new CustomEvent('owl-status', {detail: d})); }catch(_){}
 }
 /* （10-14 重构）statusFailed 与 30s 的 /public/status 轮询已退役：meta 并入每秒的 /public/live */
@@ -716,25 +696,31 @@ function renderChip(d){
   $('mLogout').onclick = function(){ fetch('/logout', {method:'POST', credentials:'include'}).then(function(){ location.reload(); }); };
   chip.hidden = false;
 }
+var LOGIN_OPEN = null;      // null = 还没拿到 /public/live
+/* 登录入口只有 Discord（10-14 站长：Key 粘贴登录删除）。右上角按钮 + 维护中 / 失败提示条 */
+function syncLogin(){
+  var authed = !!(ME && ME.logged_in), known = LOGIN_OPEN !== null;
+  if($('loginBtn')) $('loginBtn').hidden = authed || LOGIN_OPEN !== true;
+  if($('loginHint')) $('loginHint').hidden = authed || !known || LOGIN_OPEN;
+  /* /login/callback 失败会回到 /?login=failed：成员点完授权得知道没登上 */
+  if($('loginFail')) $('loginFail').hidden = authed || LOGIN_OPEN !== true || !/[?&]login=failed\b/.test(location.search);
+}
+function meter(cls, tag, used, cap, title){
+  var lim = cap > 0 ? cap : '不限', w = cap > 0 ? Math.min(100, Math.round(used / cap * 100)) : 0;
+  return '<div class="meter ' + cls + '"><div class="meter-top"><span class="m-tag">' + tag + '</span><span><b class="num"' + (title ? ' title="' + title + '"' : '') + '>' + used + '</b><small> / ' + lim + '</small></span></div>'
+    + '<div class="meter-bar"><i style="width:' + w + '%"></i></div></div>';
+}
 function renderMe(d){
   ME = d;
-  var me = $('meCard'), lr = $('loginRow');
+  var me = $('meCard');
   var authed = !!(d && d.logged_in);
   document.body.classList.toggle('authed', authed);
-  // 登录且已有 Key 时，隐藏「全站算法分配」那句——它和下面你自己的额度数字会打架
+  // 登录且已有 Key 时，隐藏「全站算法分配」那句——它和你自己的额度数字会打架
   document.body.classList.toggle('haskey', !!(authed && d && d.has_key));
   renderChip(d);
-  /* 站长反馈（两轮）：登录后这个标题**整体都不要**（下面就是额度数字），连钥匙图标一起隐藏；
-     未登录时才显示「🔑 查额度」作引导。 */
-  if($('liveTitle')){
-    $('liveTitle').hidden = !!authed;
-    if(!authed) $('liveTitle').textContent = '查额度';
-  }
-  if(authed && d && d.has_key){ /* 领取胶囊已删 */ }
-  var hk = $('headKey');
-  if(hk){ hk.hidden = true; hk.innerHTML = ''; }
-  if(!authed){ me.hidden = true; lr.hidden = false; return; }
-  lr.hidden = true; me.hidden = false;
+  syncLogin();
+  if(!authed){ me.hidden = true; return; }
+  me.hidden = false;
   var dc = d.discord || {}, nm = esc(dc.display_name || dc.username || '成员');
   if(!d.has_key){
     var regc = d.registration || {};
@@ -743,15 +729,11 @@ function renderMe(d){
       : '在 Discord 输入 <code>/register</code> 即可领取。';
     me.innerHTML = '<p class="me-empty">你好，' + nm + '！你还没有 Key。' + tip + '</p>';
   }else{
-    var t = d.today || {}, q = d.queue || [];
+    var t = d.today || {};   // 排队位置只在下方状态卡显示，不重复
     var v45 = t.legacy != null ? t.legacy : Math.max(0, (t.images || 0) - (t.v5 || 0));
-    var lim45 = t.daily_images > 0 ? t.daily_images : '不限';
-    var lim5 = t.daily_v5 > 0 ? t.daily_v5 : (d.image_scope === 'all' ? '不限' : '0');
-    if(hk){
-      hk.innerHTML = '<code title="你的 Key（已打码）">' + esc(maskKey(d.key)) + '</code>'
-        + '<button class="btn primary mini" id="copyKeyBtn" type="button">' + icon('copy') + '复制 Key</button>';
-      hk.hidden = false;
-    }
+    var lim45 = t.daily_images > 0 ? t.daily_images : 0;
+    var lim5 = t.daily_v5 > 0 ? t.daily_v5 : (d.image_scope === 'all' ? 0 : -1);
+    var reset = t.reset_hour != null ? t.reset_hour : 7;
     var retDays = d.image_retention_days != null ? d.image_retention_days : 3;
     var expBlock = retDays === 0
       ? ''
@@ -760,27 +742,19 @@ function renderMe(d){
           + '<p class="muted sm">可以打包你最近 ' + retDays + ' 天的 ' + d.images_stored + ' 张原图，用来找回客户端里误删的图。这不是长期相册，请自己保存好；打包较重，每分钟限 1 次。</p>'
           + '<div class="me-export-btns"><a class="btn exp" href="/public/my-export?format=epub">' + icon('book') + '<span>EPUB 画册<small>一图一页，附提示词和参数，手机、电脑的图书 App 都能打开</small></span></a>'
           + '<a class="btn exp" href="/public/my-export?format=zip">' + icon('image') + '<span>原图 ZIP<small>PNG 原图 + prompts.txt，适合存档或二次编辑</small></span></a></div></div>'
-        : '<div class="me-export"><div class="me-export-h">' + icon('archive') + '作品备份<span class="beta">beta</span></div>'
-          + '<p class="muted sm">最近 ' + retDays + ' 天还没有可备份的原图。出图后会出现在这里。</p></div>');
-    var tm = d.timing || {};
-    var durText = (tm.avg_dur_s != null) ? (tm.avg_dur_s + 's') : '—';
+        : '');
     var expText = d.expires_at ? fmtDate(d.expires_at).slice(5, 10) : '长期';
-    var busyHtml = '';
-    if(q.length){
-      if(q[0].state === 'running') busyHtml = '<div class="me-busy">' + icon('image') + '<span>你的图正在生成，预计十几秒</span></div>';
-      else busyHtml = '<div class="me-busy">' + icon('clock') + '<span>你的图排在第 ' + q[0].position + ' 位</span></div>';
-    }
-
-    me.innerHTML = '<div class="me-tiles">'
-      + '<div class="me-tile"><span class="me-tag">V4.5</span><div class="me-num"><b class="num">' + v45 + '</b><span> / ' + lim45 + '</span></div></div>'
-      + '<div class="me-tile v5"><span class="me-tag">V5</span><div class="me-num"><b class="num"' + (lim5 === '不限' ? ' title="个人不限额度，仍受全站日上限约束"' : '') + '>' + (t.v5 || 0) + '</b><span> / ' + lim5 + '</span></div></div>'
+    me.innerHTML = '<div class="me-head"><h2>我今天的额度</h2><span>每天 ' + reset + ' 点重置</span></div>'
+      + '<div class="meters">'
+      + meter('', 'V4.5', v45, lim45)
+      + (lim5 === -1 ? '' : meter('v5', 'V5', t.v5 || 0, lim5, lim5 === 0 ? '个人不限额度，仍受全站日上限约束' : ''))
+      + (t.daily_anlas > 0 ? meter('an', 'Anlas', t.anlas || 0, t.daily_anlas) : '')
       + '</div>'
-      + '<div class="me-foot">'
-      + '<div>均耗 <b class="num">' + durText + '</b></div>'
-      + '<div>有效期至 <b class="num">' + expText + '</b></div>'
+      + '<div class="me-key">'
+      + '<div class="copyline"><span class="mono" title="你的 Key（已打码）">' + esc(maskKey(d.key)) + '</span><button class="btn primary mini" id="copyKeyBtn" type="button">' + icon('copy') + '复制 Key</button></div>'
+      + '<div class="copyline"><span class="mono">' + esc(site) + '</span><button class="btn mini" type="button" data-copy="site">' + icon('copy') + '复制地址</button></div>'
+      + '<p class="muted sm">有效期至 ' + expText + ' · Key 泄露了在 Discord 用 <code>/resetkey</code> 换新</p>'
       + '</div>'
-      + busyHtml
-      + (d.invite_unbound ? '<div class="invite-bind">' + icon('info') + '<span>这是邀请 Key，还没绑定 Discord 账号。请在 Discord 输入 <code>/register</code>，把这把 Key 粘贴到 <code>key</code> 一栏完成绑定。</span></div>' : '')
       + shareCheckHtml(d.share_check)
       + couponsHtml(d.coupons || [])
       + expBlock;
@@ -844,7 +818,7 @@ function bindShareCheck(root){
 function couponsHtml(list){
   if(!list.length) return '';
   return '<div class="me-coupons">' + list.map(function(c){
-    var left = Math.max(0, c.expires_at - Date.now()/1000), days = Math.floor(left / 86400), hrs = Math.ceil((left % 86400) / 3600);
+    var hTot = Math.ceil(Math.max(0, c.expires_at - Date.now()/1000) / 3600), days = Math.floor(hTot / 24), hrs = hTot % 24;   // 先取整再拆，避免「2 天 24 小时」
     var exp = days >= 1 ? days + ' 天' + (hrs ? ' ' + hrs + ' 小时' : '') : hrs + ' 小时';
     return '<div class="coupon" data-cid="' + Number(c.id) + '"><div class="cp-l"><span class="cp-ic" aria-hidden="true">🎟️</span><div><b>重置券</b>'
       + '<span class="cp-d">重置今天的 V5 与 Anlas 额度，一张用一次 · 还有 ' + exp + '过期</span>'
@@ -878,22 +852,6 @@ function loadWorkbenchLink(){
 }
 loadWorkbenchLink();
 function loadMe(){ fetch('/public/me', {cache:'no-store', credentials:'include'}).then(function(r){ return r.ok ? r.json() : null; }).then(renderMe, function(){ renderMe(null); }); }
-(function(){
-  var f = $('keyLogin'); if(!f) return;
-  f.addEventListener('submit', function(e){
-    e.preventDefault();
-    var v = ($('keyLoginIn').value || '').trim(), b = $('keyLoginBtn');
-    if(!/^nai-/.test(v)){ toast('请粘贴完整的 Key（以 nai- 开头）'); return; }
-    b.disabled = true;
-    fetch('/login/key', {method:'POST', credentials:'include', headers:{'Content-Type':'application/json'}, body: JSON.stringify({key: v})})
-      .then(function(r){ return r.json().catch(function(){ return {}; }).then(function(j){ return {ok: r.ok, j: j}; }); })
-      .then(function(x){
-        b.disabled = false;
-        if(!x.ok){ toast((x.j && x.j.detail) || '登录失败'); return; }
-        $('keyLoginIn').value = ''; toast('已登录'); loadMe();
-      }, function(){ b.disabled = false; toast('网络错误，请重试'); });
-  });
-})();
 loadMe();
 setInterval(function(){ if(!document.hidden) loadMe(); }, 60000);      // Key 被 /resetkey 换掉、今日用量变化时跟着更新
 document.addEventListener('visibilitychange', function(){ if(!document.hidden) loadMe(); });

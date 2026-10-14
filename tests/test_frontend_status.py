@@ -46,7 +46,7 @@ def test_landing_html_clean_and_valid():
     # 额度为 0（不限）时不再显示 / 0，且 V5 不限时标注全站上限约束
     assert "lim45" in content
     assert "lim5" in content
-    assert 'title="个人不限额度，仍受全站日上限约束"' in content
+    assert "个人不限额度，仍受全站日上限约束" in content
 
     # 运行情况看板整合为单一 board-card
     assert 'id="kMem"' not in content and 'class="kpis"' not in content
