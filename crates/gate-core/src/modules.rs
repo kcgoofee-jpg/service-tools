@@ -28,17 +28,13 @@
 //! - tick：`quota_algo.run(state)`，摘要 [`allocation_tick_summary`]。
 //! - checks：先 [`allocation_query`] 解析 `quota_algo_last`；`keys` = `SELECT COUNT(*) FROM api_keys WHERE quota_auto=1 AND is_admin=0 AND is_test=0 AND enabled=1`；
 //!   `drift` = 同一条再加 `AND (daily_images<>? OR daily_v5<>?)`，参数 `(a, each)`（`a` 为 NULL 时 SQL 比较恒不成立 → 0）；
-//!   `ack_oversell` = `bool(get_setting("ack_v5_oversell", ""))`（非空字符串即真，包括 `"0"`）；
 //!   `base` = `guard.values.get("base_daily_images")`（没有 Guard 传 `Some(0)`）。
 //!
 //! ## autopilot（自动驾驶）
 //! - tick：`autopilot.run`，摘要 [`autopilot_tick_summary`]。
 //!
-//! ## registration / registration_ready（领 Key / 开注册就绪度）
-//! - `RegistrarInfo`：`registrar.settings()` 里的 `max_users` / `daily_images` / `daily_v5`（均 `or 0`）、`registrar.count_active()`、
-//!   以及注册服务对象上的环境变量值 `key_daily_images` / `key_daily_v5` / `max_users`（缺省 0）；没有注册服务传 `None`。
-//! - `open_now` = `site_flags.get(REGISTER_OPEN)`；`hourly` = `site_flags.get(ISSUE_HOURLY_CAP)`（可用 [`issue_hourly_cap`] 解析原始设置值）；
-//!   `ack` = `bool(get_setting("ack_registration_ready", ""))`；`account_daily_cap` = `guard.values["account_daily_cap"]`；`tokens` = 可用上游账号数。
+//! ## registration（领 Key）
+//! - `RegistrarInfo`：`registrar.settings()` 里的 `max_users`（`or 0`）、`registrar.count_active()`；没有注册服务传 `None`。
 //!
 //! ## observation（观测）
 //! - 起点 [`observation_start`]（**本地 0 点**，不是服务日起点——与旧版一致）；
@@ -47,9 +43,7 @@
 //!   `quota_state` = 设置 `quota_algo_last` 的原始字符串。
 
 use crate::clock::Clock;
-use crate::quota::{
-    DecideError, PyNum, V5_FALLBACK_RATE, fmt_prec, hget, loads_setting, num, site_int,
-};
+use crate::quota::{DecideError, PyNum, V5_FALLBACK_RATE, fmt_prec, hget, loads_setting, num};
 use crate::{autopilot, pyc, pyval, quota};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -74,12 +68,6 @@ impl Check {
             evidence: Vec::new(),
         }
     }
-
-    fn warn(name: &str, ok: bool, detail: impl Into<String>) -> Self {
-        let mut c = Self::new(name, ok, detail);
-        c.level = "warn".to_string();
-        c
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -93,7 +81,6 @@ pub struct ModuleMeta {
     pub question: &'static str,
     pub hard_note: &'static str,
     pub default_enabled: bool,
-    pub report_bugs: bool,
     /// 有周期任务（`tick`）。
     pub periodic: bool,
     /// 有交叉校验（`checks`）。
@@ -105,14 +92,13 @@ pub struct ModuleMeta {
 }
 
 /// 按 `modules.build()` 的登记顺序。
-pub const MODULES: [ModuleMeta; 7] = [
+pub const MODULES: [ModuleMeta; 6] = [
     ModuleMeta {
         name: "observation",
         title: "观测",
         question: "各处记录的数字对不对得上",
         hard_note: "关闭后不再核对；日志照常记录",
         default_enabled: true,
-        report_bugs: true,
         periodic: false,
         has_checks: true,
         custom_enabled: false,
@@ -124,7 +110,6 @@ pub const MODULES: [ModuleMeta; 7] = [
         question: "每个上游账号一小时、一天能出多少张",
         hard_note: "关闭后不再自动调每小时上限；各项上限照常生效",
         default_enabled: true,
-        report_bugs: true,
         periodic: true,
         has_checks: true,
         custom_enabled: false,
@@ -142,7 +127,6 @@ pub const MODULES: [ModuleMeta; 7] = [
         question: "每人每天能出多少张（所有人一样）",
         hard_note: "关闭后额度冻结在当前值",
         default_enabled: true,
-        report_bugs: true,
         periodic: true,
         has_checks: true,
         custom_enabled: false,
@@ -159,7 +143,6 @@ pub const MODULES: [ModuleMeta; 7] = [
         question: "名额、全站熔断、单个 Key 限流",
         hard_note: "关闭后这些设置保持当前值",
         default_enabled: true,
-        report_bugs: true,
         periodic: true,
         has_checks: false,
         custom_enabled: false,
@@ -171,7 +154,6 @@ pub const MODULES: [ModuleMeta; 7] = [
         question: "出站请求像不像正常浏览器，有没有滥用迹象",
         hard_note: "关闭后不再体检；不影响任何处罚",
         default_enabled: true,
-        report_bugs: false,
         periodic: false,
         has_checks: true,
         custom_enabled: false,
@@ -183,29 +165,10 @@ pub const MODULES: [ModuleMeta; 7] = [
         question: "新成员能不能领 Key",
         hard_note: "关闭 = 暂停领取；已领的成员和邀请 Key 绑定不受影响",
         default_enabled: true,
-        report_bugs: true,
         periodic: false,
         has_checks: true,
         custom_enabled: true,
         params: &[("Key 有效天数", ""), ("闲置回收", "")],
-    },
-    ModuleMeta {
-        name: "registration_ready",
-        title: "开注册就绪度",
-        question: "把领 Key 打开会发生什么：名额能兑现吗、链路通吗",
-        hard_note: "只读体检；不影响领 Key 开关、不改任何额度",
-        default_enabled: true,
-        report_bugs: true,
-        periodic: false,
-        has_checks: true,
-        custom_enabled: false,
-        params: &[
-            ("每小时最多发放", ""),
-            (
-                "容量能兑现的名额",
-                "全站日容量 ÷ 每人额度：开注册前先看这一条",
-            ),
-        ],
     },
 ];
 
@@ -432,58 +395,15 @@ pub struct AllocationInputs {
     pub last_raw: Option<String>,
     pub keys: i64,
     pub drift: i64,
-    pub ack_oversell: bool,
     /// `guard.values.get("base_daily_images")`（没有 Guard 时传 `Some(0)`）。
     pub base: Option<i64>,
 }
 
 pub fn allocation_checks(inp: &AllocationInputs) -> Result<Vec<Check>, DecideError> {
-    let Some(_q) = allocation_query(inp.last_raw.as_deref())? else {
+    let Some(q) = allocation_query(inp.last_raw.as_deref())? else {
         return Ok(Vec::new());
     };
-    let last = state_json(inp.last_raw.as_deref());
-    let v5 = hget(&last, "v5")?.filter(|v| pyval::truthy(v));
-    let (each, global_v5) = match v5 {
-        Some(v) => (
-            num_or_zero(hget(v, "each")?)?,
-            num_or_zero(hget(v, "global")?)?,
-        ),
-        None => (PyNum::Int(0), PyNum::Int(0)),
-    };
-    let a = hget(&last, "ceiling")?.cloned().unwrap_or(Value::Null);
-    let sold = each.mul_int(inp.keys);
-    let name = "V5：每人额度 × 人数 ≤ 全站上限";
-    let oversell = if inp.ack_oversell {
-        // 超卖是「先到先得」的有意设计（站长已在后台确认）：转绿，数字仍显示
-        Check::new(
-            name,
-            true,
-            format!(
-                "站长已确认先到先得：每人 {} × {} 人 = {} 张，全站上限 {} 张",
-                each.py_str(),
-                inp.keys,
-                sold.py_str(),
-                global_v5.py_str()
-            ),
-        )
-    } else {
-        let over = global_v5.truthy() && sold.as_f64() > global_v5.as_f64();
-        let mut detail = format!(
-            "每人 {} × {} 人 = {} 张，全站上限 {} 张",
-            each.py_str(),
-            inp.keys,
-            sold.py_str(),
-            global_v5.py_str()
-        );
-        if over {
-            detail.push_str(&format!(
-                "：超卖 {} 张，先到先得，后到的成员拿不到「每人 {} 张」",
-                sold.minus(global_v5).py_str(),
-                each.py_str()
-            ));
-        }
-        Check::new(name, !over, detail)
-    };
+    let a = q.a;
     // V4.5：保底层只在 保底 < 每日上限 时存在；算法把两者设成同一个数后这一层就没了
     let base = inp.base;
     let a_truthy = pyval::truthy(&a);
@@ -511,7 +431,6 @@ pub fn allocation_checks(inp: &AllocationInputs) -> Result<Vec<Check>, DecideErr
             inp.drift == 0,
             format!("{} 把 Key 的额度和算法结果不一致", inp.drift),
         ),
-        oversell,
         base_check,
     ])
 }
@@ -557,17 +476,11 @@ pub fn autopilot_slots_text() -> String {
 // 领 Key
 // ---------------------------------------------------------------------------
 
-/// 注册服务给出的数字（`registrar.settings()` 各项已 `or 0`；`env_*` 是服务对象上的环境变量值）。
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(deny_unknown_fields)]
+/// 注册服务给出的数字（`registrar.settings().max_users`，已 `or 0`；`registrar.count_active()`）。
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RegistrarInfo {
     pub max_users: i64,
-    pub daily_images: i64,
-    pub daily_v5: i64,
     pub active: i64,
-    pub env_daily_images: i64,
-    pub env_daily_v5: i64,
-    pub env_max_users: i64,
 }
 
 /// 「领 Key」模块校验。没有注册服务返回空列表。
@@ -592,139 +505,6 @@ pub fn idle_recycle_text(days: i64) -> String {
         format!("{days} 天")
     } else {
         "关".to_string()
-    }
-}
-
-// ---------------------------------------------------------------------------
-// 开注册就绪度
-// ---------------------------------------------------------------------------
-
-/// `site_flags.get(ISSUE_HOURLY_CAP)`：int，默认 12，范围 0～500。
-pub fn issue_hourly_cap(raw: Option<&str>) -> i64 {
-    site_int(raw, 0.0, 500.0, 12)
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RegistrationReadyInputs {
-    pub open_now: bool,
-    pub registrar: Option<RegistrarInfo>,
-    pub account_daily_cap: i64,
-    pub tokens: usize,
-    pub hourly: i64,
-    pub ack: bool,
-}
-
-/// 全站一天的出图容量 = 上游账号数 × 每账号日上限（至少按 1 个账号算）。
-pub fn site_daily(account_daily_cap: i64, tokens: usize) -> i64 {
-    account_daily_cap * std::cmp::max(1, tokens) as i64
-}
-
-pub fn registration_ready_checks(inp: &RegistrationReadyInputs) -> Vec<Check> {
-    let Some(reg) = &inp.registrar else {
-        // 服务没配起来：开关是关的就没事；开着的话成员会看到「领 Key 暂不可用」
-        return vec![Check::new(
-            "注册链路已配置",
-            !inp.open_now,
-            "领 Key 开关是打开的，但网关没有注册服务配置（DISCORD_CLIENT_ID / \
-             DISCORD_CLIENT_SECRET / DISCORD_BOT_TOKEN / REGISTRATION_BRIDGE_SECRET / \
-             DISCORD_GUILD_ID / SITE_URL 缺项）：成员用 /register 只会看到「暂不可用」",
-        )];
-    };
-    let (cap, per, v5_per, active) = (reg.max_users, reg.daily_images, reg.daily_v5, reg.active);
-    let daily = site_daily(inp.account_daily_cap, inp.tokens);
-    let mut out = vec![Check::new(
-        "注册链路已配置",
-        true,
-        format!(
-            "{}；配置齐备（网关能签发 Key，Key 通过临时消息发给本人）",
-            if inp.open_now {
-                "开放中"
-            } else {
-                "当前关闭"
-            }
-        ),
-    )];
-    // ① 每人承诺 × 人数 vs 全站日容量
-    if per != 0 && daily != 0 {
-        let promise = active * per;
-        if inp.ack {
-            out.push(Check::new(
-                "每人承诺 ≤ 全站日容量",
-                true,
-                format!(
-                    "站长已确认先到先得：每人 {per} 张 × {active} 人 = {promise} 张 vs 全站 {daily} 张/天（{} 个上游账号）",
-                    inp.tokens
-                ),
-            ));
-        } else {
-            out.push(Check::warn(
-                "每人承诺 ≤ 全站日容量",
-                promise <= daily,
-                format!(
-                    "每人 {per} 张 × {active} 人 = {promise} 张 vs 全站 {daily} 张/天（{} 个上游账号）：平分下来每人每天约 {} 张，先到先得；只有前约 {} 个名额能拿满 {per} 张",
-                    inp.tokens,
-                    pyc::floordiv(daily, std::cmp::max(1, active)),
-                    pyc::floordiv(daily, std::cmp::max(1, per))
-                ),
-            ));
-        }
-    }
-    // ② 领取速度 × 每人额度 = 每小时新增的边际需求，不能超过全站一天的量
-    if inp.hourly != 0 && per != 0 && daily != 0 {
-        let ramp = inp.hourly * per;
-        out.push(Check::new(
-            "每小时领取上限 ≤ 全站日容量",
-            ramp <= daily,
-            format!(
-                "每小时最多发 {} 个名额 × 每人 {per} 张 = {ramp} 张/小时的边际需求（全站 {daily} 张/天，约占 {}%）",
-                inp.hourly,
-                pyc::round0(ramp as f64 / daily as f64 * 100.0)
-            ),
-        ));
-    }
-    // ③ 后台额度 vs 环境变量：后台值被清掉时会跳回环境变量（可能是很早前写的大数）
-    let mut drift: Vec<String> = Vec::new();
-    for (label, db_value, env_value) in [
-        ("每人张数", per, reg.env_daily_images),
-        ("每人 V5", v5_per, reg.env_daily_v5),
-        ("名额上限", cap, reg.env_max_users),
-    ] {
-        if env_value != 0 && db_value != env_value {
-            drift.push(format!("{label} 后台 {db_value} / 环境变量 {env_value}"));
-        }
-    }
-    out.push(Check::warn(
-        "后台额度与环境变量一致",
-        drift.is_empty(),
-        drift.join("；")
-            + if drift.is_empty() {
-                ""
-            } else {
-                "（后台值被清掉会跳到环境变量那个数）"
-            },
-    ));
-    out
-}
-
-/// 面板参数「每小时最多发放」。
-pub fn hourly_text(cap: i64) -> String {
-    if cap != 0 {
-        format!("{cap} 个名额/小时")
-    } else {
-        "不限".to_string()
-    }
-}
-
-/// 面板参数「容量能兑现的名额」：全站日容量 ÷ 每人额度。`per` 为 0 显示「—」。
-pub fn seats_text(per: i64, daily: i64) -> String {
-    if per != 0 {
-        format!(
-            "约 {} 人（{daily} 张/天 ÷ 每人 {per} 张）",
-            pyc::floordiv(daily, per)
-        )
-    } else {
-        "—".to_string()
     }
 }
 

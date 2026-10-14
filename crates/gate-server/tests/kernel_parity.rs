@@ -9,6 +9,8 @@
 //! 不逐位比较的地方（夹具生成脚本里同样说明）：
 //! - 异常消息 / 堆栈：只比异常类型（`loose_errors` 场景还忽略 Bug 表，特征码里有 Python 堆栈位置）；
 //! - risk 模块里「出站请求头」「TLS 指纹」两条（3.0 换了文案，见 docs/v3-deviations.md）：两边都用固定占位；
+//! - 3.0 删掉的东西（docs/v3-deviations.md #44）：夹具是冻结的 Python 输出，不重新生成，比较前把这些从期望里去掉——
+//!   被删的整个模块、分配模块里被删的那条校验（连带按剩下的校验重算运行条级别），以及校验没通过时记的 Bug 行。
 
 use flate2::read::GzDecoder;
 use futures::future::BoxFuture;
@@ -57,8 +59,8 @@ fn load_cases() -> Vec<Value> {
 
 struct FakeRegistrar {
     db: gate_db::Db,
-    /// (key_daily_images, key_daily_v5, max_users)
-    env: (i64, i64, i64),
+    /// 环境变量里的名额上限（后台没存过时用它）
+    max_users_env: i64,
     active: i64,
 }
 
@@ -77,19 +79,14 @@ impl KernelRegistrar for FakeRegistrar {
     fn settings(&self) -> BoxFuture<'_, Result<RegistrarSettings, String>> {
         Box::pin(async move {
             Ok(RegistrarSettings {
-                max_users: self.int_setting("register_max_users", self.env.2).await?,
-                daily_images: self
-                    .int_setting("register_daily_images", self.env.0)
+                max_users: self
+                    .int_setting("register_max_users", self.max_users_env)
                     .await?,
-                daily_v5: self.int_setting("register_daily_v5", self.env.1).await?,
             })
         })
     }
     fn count_active(&self) -> BoxFuture<'_, Result<i64, String>> {
         Box::pin(async move { Ok(self.active) })
-    }
-    fn env_defaults(&self) -> (i64, i64, i64) {
-        self.env
     }
 }
 
@@ -367,6 +364,154 @@ fn compare_writes(
 }
 
 // ---------------------------------------------------------------------------
+// 3.0 删掉的部分（docs/v3-deviations.md #44）：比较前从冻结夹具的期望里去掉
+// ---------------------------------------------------------------------------
+
+/// 被删的模块。
+const REMOVED_MODULE: &str = "registration_ready";
+/// 分配模块里被删的校验（每人额度 × 人数 vs 全站上限）。
+const REMOVED_CHECK_MODULE: &str = "allocation";
+const REMOVED_CHECK: &str = "V5：每人额度 × 人数 ≤ 全站上限";
+
+/// 已按剩下的校验重算过的运行条级别：`(模块, 运行时刻)` → 级别。后面几步的期望里还带着旧的运行条，要同样改。
+type Levels = HashMap<(String, u64), String>;
+
+/// 与 `Kernel::tick_all` 同一套判定：跑挂或有 bad 校验 → bad，有 warn → warn，否则 ok。
+fn run_level(entry: &Map<String, Value>, checks: &[Value]) -> &'static str {
+    let any = |lv: &str| {
+        checks
+            .iter()
+            .any(|c| c.get("level").and_then(Value::as_str) == Some(lv))
+    };
+    if entry.get("ok") == Some(&Value::Bool(false)) || any("bad") {
+        "bad"
+    } else if any("warn") {
+        "warn"
+    } else {
+        "ok"
+    }
+}
+
+fn run_key(module: &str, run: &Value) -> Option<(String, u64)> {
+    Some((module.to_string(), run.get("at")?.as_f64()?.to_bits()))
+}
+
+/// 一个模块的运行记录（`kernel_last.<模块>`）：去掉被删的校验，这一轮的运行条级别按剩下的重算。
+fn fix_entry(name: &str, entry: &mut Value, levels: &mut Levels) {
+    let Some(e) = entry.as_object_mut() else {
+        return;
+    };
+    if name != REMOVED_CHECK_MODULE {
+        return;
+    }
+    let mut this_round = None;
+    if let Some(Value::Array(checks)) = e.get_mut("checks") {
+        checks.retain(|c| c["name"] != REMOVED_CHECK);
+        let checks = checks.clone();
+        this_round = Some(run_level(e, &checks));
+    }
+    let Some(Value::Array(runs)) = e.get_mut("runs") else {
+        return;
+    };
+    // 带着 checks 的记录里，最后一条运行条就是这一轮的
+    if let (Some(level), Some(key)) = (this_round, runs.last().and_then(|r| run_key(name, r))) {
+        levels.insert(key, level.to_string());
+    }
+    for r in runs.iter_mut() {
+        if let Some(level) = run_key(name, r).and_then(|k| levels.get(&k)) {
+            r["level"] = json!(level);
+        }
+    }
+}
+
+/// 整份 `kernel_last`（模块名 → 运行记录）。
+fn fix_kernel_last(last: &mut Value, levels: &mut Levels) {
+    let Some(map) = last.as_object_mut() else {
+        return;
+    };
+    map.shift_remove(REMOVED_MODULE);
+    for (name, entry) in map.iter_mut() {
+        fix_entry(name, entry, levels);
+    }
+}
+
+fn fix_setting(key: &Value, value: &mut Value, levels: &mut Levels) {
+    if key == "kernel_last"
+        && let Some(text) = value.as_str()
+    {
+        let mut parsed: Value = serde_json::from_str(text).expect("kernel_last 是 JSON");
+        fix_kernel_last(&mut parsed, levels);
+        *value = Value::String(parsed.to_string());
+    }
+}
+
+/// 一步的期望：返回值（tick_all / snapshot）和设置写入里的 `kernel_last`。
+fn fix_expected_step(want: &mut Value, op: &str, levels: &mut Levels) {
+    if let Some(result) = want.get_mut("result") {
+        match op {
+            "tick_all" => fix_kernel_last(result, levels),
+            "snapshot" => {
+                if let Some(mods) = result.as_array_mut() {
+                    mods.retain(|m| m["name"] != REMOVED_MODULE);
+                    for m in mods {
+                        let name = m["name"].as_str().unwrap_or("").to_string();
+                        if let Some(last) = m.get_mut("last") {
+                            fix_entry(&name, last, levels);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let Some(writes) = want
+        .get_mut("settings_writes")
+        .and_then(Value::as_array_mut)
+    else {
+        return;
+    };
+    for w in writes {
+        match w[0].as_str() {
+            Some("set") => {
+                let key = w[1].clone();
+                fix_setting(&key, &mut w[2], levels);
+            }
+            Some("bulk") => {
+                for kv in w[1].as_array_mut().into_iter().flatten() {
+                    let key = kv[0].clone();
+                    fix_setting(&key, &mut kv[1], levels);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// 校验没通过时旧版记的 Bug（来源 `check:…`）：3.0 不再记。模块自己抛异常记的 `module:…` 照旧。
+fn drop_check_bugs(diff: &mut Value) {
+    let Some(t) = diff.get_mut("error_events").and_then(Value::as_object_mut) else {
+        return;
+    };
+    for side in ["added", "removed"] {
+        if let Some(rows) = t.get_mut(side).and_then(Value::as_array_mut) {
+            rows.retain(|r| {
+                !r["source"]
+                    .as_str()
+                    .is_some_and(|s| s.starts_with("check:"))
+            });
+        }
+    }
+    let empty = |side: &str| {
+        t.get(side)
+            .and_then(Value::as_array)
+            .is_none_or(Vec::is_empty)
+    };
+    if empty("added") && empty("removed") {
+        diff.as_object_mut().unwrap().shift_remove("error_events");
+    }
+}
+
+// ---------------------------------------------------------------------------
 // 回放
 // ---------------------------------------------------------------------------
 
@@ -509,11 +654,7 @@ async fn run_case(case: &Value) -> Result<(), String> {
     if let Some(r) = case["registrar"].as_object() {
         state.kernel.set_registrar(Some(Arc::new(FakeRegistrar {
             db: state.db.clone(),
-            env: (
-                r["daily_images_env"].as_i64().unwrap(),
-                r["daily_v5_env"].as_i64().unwrap(),
-                r["max_users_env"].as_i64().unwrap(),
-            ),
+            max_users_env: r["max_users_env"].as_i64().unwrap(),
             active: r["active"].as_i64().unwrap(),
         })));
     }
@@ -548,11 +689,15 @@ async fn run_case(case: &Value) -> Result<(), String> {
     let steps = case["steps"].as_array().unwrap();
     let expected_steps = case["expect"]["steps"].as_array().unwrap();
     let mut seen_alerts = 0usize;
+    let mut levels = Levels::new();
     for (i, (step, want)) in steps.iter().zip(expected_steps).enumerate() {
         let at = step["at"].as_f64().unwrap();
         gate_server::time::freeze(Some(at));
         let _ = state.db.take_setting_writes();
         let op = step["op"].as_str().unwrap();
+        let mut want = want.clone();
+        fix_expected_step(&mut want, op, &mut levels);
+        let want = &want;
         let mut got = Map::new();
         let outcome: Result<Option<Value>, String> = match op {
             "kernel_load" => state
@@ -732,6 +877,10 @@ async fn run_case(case: &Value) -> Result<(), String> {
                 if row.get("key").and_then(Value::as_str) == Some("kernel_last") {
                     let mut v: Value =
                         serde_json::from_str(row["value"].as_str().unwrap()).unwrap();
+                    // 「结束时有」的是旧版 tick 写的；「seed 后有」的是种子，两边一样，不动
+                    if side == "added" {
+                        fix_kernel_last(&mut v, &mut levels);
+                    }
                     if loose {
                         loosen_errors(&mut v);
                     }
@@ -740,6 +889,7 @@ async fn run_case(case: &Value) -> Result<(), String> {
             }
         }
     }
+    drop_check_bugs(&mut want_diff);
     if loose {
         // Bug 的特征码 / 堆栈里有 Python 的文件名和函数名：只比数量，不比内容
         let count = |d: &Value| {

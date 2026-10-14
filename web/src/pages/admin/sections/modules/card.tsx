@@ -1,9 +1,9 @@
 import { useState } from "preact/hooks";
 import { fullTime, shortTime } from "../../../../lib/format";
-import { Badge, Button, Card } from "../../../../ui";
+import { Badge, Card } from "../../../../ui";
 import { act } from "../../Admin";
-import { ConfirmDialog, Switch } from "../system/forms";
-import { ACK_KEYS, type Check, LEVEL_TEXT, type Mod, moduleState, runCounts } from "./core";
+import { Switch } from "../system/forms";
+import { type Check, LEVEL_TEXT, type Mod, moduleState, runCounts } from "./core";
 
 const STATE_BADGE = {
   off: { text: "已关闭", tone: undefined },
@@ -33,19 +33,13 @@ function RunStrip(props: { mod: Mod }) {
   );
 }
 
-function CheckRow(props: { check: Check; onAck: (key: string, name: string) => void }) {
+function CheckRow(props: { check: Check }) {
   const c = props.check;
-  const ackKey = ACK_KEYS[c.name];
   return (
     <div class="mod-check">
       <div class="mod-check__head">
         <Badge tone={c.level === "bad" ? "danger" : "warn"}>{LEVEL_TEXT[c.level] ?? c.level}</Badge>
         <b>{c.name}</b>
-        {ackKey && (
-          <Button size="sm" variant="ghost" onClick={() => props.onAck(ackKey, c.name)}>
-            站长确认
-          </Button>
-        )}
       </div>
       <p class="muted small">{c.detail}</p>
       {(c.evidence ?? []).length > 0 && (
@@ -67,7 +61,6 @@ function CheckRow(props: { check: Check; onAck: (key: string, name: string) => v
 export default function ModuleCard(props: { mod: Mod }) {
   const m = props.mod;
   const [pending, setPending] = useState(false);
-  const [ack, setAck] = useState<{ key: string; name: string } | null>(null);
   const state = moduleState(m);
   const badge = STATE_BADGE[state];
   const checks = m.last.checks ?? [];
@@ -118,7 +111,7 @@ export default function ModuleCard(props: { mod: Mod }) {
           </p>
         )}
         {hot.map((c) => (
-          <CheckRow key={c.name} check={c} onAck={(key, name) => setAck({ key, name })} />
+          <CheckRow key={c.name} check={c} />
         ))}
         {calm.length > 0 && (
           <ul class="mod-calm" aria-label="通过的校验">
@@ -143,22 +136,6 @@ export default function ModuleCard(props: { mod: Mod }) {
           </dl>
         )}
       </div>
-
-      <ConfirmDialog
-        open={ack !== null}
-        title="确认这是有意的设计？"
-        confirmLabel="确认"
-        tone="primary"
-        onClose={() => setAck(null)}
-        onConfirm={async () => {
-          if (!ack) return;
-          const ok = await act("POST", "/admin/api/checks/ack", { key: ack.key, on: true }, "");
-          if (ok) await act("POST", "/admin/api/modules/run", undefined, "已确认，校验转绿");
-          setAck(null);
-        }}
-      >
-        <p>「{ack?.name}」按「先到先得」设计是有意的：确认后这条校验转绿、不再记 Bug，数字仍会显示。</p>
-      </ConfirmDialog>
     </Card>
   );
 }

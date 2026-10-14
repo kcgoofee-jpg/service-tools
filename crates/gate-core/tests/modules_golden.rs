@@ -1,4 +1,8 @@
 //! 模块登记对拍：`tools/parity/golden/modules.py` 生成的夹具（旧 Python 的真实输出）。
+//!
+//! 夹具是冻结的，不重新生成。3.0 删掉了「就绪度」模块和所有「每人额度 × 人数 vs 容量」的承诺类校验
+//! （docs/v3-deviations.md #44）：夹具里这些部分在比较前从期望里去掉；只测被删函数的用例（就绪度校验、
+//! 名额文案、该模块的元数据）已经从夹具里删掉。
 
 use gate_core::clock::Clock;
 use gate_core::modules::{self, *};
@@ -28,6 +32,11 @@ fn queries<'a>(c: &'a Case, tag: &str) -> Vec<&'a Vec<Value>> {
         .unwrap_or_default()
 }
 
+/// 夹具的登记顺序里「3.0 不再登记」的模块个数（见文件头）。
+const REMOVED_MODULES: usize = 1;
+/// 夹具元数据里的 `report_bugs`：3.0 的模块校验不记 Bug，字段已删除。
+const REMOVED_META_FIELDS: [&str; 1] = ["report_bugs"];
+
 #[test]
 fn meta_golden() {
     let cases = load(M, "modules/meta");
@@ -42,19 +51,29 @@ fn meta_golden() {
         let got = json!({
             "fn": "meta", "name": m.name, "title": m.title, "question": m.question,
             "hard_note": m.hard_note, "default_enabled": m.default_enabled,
-            "report_bugs": m.report_bugs, "periodic": m.periodic,
+            "periodic": m.periodic,
             "has_checks": m.has_checks, "custom_enabled": m.custom_enabled, "params": params,
         });
-        assert_eq_py_ordered(c, &got, &c.raw);
+        let mut want = c.raw.clone();
+        for field in REMOVED_META_FIELDS {
+            want.as_object_mut().unwrap().shift_remove(field);
+        }
+        assert_eq_py_ordered(c, &got, &want);
         names.push(name.to_string());
     }
     let order = cases.iter().find(|c| c.raw["fn"] == "order").unwrap();
-    let want: Vec<&str> = order.raw["names"]
+    let all: Vec<&str> = order.raw["names"]
         .as_array()
         .unwrap()
         .iter()
         .map(|v| v.as_str().unwrap())
         .collect();
+    let want: Vec<&str> = all
+        .iter()
+        .copied()
+        .filter(|n| MODULES.iter().any(|m| m.name == *n))
+        .collect();
+    assert_eq!(all.len() - want.len(), REMOVED_MODULES);
     assert_eq!(MODULES.iter().map(|m| m.name).collect::<Vec<_>>(), want);
     assert_eq!(names, want);
 }
@@ -114,15 +133,28 @@ fn capacity_ticks_golden() {
     }
 }
 
+/// 夹具里分配模块的「V5：每人额度 × 人数 ≤ 全站上限」（承诺 vs 容量，3.0 已删除）。
+const REMOVED_ALLOCATION_CHECK: &str = "V5：每人额度 × 人数 ≤ 全站上限";
+
 #[test]
 fn allocation_checks_golden() {
     let (mut errs, mut empties) = (0, 0);
     for c in load(M, "modules/checks_allocation") {
-        let inp: AllocationInputs = de(&c.raw["inputs"]);
+        // 夹具输入里的 `ack_oversell` 是「站长已确认」那条已删除校验的参数
+        let mut raw_inputs = c.raw["inputs"].clone();
+        raw_inputs.as_object_mut().unwrap().remove("ack_oversell");
+        let inp: AllocationInputs = de(&raw_inputs);
         let want_err = c.raw["err"].as_str();
         match (allocation_checks(&inp), want_err) {
             (Ok(cs), None) => {
-                assert_eq_py_ordered(&c, &checks_json(&cs), &c.raw["out"]);
+                let want: Vec<Value> = c.raw["out"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter(|x| x["name"] != REMOVED_ALLOCATION_CHECK)
+                    .cloned()
+                    .collect();
+                assert_eq_py_ordered(&c, &checks_json(&cs), &Value::Array(want));
                 if cs.is_empty() {
                     empties += 1;
                 }
@@ -164,52 +196,16 @@ fn allocation_and_autopilot_ticks_golden() {
 #[test]
 fn registration_golden() {
     for c in load(M, "modules/checks_registration") {
-        let reg: Option<RegistrarInfo> = if c.raw["inputs"]["registrar"].is_null() {
-            None
-        } else {
-            Some(de(&c.raw["inputs"]["registrar"]))
-        };
+        // 夹具里的注册服务数字还带着已删除校验用的字段（每人张数 / 环境变量），这里只取领 Key 校验用的两项
+        let r = &c.raw["inputs"]["registrar"];
+        let reg = (!r.is_null()).then(|| RegistrarInfo {
+            max_users: r["max_users"].as_i64().unwrap(),
+            active: r["active"].as_i64().unwrap(),
+        });
         assert_eq_py_ordered(
             &c,
             &checks_json(&registration_checks(reg.as_ref())),
             &c.raw["out"],
-        );
-    }
-}
-
-#[test]
-fn registration_ready_golden() {
-    for c in load(M, "modules/checks_ready") {
-        let inp: RegistrationReadyInputs = de(&c.raw["inputs"]);
-        assert_eq_py_ordered(
-            &c,
-            &checks_json(&registration_ready_checks(&inp)),
-            &c.raw["out"],
-        );
-        // site_flags 的原始设置值 → 每小时领取上限
-        let raw = c.raw["raw"]["hourly_raw"].as_str();
-        assert_eq!(issue_hourly_cap(raw), inp.hourly, "第 {} 行", c.line);
-        // 面板参数
-        let p = &c.raw["params"];
-        let daily = site_daily(inp.account_daily_cap, inp.tokens);
-        assert_eq!(
-            json!(hourly_text(inp.hourly)),
-            p["每小时最多发放"],
-            "第 {} 行",
-            c.line
-        );
-        let per = inp.registrar.as_ref().map_or(0, |r| {
-            if r.daily_images != 0 {
-                r.daily_images
-            } else {
-                r.env_daily_images
-            }
-        });
-        assert_eq!(
-            json!(seats_text(per, daily)),
-            p["容量能兑现的名额"],
-            "第 {} 行",
-            c.line
         );
     }
 }
@@ -279,22 +275,6 @@ fn params_golden() {
             "registration_params" => {
                 let days = c.raw["inputs"]["days"].as_i64().unwrap();
                 assert_eq!(json!(idle_recycle_text(days)), out["闲置回收"]);
-            }
-            "seats_text" => {
-                let i = &c.raw["inputs"];
-                assert_eq!(
-                    json!(seats_text(
-                        i["per"].as_i64().unwrap(),
-                        i["daily"].as_i64().unwrap()
-                    )),
-                    *out
-                );
-            }
-            "hourly_text" => {
-                assert_eq!(
-                    json!(hourly_text(c.raw["inputs"]["cap"].as_i64().unwrap())),
-                    *out
-                );
             }
             other => panic!("未知 {other}"),
         }

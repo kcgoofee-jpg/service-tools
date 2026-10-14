@@ -189,7 +189,6 @@ const ENDPOINTS: &[(&str, &str)] = &[
     ("PUT", "/discord-bot"),
     ("GET", "/home/join"),
     ("POST", "/home/join"),
-    ("POST", "/checks/ack"),
     ("GET", "/reconciliation"),
     ("POST", "/reconciliation"),
 ];
@@ -1225,10 +1224,10 @@ async fn ops_audit_put() {
     );
 }
 
-// ------------------------------------------------------------------ 首页加入按钮 / 交叉校验
+// ------------------------------------------------------------------ 首页加入按钮
 
 #[tokio::test]
-async fn home_join_and_checks_ack() {
+async fn home_join() {
     let e = setup(&[]).await;
     let api = Api::login(&e).await;
     assert_eq!(
@@ -1283,42 +1282,6 @@ async fn home_join_and_checks_ack() {
                 false
             ),
         ]
-    );
-
-    // 交叉校验确认
-    assert_eq!(
-        api.text("POST", "/checks/ack", Some(json!({"key": "v5_oversell"})))
-            .await,
-        (200, r#"{"ok":true,"on":true}"#.into())
-    );
-    let stamp = settings(&e).await["ack_v5_oversell"].clone();
-    let b = stamp.as_bytes();
-    assert!(
-        stamp.len() == 11 && b[2] == b'-' && b[5] == b' ' && b[8] == b':',
-        "确认时间形如 10-15 00:19：{stamp}"
-    );
-    assert_eq!(
-        api.text(
-            "POST",
-            "/checks/ack",
-            Some(json!({"key": "v5_oversell", "on": false}))
-        )
-        .await,
-        (200, r#"{"ok":true,"on":false}"#.into())
-    );
-    assert_eq!(settings(&e).await["ack_v5_oversell"], "");
-    for body in [json!({"key": "nope"}), json!({}), json!({"key": 5})] {
-        api.fails("POST", "/checks/ack", Some(body), 422, "未知的校验键")
-            .await;
-    }
-    let rows = actions(&e).await;
-    assert!(
-        rows.iter()
-            .any(|r| r.1 == "站长确认交叉校验" && r.2 == "V5 每人额度×人数 ≤ 全站上限" && r.4)
-    );
-    assert!(
-        rows.iter()
-            .any(|r| r.1 == "取消确认交叉校验" && r.2 == "V5 每人额度×人数 ≤ 全站上限" && r.4)
     );
 }
 

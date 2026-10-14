@@ -77,7 +77,6 @@ pub const ADMIN_ACTIONS: &[(&str, &str, &str)] = &[
     ("POST", "/incidents", "发布状态页事件"),
     ("POST", "/incidents/{incident_id}/updates", "更新状态页事件"),
     ("POST", "/home/join", "修改首页加入按钮"),
-    ("POST", "/checks/ack", "确认交叉校验"),
     ("POST", "/announcement/send", "发送公告"),
 ];
 
