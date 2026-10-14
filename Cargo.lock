@@ -771,6 +771,7 @@ dependencies = [
  "bytes",
  "futures",
  "gate-core",
+ "gate-testkit",
  "hex",
  "http",
  "rand 0.9.5",

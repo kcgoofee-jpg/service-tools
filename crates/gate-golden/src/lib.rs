@@ -70,13 +70,15 @@ pub fn load(manifest_dir: &str, name: &str) -> Vec<Case> {
     let base = dir(manifest_dir).join(format!("{name}.jsonl"));
     let gz = dir(manifest_dir).join(format!("{name}.jsonl.gz"));
     let (path, text) = if gz.exists() {
-        let file = std::fs::File::open(&gz).unwrap_or_else(|e| panic!("读不到夹具 {}: {e}", gz.display()));
+        let file =
+            std::fs::File::open(&gz).unwrap_or_else(|e| panic!("读不到夹具 {}: {e}", gz.display()));
         let mut text = String::new();
         std::io::Read::read_to_string(&mut flate2::read::GzDecoder::new(file), &mut text)
             .unwrap_or_else(|e| panic!("解压夹具 {} 失败: {e}", gz.display()));
         (gz, text)
     } else {
-        let text = std::fs::read_to_string(&base).unwrap_or_else(|e| panic!("读不到夹具 {}: {e}", base.display()));
+        let text = std::fs::read_to_string(&base)
+            .unwrap_or_else(|e| panic!("读不到夹具 {}: {e}", base.display()));
         (base, text)
     };
     text.lines()
@@ -84,7 +86,8 @@ pub fn load(manifest_dir: &str, name: &str) -> Vec<Case> {
         .filter(|(_, l)| !l.trim().is_empty())
         .map(|(i, l)| Case {
             line: i + 1,
-            raw: serde_json::from_str(l).unwrap_or_else(|e| panic!("{}:{} 不是合法 JSON: {e}", path.display(), i + 1)),
+            raw: serde_json::from_str(l)
+                .unwrap_or_else(|e| panic!("{}:{} 不是合法 JSON: {e}", path.display(), i + 1)),
         })
         .collect()
 }

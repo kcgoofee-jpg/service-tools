@@ -5,6 +5,7 @@
 //! - [`token_store`]：后台管理的上游 Token 文件；
 //! - [`client`]：Token 池、选号、出图间隔、429 / 403 / 401 处理、结算。
 
+pub mod client;
 pub mod headers;
 pub mod limiter;
 pub mod token_store;
