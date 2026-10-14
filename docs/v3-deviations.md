@@ -40,3 +40,9 @@
 | 34 | 内核 tick / 额度重算的并发；关停时后台循环 | 全部在一个 asyncio 事件循环里，后台定时、后台改参数、改单个 Key 额度可以在 await 处交错；关停时 `task.cancel()` 在下一个 await 处切断循环，可能停在多步写入的中间 | 同一时刻只跑一轮 `tick_all`、只跑一次额度重算（排队，不丢）；循环只在睡觉时响应关停，一轮工作做完才退出；`kernel_last` 的运行记录在一轮结束时整体落库 | 交错执行的结果本来就是未定义的（两份同时写 `quota_algo_history` 会互相覆盖）；多步写入被腰斩会留下半套额度。结果等于旧版某一种合法的交错 |
 | 35 | 后台 Key 管理里的 `anlas_auto`（Anlas 自动分配） | `POST /keys` 把 `quota_auto`、`anlas_auto` 都写成 -1；`PATCH /keys/{id}` 的 `anlas_mode`（off / auto / manual，非法值 422）和 Anlas 字段改动会写 `anlas_auto`；`GET /members` 返回 `anlas_auto`、`anlas_mode` | 不读不写 `anlas_auto` 列；`PATCH` 里的 `anlas_mode` 被忽略（不再校验、不再改 `allow_anlas` / `daily_anlas`）；`/members` 不再返回这两个字段 | Anlas 自动分配（`anlas_pool`）在 3.0 已删除；列留着（只增不删）。回滚到 2.x 时，3.0 期间新建 / 改过的 Key 的 `anlas_auto` 是默认 0（= 交给自动分配），2.x 的分配循环会按条件重新分配 |
 | 36 | 后台 Key 管理里的 `v5_pinned`（V5 基础值）与手动改额度后的重算 | `PATCH` 的 `v5_pinned` 写进列并让动态额度算法立刻重算；手填 `daily_v5` 时顺手清空它并重算；`/members` 返回 `v5_pinned` | 不读不写（`PATCH` 里的 `v5_pinned` 被忽略，`/members` 不返回）；只有「交给算法」（`quota=auto` 或旧参数 `quota_mode=auto`）才触发 `quota_algo.run`，手动改额度只把 `quota_auto` 置 -1 | `v5_pinned` 在 3.0 已删除（启动时已把列清成 NULL）；手动额度的 Key 本来就不归算法管，那次重算只是顺带，下一轮定时重算同样会生效 |
+| 37 | CORS 头 | 只在请求带 Origin 时回 `Access-Control-Allow-Origin`，`Vary: Origin`；预检回文本 `OK` | 每个响应都带 `Access-Control-Allow-Origin: *`，`Vary` 按请求头；预检空正文，方法列表不含 QUERY | tower-http 的标准实现；浏览器行为相同（不带凭据的跨域请求都放行） |
+| 38 | HEAD / 405 | GET 路由收到 HEAD 回 405；405 的 `Allow: GET` | HEAD 回 200（无正文）；`Allow: GET,HEAD` | HTTP 语义上 HEAD 本来就该被 GET 路由接受 |
+| 39 | 后台前端路由 | `/admin/<任意>` 回 404 | `/admin/<分区>` 回后台页面（前端路由，刷新不 404）；`/admin/api/*` 仍是接口 | 新后台是单页应用，每个分区有自己的地址 |
+| 40 | Discord 登录回调 | 换 Token 时网络出错 → 500 | 跳回 `/?login=failed` | 成员看到「登录失败」比看到 500 有用 |
+| 41 | 状态码统计 | 重启时内存里没落库的计数丢失 | 关停时先落库 | 部署前后的「状态码分布」不再缺一段 |
+| 42 | 500 的用量日志 | detail 写 Python 异常类名（`500 ValueError`） | 写 `500 InternalError` | Rust 没有对应的类名；请求编号和 Bug 记录照常 |

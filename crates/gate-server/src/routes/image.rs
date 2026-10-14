@@ -746,6 +746,8 @@ struct StreamSink {
     tx: tokio::sync::mpsc::Sender<Bytes>,
     wire: WireFormat,
     disconnected: bool,
+    /// 已经发出 200 响应头（之后接收端关闭才算客户端断开；回了 JSON 错误时接收端本来就会关）。
+    started: bool,
 }
 
 enum Head {
@@ -756,8 +758,14 @@ enum Head {
 impl StreamSink {
     async fn start(&mut self) {
         if let Some(h) = self.head.take() {
+            self.started = true;
             let _ = h.send(Head::Start);
         }
+    }
+
+    /// 客户端在拿到全部图之前走了（只在已经开始推流时才有意义）。
+    fn client_gone(&self) -> bool {
+        self.started && (self.disconnected || self.tx.is_closed())
     }
 
     /// 慢 / 已断开的接收方不能拖住上游结算：每块最多等 10 秒。
@@ -812,6 +820,7 @@ async fn stream(
         tx,
         wire,
         disconnected: false,
+        started: false,
     };
     let (s, c, d) = (state.clone(), ctx.clone(), disconnect.clone());
     state.tasks.spawn(ctx.clone().scope(async move {
@@ -840,8 +849,10 @@ async fn stream(
             let text = format!("{{\"error\": {m}, \"message\": {m}}}");
             let mut r = Response::new(Body::from(text));
             *r.status_mut() = StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_GATEWAY);
-            r.headers_mut()
-                .insert("content-type", HeaderValue::from_static("application/json"));
+            let h = r.headers_mut();
+            h.insert("content-type", HeaderValue::from_static("application/json"));
+            h.insert("cache-control", HeaderValue::from_static("no-store"));
+            h.insert("x-accel-buffering", HeaderValue::from_static("no"));
             Ok(r)
         }
         Err(_) => Ok(json_response(500, &json!({"error": "stream worker ended"}))),
@@ -1203,10 +1214,7 @@ async fn perform_stream(
         return Ok(());
     }
     // 派发之后客户端断开、没拿到全部图：记一条 Bug（图已生成并计数）
-    if (disconnect.is_cancelled() || sink.disconnected || sink.tx.is_closed())
-        && !delivered
-        && was_dispatched
-    {
+    if (disconnect.is_cancelled() || sink.client_gone()) && !delivered && was_dispatched {
         state.bug("disconnect", None, ctx);
     }
     match gate_err {
