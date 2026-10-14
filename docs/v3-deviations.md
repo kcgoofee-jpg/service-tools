@@ -13,3 +13,9 @@
 | 7 | 「上游可能故障」私信（`upstream_5xx`） | 任何一个上游 500 都私信站长（30 分钟冷却） | 30 分钟内至少 2 把不同的 Key 遇到 5xx 才私信；单个成员的 500 仍记 Bug | 10-14 夜一位成员的 V5 请求（超长负面提示词、旧式参数）反复 500，站长每半小时收到一次误报，同时段其他成员一切正常 |
 | 8 | 状态页「NovelAI 上游」当前状态 | 最近 1 小时失败率 > 1%（≥ 10 次请求）即「性能下降」 | 另需失败 ≥ 3 次且来自 ≥ 2 把不同的 Key；每日色条不变 | 同上：1/100 次失败就把全站状态标成性能下降 |
 | 9 | 后台成员操作的私信 | 停用 / 删除 / 重置 / 重新生成默认私信成员 | 默认不发，勾选才发 | Discord 应用曾被风控（680009），避免批量私信 |
+| 10 | 状态页 `/status` 配色 | 文字 / 底色对比度 1.88–3.5:1（浅灰说明文字、黄 / 绿状态字、白字配黄 / 绿横幅） | 所有文字与底色 ≥ 4.5:1：说明文字 `#6F6E67`、浅色主题下状态字加深（`#4B7A0E` / `#855600` / `#B23F1A` / `#C42B2B`）、深色主题红字提亮（`#EB5757`）、横幅底色加深，黄色横幅改深色字；`status::tests::palette_contrast` 逐对检查。90 天色条是图形不是文字，仍用 Statuspage 原色 | 可读性 |
+| 11 | 状态页导航与锚点 | 过去事件的标题是没有 `href` 的 `<a>`；页面没有回首页的入口 | 标题链接到同页锚点 `#incident-<id>`（每个事件容器有对应 `id`）；顶部操作区新增「返回首页」（`/`）；新增 `:focus-visible` 轮廓、标题悬停下划线；页面带 `/favicon.svg` 图标 | 链接要能点；键盘可达 |
+| 12 | 状态页安全头与资源加载 | CSP `default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'`；样式、主题切换脚本、颜色（`style="..."`）全部内联；无 `X-Frame-Options` | CSP `default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`，另加 `X-Frame-Options: DENY`、`Referrer-Policy: no-referrer`（`Cache-Control: no-cache`、`nosniff` 照旧）。样式与脚本编进二进制，由 `/_owl/status-page.css`、`/_owl/status-page.js` 提供（地址带内容哈希，匹配时长期缓存）；页面里没有 `style` 属性和内联脚本，颜色改用类名（`level-N` / `tone-*`）。`/status.json`、Atom 的响应头不变 | 防点击劫持与脚本注入，与首页 / 后台 CSP 一致 |
+| 13 | 状态页主题存储键 | 状态页自己的 `owl-status-theme` | 与首页 / 后台共用 `owl-theme`（`web/src/lib/theme.ts` 的约定）；升级后第一次访问回到「跟随系统」，且只认 `light` / `dark` | 三个页面主题一致 |
+| 14 | 后台事件接口 `/admin/api/incidents*` | 旧版挂在普通路由上，不进后台操作日志 | 与其它后台写接口一致：发布 / 更新各记一条（「发布状态页事件」「更新状态页事件」，对象为「事件 #id」），校验失败记「失败（状态码）：原因」；`incident_id` 不是整数时在登录校验之前返回 FastAPI 风格的 422 | 可追溯谁改了状态页 |
+| 15 | `HEAD /status.json`、`HEAD /status/feed.xml` | 405（旧版只声明了 GET） | 200、无正文（axum 的 GET 路由自带 HEAD；`/status` 本来就支持 HEAD） | 框架行为，无害 |

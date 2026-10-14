@@ -74,6 +74,8 @@ pub const ADMIN_ACTIONS: &[(&str, &str, &str)] = &[
     ("POST", "/modules/run", "手动执行模块校验"),
     ("POST", "/audit/purge-images", "清空原图"),
     ("POST", "/ops/reset-all-keys", "全站杀头重置"),
+    ("POST", "/incidents", "发布状态页事件"),
+    ("POST", "/incidents/{incident_id}/updates", "更新状态页事件"),
 ];
 
 /// 操作名；表里没有的写成「方法 路径」。
