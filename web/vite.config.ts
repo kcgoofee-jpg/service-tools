@@ -44,7 +44,8 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "^/(public|admin/api|self-register|login|logout|member|v1|status|healthz)": process.env.VITE_GATE ?? "http://127.0.0.1:18000",
+      "^/(public|admin/api|self-register|login|logout|member|v1|status|healthz|announcement|terms|privacy)":
+        process.env.VITE_GATE ?? "http://127.0.0.1:18000",
     },
   },
   test: {

@@ -57,30 +57,22 @@ export async function sendJSON<T>(method: string, url: string, body?: unknown): 
   return (await parse(res)) as T;
 }
 
-/** 前端报错上报（与旧版同一接口；只报本站脚本的错误）。 */
-export function installErrorReporter(page: string): void {
+/** 前端报错上报（与旧版同一接口与字段：page / msg / src / line / stack；只报本站脚本的错误）。 */
+export function installErrorReporter(page: "landing" | "admin" | "survey"): void {
   let sent = 0;
-  const report = (message: string, stack?: string) => {
-    if (sent++ > 5 || !message || message === "Script error.") return;
-    navigator.sendBeacon?.(
-      "/public/client-error",
-      new Blob(
-        [
-          JSON.stringify({
-            page,
-            message: message.slice(0, 300),
-            stack: (stack ?? "").slice(0, 2000),
-            url: location.pathname,
-          }),
-        ],
-        {
-          type: "application/json",
-        },
-      ),
-    );
+  const report = (msg: string, src?: string, line?: number, stack?: string) => {
+    if (sent++ > 5 || !msg || msg === "Script error.") return;
+    const body = JSON.stringify({
+      page,
+      msg: msg.slice(0, 300),
+      src: (src ?? location.pathname).slice(0, 200),
+      line: line ?? 0,
+      stack: (stack ?? "").slice(0, 1500),
+    });
+    navigator.sendBeacon?.("/public/client-error", new Blob([body], { type: "application/json" }));
   };
-  addEventListener("error", (e) => report(e.message, e.error?.stack));
+  addEventListener("error", (e) => report(e.message, e.filename, e.lineno, e.error?.stack));
   addEventListener("unhandledrejection", (e) =>
-    report(String(e.reason?.message ?? e.reason), e.reason?.stack),
+    report(String(e.reason?.message ?? e.reason), undefined, undefined, e.reason?.stack),
   );
 }
