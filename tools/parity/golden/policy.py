@@ -19,7 +19,7 @@ from _payloads import (ALL_MODELS, GIF, JPEG, ODD_MODELS, PNG, PNG2, V3_MODELS, 
 from app import policy
 
 rng = random.Random(20261014)
-N = 700           # 每个「请求体 → 结果」函数的随机条数（夹具体积考虑，不再多）
+N = 1500          # 每个「请求体 → 结果」函数的随机条数（> 256 KB 的夹具会被 _golden 自动 gzip）
 
 FIXED_RANDINT = 2718281828
 _real_randint = random.randint
@@ -223,7 +223,7 @@ with Writer("policy/validate_image_references") as w:
              {"model": ["nai-diffusion-4"], "parameters": {}}]
     for b in fixed:
         w.call(policy.validate_image_references, b)
-    for b in body_cases(1100, ref=True):
+    for b in body_cases(2200, ref=True):
         w.call(policy.validate_image_references, b)
 
 with Writer("policy/reference_surcharge") as w:
@@ -244,7 +244,7 @@ with Writer("policy/reference_surcharge") as w:
              {"model": None, "reference_image_multiple": [1] * 9}, {"reference_image_multiple": "abcdefghij"}]
     for b in fixed:
         w.call(policy.reference_surcharge, b)
-    for b in body_cases(600, ref=True):
+    for b in body_cases(1300, ref=True):
         w.call(policy.reference_surcharge, b)
 
 # ------------------------------------------------------------------ normalize_image_request
@@ -299,7 +299,7 @@ def _prompt_texts(body):
 
 
 with Writer("policy/_prompt_texts") as w:
-    for b in body_cases(500):
+    for b in body_cases(1200):
         w.call(_prompt_texts, b)
 
 
@@ -420,7 +420,7 @@ with Writer("policy/_per_image_cost") as w:
                rng.choice([1, 14, 23, 28, 29, 50, rng.randint(0, 100)]), rng.random() < 0.4, rng.random() < 0.4)
 
 with Writer("policy/_has_paid_extras") as w:
-    for b in body_cases(350, ref=True) + [{}, {"parameters": None}, {"parameters": []}, {"parameters": "x"},
+    for b in body_cases(800, ref=True) + [{}, {"parameters": None}, {"parameters": []}, {"parameters": "x"},
                                            {"controlnet_model": "x"}, {"controlnet_condition": "x"},
                                            {"characterReferences": [1]}, {"parameters": {"characterReferences": [1]}},
                                            {"parameters": {"controlnet_model": ""}},
@@ -447,13 +447,13 @@ def eligible_cases(n: int) -> list:
 
 
 with Writer("policy/opus_free_eligible") as w:
-    for b in eligible_cases(450):
+    for b in eligible_cases(900):
         w.call(policy.opus_free_eligible, b)
 with Writer("policy/legacy_normal_free_eligible") as w:
-    for b in eligible_cases(300):
+    for b in eligible_cases(600):
         w.call(policy.legacy_normal_free_eligible, b)
 with Writer("policy/v5_allowance_eligible") as w:
-    for b in eligible_cases(200):
+    for b in eligible_cases(450):
         w.call(policy.v5_allowance_eligible, b)
 
 with Writer("policy/snap_v5_preset") as w:
@@ -469,7 +469,7 @@ with Writer("policy/snap_v5_preset") as w:
         w.call(policy.snap_v5_preset, int(h * rng.choice([1.1, 0.9, 1.1000001, 0.8999999, 1.0])) + rng.choice([-1, 0, 1]), h)
 
 with Writer("policy/estimate_image_cost") as w:
-    cases = body_cases(800, ref=True) + body_cases(250)
+    cases = body_cases(1800, ref=True) + body_cases(600)
     # 贴近线上的计费样本（官网实测值）
     for model in ("nai-diffusion-3", "nai-diffusion-4-5-full", "nai-diffusion-5", "nai-diffusion-5-full",
                   "nai-diffusion-4-5-full-inpainting", "nai-diffusion-5-full-inpainting"):
