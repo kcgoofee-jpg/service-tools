@@ -1,0 +1,58 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { describe, expect, it } from "vitest";
+
+// 从 tokens.css 读出亮色（:root）与暗色（[data-theme="dark"]）两套颜色，逐对计算 WCAG 对比度。
+const css = readFileSync(resolve(import.meta.dirname, "tokens.css"), "utf8");
+
+function block(selector: string): Record<string, string> {
+  const start = css.indexOf(selector);
+  const open = css.indexOf("{", start);
+  const close = css.indexOf("}", open);
+  const out: Record<string, string> = {};
+  for (const m of css.slice(open + 1, close).matchAll(/--([a-z0-9-]+):\s*(#[0-9a-f]{6})\b/gi)) {
+    out[m[1] as string] = (m[2] as string).toLowerCase();
+  }
+  return out;
+}
+
+function luminance(hex: string): number {
+  const ch = [1, 3, 5].map((i) => Number.parseInt(hex.slice(i, i + 2), 16) / 255);
+  const lin = ch.map((c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * (lin[0] ?? 0) + 0.7152 * (lin[1] ?? 0) + 0.0722 * (lin[2] ?? 0);
+}
+
+function contrast(a: string, b: string): number {
+  const [x, y] = [luminance(a), luminance(b)].sort((p, q) => q - p) as [number, number];
+  return (x + 0.05) / (y + 0.05);
+}
+
+const TEXT = ["text", "text-2", "muted", "accent-text", "ok", "warn", "danger", "info", "v5"];
+const BACKGROUNDS = ["bg", "surface", "surface-2"];
+const PAIRS: Array<[string, string]> = [
+  ["accent-fg", "accent"],
+  ["accent-text", "accent-soft"],
+  ["ok", "ok-soft"],
+  ["warn", "warn-soft"],
+  ["danger", "danger-soft"],
+  ["info", "info-soft"],
+];
+
+describe.each([
+  ["亮色", block(":root {")],
+  ["暗色", block(':root[data-theme="dark"]')],
+])("%s主题对比度 ≥ 4.5:1", (_name, t) => {
+  for (const fg of TEXT) {
+    for (const bg of BACKGROUNDS) {
+      it(`${fg} on ${bg}`, () => {
+        expect(t[fg], `缺少 --${fg}`).toBeDefined();
+        expect(contrast(t[fg] as string, t[bg] as string)).toBeGreaterThanOrEqual(4.5);
+      });
+    }
+  }
+  for (const [fg, bg] of PAIRS) {
+    it(`${fg} on ${bg}`, () => {
+      expect(contrast(t[fg] as string, t[bg] as string)).toBeGreaterThanOrEqual(4.5);
+    });
+  }
+});
