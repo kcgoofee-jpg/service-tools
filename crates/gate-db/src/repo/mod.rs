@@ -14,7 +14,9 @@
 //! 不在本次移植范围内。
 
 pub mod admin_actions;
+pub mod admin_members;
 pub mod admin_ops;
+pub mod admin_records;
 pub mod audit;
 pub mod counters;
 pub mod coupons;

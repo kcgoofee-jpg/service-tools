@@ -355,6 +355,17 @@ impl Db {
         max_bytes: i64,
         since: f64,
     ) -> Result<Vec<AuditImage>> {
+        self.audit_images_for_bound(SqlValue::Integer(key_id), max_bytes, since)
+            .await
+    }
+
+    /// [`Db::audit_images_for`] 的实现：`key_id` 由调用方决定绑定成整数还是文本（后台导出沿用旧版，传查询串原文）。
+    pub(super) async fn audit_images_for_bound(
+        &self,
+        key_id: SqlValue,
+        max_bytes: i64,
+        since: f64,
+    ) -> Result<Vec<AuditImage>> {
         let cols = "SELECT id, ts, image_type, prompt, negative, extra, image, image_file FROM generation_audit ";
         let raw: Vec<RawAuditRow> = self
             .read(move |c| {

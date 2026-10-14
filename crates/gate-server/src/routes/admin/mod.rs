@@ -5,7 +5,10 @@
 mod auth;
 mod incidents;
 mod kernel;
+mod members;
 mod ops;
+mod records;
+mod req;
 
 use crate::action_log::{label, log_action, summarize};
 use crate::error::HttpErrorInfo;
@@ -28,6 +31,8 @@ pub fn router(state: AppState) -> Router<AppState> {
         .merge(incidents::router())
         .merge(ops::router())
         .merge(kernel::router())
+        .merge(members::router())
+        .merge(records::router())
         .route_layer(from_fn_with_state(state, audited))
 }
 
