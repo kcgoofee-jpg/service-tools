@@ -60,9 +60,21 @@ impl Db {
         .await
     }
 
-    pub async fn list_error_events(&self, include_resolved: bool, limit: i64) -> Result<Vec<Value>> {
-        let where_ = if include_resolved { "" } else { " WHERE resolved_at IS NULL" };
-        let order = if include_resolved { "ORDER BY (resolved_at IS NOT NULL), last_seen DESC" } else { "ORDER BY last_seen DESC" };
+    pub async fn list_error_events(
+        &self,
+        include_resolved: bool,
+        limit: i64,
+    ) -> Result<Vec<Value>> {
+        let where_ = if include_resolved {
+            ""
+        } else {
+            " WHERE resolved_at IS NULL"
+        };
+        let order = if include_resolved {
+            "ORDER BY (resolved_at IS NOT NULL), last_seen DESC"
+        } else {
+            "ORDER BY last_seen DESC"
+        };
         let sql = format!(
             "SELECT sig, source, level, title, detail, count, first_seen, last_seen, last_rid, last_key, \
              last_path, resolved_at FROM error_events{where_} {order} LIMIT ?"
@@ -77,7 +89,14 @@ impl Db {
     }
 
     pub async fn open_error_count(&self) -> Result<i64> {
-        self.read(|c| c.query_row("SELECT COUNT(*) FROM error_events WHERE resolved_at IS NULL", [], |r| r.get(0))).await
+        self.read(|c| {
+            c.query_row(
+                "SELECT COUNT(*) FROM error_events WHERE resolved_at IS NULL",
+                [],
+                |r| r.get(0),
+            )
+        })
+        .await
     }
 
     /// 标记已处理；不存在返回 false。
@@ -85,7 +104,11 @@ impl Db {
         let sig = sig.to_string();
         self.write(move |tx| {
             let found: Option<Option<f64>> = tx
-                .query_row("SELECT resolved_at FROM error_events WHERE sig=?", [&sig], |r| value::f64_opt(r, 0))
+                .query_row(
+                    "SELECT resolved_at FROM error_events WHERE sig=?",
+                    [&sig],
+                    |r| value::f64_opt(r, 0),
+                )
                 .map(Some)
                 .or_else(|err| match err {
                     rusqlite::Error::QueryReturnedNoRows => Ok(None),
@@ -95,7 +118,10 @@ impl Db {
                 None => Ok(false),
                 Some(Some(_)) => Ok(true),
                 Some(None) => {
-                    tx.execute("UPDATE error_events SET resolved_at=? WHERE sig=?", rusqlite::params![now, sig])?;
+                    tx.execute(
+                        "UPDATE error_events SET resolved_at=? WHERE sig=?",
+                        rusqlite::params![now, sig],
+                    )?;
                     Ok(true)
                 }
             }
@@ -104,12 +130,21 @@ impl Db {
     }
 
     pub async fn resolve_all_error_events(&self, now: f64) -> Result<usize> {
-        self.write(move |tx| tx.execute("UPDATE error_events SET resolved_at=? WHERE resolved_at IS NULL", [now])).await
+        self.write(move |tx| {
+            tx.execute(
+                "UPDATE error_events SET resolved_at=? WHERE resolved_at IS NULL",
+                [now],
+            )
+        })
+        .await
     }
 
     pub async fn purge_error_events(&self, before: f64) -> Result<()> {
         self.write(move |tx| {
-            tx.execute("DELETE FROM error_events WHERE resolved_at IS NOT NULL AND last_seen<?", [before])?;
+            tx.execute(
+                "DELETE FROM error_events WHERE resolved_at IS NOT NULL AND last_seen<?",
+                [before],
+            )?;
             Ok(())
         })
         .await
@@ -133,8 +168,11 @@ impl Db {
     /// 某个整点之后各状态码的总次数。
     pub async fn status_totals_since(&self, since: i64) -> Result<Vec<(i64, i64)>> {
         self.read(move |c| {
-            let mut stmt = c.prepare("SELECT code, SUM(n) FROM status_hourly WHERE hour>=? GROUP BY code")?;
-            let rows = stmt.query_map([since], |r| Ok((value::i64_or(r, 0, 0)?, value::i64_or(r, 1, 0)?)))?;
+            let mut stmt =
+                c.prepare("SELECT code, SUM(n) FROM status_hourly WHERE hour>=? GROUP BY code")?;
+            let rows = stmt.query_map([since], |r| {
+                Ok((value::i64_or(r, 0, 0)?, value::i64_or(r, 1, 0)?))
+            })?;
             rows.collect()
         })
         .await
@@ -149,4 +187,3 @@ impl Db {
         .await
     }
 }
-

@@ -271,28 +271,28 @@ impl AppState {
             now,
         );
         // 停机检测：最后一条请求日志距今超过 1 小时 → 从现在重新起算闲置天数（不然停机 ≥ 回收天数后一重启就把所有人删光）
-        if let Some(last) = self.db.last_log_ts().await? {
-            if now - last > 3600.0 {
-                self.db
-                    .set_setting(
-                        "key_inactivity_grace_started_at",
-                        &gate_core::pyc::float_repr(now),
-                    )
-                    .await?;
-                self.db
-                    .add_admin_action(
-                        "系统",
-                        "闲置计时重置",
-                        "",
-                        &format!(
-                            "网关停机约 {:.1} 小时，闲置天数从现在重新计算",
-                            (now - last) / 3600.0
-                        ),
-                        true,
-                        now,
-                    )
-                    .await?;
-            }
+        if let Some(last) = self.db.last_log_ts().await?
+            && now - last > 3600.0
+        {
+            self.db
+                .set_setting(
+                    "key_inactivity_grace_started_at",
+                    &gate_core::pyc::float_repr(now),
+                )
+                .await?;
+            self.db
+                .add_admin_action(
+                    "系统",
+                    "闲置计时重置",
+                    "",
+                    &format!(
+                        "网关停机约 {:.1} 小时，闲置天数从现在重新计算",
+                        (now - last) / 3600.0
+                    ),
+                    true,
+                    now,
+                )
+                .await?;
         }
         *self.admin_pw_hash.write().expect("pw") =
             self.db.get_setting("admin_password_hash").await?;
@@ -309,10 +309,10 @@ impl AppState {
     pub async fn load_runtime_limits(&self) -> anyhow::Result<()> {
         let mut values = Vec::new();
         for (name, lo, hi) in RUNTIME_LIMIT_BOUNDS {
-            if let Some(raw) = self.db.get_setting(&format!("runtime_{name}")).await? {
-                if let Some(v) = gate_core::pyc::parse_int(&raw).filter(|v| (lo..=hi).contains(v)) {
-                    values.push((name, v));
-                }
+            if let Some(raw) = self.db.get_setting(&format!("runtime_{name}")).await?
+                && let Some(v) = gate_core::pyc::parse_int(&raw).filter(|v| (lo..=hi).contains(v))
+            {
+                values.push((name, v));
             }
         }
         self.apply_runtime_limits(&values).await;
