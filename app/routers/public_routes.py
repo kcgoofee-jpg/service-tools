@@ -98,6 +98,92 @@ async def survey_page():
     return FileResponse(_STATIC_DIR / "survey.html", headers=LANDING_HEADERS)
 
 
+# 服务条款 / 隐私政策：自包含静态文档页（Discord 开发者门户「APP 验证」要求配置这两个链接）
+_DOC_HEADERS = {
+    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox; frame-ancestors 'none'",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "Cache-Control": "public, max-age=3600",
+}
+
+
+def _doc_page(title: str, updated: str, sections: list[tuple[str, list[str]]]) -> str:
+    rows = "".join(
+        f"<h2>{_esc(h)}</h2>" + "".join(f"<p>{_esc(p)}</p>" for p in ps) for h, ps in sections)
+    return (
+        '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        f'<title>{_esc(title)} · 猫头鹰公益站</title><style>'
+        'body{margin:0;background:#f6f5f1;color:#22211d;font:15px/1.75 -apple-system,"PingFang SC",'
+        '"Microsoft YaHei",sans-serif;padding:2.5rem 1rem}'
+        'main{max-width:46rem;margin:0 auto;background:#fff;border:1px solid #dedcd1;border-radius:12px;'
+        'padding:2rem 2.2rem}'
+        'h1{font-size:1.4rem;margin:.2rem 0}h2{font-size:1.05rem;margin:1.6rem 0 .4rem}'
+        '.upd{color:#87867f;font-size:.85rem;margin:0 0 1rem}p{margin:.4rem 0}'
+        '</style></head><body><main><h1>' + _esc(title) + '</h1><p class="upd">猫头鹰公益站（gate.davidzhao.top）'
+        ' · 最近更新：' + _esc(updated) + '</p>' + rows + '</main></body></html>'
+    )
+
+
+def _esc(s: str) -> str:
+    return (s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+             .replace('"', "&quot;"))
+
+
+@router.get("/terms")
+async def terms_page():
+    """服务条款（Discord APP 验证要求）。内容与首页「使用须知」同一口径。"""
+    html = _doc_page("服务条款", "2026-10-14", [
+        ("服务性质", [
+            "「猫头鹰公益站」（gate.davidzhao.top，下称「本站」）是由个人运营的非商业公益服务，"
+            "为 Discord 社区「猫头鹰公益站」的成员提供 NovelAI 生图请求的中转（代理）。",
+            "本站不保证服务可用性或出图质量，可能因上游（NovelAI）状况、账号额度、维护或风控随时暂停、"
+            "限流、调整规则或终止服务，且无需事先通知。"]),
+        ("资格与 Key", [
+            "服务面向本站 Discord 社区成员。成员通过社区内 /register 命令领取专属 API Key，一人一把。",
+            "Key 仅限本人使用。严禁转售、转借、多人共用或用于商业用途。多人共用或转售会被系统记录并回收 Key。"]),
+        ("使用规范", [
+            "严禁生成违反法律法规或极端有害的内容（包括但不限于违法、危害未成年人、仇恨与骚扰内容），"
+            "违规账号将被永久封禁且不再恢复。",
+            "请遵守本站公布的额度与并发规则（如一次一张、勿狂重试）。退出 Discord 服务器或 Key 长期闲置后，"
+            "Key 会被自动回收。"]),
+        ("额度与公平", [
+            "本站为免费公益服务，出图额度有限。站方可根据上游状况随时调整每人额度、全站上限、"
+            "限流与排队策略，并在状态页与社区公告中说明。"]),
+        ("责任限制", [
+            "在法律允许的最大范围内，本站按「现状」提供服务，不对任何直接或间接损失承担责任。",
+            "使用本站即表示你已阅读并同意本条款。条款更新后在本页公布即生效，重大变更会在社区公告。"]),
+        ("联系", ["如有疑问，请在 Discord 社区「猫头鹰公益站」内联系站长。"]),
+    ])
+    return HTMLResponse(html, headers=_DOC_HEADERS)
+
+
+@router.get("/privacy")
+async def privacy_page():
+    """隐私政策（Discord APP 验证要求）。与实际数据流一致：提示词/用量/图片仅站长可见。"""
+    html = _doc_page("隐私政策", "2026-10-14", [
+        ("我们收集什么", [
+            "Discord 账号信息：成员领取或登录时收集 Discord 用户 ID、用户名、显示名与头像，用于识别身份与展示。",
+            "使用记录：Key 的请求时间、模型、尺寸、等待与拒绝原因等用量日志；你输入的生图提示词；生成的图片。",
+            "如你使用「捐赠 Key」功能：你提交的 NovelAI Token、留言与联系方式。"]),
+        ("用途", [
+            "发放与管理 Key、展示个人额度；防滥用与防多人共用（行为统计）；公平调度与容量规划；社区公告与私信通知。"]),
+        ("保存期限", [
+            "用量日志与提示词长期保存（用于审计与防滥用）；生成的图片自动轮删（服务器空间满时删除最旧的，"
+            "默认保留数天）；Discord 资料与领取记录在 Key 存续期间保存，Key 回收后随之清理或匿名化。"]),
+        ("谁能看到", [
+            "仅站长本人可查看上述数据。本站不会出售、出租或与第三方共享你的个人数据。"]),
+        ("Cookie 与第三方", [
+            "本站仅在浏览器写入一个登录态会话 Cookie（HttpOnly，约 30 天），不用于跨站跟踪。",
+            "网页「用 Discord 登录」通过 Discord OAuth 完成，只申请 identify（身份识别）权限，"
+            "不读取你的消息、好友或服务器列表；生图请求仅转发给 NovelAI 官方接口。"]),
+        ("你的选择", [
+            "退出 Discord 服务器即可使 Key 被回收；如需删除登记资料或用量数据，请在社区内联系站长。"]),
+        ("联系", ["隐私相关问题请在 Discord 社区「猫头鹰公益站」内联系站长。"]),
+    ])
+    return HTMLResponse(html, headers=_DOC_HEADERS)
+
+
 @router.post("/member/survey")
 async def member_survey(request: Request):
     """问卷提交：Bearer 虚拟 Key 识别身份（passive 鉴权，不算活跃、不进防分享统计）；一人一份，重复提交覆盖。"""
