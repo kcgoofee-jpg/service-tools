@@ -668,23 +668,29 @@ pub fn check_members(rep: &mut Report, conn: &Connection, now: f64) -> rusqlite:
         }
     }
     let get = |k: &str| stat.iter().find(|(s, _)| s == k).map_or(0, |(_, n)| *n);
-    let total = Some(stat.iter().map(|(_, n)| *n).sum::<i64>())
-        .filter(|t| *t != 0)
-        .unwrap_or(1);
     rep.set(
         "day_status",
         Value::Object(stat.iter().map(|(k, n)| (k.clone(), json!(n))).collect()),
     );
-    let ok_rate = get("ok") as f64 / total as f64;
+    // 只看「出错」占「真正发到上游的请求」的比例：被拒（限流 / 额度 / 排队满）是 PVP 下按设计的结果，不是故障。
+    // 旧版用 成功 ÷ 全部，限流一多就常年「成功率 60%」挂着警告（10-15）。少于 5 次出错不报，免得小样本误报。
+    let (ok, err) = (get("ok"), get("error"));
+    let err_rate = if ok + err > 0 {
+        err as f64 / (ok + err) as f64
+    } else {
+        0.0
+    };
     rep.add(
-        if ok_rate < 0.85 { Sev::Warn } else { Sev::Ok },
+        if err >= 5 && err_rate > 0.05 {
+            Sev::Warn
+        } else {
+            Sev::Ok
+        },
         "成员",
         format!(
-            "24 小时：成功 {} · 拒绝 {} · 出错 {}（成功率 {:.0}%）",
-            get("ok"),
+            "24 小时：成功 {ok} · 被拒 {}（限流 / 额度，按设计）· 出错 {err}（出错率 {:.1}%）",
             get("rejected"),
-            get("error"),
-            ok_rate * 100.0
+            err_rate * 100.0
         ),
     );
 
