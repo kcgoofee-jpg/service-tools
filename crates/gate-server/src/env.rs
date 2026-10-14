@@ -115,6 +115,8 @@ pub struct EnvConfig {
     pub day_reset_hour: i64,
     pub cors_origins: Vec<String>,
     pub admin_allowed_origins: Vec<String>,
+    /// 信任哪些直连对端带来的 X-Forwarded-For（uvicorn 的 FORWARDED_ALLOW_IPS，默认只信任本机）。
+    pub forwarded_allow_ips: Vec<String>,
     // 上游
     pub nai_tokens: Vec<String>,
     pub nai_token_v5_daily_limits: Vec<i64>,
@@ -355,8 +357,18 @@ impl EnvConfig {
             max_text_output_tokens: r.int("MAX_TEXT_OUTPUT_TOKENS", 250),
             max_input_chars: r.int("MAX_INPUT_CHARS", 24000),
             seed_demo_key: r.bool("SEED_DEMO_KEY", false),
+            forwarded_allow_ips: split_list("FORWARDED_ALLOW_IPS", "127.0.0.1"),
             registration,
         }
+    }
+
+    /// `site_flags.get(db, spec, settings)` 用的 `settings` 视图：只有带 env 回退的三个全站预算。
+    pub fn settings_view(&self) -> serde_json::Value {
+        serde_json::json!({
+            "global_daily_v5": self.global_daily_v5,
+            "global_daily_anlas": self.global_daily_anlas,
+            "global_monthly_anlas": self.global_monthly_anlas,
+        })
     }
 
     pub fn db_path(&self) -> PathBuf {

@@ -1,6 +1,9 @@
 //! 网关应用：把各模块组装成一个 axum Router。`main.rs` 只负责命令行与进程生命周期。
 
+pub mod accounting;
 pub mod alerts;
+pub mod allowance;
+pub mod auth;
 pub mod bugs;
 pub mod clients;
 pub mod env;
@@ -31,8 +34,9 @@ pub fn app(
     state: AppState,
 ) -> tower::util::MapRequest<Router, fn(axum::extract::Request) -> axum::extract::Request> {
     let stats = state.status_stats.clone();
-    let router = routes::router(state)
+    let router = routes::router(state.clone())
         .layer(from_fn(middleware::admin_no_store))
+        .layer(from_fn_with_state(state, accounting::error_ledger))
         .layer(from_fn_with_state(stats, middleware::status_stats))
         .layer(from_fn(middleware::request_context));
     tower::util::MapRequestLayer::new(middleware::strip_v1_alias as fn(_) -> _).layer(router)

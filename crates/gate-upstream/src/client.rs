@@ -33,6 +33,9 @@ pub struct UpstreamError {
     pub transport: bool,
     /// 拒绝原因码（账号保护挡住时带上 gate_core::reasons 的码；旧版靠 str 子类 Reason 携带）。
     pub code: String,
+    /// 网关自己的回调（全站冷却 / V5 续费确认 / 额度复核）拒绝的：旧版是 GateError 原样穿过 `request()`，
+    /// 状态码与原因码不能再按上游错误改写成 502。
+    pub local: bool,
 }
 
 impl UpstreamError {
@@ -43,6 +46,18 @@ impl UpstreamError {
             billing_uncertain: false,
             transport: false,
             code: String::new(),
+            local: false,
+        }
+    }
+    /// 网关回调产生的拒绝（见 `local`）。
+    pub fn local(status: u16, message: impl Into<String>, code: impl Into<String>) -> Self {
+        Self {
+            status,
+            message: message.into(),
+            billing_uncertain: false,
+            transport: false,
+            code: code.into(),
+            local: true,
         }
     }
     fn uncertain(status: u16, message: impl Into<String>, billing_uncertain: bool) -> Self {
@@ -52,6 +67,7 @@ impl UpstreamError {
             billing_uncertain,
             transport: false,
             code: String::new(),
+            local: false,
         }
     }
     fn internal(e: impl std::fmt::Display) -> Self {
@@ -61,6 +77,7 @@ impl UpstreamError {
             billing_uncertain: false,
             transport: true,
             code: String::new(),
+            local: false,
         }
     }
 }
@@ -292,8 +309,11 @@ impl<'a> RequestOpts<'a> {
 pub struct Callbacks<'a> {
     /// 上游 429：参数是解析后的 Retry-After 秒数（未钳制，与旧版一致由回调自己处理）。
     pub on_rate_limited: Option<Box<dyn Fn(f64) -> BoxFuture<'static, ()> + Send + Sync + 'a>>,
-    /// V5 是否已按 Anlas 计费的最终确认（参数：官方免费额度是否已耗尽）。
-    pub resolve_v5_cost: Option<Box<dyn Fn(bool) -> BoxFuture<'static, ()> + Send + Sync + 'a>>,
+    /// V5 是否已按 Anlas 计费的最终确认（参数：官方免费额度是否已耗尽）。回调可以拒绝（额度复核不过），
+    /// 拒绝原样返回给调用方（`UpstreamError::local`）。
+    pub resolve_v5_cost: Option<
+        Box<dyn Fn(bool) -> BoxFuture<'static, Result<(), UpstreamError>> + Send + Sync + 'a>,
+    >,
     /// 真正发出前的最后检查（全站冷却）；返回 Err 则不发。
     pub before_dispatch: Option<Box<dyn Fn() -> Result<(), UpstreamError> + Send + Sync + 'a>>,
     /// 已决定发出（图片流用来标记「已占用上游」）。
@@ -1228,7 +1248,9 @@ impl<H: Hooks> NaiClient<H> {
         &self,
         token: &Token,
         allowance: &dyn Allowance,
-        callback: &(dyn Fn(bool) -> BoxFuture<'static, ()> + Send + Sync + '_),
+        callback: &(
+             dyn Fn(bool) -> BoxFuture<'static, Result<(), UpstreamError>> + Send + Sync + '_
+         ),
     ) -> Result<bool, UpstreamError> {
         let exhausted = {
             let _d = token.dispatch_lock.lock().await;
@@ -1249,7 +1271,7 @@ impl<H: Hooks> NaiClient<H> {
                 "该上游账号 V5 额度已耗尽，且未允许使用 Anlas；未发送生图",
             ));
         }
-        callback(exhausted).await;
+        callback(exhausted).await?;
         Ok(exhausted)
     }
 
