@@ -115,6 +115,8 @@ pub struct Inner {
     pub registration: Option<Arc<RegistrationService>>,
     /// 成员网页接口的进程内限流状态（捐赠提交、原图打包）。
     pub member_web: MemberWeb,
+    /// 自适应内核：模块运行记录 + 外部钩子（注册服务、私信函数）。
+    pub kernel: crate::kernel::Kernel,
 }
 
 impl Deref for AppState {
@@ -246,6 +248,7 @@ impl AppState {
             live: crate::live::Hub::new(),
             registration,
             member_web: MemberWeb::default(),
+            kernel: crate::kernel::Kernel::new(),
             env,
             db,
         }));

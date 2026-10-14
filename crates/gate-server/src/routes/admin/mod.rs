@@ -4,6 +4,7 @@
 
 mod auth;
 mod incidents;
+mod kernel;
 mod ops;
 
 use crate::action_log::{label, log_action, summarize};
@@ -26,6 +27,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .merge(auth::router())
         .merge(incidents::router())
         .merge(ops::router())
+        .merge(kernel::router())
         .route_layer(from_fn_with_state(state, audited))
 }
 

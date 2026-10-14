@@ -146,8 +146,11 @@ impl Guard {
                 self.with(|g| g.adapt_daily_finish(now, hit, first, seen, &params))?
             }
         };
-        for (k, v) in &adapted.writes {
-            self.db.set_setting(k, v).await?;
+        // 旧版：只改时间戳时单独 `set_setting`；真的加窗（上限 + 时间戳）是 `_set_adaptive` 里一次 `set_settings_bulk`，同一个事务
+        match adapted.writes.as_slice() {
+            [] => {}
+            [(k, v)] => self.db.set_setting(k, v).await?,
+            many => self.db.set_settings_bulk(many).await?,
         }
         Ok(adapted.change)
     }
