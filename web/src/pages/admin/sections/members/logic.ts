@@ -197,12 +197,10 @@ export const compareText = (a: string, b: string): number => collator.compare(a,
 /** idleDays：后端「满 N 天未生图」回收的天数；0 = 回收关闭，不出现「快被回收」筛选 */
 export function buildFilters(everyone: Member[], now: number, idleDays: number): FilterSet {
   const main: FilterDef[] = [
+    { id: "all", label: "全部成员", test: () => true },
     { id: "attention", label: "需要处理", test: (m) => needsAttention(m, now) },
-    { id: "active", label: "启用中", test: (m) => m.enabled },
     { id: "today", label: "今日活跃", test: (m) => m.today.requests > 0 },
     { id: "never", label: "还没出过图", test: (m) => !m.first_image_at && !m.is_admin },
-    { id: "disabled", label: "已停用", test: (m) => !m.enabled },
-    { id: "all", label: "全部成员", test: () => true },
   ];
   const more: FilterDef[] = [
     { id: "new", label: "24 小时内新加入", test: (m) => !!m.registered_at && now - m.registered_at < DAY },
@@ -264,10 +262,10 @@ export function buildFilters(everyone: Member[], now: number, idleDays: number):
 
 export const allFilters = (s: FilterSet): FilterDef[] => [...s.main, ...s.more, ...s.userTags, ...s.autoTags];
 
-/** 默认筛选：有要处理的人就直接看「需要处理」，否则「启用中」 */
+/** 默认筛选：有要处理的人就直接看「需要处理」，否则「全部成员」 */
 export function defaultFilter(everyone: Member[], now: number): string {
   const members = everyone.filter((m) => !isStaff(m));
-  return members.some((m) => needsAttention(m, now)) ? "attention" : "active";
+  return members.some((m) => needsAttention(m, now)) ? "attention" : "all";
 }
 
 export function matchesQuery(m: Member, raw: string): boolean {

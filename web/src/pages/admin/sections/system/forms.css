@@ -17,6 +17,15 @@
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr));
   align-items: start;
 }
+/* 每个字段占 4 行（标题 / 控件 / 说明 / 错误），用 subgrid 共用行高：
+   同一排里有的标题折成两行，控件也照样上下对齐 */
+.form-grid > .field {
+  grid-row: span 4;
+  display: grid;
+  grid-template-rows: subgrid;
+  row-gap: 6px;
+  align-content: start;
+}
 .form-grid--wide {
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
 }

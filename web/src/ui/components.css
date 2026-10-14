@@ -383,6 +383,21 @@
   border-radius: var(--radius);
   box-shadow: var(--shadow-2);
 }
+.menu__header {
+  padding: var(--sp-2) var(--sp-3) var(--sp-3);
+  margin-bottom: var(--sp-1);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+.menu__header strong {
+  display: block;
+  color: var(--text);
+  font-size: var(--fs-md);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .menu__item {
   display: flex;
   width: 100%;
@@ -439,11 +454,23 @@
   text-align: left;
   white-space: nowrap;
 }
+/* 表格：中文按词组整体换行（只在空格、标点处断），列被挤窄时也不会出现「可以 / 考虑」这种拆开的短词；
+   一段很长又没有标点的文字才在格子里硬折 */
 .table th,
 .table td {
+  word-break: keep-all;
+  overflow-wrap: break-word;
   padding: var(--sp-2) var(--sp-3);
   border-bottom: 1px solid var(--border);
   vertical-align: top;
+}
+/* 行标题（每行第一格）和短值不折行；长文字列加 .wrap，给够最小宽度再折 */
+.table th[scope="row"],
+.table td.nowrap {
+  white-space: nowrap;
+}
+.table td.wrap {
+  min-width: 12em;
 }
 .table tbody tr:hover {
   background: var(--surface-2);
