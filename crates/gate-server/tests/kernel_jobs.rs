@@ -86,7 +86,7 @@ fn role_removals(discord: &MockUpstream) -> Vec<String> {
 
 #[tokio::test]
 async fn idle_recycle_switched_off_never_deletes_anything() {
-    // 线上现状：KEY_INACTIVITY_DELETE_DAYS=0
+    // 关掉回收（KEY_INACTIVITY_DELETE_DAYS=0；线上 10-13 起是 3，开着）
     let discord = MockUpstream::start().await;
     let e = setup(&discord_env(&discord.url(), "0")).await;
     key(&e, 1, 400.0, &[]).await;
