@@ -1,10 +1,12 @@
-//! `Database` 全部方法的 golden 对拍：夹具由旧 Python 生成（脚本见标签 py-final）。
+//! `Database` 全部方法的快照测试。
 //!
-//! 每个用例：新建空库 → 执行 `seed_sql`（以及原图目录快照）→ 调用同名 Rust 方法 →
-//! 比较返回值（含键顺序）、调用后所有非空表的整表内容、原图目录。浮点逐位相等。
+//! 每个用例（`tests/snapshots/repo/<领域>.jsonl` 的一行）：新建空库 → 执行 `seed_sql`（以及原图目录快照）→ 调用同名 Rust 方法 →
+//! 记录返回值（或错误）、**有变化的表**的整表内容、有变化的原图文件和目录。浮点逐位、JSON 键顺序一致才算相同。
+//!
+//! 更新：`UPDATE_SNAPSHOT=1 cargo test -p gate-db --test repo_golden`，然后审阅 `git diff`。
 
 use base64::{Engine, engine::general_purpose::STANDARD as B64};
-use gate_core::{clock::Clock, pyc, pyval};
+use gate_core::{clock::Clock, pyval, reasons::reason_label};
 use gate_db::repo::{
     audit::NewAudit,
     discord::BanInfo,
@@ -13,15 +15,18 @@ use gate_db::repo::{
     usage::{LogFilter, NewLog, Success},
 };
 use gate_db::{Db, DbError};
-use gate_snapshot::{Case, as_f64, assert_eq_py, assert_eq_py_ordered, f as fjson, load};
+use gate_snapshot::snapshot::{Suite, path as snapshot_path};
+use gate_snapshot::{Case, as_f64, f as fjson};
 use rusqlite::types::ValueRef;
 use serde::Serialize;
 use serde_json::{Map, Value, json};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::time::{Duration, UNIX_EPOCH};
 
-// ------------------------------------------------------------------ 参数解码（Python 调用约定：位置 + 关键字）
+const M: &str = env!("CARGO_MANIFEST_DIR");
+
+// ------------------------------------------------------------------ 参数解码（输入沿用位置参数 + 关键字参数的写法）
 fn arg<'a>(c: &'a Case, i: usize, name: &str) -> Option<&'a Value> {
     c.kwarg(name).or_else(|| c.args().get(i))
 }
@@ -72,7 +77,7 @@ fn unb(v: Option<&Value>) -> Option<Vec<u8>> {
     }
 }
 
-// ------------------------------------------------------------------ 返回值编码（与 _golden.enc 对应）
+// ------------------------------------------------------------------ 返回值编码（`$map` / `$b` 的约定见 gate_snapshot）
 fn js<T: Serialize>(v: &T) -> Value {
     serde_json::to_value(v).unwrap()
 }
@@ -96,59 +101,6 @@ fn str_map<V: Serialize>(items: Vec<(String, V)>) -> Value {
 
 fn float(x: f64) -> Value {
     fjson(x)
-}
-
-/// `app/reasons.py::reason_label`（member_milestones 的回调；测试里自己移植一份，不依赖其他 crate 的进度）。
-fn reason_label(code: &str, detail: &str) -> String {
-    const LABELS: [(&str, &str); 18] = [
-        ("key_paused", "Key 被暂停"),
-        ("queue_full", "排队满"),
-        ("key_busy", "上一张没出完就重发"),
-        ("hourly_cap", "本小时全站上限"),
-        ("burst_cap", "突发窗口限速"),
-        ("quiet_cap", "安静时段上限"),
-        ("cap_3h", "3 小时全站上限"),
-        ("daily_cap", "全站每日上限"),
-        ("paced", "全天平滑放行"),
-        ("over_base", "超出保底暂缓"),
-        ("breaker", "全站熔断"),
-        ("cooldown", "上游限流暂停"),
-        ("v5_exhausted", "全站 V5 用完"),
-        ("queue_timeout", "排队超时"),
-        ("member_quota", "个人额度用完"),
-        ("site_quota", "全站额度用完"),
-        ("key_rate", "Key 请求过快"),
-        ("body_abort", "请求体中断"),
-    ];
-    if !code.is_empty()
-        && let Some((_, l)) = LABELS.iter().find(|(c, _)| *c == code)
-    {
-        return (*l).to_string();
-    }
-    // re.sub(r"^\d{3}\s*", "", detail).strip()
-    let chars: Vec<char> = detail.chars().collect();
-    let mut text: String = if chars.len() >= 3 && chars[..3].iter().all(char::is_ascii_digit) {
-        chars[3..]
-            .iter()
-            .collect::<String>()
-            .trim_start_matches(char::is_whitespace)
-            .to_string()
-    } else {
-        detail.to_string()
-    };
-    text = pyc::strip(&text).to_string();
-    // re.split(r"[（(，,。：:；;]", text, maxsplit=1)[0].strip()
-    let cut = text
-        .find(|c| "（(，,。：:；;".contains(c))
-        .unwrap_or(text.len());
-    let text = pyc::strip(&text[..cut]).to_string();
-    if text.chars().count() > 18 {
-        format!("{}…", text.chars().take(18).collect::<String>())
-    } else if text.is_empty() {
-        "其他".into()
-    } else {
-        text
-    }
 }
 
 // ------------------------------------------------------------------ 库快照
@@ -246,68 +198,20 @@ fn set_mtime(p: &Path, secs: f64) {
     std::fs::File::open(p).unwrap().set_modified(t).unwrap();
 }
 
-/// 3.0 新增、冻结的 2.x 夹具里没有的列（docs/v3-deviations.md #47）：比较前从 Rust 这一侧去掉。
-const RUST_ONLY_COLUMNS: [&str; 1] = ["disabled_reason"];
-
-/// `usage_log` 里 3.0 不再写入的列，冻结夹具里旧版写的值两边都不比：整表内容里按空串比较。
-/// - `client`：客户端识别已删除（docs/v3-deviations.md #50），列还在（2.x 能读），也不再从 `list_logs` 读出；
-/// - `src`（来源网段）/ `ver`（网关版本）：只写不读，3.0 不再写（docs/v3-deviations.md #104）。
-const UNWRITTEN_USAGE_COLUMNS: [&str; 3] = ["client", "src", "ver"];
-
-fn blank_usage_client(tables: &mut Value) {
-    let rows = tables.get_mut("usage_log").and_then(Value::as_array_mut);
-    for row in rows.into_iter().flatten() {
-        if let Some(o) = row.as_object_mut() {
-            for col in UNWRITTEN_USAGE_COLUMNS {
-                if o.contains_key(col) {
-                    o.insert(col.into(), json!(""));
-                }
-            }
-        }
-    }
-}
-
-/// 同上：`list_logs` 的旧版返回值每行带 `client`，新版没有这个键，比较前从旧版一侧去掉。
-fn drop_expected_client(out: &Value) -> Value {
-    let mut out = out.clone();
-    for row in out.as_array_mut().into_iter().flatten() {
-        if let Some(o) = row.as_object_mut() {
-            o.shift_remove("client");
-        }
-    }
-    out
-}
-
-fn strip_rust_only(v: &mut Value) {
-    match v {
-        Value::Object(m) => {
-            for c in RUST_ONLY_COLUMNS {
-                m.remove(c);
-            }
-            m.values_mut().for_each(strip_rust_only);
-        }
-        Value::Array(a) => a.iter_mut().for_each(strip_rust_only),
-        _ => {}
-    }
-}
-
-/// 夹具里 `api_keys` 的种子是 sqlite `.dump` 出来的不带列名整行插入；3.0 多了一列，补一个 NULL。
-fn widen_seed(stmt: &str) -> String {
-    match stmt.strip_suffix(");") {
-        Some(head) if stmt.starts_with("INSERT INTO \"api_keys\" VALUES(") => {
-            format!("{head},NULL);")
-        }
-        _ => stmt.to_string(),
-    }
+/// 输入里可省略的数组字段（空数组不写进快照）。
+fn list<'a>(case: &'a Case, key: &str) -> &'a [Value] {
+    case.get(key)
+        .and_then(Value::as_array)
+        .map_or(&[], Vec::as_slice)
 }
 
 async fn seed(db: &Db, case: &Case) -> Vec<String> {
-    for ddl in case.get("extra_ddl").unwrap().as_array().unwrap() {
+    for ddl in list(case, "extra_ddl") {
         let ddl = ddl.as_str().unwrap().to_string();
         db.write(move |tx| tx.execute_batch(&ddl)).await.unwrap();
     }
-    for stmt in case.get("seed_sql").unwrap().as_array().unwrap() {
-        let stmt = widen_seed(stmt.as_str().unwrap());
+    for stmt in list(case, "seed_sql") {
+        let stmt = stmt.as_str().unwrap().to_string();
         let sql = stmt.clone();
         db.write(move |tx| tx.execute_batch(&sql))
             .await
@@ -315,8 +219,8 @@ async fn seed(db: &Db, case: &Case) -> Vec<String> {
     }
     let root = db.image_dir().to_path_buf();
     let mut extra = Vec::new();
-    let seed_files = case.get("seed_files").unwrap().as_array().unwrap();
-    let seed_dirs = case.get("seed_dirs").unwrap().as_array().unwrap();
+    let seed_files = list(case, "seed_files");
+    let seed_dirs = list(case, "seed_dirs");
     for d in seed_dirs {
         std::fs::create_dir_all(root.join(d["path"].as_str().unwrap())).unwrap();
     }
@@ -369,7 +273,6 @@ async fn call(db: &Db, c: &Case) -> Out {
         }
         "reconciliation_history" => json!(db.reconciliation_history(int(a(0, "limit"), 20)).await?),
         // ---------------- upstream
-        // 3.0 不再返回节约模式折算的 `units`（#67）：期望一侧在 run_case 里去掉
         "get_upstream_counter" => js(&db
             .get_upstream_counter(&s(a(0, "token_id"), ""), &s(a(1, "day"), ""))
             .await?),
@@ -410,7 +313,7 @@ async fn call(db: &Db, c: &Case) -> Out {
                 .await?
         ),
         "bump_upstream_image_counter" => {
-            // 节约模式的 weight 参数已删除（docs/v3-deviations.md #67）：一张 = 一份；带别的 weight 的用例在 run_area 里跳过
+            // 一张 = 一份（没有 weight 参数）
             db.bump_upstream_image_counter(
                 &s(a(0, "token_id"), ""),
                 &s(a(1, "day"), ""),
@@ -565,7 +468,7 @@ async fn call(db: &Db, c: &Case) -> Out {
             db.delete_key(int(a(0, "key_id"), 0)).await?;
             Value::Null
         }
-        // 3.0 多一个 `now`：已过期的 Key 不算闲置（docs/v3-deviations.md #56）；夹具里的 Key 都没设过期时间，结果不变
+        // 已过期的 Key 不算闲置，所以要带 `now`
         "inactive_key_ids" => json!(db.inactive_key_ids(num(a(0, "cutoff"), 0.0), now).await?),
         "list_keys" => json!(db.list_keys().await?),
         "touch_key" => {
@@ -746,8 +649,7 @@ async fn call(db: &Db, c: &Case) -> Out {
             let (data, ty) = db.audit_image(int(a(0, "audit_id"), 0)).await?;
             json!([blob(data), ty])
         }
-        // 成员自助导出删了（docs/v3-deviations.md #49），整数绑定的 `audit_images_for` 没有了，只剩后台导出的文本绑定版；
-        // 夹具里的 key_id 都是整数，换成文本绑定，SQLite 的列亲和性转回整数，结果相同
+        // 只剩后台导出用的文本绑定版 `audit_images_for_text`；用例里的 key_id 都是整数，转成文本绑定后 SQLite 的列亲和性转回整数，结果相同
         "audit_images_for" => json!(
             db.audit_images_for_text(
                 &int(a(0, "key_id"), 0).to_string(),
@@ -786,135 +688,89 @@ async fn call(db: &Db, c: &Case) -> Out {
 }
 
 // ------------------------------------------------------------------ 驱动
-/// 失败信息只带方法名 / 入参 / 备注，不带整份种子。
-fn brief(case: &Case) -> Case {
-    Case {
-        line: case.line,
-        raw: json!({
-            "method": case.get("method"), "args": case.get("args"), "kwargs": case.get("kwargs"),
-            "note": case.get("note"),
-        }),
+
+/// 两次表快照之间有变化的表：值是调用后该表的整表内容（表被清空时是空数组）。
+fn changed_tables(before: &Value, after: &Value) -> Map<String, Value> {
+    let (before, after) = (before.as_object().unwrap(), after.as_object().unwrap());
+    let names: BTreeSet<&String> = before.keys().chain(after.keys()).collect();
+    let mut out = Map::new();
+    for name in names {
+        if before.get(name) != after.get(name) {
+            out.insert(
+                name.clone(),
+                after.get(name).cloned().unwrap_or_else(|| json!([])),
+            );
+        }
     }
+    out
 }
 
-/// `record_success` 的这一条：旧版会刷新 `last_image_at`、3.0 不刷新（只认 `image` / `image_stream`，
-/// docs/v3-deviations.md #65）。返回那把 Key 的 id。
-fn no_longer_refreshes_last_image(case: &Case) -> Option<i64> {
-    if case.get("method").and_then(Value::as_str) != Some("record_success") {
-        return None;
+/// 两次原图目录快照之间有变化的文件（新增 / 改写：base64 内容；删除：null）。
+fn changed_files(before: &Value, after: &Value) -> Map<String, Value> {
+    let (before, after) = (before.as_object().unwrap(), after.as_object().unwrap());
+    let mut out = Map::new();
+    for (k, v) in after {
+        if before.get(k) != Some(v) {
+            out.insert(k.clone(), v.clone());
+        }
     }
-    let kind = case.arg(2).as_str().unwrap_or("");
-    let old =
-        kind.starts_with("image") || matches!(kind, "upscale" | "augment-image" | "vibe_encode");
-    let new = matches!(kind, "image" | "image_stream");
-    (old && !new).then(|| case.arg(0).as_i64().unwrap_or(0))
+    for k in before.keys().filter(|k| !after.contains_key(*k)) {
+        out.insert(k.clone(), Value::Null);
+    }
+    out
 }
 
-/// 某把 Key 在表快照里的 `last_image_at`。
-fn last_image_at(tables: &Value, key_id: i64) -> Option<Value> {
-    tables["api_keys"]
-        .as_array()?
-        .iter()
-        .find(|r| r["id"] == key_id)
-        .map(|r| r["last_image_at"].clone())
-}
-
-/// 已删除的方法：冻结夹具里还有它们的用例，逐条跳过。
-/// - `latest_member_clients`：每把 Key 最近一次请求的客户端（docs/v3-deviations.md #50）；
-/// - 其余：没有生产调用方的死代码（docs/v3-deviations.md #101）。
-const REMOVED_METHODS: [&str; 7] = [
-    "latest_member_clients",
-    "shadow_rows",
-    "bump_counters",
-    "get_key_role",
-    "list_admin_actions",
-    "count_admin_actions",
-    "list_audit",
-];
-
-async fn run_case(case: &Case) {
-    if case
-        .get("method")
-        .and_then(Value::as_str)
-        .is_some_and(|m| REMOVED_METHODS.contains(&m))
-    {
-        return;
-    }
+/// 一个用例的输出：`ret`（返回值）或 `err`，加上有变化的 `tables` / `files`，子目录有变化时再加 `dirs`（调用后的完整列表）。
+async fn run_case(case: &Case) -> Value {
     let dir = tempfile::tempdir().unwrap();
     let db = Db::open(dir.path().join("gate.db"), 0.0, &[]).unwrap();
     let extra = seed(&db, case).await;
-    let brief = brief(case);
-    // 3.0 不再刷新的 last_image_at：期望一侧换回调用前的值（#65）
-    let kept_last_image = match no_longer_refreshes_last_image(case) {
-        Some(kid) => Some((kid, last_image_at(&dump_tables(&db).await, kid))),
-        None => None,
-    };
+    let tables_before = dump_tables(&db).await;
+    let (files_before, dirs_before) = snap_files(db.image_dir(), &extra);
 
-    let out = call(&db, case).await;
-    match (case.err(), out) {
-        (Some(_), Err(_)) => {}
-        (Some(ty), Ok(v)) => panic!(
-            "golden 第 {} 行：旧版抛 {ty}，Rust 却成功了：{v}\n{brief:?}",
-            case.line
-        ),
-        (None, Err(e)) => panic!("golden 第 {} 行：Rust 报错 {e}\n{brief:?}", case.line),
-        (None, Ok(mut v)) => {
-            strip_rust_only(&mut v);
-            if case.get("method").and_then(Value::as_str) == Some("list_logs") {
-                assert_eq_py_ordered(&brief, &v, &drop_expected_client(case.out()))
-            } else if case.get("method").and_then(Value::as_str) == Some("get_upstream_counter") {
-                let mut want = case.out().clone();
-                want.as_object_mut().unwrap().shift_remove("units");
-                assert_eq_py_ordered(&brief, &v, &want)
-            } else {
-                assert_eq_py_ordered(&brief, &v, case.out())
-            }
+    let mut out = Map::new();
+    match call(&db, case).await {
+        Ok(v) => out.insert("ret".into(), v),
+        Err(e) => {
+            // 错误文案里可能带临时目录路径
+            let msg = e.to_string().replace(dir.path().to_str().unwrap(), "<tmp>");
+            out.insert("err".into(), json!(msg))
         }
+    };
+    let tables = changed_tables(&tables_before, &dump_tables(&db).await);
+    if !tables.is_empty() {
+        out.insert("tables".into(), Value::Object(tables));
     }
-
-    let mut tables = dump_tables(&db).await;
-    strip_rust_only(&mut tables);
-    blank_usage_client(&mut tables);
-    let mut want_tables = case.get("tables_after").unwrap().clone();
-    blank_usage_client(&mut want_tables);
-    if let Some((kid, before)) = kept_last_image
-        && let Some(row) = want_tables["api_keys"]
-            .as_array_mut()
-            .and_then(|rows| rows.iter_mut().find(|r| r["id"] == kid))
-    {
-        row["last_image_at"] = before.unwrap_or(Value::Null);
+    let (files_after, dirs_after) = snap_files(db.image_dir(), &extra);
+    let files = changed_files(&files_before, &files_after);
+    if !files.is_empty() {
+        out.insert("files".into(), Value::Object(files));
     }
-    assert_eq_py(&brief, &tables, &want_tables);
-    let (files, dirs) = snap_files(db.image_dir(), &extra);
-    assert_eq_py(&brief, &files, case.get("files_after").unwrap());
-    assert_eq_py(&brief, &dirs, case.get("dirs_after").unwrap());
+    if dirs_before != dirs_after {
+        out.insert("dirs".into(), dirs_after);
+    }
+    Value::Object(out)
 }
 
 async fn run_area(area: &str) {
-    let cases = load(env!("CARGO_MANIFEST_DIR"), area);
-    assert!(!cases.is_empty());
-    for case in &cases {
-        // `audit_image_count` 只给成员自助导出的保留天数用，已随导出一起删除（docs/v3-deviations.md #49）
-        if case.get("method").and_then(Value::as_str) == Some("audit_image_count") {
-            continue;
-        }
-        // 节约模式按 weight 折算 units 已删除（#67）：只测折算的用例（weight ≠ 1）跳过
-        if case.get("method").and_then(Value::as_str) == Some("bump_upstream_image_counter")
-            && case.args().get(3).is_some_and(|w| w.as_f64() != Some(1.0))
-        {
-            continue;
-        }
-        run_case(case).await;
+    let mut suite = Suite::open(M, &format!("repo/{area}"));
+    let cases = suite.cases();
+    for (i, case) in cases.iter().enumerate() {
+        suite.record(i, Some(run_case(case).await));
     }
+    suite.finish();
 }
 
 macro_rules! area_tests {
-    ($($name:ident),* $(,)?) => {$(
-        #[tokio::test(flavor = "multi_thread")]
-        async fn $name() {
-            run_area(stringify!($name)).await;
-        }
-    )*};
+    ($($name:ident),* $(,)?) => {
+        const AREAS: &[&str] = &[$(stringify!($name)),*];
+        $(
+            #[tokio::test(flavor = "multi_thread")]
+            async fn $name() {
+                run_area(stringify!($name)).await;
+            }
+        )*
+    };
 }
 
 area_tests!(
@@ -930,3 +786,104 @@ area_tests!(
     usage,
     audit,
 );
+
+/// `call` 支持的全部方法：每个方法在快照里至少要有 `MIN_CASES_PER_METHOD` 个用例（抽样、删用例时不会悄悄丢掉一个方法）。
+const METHODS: &[&str] = &[
+    "reconciliation_totals",
+    "save_reconciliation",
+    "reconciliation_history",
+    "get_upstream_counter",
+    "migrate_upstream_token_ids",
+    "move_upstream_token",
+    "get_upstream_token_limits",
+    "get_upstream_token_enabled",
+    "get_upstream_token_image_concurrency",
+    "set_upstream_token_limit",
+    "set_upstream_token_enabled",
+    "set_upstream_token_image_concurrency",
+    "get_upstream_v5_counter",
+    "bump_upstream_image_counter",
+    "bump_upstream_v5_counter",
+    "get_setting",
+    "set_setting",
+    "set_settings_bulk",
+    "add_coupon",
+    "list_coupons",
+    "use_coupon",
+    "add_admin_action",
+    "purge_admin_actions",
+    "forget_registration_for_key",
+    "ban_discord",
+    "unban_discord",
+    "list_bans",
+    "save_survey",
+    "list_survey",
+    "save_donation",
+    "list_donations",
+    "count_unhandled_donations",
+    "handle_donation",
+    "create_key",
+    "get_key",
+    "get_key_by_token",
+    "rotate_key_token",
+    "update_key",
+    "delete_key",
+    "inactive_key_ids",
+    "list_keys",
+    "touch_key",
+    "set_key_role",
+    "get_counter",
+    "reset_daily_image_quota",
+    "month_anlas",
+    "day_v5_total",
+    "day_anlas_total",
+    "month_anlas_all",
+    "member_usage",
+    "overview",
+    "record_success",
+    "add_log",
+    "list_logs",
+    "count_logs",
+    "purge_usage_log",
+    "member_milestones",
+    "image_perf_rows",
+    "image_stability",
+    "usage_by_kind",
+    "generated_image_totals",
+    "user_image_timing",
+    "add_audit",
+    "list_audit_ids",
+    "audit_thumb",
+    "audit_image",
+    "audit_images_for",
+    "audit_image_bytes",
+    "purge_audit_images_to_cap",
+    "purge_audit_images_before_id",
+    "purge_audit_images",
+    "purge_audit",
+    "sweep_orphan_images",
+];
+const MIN_CASES_PER_METHOD: usize = 2;
+
+#[test]
+fn every_method_keeps_a_few_cases() {
+    let mut count: BTreeMap<String, usize> = BTreeMap::new();
+    for area in AREAS {
+        let path = snapshot_path(M, &format!("repo/{area}"));
+        let text = std::fs::read_to_string(&path).unwrap();
+        for line in text.lines().filter(|l| !l.trim().is_empty()) {
+            let v: Value = serde_json::from_str(line).unwrap();
+            *count
+                .entry(v["in"]["method"].as_str().unwrap().to_string())
+                .or_default() += 1;
+        }
+    }
+    for m in METHODS {
+        let n = count.remove(*m).unwrap_or(0);
+        assert!(
+            n >= MIN_CASES_PER_METHOD,
+            "方法 {m} 在快照里只有 {n} 个用例（至少 {MIN_CASES_PER_METHOD} 个）"
+        );
+    }
+    assert!(count.is_empty(), "快照里有 `call` 不认识的方法：{count:?}");
+}

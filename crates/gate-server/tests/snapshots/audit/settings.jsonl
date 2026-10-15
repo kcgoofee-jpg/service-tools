@@ -1,0 +1,239 @@
+{"in":{"fn":"audit_flags","kv":{}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_thumbs":"1"}},"out":{"ret":[false,true,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_thumbs":"1"}},"out":{"ret":[false,true,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_thumbs":"1"}},"out":{"ret":[false,true,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_thumbs":"1"}},"out":{"ret":[false,true,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_thumbs":"1"}},"out":{"ret":[false,true,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_thumbs":"1"}},"out":{"ret":[false,true,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_thumbs":"1"}},"out":{"ret":[false,true,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_thumbs":"1"}},"out":{"ret":[false,true,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_thumbs":"0"}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_thumbs":"0"}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_thumbs":"0"}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_thumbs":"0"}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_thumbs":"0"}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_thumbs":"0"}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_thumbs":"0"}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_thumbs":"0"}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_thumbs":"2"}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_thumbs":"2"}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_thumbs":"2"}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_thumbs":"2"}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_thumbs":"2"}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_thumbs":"2"}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_thumbs":"2"}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_thumbs":"2"}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_prompts":""}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_thumbs":""}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_prompts":""}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_thumbs":""}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_prompts":""}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_thumbs":""}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_prompts":""}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_thumbs":""}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_prompts":""}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_thumbs":""}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_prompts":""}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_thumbs":""}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_prompts":""}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_thumbs":""}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_prompts":""}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_thumbs":""}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_thumbs":"y"}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_thumbs":"y"}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_thumbs":"y"}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_thumbs":"y"}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_thumbs":"y"}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_thumbs":"y"}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{"audit_retention_days":"inf"}},"out":{"err":"参数错误：audit_retention_days=\"inf\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_flags","kv":{"audit_retention_days":"inf"}},"out":{"err":"参数错误：audit_retention_days=\"inf\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_flags","kv":{"audit_retention_days":"inf"}},"out":{"err":"参数错误：audit_retention_days=\"inf\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_flags","kv":{"audit_retention_days":"-inf"}},"out":{"err":"参数错误：audit_retention_days=\"-inf\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_flags","kv":{"audit_retention_days":"-inf"}},"out":{"err":"参数错误：audit_retention_days=\"-inf\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_flags","kv":{"audit_retention_days":"-inf"}},"out":{"err":"参数错误：audit_retention_days=\"-inf\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_flags","kv":{"audit_retention_days":"Infinity"}},"out":{"err":"参数错误：audit_retention_days=\"Infinity\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_flags","kv":{"audit_retention_days":"Infinity"}},"out":{"err":"参数错误：audit_retention_days=\"Infinity\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_flags","kv":{"audit_retention_days":"Infinity"}},"out":{"err":"参数错误：audit_retention_days=\"Infinity\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_flags","kv":{"audit_retention_days":"1e999"}},"out":{"err":"参数错误：audit_retention_days=\"1e999\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_flags","kv":{"audit_retention_days":"1e999"}},"out":{"err":"参数错误：audit_retention_days=\"1e999\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_flags","kv":{"audit_retention_days":"1e999"}},"out":{"err":"参数错误：audit_retention_days=\"1e999\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_flags","kv":{"audit_retention_days":"-1e999"}},"out":{"err":"参数错误：audit_retention_days=\"-1e999\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_flags","kv":{"audit_retention_days":"-1e999"}},"out":{"err":"参数错误：audit_retention_days=\"-1e999\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_flags","kv":{"audit_retention_days":"-1e999"}},"out":{"err":"参数错误：audit_retention_days=\"-1e999\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_flags","kv":{}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_flags","kv":{}},"out":{"ret":[false,false,7]}}
+{"in":{"fn":"audit_image_keep_hours","kv":{}},"out":{"ret":24}}
+{"in":{"fn":"audit_image_keep_hours","kv":{"audit_image_keep_hours":"24"}},"out":{"ret":24}}
+{"in":{"fn":"audit_image_keep_hours","kv":{"audit_image_keep_hours":"0"}},"out":{"ret":0}}
+{"in":{"fn":"audit_image_keep_hours","kv":{"audit_image_keep_hours":"1"}},"out":{"ret":1}}
+{"in":{"fn":"audit_image_keep_hours","kv":{"audit_image_keep_hours":"8760"}},"out":{"ret":8760}}
+{"in":{"fn":"audit_image_keep_hours","kv":{"audit_image_keep_hours":"8761"}},"out":{"ret":8760}}
+{"in":{"fn":"audit_image_keep_hours","kv":{"audit_image_keep_hours":"-1"}},"out":{"ret":0}}
+{"in":{"fn":"audit_image_keep_hours","kv":{"audit_image_keep_hours":"48"}},"out":{"ret":48}}
+{"in":{"fn":"audit_image_keep_hours","kv":{"audit_image_keep_hours":" 12 "}},"out":{"ret":12}}
+{"in":{"fn":"audit_image_keep_hours","kv":{"audit_image_keep_hours":"12.7"}},"out":{"ret":12}}
+{"in":{"fn":"audit_image_keep_hours","kv":{"audit_image_keep_hours":"1e3"}},"out":{"ret":1000}}
+{"in":{"fn":"audit_image_keep_hours","kv":{"audit_image_keep_hours":"1e5"}},"out":{"ret":8760}}
+{"in":{"fn":"audit_image_keep_hours","kv":{"audit_image_keep_hours":"abc"}},"out":{"ret":24}}
+{"in":{"fn":"audit_image_keep_hours","kv":{"audit_image_keep_hours":""}},"out":{"ret":24}}
+{"in":{"fn":"audit_image_keep_hours","kv":{"audit_image_keep_hours":"  "}},"out":{"ret":24}}
+{"in":{"fn":"audit_image_keep_hours","kv":{"audit_image_keep_hours":"nan"}},"out":{"ret":24}}
+{"in":{"fn":"audit_image_keep_hours","kv":{"audit_image_keep_hours":"inf"}},"out":{"ret":8760}}
+{"in":{"fn":"audit_image_keep_hours","kv":{"audit_image_keep_hours":"-inf"}},"out":{"ret":0}}
+{"in":{"fn":"audit_image_keep_hours","kv":{"audit_image_keep_hours":"1_0"}},"out":{"ret":10}}
+{"in":{"fn":"audit_image_keep_hours","kv":{"audit_image_keep_hours":"999999999999999999999999999999"}},"out":{"ret":8760}}
+{"in":{"fn":"audit_image_keep_hours","kv":{"audit_image_keep_hours":"-0.0"}},"out":{"ret":0}}
+{"in":{"fn":"audit_image_keep_hours","kv":{"audit_image_keep_hours":"４８"}},"out":{"ret":48}}
+{"in":{"fn":"audit_image_cap_mb","kv":{}},"out":{"ret":8192}}
+{"in":{"fn":"audit_image_cap_mb","kv":{"audit_image_cap_mb":"8192"}},"out":{"ret":8192}}
+{"in":{"fn":"audit_image_cap_mb","kv":{"audit_image_cap_mb":"0"}},"out":{"ret":0}}
+{"in":{"fn":"audit_image_cap_mb","kv":{"audit_image_cap_mb":"1"}},"out":{"ret":1}}
+{"in":{"fn":"audit_image_cap_mb","kv":{"audit_image_cap_mb":"500000"}},"out":{"ret":500000}}
+{"in":{"fn":"audit_image_cap_mb","kv":{"audit_image_cap_mb":"500001"}},"out":{"ret":500000}}
+{"in":{"fn":"audit_image_cap_mb","kv":{"audit_image_cap_mb":"-1"}},"out":{"ret":0}}
+{"in":{"fn":"audit_image_cap_mb","kv":{"audit_image_cap_mb":"100"}},"out":{"ret":100}}
+{"in":{"fn":"audit_image_cap_mb","kv":{"audit_image_cap_mb":" 64 "}},"out":{"ret":64}}
+{"in":{"fn":"audit_image_cap_mb","kv":{"audit_image_cap_mb":"10.9"}},"out":{"ret":10}}
+{"in":{"fn":"audit_image_cap_mb","kv":{"audit_image_cap_mb":"1e4"}},"out":{"ret":10000}}
+{"in":{"fn":"audit_image_cap_mb","kv":{"audit_image_cap_mb":"abc"}},"out":{"ret":8192}}
+{"in":{"fn":"audit_image_cap_mb","kv":{"audit_image_cap_mb":""}},"out":{"ret":8192}}
+{"in":{"fn":"audit_image_cap_mb","kv":{"audit_image_cap_mb":"nan"}},"out":{"ret":8192}}
+{"in":{"fn":"audit_image_cap_mb","kv":{"audit_image_cap_mb":"inf"}},"out":{"ret":500000}}
+{"in":{"fn":"audit_image_cap_mb","kv":{"audit_image_cap_mb":"-inf"}},"out":{"ret":0}}
+{"in":{"fn":"audit_image_cap_mb","kv":{"audit_image_cap_mb":"999999999999999999999999999999"}},"out":{"ret":500000}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"truee","audit_thumbs":"maybe","audit_retention_days":"1e2","audit_image_cap_mb":"500000","member_image_download":"TRUE"}},"out":{"ret":""}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"  ","audit_thumbs":"0","audit_retention_days":"-inf","audit_image_keep_hours":"nan","audit_image_cap_mb":"100","member_image_download":"TRUE"}},"out":{"err":"参数错误：audit_retention_days=\"-inf\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"0","audit_thumbs":"  ","audit_retention_days":"1e999","audit_image_keep_hours":"24","audit_image_cap_mb":"","member_image_download":"猫"}},"out":{"err":"参数错误：audit_retention_days=\"1e999\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"on","audit_thumbs":"true","audit_retention_days":"-inf","audit_image_keep_hours":"","audit_image_cap_mb":" 64 ","member_image_download":"off"}},"out":{"err":"参数错误：audit_retention_days=\"-inf\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_thumbs":"0","audit_retention_days":"1E-1","audit_image_keep_hours":"1_0","audit_image_cap_mb":"-inf","member_image_download":"yes"}},"out":{"ret":""}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_thumbs":"True","audit_retention_days":"1e999","audit_image_keep_hours":"inf","audit_image_cap_mb":"1","member_image_download":"true"}},"out":{"err":"参数错误：audit_retention_days=\"1e999\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"0","audit_thumbs":"y","audit_retention_days":"  ","audit_image_keep_hours":"0","member_image_download":"2"}},"out":{"ret":""}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"-1","audit_thumbs":"猫","audit_retention_days":"-1e999","audit_image_keep_hours":"abc","audit_image_cap_mb":"","member_image_download":"on"}},"out":{"err":"参数错误：audit_retention_days=\"-1e999\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_thumbs":"１","audit_retention_days":"inf","audit_image_keep_hours":"nan","audit_image_cap_mb":"nan","member_image_download":"yes"}},"out":{"err":"参数错误：audit_retention_days=\"inf\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"True","audit_thumbs":"-1","audit_retention_days":"1,000","audit_image_keep_hours":"24","audit_image_cap_mb":"inf"}},"out":{"ret":"为防止滥用和优化调度，本站会保留你的图片提示词（7 天后自动删除），仅站长可见。"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"false","audit_thumbs":"off","audit_retention_days":"+8","audit_image_keep_hours":"12.7","member_image_download":"maybe"}},"out":{"ret":""}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"ture","audit_thumbs":"YES","audit_retention_days":"NaN","audit_image_cap_mb":"10.9","member_image_download":"2"}},"out":{"ret":"为防止滥用和优化调度，本站会保留你的生成的原图（24 小时后自动删除），仅站长可见。"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"True","audit_thumbs":"0.0","audit_retention_days":"  ","audit_image_keep_hours":"24","audit_image_cap_mb":"0"}},"out":{"ret":"为防止滥用和优化调度，本站会保留你的图片提示词（7 天后自动删除），仅站长可见。"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"y","audit_thumbs":"YES","audit_retention_days":"inf","audit_image_keep_hours":"  ","audit_image_cap_mb":"inf","member_image_download":"no"}},"out":{"err":"参数错误：audit_retention_days=\"inf\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":" 1 ","audit_thumbs":"2","audit_retention_days":"1__0","audit_image_keep_hours":"nan","member_image_download":""}},"out":{"ret":"为防止滥用和优化调度，本站会保留你的图片提示词（7 天后自动删除），仅站长可见。"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"１","audit_thumbs":"","audit_retention_days":"-inf","audit_image_keep_hours":"abc","audit_image_cap_mb":"1e4","member_image_download":"0"}},"out":{"err":"参数错误：audit_retention_days=\"-inf\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"maybe","audit_thumbs":"-1","audit_retention_days":"Infinity","audit_image_cap_mb":"500001","member_image_download":" ON "}},"out":{"err":"参数错误：audit_retention_days=\"Infinity\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"猫","audit_thumbs":"１","audit_retention_days":".5","audit_image_cap_mb":"","member_image_download":"1"}},"out":{"ret":""}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"ON","audit_thumbs":"-1","audit_retention_days":"7","audit_image_keep_hours":"-1","member_image_download":"TRUE"}},"out":{"ret":"为防止滥用和优化调度，本站会保留你的图片提示词（7 天后自动删除），仅站长可见。"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"2","audit_retention_days":"nan","audit_image_keep_hours":"inf","audit_image_cap_mb":"-inf","member_image_download":"  "}},"out":{"ret":""}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_thumbs":"True","audit_image_keep_hours":"","audit_image_cap_mb":"0","member_image_download":"true"}},"out":{"ret":"为防止滥用和优化调度，本站会保留你的生成的原图（24 小时后自动删除），仅站长可见。"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"t","audit_retention_days":"3650","audit_image_keep_hours":"-1","audit_image_cap_mb":"inf","member_image_download":"maybe"}},"out":{"ret":""}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"0.0","audit_thumbs":"no","audit_retention_days":"NaN","audit_image_cap_mb":"10.9","member_image_download":"FALSE"}},"out":{"ret":""}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"off","audit_thumbs":"","audit_image_keep_hours":"8760","audit_image_cap_mb":"1","member_image_download":"no"}},"out":{"ret":""}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"maybe","audit_thumbs":"false","audit_retention_days":"inf","audit_image_keep_hours":"1","audit_image_cap_mb":"0","member_image_download":"True"}},"out":{"err":"参数错误：audit_retention_days=\"inf\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"１","audit_thumbs":"maybe","audit_retention_days":".5","audit_image_cap_mb":"abc","member_image_download":"猫"}},"out":{"ret":""}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"","audit_retention_days":"nan","audit_image_keep_hours":"-inf","audit_image_cap_mb":"0","member_image_download":"猫"}},"out":{"ret":""}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"1","audit_thumbs":"TRUE","audit_retention_days":"inf","audit_image_keep_hours":"0","member_image_download":"  "}},"out":{"err":"参数错误：audit_retention_days=\"inf\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"TRUE","audit_thumbs":"on","audit_retention_days":"inf","audit_image_keep_hours":"1_0","audit_image_cap_mb":"500001"}},"out":{"err":"参数错误：audit_retention_days=\"inf\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"maybe","audit_thumbs":"True","audit_retention_days":".5","audit_image_keep_hours":"","audit_image_cap_mb":"-1"}},"out":{"ret":"为防止滥用和优化调度，本站会保留你的生成的原图（24 小时后自动删除），仅站长可见。"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"1","audit_thumbs":"-1","audit_retention_days":"  ","audit_image_cap_mb":"100","member_image_download":"1"}},"out":{"ret":"为防止滥用和优化调度，本站会保留你的图片提示词（7 天后自动删除），仅站长可见。"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"t","audit_thumbs":"猫","audit_retention_days":"inf","audit_image_keep_hours":"1e5","audit_image_cap_mb":"0","member_image_download":"TRUE"}},"out":{"err":"参数错误：audit_retention_days=\"inf\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"yes\n","audit_thumbs":"yes\n","audit_retention_days":"+8","audit_image_keep_hours":"","audit_image_cap_mb":"8192"}},"out":{"ret":"为防止滥用和优化调度，本站会保留你的图片提示词（8 天后自动删除）、生成的原图（24 小时后自动删除），仅站长可见。"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"ON","audit_thumbs":"YES","audit_retention_days":"3650","audit_image_keep_hours":"  ","audit_image_cap_mb":"1"}},"out":{"ret":"为防止滥用和优化调度，本站会保留你的图片提示词（3650 天后自动删除）、生成的原图（24 小时后自动删除），仅站长可见。"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"ON","audit_thumbs":"1.0","audit_image_keep_hours":"","audit_image_cap_mb":" 64 ","member_image_download":"false"}},"out":{"ret":"为防止滥用和优化调度，本站会保留你的图片提示词（7 天后自动删除），仅站长可见。"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"truee","audit_thumbs":"no","audit_retention_days":"30","audit_image_cap_mb":"","member_image_download":"on"}},"out":{"ret":""}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"truee","audit_thumbs":"１","audit_retention_days":"1_0","audit_image_cap_mb":" 64 ","member_image_download":"  "}},"out":{"ret":""}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"1","audit_thumbs":"no","audit_retention_days":"-1e999","audit_image_keep_hours":"","audit_image_cap_mb":"inf","member_image_download":"true"}},"out":{"err":"参数错误：audit_retention_days=\"-1e999\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"1.0","audit_thumbs":"maybe","audit_retention_days":"  ","audit_image_cap_mb":"nan","member_image_download":"  "}},"out":{"ret":""}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"ON","audit_thumbs":"truee","audit_image_keep_hours":"-inf","audit_image_cap_mb":"10.9","member_image_download":""}},"out":{"ret":"为防止滥用和优化调度，本站会保留你的图片提示词（7 天后自动删除），仅站长可见。"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"y","audit_retention_days":"0","audit_image_keep_hours":"４８","member_image_download":"true"}},"out":{"ret":""}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"yes\n","audit_thumbs":"on","audit_retention_days":".5","audit_image_keep_hours":"48","member_image_download":"0"}},"out":{"ret":"为防止滥用和优化调度，本站会保留你的图片提示词（长期保存）、生成的原图（48 小时后自动删除），仅站长可见。"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"0.0","audit_retention_days":"5.","audit_image_keep_hours":"12.7","audit_image_cap_mb":"-1","member_image_download":"0"}},"out":{"ret":""}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"TRUE","audit_retention_days":"Infinity","audit_image_keep_hours":"  ","audit_image_cap_mb":"10.9","member_image_download":""}},"out":{"err":"参数错误：audit_retention_days=\"Infinity\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"ON","audit_thumbs":"2","audit_retention_days":"0x10","audit_image_keep_hours":"-1","audit_image_cap_mb":"500001"}},"out":{"ret":"为防止滥用和优化调度，本站会保留你的图片提示词（7 天后自动删除），仅站长可见。"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"On ","audit_thumbs":"TRUE","audit_retention_days":"inf","audit_image_keep_hours":"","audit_image_cap_mb":"0","member_image_download":"maybe"}},"out":{"err":"参数错误：audit_retention_days=\"inf\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"no","audit_thumbs":"-1","audit_retention_days":"٣","audit_image_keep_hours":"","member_image_download":"on"}},"out":{"ret":""}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"YES","audit_thumbs":"no","audit_retention_days":" 7 ","audit_image_keep_hours":"8761","audit_image_cap_mb":"abc"}},"out":{"ret":"为防止滥用和优化调度，本站会保留你的图片提示词（7 天后自动删除），仅站长可见。"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_thumbs":" 1 ","audit_retention_days":"１２","audit_image_cap_mb":"-inf","member_image_download":"false"}},"out":{"ret":"为防止滥用和优化调度，本站会保留你的生成的原图（24 小时后自动删除），仅站长可见。"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_thumbs":"True","audit_image_keep_hours":" 12 ","audit_image_cap_mb":""}},"out":{"ret":"为防止滥用和优化调度，本站会保留你的生成的原图（12 小时后自动删除），仅站长可见。"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_thumbs":"0","audit_retention_days":"-5","audit_image_keep_hours":" 12 ","audit_image_cap_mb":"","member_image_download":"no"}},"out":{"ret":""}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"True","audit_thumbs":"1.0","audit_image_keep_hours":"1_0","audit_image_cap_mb":"100","member_image_download":"0"}},"out":{"ret":"为防止滥用和优化调度，本站会保留你的图片提示词（7 天后自动删除），仅站长可见。"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"maybe","audit_retention_days":"inf","audit_image_keep_hours":"1","audit_image_cap_mb":"nan","member_image_download":"True"}},"out":{"err":"参数错误：audit_retention_days=\"inf\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"2","audit_thumbs":"no","audit_retention_days":"1","audit_image_cap_mb":"nan","member_image_download":"2"}},"out":{"ret":""}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_thumbs":"yes\n","audit_retention_days":"-inf","audit_image_keep_hours":"24","audit_image_cap_mb":"-1","member_image_download":"true"}},"out":{"err":"参数错误：audit_retention_days=\"-inf\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"-1","audit_thumbs":"  ","audit_retention_days":"1e999","audit_image_keep_hours":"-inf","audit_image_cap_mb":"0","member_image_download":"false"}},"out":{"err":"参数错误：audit_retention_days=\"1e999\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"","audit_thumbs":"ON","audit_image_keep_hours":"-1","audit_image_cap_mb":" 64 ","member_image_download":"True"}},"out":{"ret":"为防止滥用和优化调度，本站会保留你的生成的原图（服务器空间满了会自动删掉最旧的），仅站长可见。"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"0.0","audit_thumbs":"false","audit_image_keep_hours":"-inf","audit_image_cap_mb":" 64 ","member_image_download":"no"}},"out":{"ret":""}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"1.0","audit_thumbs":"猫","audit_retention_days":"-inf","audit_image_cap_mb":"100","member_image_download":"True"}},"out":{"err":"参数错误：audit_retention_days=\"-inf\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_thumbs":"","audit_retention_days":"-inf","audit_image_keep_hours":"8760","audit_image_cap_mb":"1e4","member_image_download":"maybe"}},"out":{"err":"参数错误：audit_retention_days=\"-inf\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"","audit_thumbs":"On ","audit_retention_days":"Infinity","audit_image_keep_hours":"0","audit_image_cap_mb":"1","member_image_download":"on"}},"out":{"err":"参数错误：audit_retention_days=\"Infinity\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"YES","audit_thumbs":"true","audit_retention_days":"-inf","audit_image_keep_hours":"","audit_image_cap_mb":"abc","member_image_download":"true"}},"out":{"err":"参数错误：audit_retention_days=\"-inf\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"TRUE","audit_thumbs":"y","audit_retention_days":"1e999","audit_image_keep_hours":"-inf","member_image_download":"TRUE"}},"out":{"err":"参数错误：audit_retention_days=\"1e999\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"On ","audit_thumbs":"","audit_retention_days":"30"}},"out":{"ret":"为防止滥用和优化调度，本站会保留你的图片提示词（30 天后自动删除），仅站长可见。"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"0","audit_thumbs":"y","audit_retention_days":"7d","audit_image_keep_hours":"48","audit_image_cap_mb":"-1","member_image_download":"2"}},"out":{"ret":""}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"YES","audit_thumbs":"-1","audit_retention_days":"7d","audit_image_cap_mb":"10.9","member_image_download":"off"}},"out":{"ret":"为防止滥用和优化调度，本站会保留你的图片提示词（7 天后自动删除），仅站长可见。"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":" 1 ","audit_retention_days":" 9 ","audit_image_keep_hours":"8760","audit_image_cap_mb":"-1"}},"out":{"ret":"为防止滥用和优化调度，本站会保留你的图片提示词（9 天后自动删除），仅站长可见。"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"truee","audit_thumbs":"  ","audit_retention_days":"-inf","audit_image_keep_hours":"","audit_image_cap_mb":"","member_image_download":"on"}},"out":{"err":"参数错误：audit_retention_days=\"-inf\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"0","audit_thumbs":"0","audit_retention_days":"inf","audit_image_keep_hours":"24","audit_image_cap_mb":"1","member_image_download":" ON "}},"out":{"err":"参数错误：audit_retention_days=\"inf\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"false","audit_thumbs":"","audit_retention_days":"12.9","audit_image_keep_hours":"４８","member_image_download":"off"}},"out":{"ret":""}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"y","audit_thumbs":"ON","audit_image_keep_hours":"  ","audit_image_cap_mb":"500000","member_image_download":"no"}},"out":{"ret":"为防止滥用和优化调度，本站会保留你的生成的原图（24 小时后自动删除），仅站长可见。"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"y","audit_thumbs":"2","audit_retention_days":"-1e999","audit_image_keep_hours":"abc","audit_image_cap_mb":"-inf","member_image_download":"yes"}},"out":{"err":"参数错误：audit_retention_days=\"-1e999\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"ON","audit_thumbs":"","audit_retention_days":"NaN","audit_image_keep_hours":"0","member_image_download":"FALSE"}},"out":{"ret":"为防止滥用和优化调度，本站会保留你的图片提示词（7 天后自动删除），仅站长可见。"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"true","audit_thumbs":"-1","audit_retention_days":"1e999","audit_image_keep_hours":"8761","audit_image_cap_mb":"abc"}},"out":{"err":"参数错误：audit_retention_days=\"1e999\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"１","audit_retention_days":"7","audit_image_keep_hours":"48","audit_image_cap_mb":"inf","member_image_download":"on"}},"out":{"ret":""}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"-1","audit_thumbs":"2","audit_image_keep_hours":"inf","audit_image_cap_mb":"","member_image_download":"  "}},"out":{"ret":""}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"ON","audit_thumbs":"truee","audit_retention_days":"-inf","audit_image_cap_mb":"","member_image_download":"2"}},"out":{"err":"参数错误：audit_retention_days=\"-inf\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"maybe","audit_thumbs":"","audit_retention_days":"٣","audit_image_keep_hours":"  ","audit_image_cap_mb":"-1"}},"out":{"ret":""}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"-1","audit_thumbs":"0","audit_image_keep_hours":"４８","audit_image_cap_mb":"nan","member_image_download":"on"}},"out":{"ret":""}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"1","audit_thumbs":"0.0","audit_image_keep_hours":"abc","audit_image_cap_mb":"10.9","member_image_download":"2"}},"out":{"ret":"为防止滥用和优化调度，本站会保留你的图片提示词（7 天后自动删除），仅站长可见。"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"猫","audit_retention_days":"99999999999999999999","audit_image_cap_mb":"8192","member_image_download":"True"}},"out":{"ret":""}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"1","audit_thumbs":"0","audit_retention_days":"1,000","audit_image_cap_mb":"1e4","member_image_download":"on"}},"out":{"ret":"为防止滥用和优化调度，本站会保留你的图片提示词（7 天后自动删除），仅站长可见。"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"0","audit_thumbs":"1.0","audit_retention_days":"7","audit_image_keep_hours":"24","audit_image_cap_mb":"","member_image_download":"1"}},"out":{"ret":""}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"no","audit_thumbs":"on","audit_retention_days":"7","audit_image_keep_hours":"-inf","audit_image_cap_mb":"-1"}},"out":{"ret":"为防止滥用和优化调度，本站会保留你的生成的原图（服务器空间满了会自动删掉最旧的），仅站长可见。"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"猫","audit_thumbs":"2","audit_retention_days":"7d","audit_image_cap_mb":"10.9"}},"out":{"ret":""}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"  ","audit_thumbs":"1.0","audit_retention_days":"1e999","audit_image_keep_hours":"8760","audit_image_cap_mb":"0","member_image_download":"猫"}},"out":{"err":"参数错误：audit_retention_days=\"1e999\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"off","audit_thumbs":"maybe","audit_retention_days":"7d","audit_image_keep_hours":"-1","member_image_download":"0"}},"out":{"ret":""}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"","audit_thumbs":"2","audit_retention_days":"٣","audit_image_keep_hours":"0","audit_image_cap_mb":"nan","member_image_download":"0"}},"out":{"ret":""}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"  ","audit_retention_days":"Infinity","audit_image_keep_hours":"４８","audit_image_cap_mb":"-inf","member_image_download":" ON "}},"out":{"err":"参数错误：audit_retention_days=\"Infinity\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"1.0","audit_thumbs":"On ","audit_retention_days":".5","audit_image_keep_hours":" 12 ","audit_image_cap_mb":"1"}},"out":{"ret":"为防止滥用和优化调度，本站会保留你的生成的原图（12 小时后自动删除），仅站长可见。"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"YES","audit_thumbs":"yes\n","audit_retention_days":" 7 ","audit_image_keep_hours":"1e3","audit_image_cap_mb":"1"}},"out":{"ret":"为防止滥用和优化调度，本站会保留你的图片提示词（7 天后自动删除）、生成的原图（1000 小时后自动删除），仅站长可见。"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_thumbs":"no","audit_retention_days":"30","audit_image_cap_mb":"-1","member_image_download":"no"}},"out":{"ret":""}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"0","audit_thumbs":"TRUE","audit_retention_days":" 7 ","audit_image_cap_mb":"inf","member_image_download":"false"}},"out":{"ret":"为防止滥用和优化调度，本站会保留你的生成的原图（24 小时后自动删除），仅站长可见。"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"１","audit_thumbs":"off","audit_retention_days":"-5","audit_image_keep_hours":"0","member_image_download":"on"}},"out":{"ret":""}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"YES","audit_thumbs":"y","audit_retention_days":"inf","audit_image_keep_hours":"1e3","audit_image_cap_mb":"8192","member_image_download":"2"}},"out":{"err":"参数错误：audit_retention_days=\"inf\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"1.0","audit_thumbs":"maybe","audit_retention_days":"-inf","audit_image_keep_hours":"24","member_image_download":"1"}},"out":{"err":"参数错误：audit_retention_days=\"-inf\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"猫","audit_thumbs":"off","audit_retention_days":".5","audit_image_keep_hours":"1e3","member_image_download":"FALSE"}},"out":{"ret":""}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"猫","audit_thumbs":"0.0","audit_retention_days":"NaN","audit_image_keep_hours":"-inf","audit_image_cap_mb":"inf"}},"out":{"ret":""}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"","audit_thumbs":"y","audit_retention_days":"-1e999","audit_image_keep_hours":"-1","member_image_download":"false"}},"out":{"err":"参数错误：audit_retention_days=\"-1e999\": OverflowError: cannot convert float infinity to integer"}}
+{"in":{"fn":"audit_disclosure","kv":{"audit_prompts":"0","audit_thumbs":"0","audit_retention_days":"7","audit_image_keep_hours":"0","audit_image_cap_mb":"8192","member_image_download":"1"}},"out":{"ret":""}}

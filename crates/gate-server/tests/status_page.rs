@@ -1,18 +1,17 @@
-//! 公开状态页与后台事件接口（旧版 `app/status_page.py`）。
+//! 公开状态页与后台事件接口。
 //!
-//! 对拍夹具 `tests/fixtures/status_page.jsonl` 由旧 Python 生成（脚本见标签 py-final）
-//! （合成事件 / 小时计数 / 上游请求 / 官方状态 → 旧版的 `/status.json`、Atom、页面文本、后台列表）：
-//! - `/status.json`、`/status/feed.xml`、`/admin/api/incidents`：与旧版逐字节相同；
-//! - `/status` HTML：3.0 改了样式 / 脚本的加载方式，不比整页——旧页渲染出的每一个可见字符串（文本节点按顺序，
-//!   title / aria-label / href / role / lang 属性）新页都必须包含。
+//! 快照 `tests/snapshots/status/scenarios.jsonl`：每行一个场景（合成事件 / 小时计数 / 上游请求 / 官方状态），
+//! 输出是 `/status.json`、`/status/feed.xml`、后台事件列表（`/admin/api/incidents`）的内容，以及 `/status` 页面的
+//! 可见文本（文本节点按顺序，加上 title / aria-label / href / role / lang 属性；样式 / 脚本的内容和带内容哈希的资源地址不存，
+//! 页面样式改了不会让快照失效，文案改了会）。
+//! 更新：`UPDATE_SNAPSHOT=1 cargo test -p gate-server --test status_page`，然后审阅 `git diff`。
 //!
 //! 时钟是全进程共享的（`time::freeze`），所以每个测试先拿 [`clock`] 的锁。
 
 mod common;
 use common::*;
-use serde_json::{Value, json};
-use std::io::Read;
-use std::path::Path;
+use gate_snapshot::snapshot::{Suite, path as snapshot_path};
+use serde_json::{Map, Value, json};
 
 const M: &str = env!("CARGO_MANIFEST_DIR");
 
@@ -28,23 +27,16 @@ async fn clock(at: Option<f64>) -> tokio::sync::MutexGuard<'static, ()> {
     guard
 }
 
-fn fixture() -> Vec<Value> {
-    let dir = Path::new(M).join("tests").join("fixtures");
-    let plain = dir.join("status_page.jsonl");
-    let gz = dir.join("status_page.jsonl.gz");
-    let text = if gz.exists() {
-        let mut t = String::new();
-        flate2::read::GzDecoder::new(std::fs::File::open(&gz).unwrap())
-            .read_to_string(&mut t)
-            .unwrap();
-        t
-    } else {
-        std::fs::read_to_string(&plain).unwrap()
-    };
-    text.lines()
+/// 快照里某个场景的输入（只读文件，不比较输出）。
+fn scenario_input(name: &str) -> Value {
+    let path = snapshot_path(M, "status/scenarios");
+    std::fs::read_to_string(&path)
+        .unwrap()
+        .lines()
         .filter(|l| !l.trim().is_empty())
-        .map(|l| serde_json::from_str(l).unwrap())
-        .collect()
+        .map(|l| serde_json::from_str::<Value>(l).unwrap()["in"].clone())
+        .find(|sc| sc["scenario"] == name)
+        .unwrap_or_else(|| panic!("快照里没有场景 {name}"))
 }
 
 fn text(body: &[u8]) -> String {
@@ -189,40 +181,99 @@ async fn add_usage(e: &Env, ok: usize, failures: &[(i64, i64)]) {
     insert_sql(e, sql).await;
 }
 
-fn escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
+/// HTML 实体还原（页面由 maud 渲染，只会出现这几种）。
+fn unescape(s: &str) -> String {
+    s.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&#x27;", "'")
+        .replace("&amp;", "&")
 }
 
-/// 旧页的可见字符串都在新页里，且文本节点的先后顺序不变。
-#[track_caller]
-fn assert_old_strings_present(name: &str, html: &str, expect: &Value) {
-    let mut cursor = 0;
-    for t in expect["html_texts"].as_array().unwrap() {
-        let needle = escape(t.as_str().unwrap());
-        match html[cursor..].find(&needle) {
-            Some(i) => cursor += i + needle.len(),
-            None => panic!(
-                "{name}：新页缺少（或顺序不对）旧页文本 {needle:?}\n（从偏移 {cursor} 起找）"
-            ),
+/// 要记录的属性。
+const KEPT_ATTRS: [&str; 5] = ["title", "aria-label", "href", "role", "lang"];
+
+/// 解析一个开始标签里的属性（`name="value"`；没有值的属性忽略）。
+fn tag_attrs(tag: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    let mut rest = tag;
+    while let Some(eq) = rest.find("=\"") {
+        let name_start = rest[..eq]
+            .rfind(|c: char| c.is_whitespace() || c == '<')
+            .map_or(0, |i| i + 1);
+        let name = rest[name_start..eq].to_string();
+        let after = &rest[eq + 2..];
+        let end = after.find('"').unwrap_or(after.len());
+        out.push((name, unescape(&after[..end])));
+        rest = &after[(end + 1).min(after.len())..];
+    }
+    out
+}
+
+/// 页面的可见文本：`{"texts": [文本节点…], "attrs": [[属性名, 值]…]}`，都按文档顺序。
+/// `<script>` / `<style>` 的内容不算；`/_owl/` 资源地址里的内容哈希（`?v=…`）去掉。
+fn visible(html: &str) -> Value {
+    let (mut texts, mut attrs) = (Vec::new(), Vec::new());
+    let mut rest = html;
+    while !rest.is_empty() {
+        let Some(lt) = rest.find('<') else {
+            push_text(&mut texts, rest);
+            break;
+        };
+        push_text(&mut texts, &rest[..lt]);
+        rest = &rest[lt..];
+        if let Some(body) = rest.strip_prefix("<!--") {
+            rest = body.find("-->").map_or("", |i| &body[i + 3..]);
+            continue;
+        }
+        let end = rest.find('>').map_or(rest.len(), |i| i + 1);
+        let tag = &rest[..end];
+        rest = &rest[end..];
+        let name = tag[1..]
+            .split(|c: char| c.is_whitespace() || c == '>' || c == '/')
+            .next()
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        for (k, v) in tag_attrs(tag) {
+            if KEPT_ATTRS.contains(&k.as_str()) {
+                let v = match v.split_once("?v=") {
+                    Some((path, _)) if path.starts_with("/_owl/") => path.to_string(),
+                    _ => v,
+                };
+                attrs.push(json!([k, v]));
+            }
+        }
+        if name == "script" || name == "style" {
+            let close = format!("</{name}");
+            rest = rest.find(&close).map_or("", |i| &rest[i..]);
         }
     }
-    for a in expect["html_attrs"].as_array().unwrap() {
-        let needle = format!(
-            "{}=\"{}\"",
-            a[0].as_str().unwrap(),
-            escape(a[1].as_str().unwrap())
-        );
-        assert!(html.contains(&needle), "{name}：新页缺少旧页属性 {needle}");
+    json!({"texts": texts, "attrs": attrs})
+}
+
+fn push_text(texts: &mut Vec<String>, raw: &str) {
+    let t = unescape(raw.trim());
+    if !t.is_empty() {
+        texts.push(t);
+    }
+}
+
+/// 紧凑 JSON 的响应存成 JSON 值（读 diff 方便），不是紧凑 JSON 的存原文字符串：逐字节一致。
+fn json_or_text(body: &str) -> Value {
+    match serde_json::from_str::<Value>(body) {
+        Ok(v) if serde_json::to_string(&v).is_ok_and(|compact| compact == body) => v,
+        _ => Value::String(body.to_string()),
     }
 }
 
 #[tokio::test]
-async fn golden_outputs_match_python() {
+async fn scenario_outputs_match_snapshot() {
     let _g = clock(None).await;
-    for sc in fixture() {
+    let mut suite = Suite::open(M, "status/scenarios");
+    let cases = suite.cases();
+    for (i, case) in cases.iter().enumerate() {
+        let sc = &case.raw;
         let name = sc["scenario"].as_str().unwrap().to_string();
         gate_server::time::freeze(Some(sc["now"].as_f64().unwrap()));
         let discord = &sc["discord"];
@@ -236,21 +287,17 @@ async fn golden_outputs_match_python() {
             vec![("DISCORD_GUILD_ID", &guild), ("ANNOUNCE_CHANNEL_ID", &chan)]
         };
         let e = setup(&extra).await;
-        load_inputs(&e, &sc).await;
-        let expect = &sc["expect"];
+        load_inputs(&e, sc).await;
+        let mut out = Map::new();
 
-        // 写入路径：后台列表（全部事件，含不上公开页的）与旧版逐字节相同；components 列的原文也相同
+        // 后台列表（全部事件，含不上公开页的）；components 列的原文
         let cookie = login(&e).await;
         let (s, _, b) = Call::new("GET", "/admin/api/incidents")
             .header("cookie", cookie)
             .send(&e.state)
             .await;
         assert_eq!(s, 200, "{name}");
-        assert_eq!(
-            text(&b),
-            expect["admin_list"].as_str().unwrap(),
-            "{name}：后台列表"
-        );
+        out.insert("admin_list".into(), json_or_text(&text(&b)));
         let cols: Vec<String> = e
             .state
             .db
@@ -260,24 +307,14 @@ async fn golden_outputs_match_python() {
             })
             .await
             .unwrap();
-        let want: Vec<String> = expect["components_column"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|v| v.as_str().unwrap().to_string())
-            .collect();
-        assert_eq!(cols, want, "{name}：components 列");
+        out.insert("components_column".into(), json!(cols));
 
         // JSON
         let (s, h, b) = get(&e, "/status.json").await;
         assert_eq!(s, 200, "{name}");
         assert_eq!(h["content-type"], "application/json", "{name}");
         assert_eq!(h["cache-control"], "no-cache", "{name}");
-        assert_eq!(
-            text(&b),
-            expect["json"].as_str().unwrap(),
-            "{name}：/status.json"
-        );
+        out.insert("status_json".into(), json_or_text(&text(&b)));
 
         // Atom
         let (s, h, b) = get(&e, "/status/feed.xml").await;
@@ -285,42 +322,26 @@ async fn golden_outputs_match_python() {
         assert_eq!(h["content-type"], "application/atom+xml", "{name}");
         assert_eq!(h["cache-control"], "no-cache", "{name}");
         assert_eq!(h["x-content-type-options"], "nosniff", "{name}");
-        if let Some(atom) = expect["atom"].as_str() {
-            assert_eq!(text(&b), atom, "{name}：/status/feed.xml");
-        }
+        out.insert("atom".into(), json!(text(&b)));
 
         // HTML
         let (s, h, b) = get(&e, "/status").await;
         assert_eq!(s, 200, "{name}");
         assert_eq!(h["content-type"], "text/html; charset=utf-8", "{name}");
-        let html = text(&b);
-        assert_old_strings_present(&name, &html, expect);
-        assert!(
-            html.contains(&format!(
-                "href=\"{}\"",
-                expect["subscribe_url"].as_str().unwrap()
-            )),
-            "{name}：订阅地址"
-        );
-        // 当前状态
-        let statuses = expect["statuses"].as_object().unwrap();
-        let json: Value = serde_json::from_str(expect["json"].as_str().unwrap()).unwrap();
-        for c in json["components"].as_array().unwrap() {
-            assert_eq!(c["status"], statuses[c["key"].as_str().unwrap()], "{name}");
-        }
+        out.insert("html".into(), visible(&text(&b)));
+        suite.record(i, Some(Value::Object(out)));
     }
     gate_server::time::freeze(None);
+    // 场景没被意外删掉
+    assert!(cases.len() >= 12, "状态页快照只剩 {} 个场景", cases.len());
+    suite.finish();
 }
 
 #[tokio::test]
 async fn html_is_hardened_and_links_work() {
     let _g = clock(Some(NOW)).await;
     let e = setup(&[]).await;
-    let sc = fixture()
-        .into_iter()
-        .find(|s| s["scenario"] == "history_mix")
-        .unwrap();
-    load_inputs(&e, &sc).await;
+    load_inputs(&e, &scenario_input("history_mix")).await;
     let (s, h, b) = get(&e, "/status").await;
     assert_eq!(s, 200);
     let html = text(&b);
