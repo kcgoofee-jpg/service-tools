@@ -5,7 +5,7 @@
 //! - `audit/settings`：库里的原始设置串 → 记录开关 / 保留时长 / 披露文案（真实 SQLite 库）；
 //! - `audit/images`：图片只记「决定」——收不收、类型串、缩略图尺寸与四个采样点的颜色（编码器的字节不存）。
 //!
-//! 更新：`UPDATE_SNAPSHOT=1 cargo test -p gate-server --test audit_golden`，然后审阅 `git diff`。
+//! 更新：`UPDATE_SNAPSHOT=1 cargo test -p gate-server --test audit_snapshot`，然后审阅 `git diff`。
 //! 测试函数名都以 `audit_` 开头，`cargo test -p gate-server audit` 能选中。
 
 use base64::Engine;

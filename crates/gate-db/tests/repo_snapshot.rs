@@ -3,7 +3,7 @@
 //! 每个用例（`tests/snapshots/repo/<领域>.jsonl` 的一行）：新建空库 → 执行 `seed_sql`（以及原图目录快照）→ 调用同名 Rust 方法 →
 //! 记录返回值（或错误）、**有变化的表**的整表内容、有变化的原图文件和目录。浮点逐位、JSON 键顺序一致才算相同。
 //!
-//! 更新：`UPDATE_SNAPSHOT=1 cargo test -p gate-db --test repo_golden`，然后审阅 `git diff`。
+//! 更新：`UPDATE_SNAPSHOT=1 cargo test -p gate-db --test repo_snapshot`，然后审阅 `git diff`。
 
 use base64::{Engine, engine::general_purpose::STANDARD as B64};
 use gate_core::{clock::Clock, pyval, reasons::reason_label};

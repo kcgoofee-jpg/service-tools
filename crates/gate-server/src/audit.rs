@@ -19,7 +19,7 @@
 //! - `audit_flags` 里存着的天数是 `inf` / `1e999` 时旧版抛 `OverflowError`（没人捕获），这里返回 `DbError::Invalid`；
 //!   空串 / `nan` / 乱码回到 7 天（`ValueError` 被捕获），不是环境默认值。
 //!
-//! 与旧版的差异（图片编解码换成 `image` crate，应并入 docs/v3-deviations.md；对拍见 tests/audit_golden.rs）：
+//! 与旧版的差异（图片编解码换成 `image` crate；快照见 tests/audit_snapshot.rs）：
 //! - 字节不逐位相同：缩放核、JPEG 量化 / 子采样 / 霍夫曼优化与 Pillow 不同；尺寸、收不收、类型串一致；
 //! - 只认 PNG / JPEG / WebP：Pillow 还会打开 GIF / BMP / TIFF 等，上游不会返回这些；
 //! - zip 只支持 stored / deflate：旧版 `zipfile` 还能读 bzip2 / lzma，上游不会这样压；

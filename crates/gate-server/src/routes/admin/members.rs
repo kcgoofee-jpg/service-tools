@@ -1348,7 +1348,7 @@ async fn members(State(state): State<AppState>, req: Request) -> R {
             "rejected_why",
             json!(ms.and_then(|m| m.rejected_why.clone()).unwrap_or_default()),
         );
-        // 字段名沿用 2.x 的 "share"（前端和 admin_golden 按这个名字读）；内容只剩 Key 临时暂停的到期时间
+        // 字段名沿用 2.x 的 "share"（前端和 admin_snapshot 按这个名字读）；内容只剩 Key 临时暂停的到期时间
         put(
             "share",
             pause_map

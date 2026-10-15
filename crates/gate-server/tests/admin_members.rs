@@ -1,6 +1,6 @@
 //! 后台「成员」接口：Key / 成员 / 黑名单 / 券 / 标签 / 奖励。
 //!
-//! 逐字节对拍旧版见 `admin_golden.rs`（夹具由旧 Python 生成）；这里按接口写成可读的用例：
+//! 逐字节快照见 `admin_snapshot.rs`；这里按接口写成可读的用例：
 //! 鉴权、校验文案、返回结构、写进库的行、操作日志，注册服务（真实的 RegistrationService + 本机假 Discord）和动态额度占位内核。
 
 mod admin_util;

@@ -8,7 +8,7 @@
 //! 时间是进程级冻结的，所以这个文件里只放这一个测试（独占一个测试进程）。
 //! 归一化：新建 Key 的随机串统一成 `nai-<rand>`；缩略图字节（编码器不同）只记是不是 JPEG。
 //!
-//! 更新：`UPDATE_SNAPSHOT=1 cargo test -p gate-server --test admin_golden`，然后审阅 `git diff`。
+//! 更新：`UPDATE_SNAPSHOT=1 cargo test -p gate-server --test admin_snapshot`，然后审阅 `git diff`。
 
 mod admin_util;
 mod common;
