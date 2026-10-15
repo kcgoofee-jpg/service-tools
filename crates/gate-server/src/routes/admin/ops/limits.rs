@@ -71,7 +71,7 @@ async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Requ
     ) -> Result<Value, ApiError> {
         let value = match body.get(spec.key) {
             Some(v) => v.clone(),
-            None if spec.key == GLOBAL_DAILY_V5.key => {
+            None if std::ptr::eq(spec, &GLOBAL_DAILY_V5) => {
                 Value::from(crate::ops::algo_owned(&state.db).await?.global_daily_v5)
             }
             None => site_flag(state, spec).await?,
