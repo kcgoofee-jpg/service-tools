@@ -2708,11 +2708,6 @@ async fn registration_settings_ops_match_legacy() {
         .set_setting("register_daily_v5", "0")
         .await
         .unwrap();
-    e.state
-        .db
-        .set_setting("guard_base_daily_images", "20")
-        .await
-        .unwrap();
     // 记录开关：提示词记录 5 天
     let audit = gate_server::ops::set_audit(
         &e.state,
@@ -2725,7 +2720,7 @@ async fn registration_settings_ops_match_legacy() {
         json!({"prompts": true, "thumbs": false, "retention_days": 5,
                "image_cap_mb": 8192, "image_keep_hours": 24})
     );
-    // 欢迎文案：保底 20 张、全部功能、没有有效期这一行、带记录声明
+    // 欢迎文案：每人上限 100 张（保底一层已删除，docs/v3-deviations.md #61）、全部功能、没有有效期这一行、带记录声明
     let r = bridge(
         &e,
         "/self-register/issue",
@@ -2734,7 +2729,7 @@ async fn registration_settings_ops_match_legacy() {
     .await;
     assert_eq!(r.0, 200, "{:?}", r.2);
     let key = r.2["key"].as_str().unwrap();
-    let want = "🦉 **欢迎来到猫头鹰公益站！** 这是你的 API Key（只发这一次，请先保存）：\n`<KEY>`\n\n**三步开始出图（以柏宝绘为例）**\n1. 打开柏宝绘 → 渠道 → 配置 → 新建接入点\n2. 接口地址填 `https://gate.test/`（**不要**加 /v1）\n3. API Key 填上面 `nai-` 开头的整串，保存后随便生成一张图试试\n其他支持自定义 NovelAI 地址的客户端同样这样填。\n\n**不确定填对没有？** 在 Discord 输入 `/quota`，能看到额度就说明 Key 正常；网页登录开放后还能在 https://gate.test/ 用 Discord 一键登录、打包下载自己的作品。\n\n**规则**\n• 每日额度：V4.5 及以下保底 20 张、全站空闲时最多 100 张（次日自动恢复）\n• 已开通功能：全部已开放功能\n• 连续 3 天没有使用会被自动回收（回收前 1 天私信提醒）\n• 每把 Key 同时生成 1 张，多发的会被退回，等前一张出完再发\n• 只提供免费出图：总像素 ≤1024×1024（尺寸可自定义，超出自动等比缩小）、≤28 步、每次 1 张；图生图、Vibe 等会消耗 Anlas 的功能不开放\n• Key 只给本服务器成员：退出服务器后 Key 自动失效\n• 一人一把，请勿分享（本站记录打码后的来源网段防分享，不存完整 IP，7 天后删除）\n\n**常用命令**：`/quota` 看额度和服务状态 · `/resetkey` Key 丢了或泄露时换新 · `/help` 简要说明\n遇到问题到 🛠️｜问题反馈 发截图（记得打码 Key）。\n为防止滥用和优化调度，本站会保留你的图片提示词（5 天后自动删除），仅站长可见。";
+    let want = "🦉 **欢迎来到猫头鹰公益站！** 这是你的 API Key（只发这一次，请先保存）：\n`<KEY>`\n\n**三步开始出图（以柏宝绘为例）**\n1. 打开柏宝绘 → 渠道 → 配置 → 新建接入点\n2. 接口地址填 `https://gate.test/`（**不要**加 /v1）\n3. API Key 填上面 `nai-` 开头的整串，保存后随便生成一张图试试\n其他支持自定义 NovelAI 地址的客户端同样这样填。\n\n**不确定填对没有？** 在 Discord 输入 `/quota`，能看到额度就说明 Key 正常；网页登录开放后还能在 https://gate.test/ 用 Discord 一键登录、打包下载自己的作品。\n\n**规则**\n• 每日额度：V4.5 及以下 100 张（次日自动恢复）\n• 已开通功能：全部已开放功能\n• 连续 3 天没有使用会被自动回收（回收前 1 天私信提醒）\n• 每把 Key 同时生成 1 张，多发的会被退回，等前一张出完再发\n• 只提供免费出图：总像素 ≤1024×1024（尺寸可自定义，超出自动等比缩小）、≤28 步、每次 1 张；图生图、Vibe 等会消耗 Anlas 的功能不开放\n• Key 只给本服务器成员：退出服务器后 Key 自动失效\n• 一人一把，请勿分享（本站记录打码后的来源网段防分享，不存完整 IP，7 天后删除）\n\n**常用命令**：`/quota` 看额度和服务状态 · `/resetkey` Key 丢了或泄露时换新 · `/help` 简要说明\n遇到问题到 🛠️｜问题反馈 发截图（记得打码 Key）。\n为防止滥用和优化调度，本站会保留你的图片提示词（5 天后自动删除），仅站长可见。";
     assert_eq!(
         r.2["message"].as_str().unwrap(),
         v3_welcome(&want.replace("<KEY>", key))

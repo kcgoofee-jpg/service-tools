@@ -60,7 +60,7 @@ pub const QUEUE_BUSY_REJECTS: i64 = 5;
 pub const SLOTS_V5_MIN: f64 = 50.0;
 
 /// 单 Key 限流统计要排除的拒绝原因码：`KEY_PAUSED` + `reasons.SITE_LEVEL`（全站层面的拒绝不算成员的错）。
-pub const KEY_GUARD_SKIP_REASONS: [&str; 14] = [
+pub const KEY_GUARD_SKIP_REASONS: [&str; 13] = [
     "key_paused",
     "queue_full",
     "hourly_cap",
@@ -69,7 +69,6 @@ pub const KEY_GUARD_SKIP_REASONS: [&str; 14] = [
     "cap_3h",
     "daily_cap",
     "paced",
-    "over_base",
     "breaker",
     "cooldown",
     "v5_exhausted",

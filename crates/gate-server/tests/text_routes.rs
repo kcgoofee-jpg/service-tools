@@ -262,7 +262,7 @@ fn me_json(
     features: &str,
 ) -> String {
     format!(
-        "{{\"name\":\"{name}\",\"is_admin\":{is_admin},\"generated_images_total\":0,\"today\":{{\"images\":0,\"daily_images\":100,\"daily_images_base\":0,\"legacy_free_images_today\":0,\"anlas_today\":0.0,\"daily_anlas\":0.0,\"anlas_auto\":false,\"v5_today\":0,\"daily_v5\":10,\"image_model_scope\":\"legacy\",\"anlas_month\":0.0,\"monthly_anlas\":0.0,\"text_tokens\":{tokens},\"daily_text_tokens\":{daily_text},\"requests\":{requests}}},\"expires_at\":null,\"inactivity_delete_days\":{delete_days},\"features\":{features}}}"
+        "{{\"name\":\"{name}\",\"is_admin\":{is_admin},\"generated_images_total\":0,\"today\":{{\"images\":0,\"daily_images\":100,\"legacy_free_images_today\":0,\"anlas_today\":0.0,\"daily_anlas\":0.0,\"anlas_auto\":false,\"v5_today\":0,\"daily_v5\":10,\"image_model_scope\":\"legacy\",\"anlas_month\":0.0,\"monthly_anlas\":0.0,\"text_tokens\":{tokens},\"daily_text_tokens\":{daily_text},\"requests\":{requests}}},\"expires_at\":null,\"inactivity_delete_days\":{delete_days},\"features\":{features}}}"
     )
 }
 

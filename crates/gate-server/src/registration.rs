@@ -1119,8 +1119,8 @@ impl RegistrationService {
             self.set_role(user_id, true).await;
         }
         let notice = crate::audit::audit_disclosure(&self.db, &self.env).await?;
-        let base = pyval::number_like(&self.site_value(&site_flags::GUARD_BASE).await?)
-            .unwrap_or(0.0) as i64;
+        // 保底一层已删除（docs/v3-deviations.md #61）：这里只剩每人上限；下面的文案由欢迎语改写一并处理
+        let base = cfg.daily_images;
         let legacy = if base != 0 && cfg.daily_images != 0 && base < cfg.daily_images {
             format!(
                 "V4.5 及以下保底 {base} 张、全站空闲时最多 {} 张",

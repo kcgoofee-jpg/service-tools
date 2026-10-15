@@ -18,9 +18,7 @@ pub const CAP_3H: &str = "cap_3h";
 /// 突发拒绝不算需求）。
 pub const BURST_CAP: &str = "burst_cap";
 pub const DAILY_CAP: &str = "daily_cap"; // 账号每日上限
-pub const PACED: &str = "paced"; // 每日上限按时段放行：这个时段的份额用完了
-/// 用完保底后，全站不空闲 / 时段份额不多，暂时不放行（站点原因，不是成员客户端的问题）。
-pub const OVER_BASE: &str = "over_base";
+pub const PACED: &str = "paced"; // 全站每日上限按时段放行：这个时段的份额用完了
 pub const BREAKER: &str = "breaker"; // 全站熔断
 pub const COOLDOWN: &str = "cooldown"; // 上游 429 后全站暂停出图
 pub const V5_EXHAUSTED: &str = "v5_exhausted"; // 账号 V5 免费额度用完（未开通 Anlas 的 Key 不能自动转付费）
@@ -34,7 +32,7 @@ pub const PARAM: &str = "param"; // 参数不被支持（模型、采样器、�
 
 /// 全站层面的拒绝：原因在站点（排队满、账号上限、熔断、冷却），不是这个成员的客户端出了问题。
 /// 自动驾驶的「单 Key 被拒 ≥60 次 → 暂停」不能数这些，否则忙时自动重试的正常成员会被误判为死循环。
-pub const SITE_LEVEL: [&str; 13] = [
+pub const SITE_LEVEL: [&str; 12] = [
     QUEUE_FULL,
     HOURLY_CAP,
     QUIET_CAP,
@@ -42,7 +40,6 @@ pub const SITE_LEVEL: [&str; 13] = [
     CAP_3H,
     DAILY_CAP,
     PACED,
-    OVER_BASE,
     BREAKER,
     COOLDOWN,
     V5_EXHAUSTED,
@@ -118,9 +115,6 @@ pub const BACKFILL: &[(&str, &str)] = &[
     (KEY_RATE, "%请求过于频繁%"),
     (KEY_RATE, "%同时进行中的请求过多%"),
     (BODY_ABORT, "%请求体传输中断%"),
-    // 保底放行：历史文案与现在不同（「今天的保底 N 张已用完」/「保底 N 张已用完」都出现过），
-    // 但都含「保底 … 已用完」，一次覆盖住，否则这批拒绝会一直挂在空原因里。
-    (OVER_BASE, "%保底%已用完%"),
     // 免费图日额（V5 那条在上面的 SITE_QUOTA 之后匹配，文案含「及以下」）
     (MEMBER_QUOTA, "%免费图额度已用完%"),
     (FEATURE_OFF, "%暂无权使用%"),
@@ -150,7 +144,6 @@ pub const LABELS: &[(&str, &str)] = &[
     (CAP_3H, "3 小时全站上限"),
     (DAILY_CAP, "全站每日上限"),
     (PACED, "全天平滑放行"),
-    (OVER_BASE, "超出保底暂缓"),
     (BREAKER, "全站熔断"),
     (COOLDOWN, "上游限流暂停"),
     (V5_EXHAUSTED, "全站 V5 用完"),

@@ -182,19 +182,6 @@ pub async fn build(state: &AppState, now: f64) -> Result<Map<String, Value>, Int
         .filter(|t| t.usable(now))
         .map(|t| t.token_id.clone())
         .collect();
-    // 和出图检查同一个条件：没人排队 + 按时段放出的份额还剩半小时以上的量
-    let params = state.params.get();
-    let mut borrow_open = false;
-    if state
-        .guard
-        .with(|g| g.site_idle(-1, &token_ids, now, &params))
-    {
-        let reserve = gv("account_daily_cap") as f64 / 48.0 * token_ids.len() as f64;
-        borrow_open = match state.guard.paced_headroom(&token_ids, &day, now).await {
-            Ok(h) => h > reserve,
-            Err(_) => false,
-        };
-    }
     // 全站现在能不能出图：所有可用账号都被站点级规则拦下时，首页要说清原因（和成员拿到的 429 同一句话）
     let mut blocked = Value::Null;
     if !token_ids.is_empty() {
@@ -285,16 +272,15 @@ pub async fn build(state: &AppState, now: f64) -> Result<Map<String, Value>, Int
     );
     body.insert(
         "rules".into(),
+        // 3.0 删掉的字段（docs/v3-deviations.md #61）：`base`（保底）、`borrow_open`（空闲借用）、
+        // `anlas`（早已下线的 Anlas 自动分配占位）
         json!({
-            "base": gv("base_daily_images"), "key_queue": gv("key_image_queue"),
+            "key_queue": gv("key_image_queue"),
             "queue_cap": gv("queue_per_account") * usable,
             "hourly_cap": gv("account_hourly_cap") * usable, "daily_cap": gv("account_daily_cap") * usable,
             "quiet_start": gv("quiet_start"), "quiet_end": gv("quiet_end"),
             "quiet_cap": gv("quiet_hourly_cap") * usable,
             "min_interval": min_interval, "jitter": gv("interval_jitter"),
-            "borrow_open": borrow_open,
-            // Anlas 自动分配已下线（2026-10-13），字段保留兼容旧前端
-            "anlas": {"per_member": 0, "members": 0, "enabled": false},
             "quota": quota, // 动态额度的当前结果（quota_algo）
         }),
     );
@@ -373,11 +359,11 @@ pub async fn has_announcement(state: &AppState) -> bool {
 
 // ------------------------------------------------------------------ /public/status
 
-/// 首页「使用须知」里的排队与保底规则；数值来自后台「账号保护与排队」。
+/// 首页「使用须知」里的排队规则；数值来自后台「账号保护与排队」（保底已删除，docs/v3-deviations.md #61）。
 fn public_limits(state: &AppState) -> Value {
     let v = state.guard.with(|g| g.values.clone());
     let get = |k: &str| v.get(k).copied().unwrap_or(0);
-    json!({"key_image_queue": get("key_image_queue"), "base_daily_images": get("base_daily_images"),
+    json!({"key_image_queue": get("key_image_queue"),
            "quiet_start": get("quiet_start"), "quiet_end": get("quiet_end"),
            "quiet": get("quiet_start") != get("quiet_end")})
 }

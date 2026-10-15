@@ -92,11 +92,12 @@ async fn quota_algo_get_shape_and_put_validation() {
     let api = Api::login(&e).await;
 
     // 什么都没存过：params 是代码里的起点值（整数）；last 是 {}，history 是 []
+    // （保底的 quota_base / quota_base_min / quota_base_step 已删除，docs/v3-deviations.md #61）
     let (status, text) = api.call("GET", "/quota-algo", None).await;
     assert_eq!(status, 200);
     assert_eq!(
         text,
-        r#"{"last":{},"history":[],"params":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_base":100,"quota_ceiling_max":300,"quota_base_min":50,"quota_base_min_fair":10,"quota_step":25,"quota_base_step":10,"quota_v5_min":3,"quota_v5_max":30}}"#
+        r#"{"last":{},"history":[],"params":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25,"quota_v5_min":3,"quota_v5_max":30}}"#
     );
 
     // 校验失败：422 + 旧版文案，不写任何东西
@@ -144,14 +145,14 @@ async fn quota_algo_put_saves_and_recomputes() {
     assert_eq!(status, 200, "{v}");
     assert_eq!(v["ok"], true);
     assert_eq!(v["last"]["enabled"], true);
-    // 初始值同步成今天的 N（上限和保底一起）
+    // 初始值同步成今天的 N（保底已删除，不再写 quota_base_now，docs/v3-deviations.md #61）
     assert_eq!(
         setting(&e, "quota_target_avg").await.as_deref(),
         Some("200")
     );
     assert_eq!(setting(&e, "quota_step").await.as_deref(), Some("30"));
     assert_eq!(setting(&e, "quota_ceiling").await.as_deref(), Some("200"));
-    assert_eq!(setting(&e, "quota_base_now").await.as_deref(), Some("200"));
+    assert_eq!(setting(&e, "quota_base_now").await, None);
     assert_eq!(setting(&e, "nope").await, None);
     // 重算已经执行：额度下发给算法管理的成员 Key，结果写进 quota_algo_last
     let key = e
@@ -188,7 +189,7 @@ async fn quota_algo_put_saves_and_recomputes() {
     let (_, g) = api.json("GET", "/quota-algo", None).await;
     assert_eq!(g["last"]["ceiling"], 200);
     assert_eq!(g["params"]["quota_target_avg"], "200");
-    assert_eq!(g["params"]["quota_base"], 100);
+    assert_eq!(g["params"].get("quota_base"), None);
 
     // 总开关关掉：重算直接返回 {"enabled": false}
     let (status, v) = api

@@ -101,28 +101,24 @@ impl Db {
                 [&yday],
                 |r| Ok((value::i64_or(r, 0, 0)?, value::f64_or(r, 1, 0.0)?)),
             )?;
-            // 只数成员（不含测试号、站长号）被拦的记录
+            // 只数成员（不含测试号、站长号）被拦的记录，按原因码数（不依赖中文文案）。
+            // 旧版每小时上限按 `detail LIKE '%出图量已达上限%'` 数，还数了「保底」文案；保底已删除，
+            // 改成按原因码（docs/v3-deviations.md #61）
             let member_rejects = "FROM usage_log u JOIN api_keys k ON k.id=u.key_id WHERE u.ts>=? AND u.ts<? \
-                                  AND u.status='rejected' AND k.is_test=0 AND k.is_admin=0 AND u.detail LIKE ?";
+                                  AND u.status='rejected' AND k.is_test=0 AND k.is_admin=0 AND u.reason=?";
             let hourly_block_hours: Vec<i64> = {
                 let mut stmt = c.prepare(&format!(
                     "SELECT DISTINCT CAST(u.ts/3600 AS INT) {member_rejects}"
                 ))?;
-                stmt.query_map(params![start, end, "%出图量已达上限%"], |r| {
-                    value::i64_or(r, 0, 0)
-                })?
+                stmt.query_map(
+                    params![start, end, gate_core::reasons::HOURLY_CAP],
+                    |r| value::i64_or(r, 0, 0),
+                )?
                 .collect::<rusqlite::Result<_>>()?
             };
-            let base_blocks = count_i64(
-                c,
-                &format!("SELECT COUNT(*) {member_rejects}"),
-                params![start, end, "%保底%其他人在排队%"],
-            )?;
-            // 按原因码数（不依赖中文文案）
             let paced_blocks = count_i64(
                 c,
-                "SELECT COUNT(*) FROM usage_log u JOIN api_keys k ON k.id=u.key_id \
-                 WHERE u.ts>=? AND u.ts<? AND u.status='rejected' AND k.is_test=0 AND k.is_admin=0 AND u.reason=?",
+                &format!("SELECT COUNT(*) {member_rejects}"),
                 params![start, end, gate_core::reasons::PACED],
             )?;
             let coverage_first_ts = c.query_row("SELECT MIN(ts) FROM usage_log", [], |r| {
@@ -154,7 +150,6 @@ impl Db {
                     upstream_images,
                     upstream_units,
                     hourly_block_hours,
-                    base_blocks,
                     paced_blocks,
                 },
                 coverage_first_ts,

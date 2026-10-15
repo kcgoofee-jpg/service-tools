@@ -11,6 +11,8 @@
 //! - risk 模块里「出站请求头」「TLS 指纹」两条（3.0 换了文案，见 docs/v3-deviations.md）：两边都用固定占位；
 //! - 3.0 删掉的东西（docs/v3-deviations.md #44）：夹具是冻结的 Python 输出，不重新生成，比较前把这些从期望里去掉——
 //!   被删的整个模块、分配模块里被删的那条校验（连带按剩下的校验重算运行条级别），以及校验没通过时记的 Bug 行。
+//! - 3.0 的额度改动（见 [`v3`] 模块，逐条对应 docs/v3-deviations.md 的编号）：同样只在期望一侧改写；
+//!   操作日志的自增 id 两边都不比（被删掉的日志会让后面的 id 错位）。
 
 use flate2::read::GzDecoder;
 use futures::future::BoxFuture;
@@ -369,9 +371,9 @@ fn compare_writes(
 
 /// 被删的模块。
 const REMOVED_MODULE: &str = "registration_ready";
-/// 分配模块里被删的校验（每人额度 × 人数 vs 全站上限）。
+/// 分配模块里被删的校验：每人额度 × 人数 vs 全站上限（#44）、保底 ≤ 每日上限（#61）。
 const REMOVED_CHECK_MODULE: &str = "allocation";
-const REMOVED_CHECK: &str = "V5：每人额度 × 人数 ≤ 全站上限";
+const REMOVED_CHECKS: [&str; 2] = ["V5：每人额度 × 人数 ≤ 全站上限", "V4.5：保底 ≤ 每日上限"];
 
 /// 已按剩下的校验重算过的运行条级别：`(模块, 运行时刻)` → 级别。后面几步的期望里还带着旧的运行条，要同样改。
 type Levels = HashMap<(String, u64), String>;
@@ -406,7 +408,7 @@ fn fix_entry(name: &str, entry: &mut Value, levels: &mut Levels) {
     }
     let mut this_round = None;
     if let Some(Value::Array(checks)) = e.get_mut("checks") {
-        checks.retain(|c| c["name"] != REMOVED_CHECK);
+        checks.retain(|c| !REMOVED_CHECKS.iter().any(|n| c["name"] == *n));
         let checks = checks.clone();
         this_round = Some(run_level(e, &checks));
     }
@@ -446,7 +448,8 @@ fn fix_setting(key: &Value, value: &mut Value, levels: &mut Levels) {
 }
 
 /// 一步的期望：返回值（tick_all / snapshot）和设置写入里的 `kernel_last`。
-fn fix_expected_step(want: &mut Value, op: &str, levels: &mut Levels) {
+fn fix_expected_step(want: &mut Value, op: &str, levels: &mut Levels, v3: &mut v3::Expect) {
+    v3.fix_step(want, op);
     if let Some(result) = want.get_mut("result") {
         match op {
             "tick_all" => fix_kernel_last(result, levels),
@@ -483,6 +486,296 @@ fn fix_expected_step(want: &mut Value, op: &str, levels: &mut Levels) {
                 }
             }
             _ => {}
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 3.0 的额度改动：比较前在期望一侧改写（夹具冻结不改）
+// ---------------------------------------------------------------------------
+
+mod v3 {
+    use gate_core::jsondump;
+    use serde_json::{Map, Value, json};
+    use std::collections::HashMap;
+
+    /// 期望一侧的改写；跨步骤记住每个设置最后一次（改写后）的值，用来改写最后的表行差异。
+    pub struct Expect {
+        last_written: HashMap<String, String>,
+        /// 种子里只有原因码 `hourly_cap`、没有「出图量已达上限」文案的拒绝记录的时间戳：
+        /// 旧版的复盘按文案 LIKE 数不到它们，3.0 按原因码数得到（#61）
+        code_only_hourly: Vec<f64>,
+    }
+
+    /// 3.0 不再写的设置（#61：保底）。
+    const DROPPED_SETTINGS: [&str; 2] = ["guard_base_daily_images", "quota_base_now"];
+
+    /// 复盘：`from` / `to` 只留每人上限 A，去掉 `base_blocks`（#61）。
+    fn review(r: &mut Map<String, Value>) {
+        for k in ["from", "to"] {
+            if let Some(Value::Array(pair)) = r.get_mut(k) {
+                pair.truncate(1);
+            }
+        }
+        r.shift_remove("base_blocks");
+    }
+
+    /// `quota_run` 的返回值 / `quota_algo_last`：没有 `base`（#61）。
+    pub fn quota_result(v: &mut Value) {
+        if let Some(m) = v.as_object_mut() {
+            m.shift_remove("base");
+            if let Some(Value::Object(r)) = m.get_mut("review") {
+                review(r);
+            }
+        }
+    }
+
+    fn reparse(text: &str, f: impl FnOnce(&mut Value)) -> String {
+        let mut v = jsondump::loads(text).expect("写进库的 JSON 合法");
+        f(&mut v);
+        jsondump::dumps(&v)
+    }
+
+    /// 这一轮的复盘是否只因为保底变了才算「调整」：3.0 的首页文案不再写「算法调整」那一句（#61）。
+    fn only_base_changed(history_text: &str) -> bool {
+        let v = jsondump::loads(history_text).unwrap();
+        let Some(r) = v.as_array().and_then(|a| a.last()) else {
+            return false;
+        };
+        let (from, to) = (&r["from"], &r["to"]);
+        from != to && from.get(0) == to.get(0)
+    }
+
+    impl Expect {
+        pub fn new(seed: &[String]) -> Self {
+            let code_only_hourly = seed
+                .iter()
+                .filter(|s| {
+                    s.starts_with("INSERT INTO usage_log") && s.contains("'', 'hourly_cap'")
+                })
+                .map(|s| {
+                    let values = s.split("VALUES (").nth(1).expect("VALUES");
+                    values
+                        .split(", ")
+                        .next()
+                        .unwrap()
+                        .parse::<f64>()
+                        .expect("ts")
+                })
+                .collect();
+            Self {
+                last_written: HashMap::new(),
+                code_only_hourly,
+            }
+        }
+
+        /// 复盘的 `hourly_blocks`：加上旧版按文案数不到、3.0 按原因码数到的小时（#61）。
+        fn hourly_blocks(&self, r: &mut Map<String, Value>) {
+            if self.code_only_hourly.is_empty() {
+                return;
+            }
+            let Some(day) = r.get("day").and_then(Value::as_str) else {
+                return;
+            };
+            let start = gate_core::clock::Clock::new("Asia/Shanghai", 7)
+                .service_day_start(day)
+                .expect("复盘日期");
+            let mut hours: Vec<i64> = self
+                .code_only_hourly
+                .iter()
+                .filter(|t| start <= **t && **t < start + 86400.0)
+                .map(|t| (t / 3600.0).trunc() as i64)
+                .collect();
+            hours.sort_unstable();
+            hours.dedup();
+            if hours.is_empty() {
+                return;
+            }
+            // 夹具里这类场景没有带文案的记录，旧版数到 0：并集就是这些小时
+            assert_eq!(
+                r["hourly_blocks"], 0,
+                "夹具假设：只有原因码的记录单独成场景"
+            );
+            r.insert("hourly_blocks".into(), json!(hours.len()));
+        }
+
+        fn review(&self, r: &mut Map<String, Value>) {
+            review(r);
+            self.hourly_blocks(r);
+        }
+
+        fn quota_result(&self, v: &mut Value) {
+            quota_result(v);
+            if let Some(Value::Object(r)) = v.get_mut("review") {
+                self.hourly_blocks(r);
+            }
+        }
+
+        /// 一个设置的新值；`None` = 3.0 不写这个设置。
+        fn setting(&mut self, key: &str, value: &str, drop_note: bool) -> Option<String> {
+            if DROPPED_SETTINGS.contains(&key) {
+                return None;
+            }
+            let fixed = match key {
+                "quota_algo_last" => reparse(value, |v| self.quota_result(v)),
+                "quota_algo_history" => reparse(value, |v| {
+                    if let Some(Value::Object(r)) = v.as_array_mut().and_then(|a| a.last_mut()) {
+                        self.review(r);
+                    }
+                }),
+                "algo_notice" if drop_note => {
+                    let i = value.find("今日额度：").expect("首页文案");
+                    value[i..].to_string()
+                }
+                _ => value.to_string(),
+            };
+            if matches!(
+                key,
+                "quota_algo_last" | "quota_algo_history" | "algo_notice"
+            ) {
+                self.last_written.insert(key.to_string(), fixed.clone());
+            }
+            Some(fixed)
+        }
+
+        /// 一步的期望：设置写入、返回值。
+        pub fn fix_step(&mut self, want: &mut Value, op: &str) {
+            let mut drop_note = false;
+            if let Some(writes) = want
+                .get_mut("settings_writes")
+                .and_then(Value::as_array_mut)
+            {
+                let mut out = Vec::new();
+                for w in writes.iter() {
+                    match w[0].as_str() {
+                        Some("set") => {
+                            let key = w[1].as_str().unwrap();
+                            if let Some(v) = self.setting(key, w[2].as_str().unwrap(), drop_note) {
+                                out.push(json!(["set", key, v]));
+                            }
+                        }
+                        Some("bulk") => {
+                            let mut pairs = Vec::new();
+                            for kv in w[1].as_array().unwrap() {
+                                let key = kv[0].as_str().unwrap();
+                                let raw = kv[1].as_str().unwrap();
+                                if key == "quota_algo_history" {
+                                    drop_note = only_base_changed(raw);
+                                }
+                                if let Some(v) = self.setting(key, raw, drop_note) {
+                                    pairs.push(json!([key, v]));
+                                }
+                            }
+                            if !pairs.is_empty() {
+                                out.push(json!(["bulk", pairs]));
+                            }
+                        }
+                        _ => out.push(w.clone()),
+                    }
+                }
+                *writes = out;
+            }
+            if let Some(result) = want.get_mut("result") {
+                match op {
+                    "quota_run" => self.quota_result(result),
+                    "probe" => {
+                        if let Some(g) = result
+                            .get_mut("guard_values")
+                            .and_then(Value::as_object_mut)
+                        {
+                            g.shift_remove("base_daily_images");
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        /// 最后的表行差异（期望一侧）：设置行按最后一次写入改写，操作日志按 3.0 的文案改写。
+        pub fn fix_diff(&self, diff: &mut Value) {
+            if let Some(t) = diff.get_mut("site_settings").and_then(Value::as_object_mut) {
+                for side in ["added", "removed"] {
+                    if let Some(rows) = t.get_mut(side).and_then(Value::as_array_mut) {
+                        rows.retain(|r| !DROPPED_SETTINGS.iter().any(|k| r["key"] == *k));
+                        if side == "added" {
+                            for r in rows.iter_mut() {
+                                let key = r["key"].as_str().unwrap_or("").to_string();
+                                if let Some(v) = self.last_written.get(&key) {
+                                    r["value"] = json!(v);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if let Some(rows) = diff
+                .get_mut("admin_actions")
+                .and_then(|t| t.get_mut("added"))
+                .and_then(Value::as_array_mut)
+            {
+                rows.retain_mut(|r| match r["action"].as_str() {
+                    // 「上限 a→a2 · 保底 b→b2」→「上限 a→a2」；只有保底变了的那条不再记（#61）
+                    Some("动态额度调整") => {
+                        let target = r["target"].as_str().unwrap();
+                        let upper = target.split(" · 保底 ").next().unwrap().to_string();
+                        let (from, to) = upper.trim_start_matches("上限 ").split_once('→').unwrap();
+                        let keep = from != to;
+                        r["target"] = json!(upper);
+                        keep
+                    }
+                    // 「V4.5 上限 a（保底 b）· V5 …」→「V4.5 上限 a · V5 …」（#61）
+                    Some("动态额度应用") => {
+                        let detail = r["detail"].as_str().unwrap();
+                        if let Some((head, rest)) = detail.split_once("（保底 ")
+                            && let Some((_, tail)) = rest.split_once("）·")
+                        {
+                            r["detail"] = json!(format!("{head} ·{tail}"));
+                        }
+                        true
+                    }
+                    _ => true,
+                });
+            }
+            drop_empty(diff);
+        }
+    }
+
+    /// 两边都做：操作日志不比自增 id（期望一侧删掉的日志会让后面的 id 错位）。
+    pub fn normalize_diff(diff: &mut Value) {
+        if let Some(t) = diff.get_mut("admin_actions").and_then(Value::as_object_mut) {
+            for side in ["added", "removed"] {
+                if let Some(rows) = t.get_mut(side).and_then(Value::as_array_mut) {
+                    for r in rows {
+                        if let Some(o) = r.as_object_mut() {
+                            o.shift_remove("id");
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(t) = diff
+            .get_mut("sqlite_sequence")
+            .and_then(Value::as_object_mut)
+        {
+            for side in ["added", "removed"] {
+                if let Some(rows) = t.get_mut(side).and_then(Value::as_array_mut) {
+                    rows.retain(|r| r["name"] != "admin_actions");
+                }
+            }
+        }
+        drop_empty(diff);
+    }
+
+    /// 改写后两边都空了的表从差异里去掉。
+    fn drop_empty(diff: &mut Value) {
+        if let Some(m) = diff.as_object_mut() {
+            m.retain(|_, t| {
+                ["added", "removed"].iter().any(|s| {
+                    t.get(*s)
+                        .and_then(Value::as_array)
+                        .is_some_and(|a| !a.is_empty())
+                })
+            });
         }
     }
 }
@@ -631,7 +924,7 @@ async fn run_case(case: &Value) -> Result<(), String> {
     if !seed.is_empty() {
         state
             .db
-            .run_script(seed)
+            .run_script(seed.clone())
             .await
             .map_err(|e| format!("{name}: 种子数据失败 {e}"))?;
     }
@@ -690,13 +983,14 @@ async fn run_case(case: &Value) -> Result<(), String> {
     let expected_steps = case["expect"]["steps"].as_array().unwrap();
     let mut seen_alerts = 0usize;
     let mut levels = Levels::new();
+    let mut v3_expect = v3::Expect::new(&seed);
     for (i, (step, want)) in steps.iter().zip(expected_steps).enumerate() {
         let at = step["at"].as_f64().unwrap();
         gate_server::time::freeze(Some(at));
         let _ = state.db.take_setting_writes();
         let op = step["op"].as_str().unwrap();
         let mut want = want.clone();
-        fix_expected_step(&mut want, op, &mut levels);
+        fix_expected_step(&mut want, op, &mut levels, &mut v3_expect);
         let want = &want;
         let mut got = Map::new();
         let outcome: Result<Option<Value>, String> = match op {
@@ -911,6 +1205,9 @@ async fn run_case(case: &Value) -> Result<(), String> {
         }
     }
     drop_check_bugs(&mut want_diff);
+    v3_expect.fix_diff(&mut want_diff);
+    v3::normalize_diff(&mut want_diff);
+    v3::normalize_diff(&mut actual_diff);
     if loose {
         // Bug 的特征码 / 堆栈里有 Python 的文件名和函数名：只比数量，不比内容
         let count = |d: &Value| {

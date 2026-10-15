@@ -102,11 +102,13 @@ fn pure_golden() {
 fn consts_golden() {
     let cases = load(M, "autopilot/consts");
     let c = &cases[0];
+    // `over_base`（保底）随保底一层删除（docs/v3-deviations.md #61），期望一侧去掉
     let want: Vec<&str> = c.raw["skip_reasons"]
         .as_array()
         .unwrap()
         .iter()
         .map(|v| v.as_str().unwrap())
+        .filter(|r| *r != "over_base")
         .collect();
     assert_eq!(autopilot::KEY_GUARD_SKIP_REASONS.to_vec(), want);
     assert_eq!(c.raw["slots_max"], SLOTS_MAX);

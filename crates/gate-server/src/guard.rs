@@ -95,20 +95,6 @@ impl Guard {
         Ok(self.with(|g| g.token_block_reason(token_id, c.units, now)))
     }
 
-    /// 所有可用账号的「按时段放行」余量之和。
-    pub async fn paced_headroom(
-        &self,
-        token_ids: &[String],
-        day: &str,
-        now: f64,
-    ) -> Result<f64, GuardIoError> {
-        let mut used = Vec::with_capacity(token_ids.len());
-        for t in token_ids {
-            used.push(self.db.get_upstream_counter(t, day).await?.units);
-        }
-        Ok(self.with(|g| g.paced_headroom(&used, now)))
-    }
-
     /// 上游 429：每小时上限减半（AIMD）。返回 (旧, 新)。
     pub async fn on_upstream_429(&self, now: f64) -> Result<Option<(i64, i64)>, GuardIoError> {
         let prev = parse_setting_float(self.db.get_setting("guard_429_cap_at").await?.as_deref())?;

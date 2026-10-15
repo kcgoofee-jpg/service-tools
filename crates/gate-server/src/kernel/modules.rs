@@ -185,12 +185,10 @@ async fn allocation_checks(state: &AppState) -> Result<Vec<Check>, KernelError> 
         return Ok(Vec::new());
     };
     let (keys, drift) = state.db.managed_keys_drift(&q.a, q.each).await?;
-    let base = Some(state.guard.with(|g| g.values["base_daily_images"]));
     Ok(gm::allocation_checks(&AllocationInputs {
         last_raw: raw,
         keys,
         drift,
-        base,
     })?)
 }
 

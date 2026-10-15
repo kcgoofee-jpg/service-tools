@@ -987,23 +987,6 @@ async fn v1_models() -> Response {
     }))
 }
 
-/// `daily_base`：这把 Key 的每日保底张数；0 表示没有保底 / 借用之分（整天都按每日上限）。
-fn daily_base(state: &AppState, key: &Key) -> i64 {
-    let base = state
-        .guard
-        .with(|g| g.values.get("base_daily_images").copied().unwrap_or(0));
-    if key.is_admin()
-        || base == 0
-        || !truthy(key.get("daily_images"))
-        || base >= key.daily_images()
-        || key.manual()
-    {
-        0
-    } else {
-        base
-    }
-}
-
 /// `_feature_view`：该 Key 当前各项功能是否可用（已计入全局开关）。
 async fn feature_view(state: &AppState, key: &Key) -> Result<Vec<Value>, ApiError> {
     let mut view = Vec::new();
@@ -1047,7 +1030,6 @@ async fn me(state: &AppState, parts: &Parts) -> ApiResult {
         "today": {
             "images": c.images,
             "daily_images": key.get("daily_images"),
-            "daily_images_base": daily_base(state, &key),
             "legacy_free_images_today": c.legacy_free_images,
             "anlas_today": pyc::round(anlas_today, 2),
             "daily_anlas": key.get("daily_anlas"),

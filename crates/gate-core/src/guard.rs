@@ -14,7 +14,7 @@
 //!   写成功之后才 [`GuardCore::apply_updates`]（与旧版「先写库后改内存」同序）；`to_settings` 给出全部字段的当前串；
 //! - `seed_hour(db, token_ids)`：`SELECT ts, images FROM usage_log WHERE ts>now-10800 AND status='ok' AND kind LIKE 'image%'
 //!   AND images>0 ORDER BY ts`，行交给 [`stamps_from_rows`] + [`GuardCore::seed_hour`]；
-//! - `token_block_reason(db, token_id, day)` / `paced_headroom(db, ...)` 里的 `db.get_upstream_counter(token_id, day)`
+//! - `token_block_reason(db, token_id, day)` 里的 `db.get_upstream_counter(token_id, day)`
 //!   （`upstream_token_counters` 表的 `units`，缺 `units` 用 `images`，没有记录是 0）：服务层取出 `used` 传进来
 //!   （旧版 `daily == 0` 或熔断 / 安静时段已经拦下时不会去读，多读一次没有可观察的差别）；
 //! - `on_upstream_429`：读 `guard_429_cap_at`，写 `guard_account_hourly_cap` / `guard_hourly_adapted_at` /
@@ -31,8 +31,11 @@
 //! - 每小时上限的 `_cap_marks` 只在上限变化时记，最多 64 条；
 //! - `_window` 只从队首弹 3 小时前的时间戳，乱序追加的时间戳不会被整理。
 //!
-//! 已删除功能的残留不移植：3 小时上限（`WINDOW_3H` 只剩队列保留期）、10 分钟旋钮、每日熔断、空闲借用的
-//! 旧实现（`site_idle` 仍被首页和出图路由使用，保留）。
+//! 已删除功能的残留不移植：3 小时上限（`WINDOW_3H` 只剩队列保留期）、10 分钟旋钮、每日熔断。
+//!
+//! 3.0 删除的（docs/v3-deviations.md #61）：「V4.5 每人保底 + 全站空闲时借用到每日上限」整层——
+//! 设置 `base_daily_images`、`site_idle`、`paced_headroom`。额度是 PVP：每人只有一个上限，
+//! 全站按时段放行（`paced`）对所有人一视同仁。
 
 use crate::clock::Clock;
 use crate::params::Params;
@@ -52,8 +55,6 @@ pub const BURST_DIVISOR: i64 = 4;
 pub const HOURLY_MIN: i64 = 100;
 pub const HOURLY_MAX: i64 = 160;
 pub const HOURLY_STEP: i64 = 10;
-/// 本小时用量低于上限的 60% 且没人排队，算「空闲」
-pub const IDLE_SHARE: f64 = 0.6;
 /// `_cap_marks` 的容量（`deque(maxlen=64)`）
 pub const CAP_MARKS_MAX: usize = 64;
 
@@ -78,7 +79,7 @@ const fn field(name: &'static str, default: i64, min: i64, max: i64, label: &'st
 }
 
 /// 所有设置（存 `site_settings` 的键是 `guard_<名称>`）；0 表示关闭该项。
-pub const FIELDS: [Field; 10] = [
+pub const FIELDS: [Field; 9] = [
     field(
         "account_daily_cap",
         1000,
@@ -142,17 +143,7 @@ pub const FIELDS: [Field; 10] = [
         100,
         "每个上游账号全站最多同时排几张图",
     ),
-    field(
-        "base_daily_images",
-        100,
-        0,
-        100000,
-        "V4.5 每人每天保底张数；超过后只在全站空闲时放行，直到 Key 的每日上限",
-    ),
 ];
-
-/// 保底张数字段（`site_flags::GUARD_BASE` 的默认值和范围以它为准）。
-pub const BASE_DAILY_IMAGES: Field = FIELDS[9];
 
 /// `site_settings` 里的键名。
 pub fn setting_key(name: &str) -> String {
@@ -715,26 +706,6 @@ impl GuardCore {
         ((at - self.day_elapsed(now)) / 60.0).ceil().max(1.0) as i64
     }
 
-    /// 不分时段（`daily_burst` 或 `account_daily_cap` 为 0）时 `paced_headroom` 恒为无穷大、不用读库。
-    pub fn paced_headroom_enabled(&self) -> bool {
-        self.v("daily_burst") != 0 && self.v("account_daily_cap") != 0
-    }
-
-    /// 所有账号「按时段已放出、还没用掉」的张数之和；不分时段时返回无穷大。
-    /// `used` = 每个账号今天已用（`units`，缺则 `images`）。
-    pub fn paced_headroom(&self, used: &[f64], now: f64) -> f64 {
-        if !self.paced_headroom_enabled() {
-            return f64::INFINITY;
-        }
-        let allow = self.paced_allowance(now);
-        let mut total = 0.0;
-        for u in used {
-            let left = allow - u;
-            total += if left > 0.0 { left } else { 0.0 };
-        }
-        total
-    }
-
     /// 这个上游账号现在不能再接新的出图任务时，返回给成员看的原因。
     /// `used` = 该账号今天已用（`upstream_token_counters` 的 `units`，缺则 `images`；节约模式 14 步的图算半张）。
     pub fn token_block_reason(&mut self, token_id: &str, used: f64, now: f64) -> Option<Reason> {
@@ -930,26 +901,6 @@ impl GuardCore {
             out.insert("mine".into(), Value::Array(mine));
         }
         Value::Object(out)
-    }
-
-    // ---------- 保底与借用 ----------
-
-    /// 没有其他成员在排队，且本小时用量低于上限的 60%：允许超出保底继续用。
-    pub fn site_idle(&mut self, key_id: i64, token_ids: &[String], now: f64, p: &Params) -> bool {
-        if self
-            .image_inflight
-            .iter()
-            .any(|(k, n)| *k != key_id && *n > 0)
-        {
-            return false;
-        }
-        let cap = self.hourly_cap(now);
-        if cap == 0 || token_ids.is_empty() {
-            return true;
-        }
-        let used: i64 = token_ids.iter().map(|t| self.hour_count(t, now)).sum();
-        (used as f64)
-            < p.float("capacity.idle_share", IDLE_SHARE) * cap as f64 * token_ids.len() as f64
     }
 }
 

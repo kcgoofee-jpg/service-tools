@@ -133,16 +133,19 @@ fn capacity_ticks_golden() {
     }
 }
 
-/// 夹具里分配模块的「V5：每人额度 × 人数 ≤ 全站上限」（承诺 vs 容量，3.0 已删除）。
-const REMOVED_ALLOCATION_CHECK: &str = "V5：每人额度 × 人数 ≤ 全站上限";
+/// 夹具里分配模块 3.0 已删除的校验：「V5：每人额度 × 人数 ≤ 全站上限」（承诺 vs 容量，#44）、
+/// 「V4.5：保底 ≤ 每日上限」（保底一层删除，docs/v3-deviations.md #61）。
+const REMOVED_ALLOCATION_CHECKS: [&str; 2] =
+    ["V5：每人额度 × 人数 ≤ 全站上限", "V4.5：保底 ≤ 每日上限"];
 
 #[test]
 fn allocation_checks_golden() {
-    let (mut errs, mut empties) = (0, 0);
+    let (mut errs, mut empties, mut removed) = (0, 0, 0);
     for c in load(M, "modules/checks_allocation") {
-        // 夹具输入里的 `ack_oversell` 是「站长已确认」那条已删除校验的参数
+        // 夹具输入里的 `ack_oversell`、`base` 是已删除校验的参数
         let mut raw_inputs = c.raw["inputs"].clone();
         raw_inputs.as_object_mut().unwrap().remove("ack_oversell");
+        raw_inputs.as_object_mut().unwrap().remove("base");
         let inp: AllocationInputs = de(&raw_inputs);
         let want_err = c.raw["err"].as_str();
         match (allocation_checks(&inp), want_err) {
@@ -151,7 +154,11 @@ fn allocation_checks_golden() {
                     .as_array()
                     .unwrap()
                     .iter()
-                    .filter(|x| x["name"] != REMOVED_ALLOCATION_CHECK)
+                    .filter(|x| {
+                        !REMOVED_ALLOCATION_CHECKS
+                            .iter()
+                            .any(|name| x["name"] == *name)
+                    })
                     .cloned()
                     .collect();
                 assert_eq_py_ordered(&c, &checks_json(&cs), &Value::Array(want));
@@ -162,6 +169,12 @@ fn allocation_checks_golden() {
             (Err(e), Some(t)) => {
                 assert_eq!(e.py_type(), t, "第 {} 行", c.line);
                 errs += 1;
+            }
+            // 旧版只在保底校验里比较「保底 ≤ 每人上限」时抛 TypeError（每人上限不是数字）；
+            // 这条校验删了，3.0 只剩同步校验
+            (Ok(cs), Some("TypeError")) if allocation_query(inp.last_raw.as_deref()).is_ok() => {
+                assert_eq!(cs.len(), 1, "第 {} 行", c.line);
+                removed += 1;
             }
             (got, want) => panic!("第 {} 行：{got:?} 与 {want:?} 不符", c.line),
         }
@@ -177,7 +190,7 @@ fn allocation_checks_golden() {
             }
         }
     }
-    assert!(errs > 5 && empties > 100);
+    assert!(errs > 5 && empties > 100, "{errs} {empties} {removed}");
 }
 
 #[test]

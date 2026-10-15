@@ -27,8 +27,8 @@
 //! ## allocation（分配）
 //! - tick：`quota_algo.run(state)`，摘要 [`allocation_tick_summary`]。
 //! - checks：先 [`allocation_query`] 解析 `quota_algo_last`；`keys` = `SELECT COUNT(*) FROM api_keys WHERE quota_auto=1 AND is_admin=0 AND is_test=0 AND enabled=1`；
-//!   `drift` = 同一条再加 `AND (daily_images<>? OR daily_v5<>?)`，参数 `(a, each)`（`a` 为 NULL 时 SQL 比较恒不成立 → 0）；
-//!   `base` = `guard.values.get("base_daily_images")`（没有 Guard 传 `Some(0)`）。
+//!   `drift` = 同一条再加 `AND (daily_images<>? OR daily_v5<>?)`，参数 `(a, each)`（`a` 为 NULL 时 SQL 比较恒不成立 → 0）。
+//!   旧版还有一条「V4.5：保底 ≤ 每日上限」，保底层删除后一起删了（docs/v3-deviations.md #61）。
 //!
 //! ## autopilot（自动驾驶）
 //! - tick：`autopilot.run`，摘要 [`autopilot_tick_summary`]。
@@ -395,44 +395,17 @@ pub struct AllocationInputs {
     pub last_raw: Option<String>,
     pub keys: i64,
     pub drift: i64,
-    /// `guard.values.get("base_daily_images")`（没有 Guard 时传 `Some(0)`）。
-    pub base: Option<i64>,
 }
 
 pub fn allocation_checks(inp: &AllocationInputs) -> Result<Vec<Check>, DecideError> {
-    let Some(q) = allocation_query(inp.last_raw.as_deref())? else {
+    if allocation_query(inp.last_raw.as_deref())?.is_none() {
         return Ok(Vec::new());
-    };
-    let a = q.a;
-    // V4.5：保底层只在 保底 < 每日上限 时存在；算法把两者设成同一个数后这一层就没了
-    let base = inp.base;
-    let a_truthy = pyval::truthy(&a);
-    let base_ok = match base {
-        None | Some(0) => true,
-        Some(_) if !a_truthy => true,
-        Some(b) => {
-            let af = pyval::number_like(&a)
-                .ok_or_else(|| DecideError::Type(format!("不能比较: {a}")))?;
-            (b as f64) <= af
-        }
-    };
-    let base_check = Check::new(
-        "V4.5：保底 ≤ 每日上限",
-        base_ok,
-        format!(
-            "保底 {} · 每人上限 {}（两者相等 = 没有保底/空闲借用两层，只有每日上限）",
-            base.map_or("None".to_string(), |b| b.to_string()),
-            pyval::py_str(&a)
-        ),
-    );
-    Ok(vec![
-        Check::new(
-            "算法管理的 Key 都已同步",
-            inp.drift == 0,
-            format!("{} 把 Key 的额度和算法结果不一致", inp.drift),
-        ),
-        base_check,
-    ])
+    }
+    Ok(vec![Check::new(
+        "算法管理的 Key 都已同步",
+        inp.drift == 0,
+        format!("{} 把 Key 的额度和算法结果不一致", inp.drift),
+    )])
 }
 
 // ---------------------------------------------------------------------------

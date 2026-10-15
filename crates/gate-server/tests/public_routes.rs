@@ -352,10 +352,10 @@ async fn public_live_shape_and_key_order() {
     assert_eq!(v["members"], json!({"max": 10, "active": 0, "open": false}));
     // 测试环境 IMAGE_MIN_INTERVAL=0：`float(x or 15)` → 15；interval = 15 + 抖动 5 / 2
     assert_eq!(v["interval"], json!(17.5));
+    // 保底 `base`、空闲借用 `borrow_open`、Anlas 自动分配占位 `anlas` 已删除（docs/v3-deviations.md #61）
     assert_eq!(
         keys(&v["rules"]),
         [
-            "base",
             "key_queue",
             "queue_cap",
             "hourly_cap",
@@ -365,23 +365,15 @@ async fn public_live_shape_and_key_order() {
             "quiet_cap",
             "min_interval",
             "jitter",
-            "borrow_open",
-            "anlas",
             "quota"
         ]
     );
     let rules = &v["rules"];
-    assert_eq!(rules["base"], 100);
     assert_eq!(rules["queue_cap"], 5);
     assert_eq!(rules["daily_cap"], 1000);
     assert_eq!(rules["quiet_cap"], 20);
     assert_eq!(rules["min_interval"], json!(15.0));
     assert!(rules["min_interval"].is_f64());
-    assert!(rules["borrow_open"].is_boolean());
-    assert_eq!(
-        rules["anlas"],
-        json!({"per_member": 0, "members": 0, "enabled": false})
-    );
     // 还没有动态额度结果：键都在，值全是 null
     assert_eq!(
         rules["quota"],
@@ -609,7 +601,8 @@ async fn public_status_exposes_only_safe_fields() {
     );
     assert_eq!(
         v["limits"],
-        json!({"key_image_queue": 1, "base_daily_images": 100, "quiet_start": 0, "quiet_end": 0, "quiet": false})
+        // 保底 `base_daily_images` 已删除（docs/v3-deviations.md #61）
+        json!({"key_image_queue": 1, "quiet_start": 0, "quiet_end": 0, "quiet": false})
     );
     assert_eq!(v["image_jobs"], 0);
     assert_eq!(v["stability"], json!({"ok": 0, "error": 0}));

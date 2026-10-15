@@ -269,55 +269,8 @@ pub async fn quota_image_check(
                 ));
             }
         }
-        // 保底与借用：超过每日保底后，只在全站空闲时放行，直到 Key 的每日上限。
-        let (base, account_daily_cap) = state.guard.with(|g| {
-            (
-                g.values.get("base_daily_images").copied().unwrap_or(0),
-                g.values.get("account_daily_cap").copied().unwrap_or(0),
-            )
-        });
-        if base != 0
-            && base < daily_images
-            && used_legacy + legacy_free_images > base
-            && !key.manual()
-        {
-            let tokens = usable_token_ids(state).await;
-            // 按时段放行时，超出保底的部分只能用这个时段还剩得多的份额：至少留半小时的量给保底内的人
-            let reserve = account_daily_cap as f64 / 48.0 * tokens.len() as f64;
-            let params = state.params.get();
-            let now = state.now();
-            if !state
-                .guard
-                .with(|g| g.site_idle(key.id(), &tokens, now, &params))
-            {
-                return Err(gate(
-                    429,
-                    Reason::new(
-                        format!(
-                            "保底 {base} 张已用完。当前高峰期有排队，空闲时可继续用到 {daily_images} 张，请稍后再试"
-                        ),
-                        reasons::OVER_BASE,
-                    ),
-                ));
-            }
-            let headroom = state
-                .guard
-                .paced_headroom(&tokens, &day, now)
-                .await
-                .map_err(guard_io)?;
-            if headroom <= reserve {
-                // 文案不能含「其他人在排队」：每日复盘按它数「有余量还被拦」
-                return Err(gate(
-                    429,
-                    Reason::new(
-                        format!(
-                            "保底 {base} 张已用完。此时段余量优先供给保底成员，空闲时可继续用到 {daily_images} 张，请稍后再试"
-                        ),
-                        reasons::OVER_BASE,
-                    ),
-                ));
-            }
-        }
+        // 「保底 + 全站空闲时借用到每日上限」整层已删除（docs/v3-deviations.md #61）：每人只有每日上限，
+        // 全站按时段放行在 guard_precheck 里对所有人一视同仁。
     }
     if est.v5 > 0 {
         // V5 周额度是账户级共享资源，用全站日计数镜像

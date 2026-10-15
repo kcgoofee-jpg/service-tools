@@ -13,7 +13,7 @@ use gate_core::quota::{
 };
 use gate_core::site_flags::{self, GLOBAL_DAILY_V5};
 use gate_core::{autopilot, pyval, quota};
-use serde_json::{Map, Value, json};
+use serde_json::Value;
 use std::collections::HashMap;
 
 /// 取一组设置键的当前值（缺失的键不放进 map）。
@@ -130,11 +130,6 @@ pub(crate) async fn apply_effects(
                 daily_images,
                 daily_v5,
             } => state.db.quota_apply_to_keys(daily_images, daily_v5).await?,
-            Effect::GuardSaveBase { base_daily_images } => {
-                let mut body = Map::new();
-                body.insert("base_daily_images".into(), json!(base_daily_images));
-                state.guard.save(&body).await?;
-            }
             // ops.set_registration(db, {"max_users": n, "notify": False}, ...)：只落库，不发公告
             Effect::SetRegistrationMaxUsers { max_users } => {
                 state
@@ -200,12 +195,9 @@ pub async fn run_quota(state: &AppState) -> Result<Value, KernelError> {
         params: QuotaParams::default(),
     };
     if !skip {
-        let (cap, base) = state
-            .guard
-            .with(|g| (g.values["account_daily_cap"], g.values["base_daily_images"]));
+        let cap = state.guard.with(|g| g.values["account_daily_cap"]);
         inp.guard = Some(GuardInfo {
             account_daily_cap: cap,
-            base_daily_images: Some(base),
         });
         inp.pool_len = Some(state.nai.tokens().await.len());
         inp.global_daily_v5_default = global_daily_v5_default(state);

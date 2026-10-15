@@ -592,9 +592,11 @@ async fn patch_quota_auto_hands_the_key_to_the_algorithm() {
         (json!(false), json!(0.0), Value::Null)
     );
     // 立即重算了一次：算法给这把 Key 定了额度，并留下系统的「动态额度」操作记录
+    // （每人上限没变，所以是「应用」而不是「调整」；旧版还会因为保底 100 → 150 记一条「调整」，
+    // 保底已删除，docs/v3-deviations.md #61）
     let acts = a.actions().await;
     assert!(
-        acts.iter().any(|(act, ..)| act == "动态额度调整"),
+        acts.iter().any(|(act, ..)| act == "动态额度应用"),
         "{acts:?}"
     );
     // 算法出错时（比如读不到上游额度）请求本身不失败，只记 Bug：这条路径由 kernel 的测试覆盖

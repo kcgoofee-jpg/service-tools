@@ -26,8 +26,7 @@
 //! | `members` | `SELECT id FROM api_keys WHERE enabled=1 AND is_admin=0 AND is_test=0 AND quota_auto=1`（只用行数） | — |
 //! | `daily.yesterday.counters` | `SELECT c.key_id, c.images, k.daily_images, c.legacy_free_images, k.quota_auto FROM counters c JOIN api_keys k ON k.id=c.key_id WHERE c.day=? AND k.is_test=0 AND k.is_admin=0` | `(yday)` |
 //! | `daily.yesterday.upstream_images/units` | `SELECT COALESCE(SUM(images),0), COALESCE(SUM(COALESCE(units, images)),0) FROM upstream_token_counters WHERE day=?` | `(yday)` |
-//! | `daily.yesterday.hourly_block_hours` | `SELECT DISTINCT CAST(u.ts/3600 AS INT) FROM usage_log u JOIN api_keys k ON k.id=u.key_id WHERE u.ts>=? AND u.ts<? AND u.status='rejected' AND k.is_test=0 AND k.is_admin=0 AND u.detail LIKE ?` | `(start, end, '%出图量已达上限%')` |
-//! | `daily.yesterday.base_blocks` | `SELECT COUNT(*)` + 上一条同样的 `FROM … WHERE …` | `(start, end, '%保底%其他人在排队%')` |
+//! | `daily.yesterday.hourly_block_hours` | `SELECT DISTINCT CAST(u.ts/3600 AS INT) FROM usage_log u JOIN api_keys k ON k.id=u.key_id WHERE u.ts>=? AND u.ts<? AND u.status='rejected' AND k.is_test=0 AND k.is_admin=0 AND u.reason=?` | `(start, end, 'hourly_cap')`（旧版按文案 `LIKE '%出图量已达上限%'` 数，docs/v3-deviations.md #61） |
 //! | `daily.yesterday.paced_blocks` | `SELECT COUNT(*) FROM usage_log u JOIN api_keys k ON k.id=u.key_id WHERE u.ts>=? AND u.ts<? AND u.status='rejected' AND k.is_test=0 AND k.is_admin=0 AND u.reason=?` | `(start, end, 'paced')` |
 //! | `daily.coverage_first_ts` | `SELECT MIN(ts) FROM usage_log`（无记录为 NULL → `None`） | — |
 //! | `daily.member_usage` | `SELECT c.legacy_free_images FROM counters c JOIN api_keys k ON k.id=c.key_id WHERE c.day=? AND k.is_test=0 AND k.is_admin=0 AND k.quota_auto=1 AND c.legacy_free_images>0` | `(yday)` |
@@ -38,15 +37,20 @@
 //! | `active_v5` | `SELECT COUNT(DISTINCT c.key_id) FROM counters c JOIN api_keys k ON k.id=c.key_id WHERE c.v5>0 AND k.is_test=0 AND k.is_admin=0 AND c.day IN (?,?,?)` | [`active_v5_days`]`(clock, now, 3)`（**自然日**，不是服务日；与旧版一致） |
 //! | `managed_keys` | `SELECT daily_images, daily_v5, image_model_scope FROM api_keys WHERE quota_auto=1 AND is_admin=0 AND is_test=0`（旧版直接 `COUNT(*)` 带 `daily_images<>? OR daily_v5<>? OR image_model_scope<>'all'`，这里改成取出行再在 Rust 里数，三列都是 NOT NULL，结果相同） | — |
 //! | `settings` | `SELECT value FROM site_settings WHERE key=?`，读到的键见 [`SETTING_KEYS_READ`] | — |
-//! | `guard` / `pool_len` / `global_daily_v5_default` | 内存里的 Guard（`values["account_daily_cap"]`、`values.get("base_daily_images")`）、上游账号池大小、`site_flags.default_of(GLOBAL_DAILY_V5, settings)`（= `Settings.global_daily_v5` 钳到 0..100000，解析失败为 0） | — |
+//! | `guard` / `pool_len` / `global_daily_v5_default` | 内存里的 Guard（`values["account_daily_cap"]`）、上游账号池大小、`site_flags.default_of(GLOBAL_DAILY_V5, settings)`（= `Settings.global_daily_v5` 钳到 0..100000，解析失败为 0） | — |
 //!
 //! # `effects` 的执行方式（按顺序）
 //!
 //! - [`Effect::Set`]：`db.set_setting(key, value)`（`INSERT … ON CONFLICT(key) DO UPDATE`，立即提交）；
 //! - [`Effect::Bulk`]：`db.set_settings_bulk(pairs)`（同一事务）；
 //! - [`Effect::Log`]：`log_action(db, actor, action, target, detail)`（落库时截断 80/80/120/400 个码点，失败只告警）；
-//! - [`Effect::UpdateKeys`]：`UPDATE api_keys SET daily_images=?, daily_v5=?, image_model_scope='all' WHERE quota_auto=1 AND is_admin=0 AND is_test=0` 并提交；
-//! - [`Effect::GuardSaveBase`]：`guard.save({"base_daily_images": v})`，即 `set_settings_bulk({"guard_base_daily_images": v})` 并更新内存里的 Guard 值。
+//! - [`Effect::UpdateKeys`]：`UPDATE api_keys SET daily_images=?, daily_v5=?, image_model_scope='all' WHERE quota_auto=1 AND is_admin=0 AND is_test=0` 并提交。
+//!
+//! # 3.0 删掉的「保底」
+//!
+//! 2.x 在每人上限 A 之外还有「保底 B」（`quota_base*` / `quota_base_now` 设置、`guard_base_daily_images`、
+//! 复盘里的 `base_blocks`），超过 B 只在全站空闲时放行。算法早就把 B 同步成 A，这一层从不生效；3.0 整层删除
+//! （docs/v3-deviations.md #61）：复盘的 `from` / `to` 只记 `[A]`，结果里没有 `base`，不再写 `guard_base_daily_images`。
 //!
 //! # `P(...)` 私密参数
 //!
@@ -85,33 +89,26 @@ pub const FREE_BURST: f64 = 30.0;
 pub const FREE_REFILL_PER_HOUR: f64 = 4.0;
 
 /// `quota_algo.DEFAULTS`（键名 → 起点值），顺序与旧版一致。
-pub const DEFAULTS: [(&str, i64); 10] = [
+pub const DEFAULTS: [(&str, i64); 7] = [
     ("quota_auto_enabled", 1),
     ("quota_target_avg", 150),
-    ("quota_base", 100),
     ("quota_ceiling_max", 300),
-    ("quota_base_min", 50),
     ("quota_base_min_fair", 10),
     ("quota_step", 25),
-    ("quota_base_step", 10),
     ("quota_v5_min", 3),
     ("quota_v5_max", 30),
 ];
 
 /// `decide` 会读的 `site_settings` 键（服务层据此取 `QuotaInputs::settings`，缺失的键不放进 map）。
-pub const SETTING_KEYS_READ: [&str; 17] = [
+pub const SETTING_KEYS_READ: [&str; 13] = [
     "quota_auto_enabled",
     "quota_target_avg",
-    "quota_base",
     "quota_ceiling_max",
-    "quota_base_min",
     "quota_base_min_fair",
     "quota_step",
-    "quota_base_step",
     "quota_v5_min",
     "quota_v5_max",
     "quota_ceiling",
-    "quota_base_now",
     DAY_KEY,
     HISTORY_KEY,
     V5_DAY_KEY,
@@ -178,8 +175,6 @@ pub enum Effect {
     },
     /// 把算法结果下发给所有算法管理的成员 Key（见模块文档）。
     UpdateKeys { daily_images: i64, daily_v5: i64 },
-    /// `guard.save({"base_daily_images": v})`。
-    GuardSaveBase { base_daily_images: i64 },
     /// 自动驾驶：`ops.set_registration(db, {"max_users": n, "notify": False}, state, registrar)`，
     /// 即 `set_settings_bulk({"register_max_users": n})`（不通知）。
     SetRegistrationMaxUsers { max_users: i64 },
@@ -361,12 +356,9 @@ pub fn water_fill(usage: &[i64], budget: f64) -> i64 {
 pub struct QuotaCfg {
     pub quota_auto_enabled: i64,
     pub quota_target_avg: i64,
-    pub quota_base: i64,
     pub quota_ceiling_max: i64,
-    pub quota_base_min: i64,
     pub quota_base_min_fair: i64,
     pub quota_step: i64,
-    pub quota_base_step: i64,
     pub quota_v5_min: i64,
     pub quota_v5_max: i64,
 }
@@ -376,12 +368,9 @@ impl Default for QuotaCfg {
         Self {
             quota_auto_enabled: 1,
             quota_target_avg: 150,
-            quota_base: 100,
             quota_ceiling_max: 300,
-            quota_base_min: 50,
             quota_base_min_fair: 10,
             quota_step: 25,
-            quota_base_step: 10,
             quota_v5_min: 3,
             quota_v5_max: 30,
         }
@@ -712,7 +701,6 @@ pub struct YesterdayInputs {
     pub upstream_images: i64,
     pub upstream_units: f64,
     pub hourly_block_hours: Vec<i64>,
-    pub base_blocks: i64,
     pub paced_blocks: i64,
 }
 
@@ -722,7 +710,6 @@ pub struct YesterdayStats {
     pub used: i64,
     pub ceiling_hits: i64,
     pub hourly_blocks: i64,
-    pub base_blocks: i64,
     pub paced_blocks: i64,
 }
 
@@ -732,7 +719,6 @@ impl YesterdayStats {
         m.insert("used".into(), json!(self.used));
         m.insert("ceiling_hits".into(), json!(self.ceiling_hits));
         m.insert("hourly_blocks".into(), json!(self.hourly_blocks));
-        m.insert("base_blocks".into(), json!(self.base_blocks));
         m.insert("paced_blocks".into(), json!(self.paced_blocks));
         m
     }
@@ -758,7 +744,6 @@ pub fn yesterday_stats(y: &YesterdayInputs) -> YesterdayStats {
         used,
         ceiling_hits: hits,
         hourly_blocks: hours.len() as i64,
-        base_blocks: y.base_blocks,
         paced_blocks: y.paced_blocks,
     }
 }
@@ -1031,8 +1016,6 @@ pub fn daily_adjust_due(day_key_setting: Option<&str>, today: &str) -> bool {
 pub struct GuardInfo {
     /// `guard.values["account_daily_cap"]`
     pub account_daily_cap: i64,
-    /// `guard.values.get("base_daily_images")`
-    pub base_daily_images: Option<i64>,
 }
 
 /// 算法管理的成员 Key 当前下发的值。
@@ -1125,15 +1108,12 @@ impl Cx {
 /// `_cfg`：把 `DEFAULTS` 里的每个键读成整数（解析失败回到起点值；`inf` 抛 OverflowError，与旧版一致）。
 pub fn quota_cfg(settings: &HashMap<String, String>) -> Result<QuotaCfg, DecideError> {
     let mut cfg = QuotaCfg::default();
-    let slots: [&mut i64; 10] = [
+    let slots: [&mut i64; 7] = [
         &mut cfg.quota_auto_enabled,
         &mut cfg.quota_target_avg,
-        &mut cfg.quota_base,
         &mut cfg.quota_ceiling_max,
-        &mut cfg.quota_base_min,
         &mut cfg.quota_base_min_fair,
         &mut cfg.quota_step,
-        &mut cfg.quota_base_step,
         &mut cfg.quota_v5_min,
         &mut cfg.quota_v5_max,
     ];
@@ -1189,10 +1169,6 @@ fn run_inner(inp: &QuotaInputs, clock: &Clock, cx: &mut Cx) -> Result<Value, Dec
         Some(s) => int_via_float(s)?,
         None => cfg.quota_target_avg,
     };
-    let mut b = match cx.get("quota_base_now") {
-        Some(s) => int_via_float(s)?,
-        None => cfg.quota_base,
-    };
     let reset_hour = clock.reset_hour();
     let members = inp.members;
 
@@ -1231,7 +1207,7 @@ fn run_inner(inp: &QuotaInputs, clock: &Clock, cx: &mut Cx) -> Result<Value, Dec
                 )],
             )
         };
-        let (a2, b2) = (n, n);
+        let a2 = n;
         let mut r = Map::new();
         r.insert("day".into(), json!(yday));
         r.extend(stats.to_map());
@@ -1241,27 +1217,21 @@ fn run_inner(inp: &QuotaInputs, clock: &Clock, cx: &mut Cx) -> Result<Value, Dec
         );
         r.insert("cap".into(), json!(cap));
         r.insert("budget".into(), json!(budget));
-        r.insert("from".into(), json!([a, b]));
-        r.insert("to".into(), json!([a2, b2]));
+        r.insert("from".into(), json!([a]));
+        r.insert("to".into(), json!([a2]));
         r.insert("reasons".into(), json!(reasons));
         let mut history = as_history_slice(loads_setting(cx.get(HISTORY_KEY), "[]")?)?;
         history.push(Value::Object(r.clone()));
         cx.bulk(vec![
             ("quota_ceiling".into(), a2.to_string()),
-            ("quota_base_now".into(), b2.to_string()),
             (DAY_KEY.into(), today.clone()),
             (HISTORY_KEY.into(), jsondump::dumps(&Value::Array(history))),
         ]);
-        if (a2, b2) != (a, b) {
-            cx.log(
-                "动态额度调整",
-                format!("上限 {a}→{a2} · 保底 {b}→{b2}"),
-                reasons.join("；"),
-            );
+        if a2 != a {
+            cx.log("动态额度调整", format!("上限 {a}→{a2}"), reasons.join("；"));
         }
         review = Some(r);
         a = a2;
-        b = b2;
     }
 
     // ---- V5 ----
@@ -1424,19 +1394,6 @@ fn run_inner(inp: &QuotaInputs, clock: &Clock, cx: &mut Cx) -> Result<Value, Dec
             daily_v5: each,
         });
     }
-    if let Some(g) = &inp.guard
-        && g.base_daily_images != Some(b)
-    {
-        // guard.save 的范围校验：0..=100000，越界抛 ValueError（此前的写入已发生）
-        if !(0..=100_000).contains(&b) {
-            return Err(DecideError::Value(
-                "V4.5 每人每天保底张数 必须在 0～100000 之间".into(),
-            ));
-        }
-        cx.effects.push(Effect::GuardSaveBase {
-            base_daily_images: b,
-        });
-    }
     cx.bulk(vec![
         ("global_daily_v5".into(), global.to_string()),
         ("register_daily_images".into(), a.to_string()),
@@ -1470,7 +1427,6 @@ fn run_inner(inp: &QuotaInputs, clock: &Clock, cx: &mut Cx) -> Result<Value, Dec
     let mut result = Map::new();
     result.insert("enabled".into(), json!(true));
     result.insert("ceiling".into(), json!(a));
-    result.insert("base".into(), json!(b));
     result.insert("v5".into(), v5_value);
     result.insert("members".into(), json!(members));
     result.insert("cap".into(), json!(cap));
@@ -1489,7 +1445,7 @@ fn run_inner(inp: &QuotaInputs, clock: &Clock, cx: &mut Cx) -> Result<Value, Dec
             "动态额度应用",
             format!("{changed} 把 Key"),
             format!(
-                "V4.5 上限 {a}（保底 {b}）· V5 每人 {each}，全站 {global}（剩余 {pct_s}%，恢复 {rate_s}%/天）"
+                "V4.5 上限 {a} · V5 每人 {each}，全站 {global}（剩余 {pct_s}%，恢复 {rate_s}%/天）"
             ),
         );
     }
