@@ -74,6 +74,21 @@ cron（root）跑的都是 `/opt/owl/ops/` 里的脚本（= 仓库 `deploy/v3/op
 
 `/usr/local/bin/naigate-snapshot` 是这几处共用的快照入口（`nai-ops snapshot`）。恢复见 `deploy/ops/migrate_restore.sh`。
 
+## 改密钥
+
+3.0 和 2.x 共用 `/opt/service-tools/.env`（`NAI_TOKENS`、`DISCORD_BOT_TOKEN`、`REGISTRATION_BRIDGE_SECRET`、`ADMIN_PASSWORD` 等都在这里）。
+改完要让 3.0 的三个容器重新读取：
+
+```bash
+nano /opt/service-tools/.env      # 或其它编辑器；保持 600 权限，值里不要有 $、引号、空格
+cd /opt/owl && docker compose -p owl --env-file /opt/service-tools/.env -f compose.yml up -d
+/opt/owl/cutover.sh status
+```
+
+`up -d` 只重建配置变了的容器；网关重启时进行中的出图照常收尾记账（见「发布」）。
+**不要**在 `/opt/service-tools` 下执行 `docker compose up`：那里是 2.x 的检出，会把 2.x 的容器拉起来。
+`ADMIN_PASSWORD` 只作初始 / 恢复用：后台改过密码的话以库里保存的为准。
+
 ## 常用命令
 
 ```bash
