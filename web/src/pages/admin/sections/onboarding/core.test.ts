@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type RegistrationInfo, regBody, regServer, roleProblem, v5Need } from "./core";
+import { type RegistrationInfo, regBody, regServer, roleProblem } from "./core";
 
 const labels = { image: "文生图", vibe: "Vibe 编码" };
 const reg: RegistrationInfo = {
@@ -15,8 +15,6 @@ const reg: RegistrationInfo = {
   role_id: "",
   role_note: "",
   active: 8,
-  reset_at: "",
-  v5_capacity: { need: 60, global: 63, short: false, message: "" },
 };
 
 describe("注册设置表单", () => {
@@ -54,10 +52,5 @@ describe("注册设置表单", () => {
     expect(roleProblem("123", "")).not.toBeNull();
     expect(roleProblem("", "")).toBeNull();
     expect(roleProblem("1", "2")).toBeNull();
-  });
-  it("V5 名额推算只在含 V5 且名额、每人额度都有限时才有", () => {
-    expect(v5Need(10, 6, "all")).toBe(60);
-    expect(v5Need(10, 6, "legacy")).toBe(0);
-    expect(v5Need(0, 6, "all")).toBe(0);
   });
 });

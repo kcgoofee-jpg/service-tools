@@ -15,8 +15,6 @@ export type RegistrationInfo = {
   role_id: string;
   role_note: string;
   active: number;
-  reset_at: string;
-  v5_capacity: { need: number; global: number; short: boolean; message: string };
 };
 export type AuditInfo = {
   prompts: boolean;
@@ -148,11 +146,6 @@ export function regBody(
   }
   if (!notify) body.notify = false;
   return body;
-}
-
-/** 名额 × 每人 V5 与全站 V5 日限的关系（与后端 v5_capacity 同一口径，但用表单里的最新输入实时算） */
-export function v5Need(seats: number, perV5: number, scope: string): number {
-  return scope === "all" && seats > 0 && perV5 > 0 ? seats * perV5 : 0;
 }
 
 export const AUDIT_SPECS: Record<string, FieldSpec> = {

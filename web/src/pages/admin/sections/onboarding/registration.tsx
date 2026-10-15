@@ -2,9 +2,9 @@
 import { useMemo, useState } from "preact/hooks";
 import { Badge, Button, Card, Meter, Notice, toast } from "../../../../ui";
 import { act } from "../../Admin";
+import { featureIds } from "../members/types";
 import {
   ConfirmDialog,
-  Derive,
   NumField,
   SaveBar,
   SelectField,
@@ -13,14 +13,14 @@ import {
   useForm,
   withTone,
 } from "../system/forms";
-import { FEATURE_PREFIX, type Ops, regBody, regServer, regSpecs, roleProblem, v5Need } from "./core";
+import { FEATURE_PREFIX, type Ops, regBody, regServer, regSpecs, roleProblem } from "./core";
 
 const URL = "/admin/api/ops/registration";
 
 export default function RegistrationCard(props: { ops: Ops; algoOn: boolean }) {
   const r = props.ops.registration;
   const labels = props.ops.features.labels;
-  const names = useMemo(() => Object.keys(labels), [labels]);
+  const names = useMemo(() => featureIds(labels), [labels]);
   const specs = useMemo(() => regSpecs(labels), [labels]);
   const server = useMemo(() => regServer(r, labels), [r, labels]);
   const form = useForm(specs, server);
@@ -28,12 +28,6 @@ export default function RegistrationCard(props: { ops: Ops; algoOn: boolean }) {
   const [toggleTo, setToggleTo] = useState<boolean | null>(null);
   const [pendingSave, setPendingSave] = useState(false);
 
-  const seats = Number(form.raw("max_users"));
-  const per = Number(form.raw("daily_v5"));
-  const scope = String(form.raw("image_scope"));
-  const need = v5Need(Number.isFinite(seats) ? seats : 0, Number.isFinite(per) ? per : 0, scope);
-  const glob = r.v5_capacity.global;
-  const short = need > 0 && glob > 0 && need > glob;
   const roleErr = roleProblem(String(form.raw("role_guild")), String(form.raw("role_id")));
   const pct = r.max_users > 0 ? Math.min(100, (r.active / r.max_users) * 100) : 0;
   const customFeatures = form.raw("features_mode") === "custom";
@@ -88,10 +82,9 @@ export default function RegistrationCard(props: { ops: Ops; algoOn: boolean }) {
     >
       <div class="stack-sm">
         {!r.configured && <Notice>Discord 机器人尚未配置：以下设置会保存，机器人启用后才生效。</Notice>}
-        {r.v5_capacity.short && <Notice tone="warn">{r.v5_capacity.message}</Notice>}
         <SwitchRow
           title="开放自助领取"
-          desc={`${r.open ? "成员可通过 Discord /register 自助领取 Key" : "新成员暂时无法领取 Key"}${r.reset_at ? ` · 重置时间 ${r.reset_at}` : ""}`}
+          desc={r.open ? "成员可通过 Discord /register 自助领取 Key" : "新成员暂时无法领取 Key"}
           checked={r.open}
           onChange={(v) => setToggleTo(v)}
         />
@@ -121,20 +114,6 @@ export default function RegistrationCard(props: { ops: Ops; algoOn: boolean }) {
               hint={algoHint ?? "新成员默认可用的模型范围"}
             />
           </div>
-          {scope === "all" && (
-            <Derive title="V5 名额推算" {...(short ? { tone: "warn" as const } : {})}>
-              {need > 0 ? (
-                <div>
-                  名额 <b>{seats}</b> × 每人 V5 <b>{per}</b> = <b>{need}</b> 张/天；全站 V5 日限{" "}
-                  <b>{glob > 0 ? glob : "不限"}</b>
-                  {short && <>：超出 {need - glob} 张，先用的人用满后，后面的人当天没有 V5</>}
-                </div>
-              ) : (
-                <div>名额不限或每人 V5 不限：无法推算总需求。</div>
-              )}
-            </Derive>
-          )}
-
           <fieldset class="checks">
             <legend class="form-section__title">限定身份组</legend>
             <p class="muted small">只有在指定服务器里拥有指定身份组的人能领 Key；留空 = 不限定。</p>

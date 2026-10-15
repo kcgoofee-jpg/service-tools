@@ -1,43 +1,15 @@
-/** 首页「加入 Discord」按钮 + 全站功能开关。 */
+/** 全站功能开关。 */
 import { useMemo, useState } from "preact/hooks";
 import { Badge, Card, Notice } from "../../../../ui";
-import { act, useAdmin } from "../../Admin";
+import { act } from "../../Admin";
+import { featureIds } from "../members/types";
 import type { FieldSpec } from "../system/core";
 import { ConfirmDialog, SaveBar, SwitchRow, useForm } from "../system/forms";
 import { ANLAS_FEATURES, type Ops } from "./core";
 
-export function HomeJoinCard() {
-  const { data } = useAdmin<{ open: boolean }>("/admin/api/home/join");
-  const [pending, setPending] = useState(false);
-  if (!data) return null;
-  return (
-    <Card
-      title="首页管理"
-      sub="首页「加入 Discord」按钮：独立开关，与「自助领 Key」无关。这里只管按钮显示，领不领得到 Key 由上面的设置管；保存不发公告。"
-    >
-      <SwitchRow
-        title={data.open ? "加入按钮开放（显示邀请链接）" : "已置灰「关闭注册」"}
-        desc="开 = 显示邀请按钮；关 = 置灰为「关闭注册」"
-        checked={data.open}
-        disabled={pending}
-        onChange={async (v) => {
-          setPending(true);
-          await act(
-            "POST",
-            "/admin/api/home/join",
-            { open: v },
-            v ? "首页加入按钮已开放" : "首页加入按钮已置灰为「关闭注册」",
-          );
-          setPending(false);
-        }}
-      />
-    </Card>
-  );
-}
-
 export function FeaturesCard(props: { ops: Ops }) {
   const { global, labels } = props.ops.features;
-  const names = Object.keys(labels);
+  const names = featureIds(labels);
   const specs = useMemo<Record<string, FieldSpec>>(() => {
     const o: Record<string, FieldSpec> = {};
     for (const n of names) o[n] = { kind: "bool", label: labels[n] ?? n };
