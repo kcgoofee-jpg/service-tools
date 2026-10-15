@@ -150,6 +150,95 @@ async fn no_per_member_pacing_below_the_daily_cap() {
     assert!(!text.contains("每小时自动恢复"), "{text}");
 }
 
+/// 每把 Key 的限速只剩排队与 RPM 两层（docs/v3-deviations.md #64）：
+/// - 同一把 Key 同时只生成 1 张：第二张排队、等第一张出完才发往上游（即使还有空着的上游账号）——
+///   这是排队本身做的，旧版靠每把 Key 一个的信号量；
+/// - 再多的并发请求是「上一张还没出完」（`key_busy`），不再有「同时进行中的请求过多」（`key_rate`）；
+/// - 前一张出完，下一张马上能发，没有 15 秒的每 Key 出图间隔。
+#[tokio::test]
+async fn one_image_per_key_at_a_time_without_per_key_interval() {
+    let e = setup(&[("NAI_TOKENS", "pst-synthetic-one,pst-synthetic-two")]).await;
+    // 账号级的随机抖动（0～5 秒）与这里无关，关掉免得计时不稳
+    e.state
+        .guard
+        .with(|g| g.values.insert("interval_jitter".into(), 0));
+    e.mock.push(
+        "/ai/generate-image",
+        Reply::Chunks {
+            status: 200,
+            content_type: "binary/octet-stream".into(),
+            chunks: vec![(
+                std::time::Duration::from_millis(600),
+                bytes::Bytes::from(gate_testkit::zip_of_pngs(1)),
+            )],
+        },
+    );
+    let spawn = |state: AppState| {
+        tokio::spawn(async move {
+            call(
+                &state,
+                "POST",
+                "/ai/generate-image",
+                Some(TOKEN),
+                Some(image_body("nai-diffusion-4-5-full", 1)),
+            )
+            .await
+        })
+    };
+    let first = spawn(e.state.clone());
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    let second = spawn(e.state.clone());
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    // 第一张在上游，第二张在排队：第二个上游账号空着也不发
+    assert_eq!(e.mock.requests_to("/ai/generate-image").len(), 1);
+    let view = e.state.guard.with(|g| g.queue_view(Some(1)));
+    assert_eq!(
+        (view["running"].as_i64(), view["waiting"].as_i64()),
+        (Some(1), Some(1))
+    );
+    // 第三、四张：排队满了（同时生成 1 张 + 排队 1 张）
+    for _ in 0..2 {
+        let (status, _, body) = call(
+            &e.state,
+            "POST",
+            "/ai/generate-image",
+            Some(TOKEN),
+            Some(image_body("nai-diffusion-4-5-full", 1)),
+        )
+        .await;
+        let text = String::from_utf8_lossy(&body).to_string();
+        assert_eq!(status, 429, "{text}");
+        assert!(text.contains("上一张图还没出完"), "{text}");
+    }
+    let (s1, _, _) = first.await.unwrap();
+    let (s2, _, _) = second.await.unwrap();
+    assert_eq!((s1, s2), (StatusCode::OK, StatusCode::OK));
+    assert_eq!(e.mock.requests_to("/ai/generate-image").len(), 2);
+    // 前一张出完，下一张立刻能发（没有每 Key 15 秒间隔）
+    let t0 = std::time::Instant::now();
+    let (status, _, _) = call(
+        &e.state,
+        "POST",
+        "/ai/generate-image",
+        Some(TOKEN),
+        Some(image_body("nai-diffusion-4-5-full", 1)),
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert!(
+        t0.elapsed() < std::time::Duration::from_secs(3),
+        "{:?}",
+        t0.elapsed()
+    );
+    let rows = logs(&e.state).await;
+    let reasons: Vec<&str> = rows
+        .iter()
+        .filter(|r| r["status"] == "rejected")
+        .map(|r| r["reason"].as_str().unwrap_or(""))
+        .collect();
+    assert_eq!(reasons, ["key_busy", "key_busy"], "{rows:?}");
+}
+
 /// 不识别客户端、不记设备（docs/v3-deviations.md #50）：不管 User-Agent、启动器请求头还是请求体长什么样，
 /// 用量日志的 client 列都是空串，后台日志接口也不返回这个字段。
 #[tokio::test]

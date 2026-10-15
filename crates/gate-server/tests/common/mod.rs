@@ -31,7 +31,6 @@ pub async fn setup(extra: &[(&str, &str)]) -> Env {
         ("NAI_IMAGE_HOST", &mock.url()),
         ("NAI_TEXT_HOST", &mock.url()),
         ("NAI_TEXT_HOST_LEGACY", &mock.url()),
-        ("KEY_IMAGE_MIN_INTERVAL", "0"),
         ("IMAGE_MIN_INTERVAL", "0"),
         ("POST_REQUEST_JITTER_MIN", "0"),
         ("POST_REQUEST_JITTER_MAX", "0"),

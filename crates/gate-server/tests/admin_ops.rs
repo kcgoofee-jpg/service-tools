@@ -401,11 +401,12 @@ async fn settings_get_put_and_stored_strings() {
 async fn runtime_limits_validate_apply_and_persist() {
     let e = setup(&[]).await;
     let api = Api::login(&e).await;
+    // 每 Key 出图间隔 key_image_min_interval 已删除（docs/v3-deviations.md #64）：只剩三项，传它算未知设置
     assert_eq!(
         api.text("GET", "/runtime-limits", None).await,
         (
             200,
-            r#"{"queue_timeout":5,"key_image_min_interval":0,"image_min_interval":0,"image_429_cooldown_seconds":60}"#.into()
+            r#"{"queue_timeout":5,"image_min_interval":0,"image_429_cooldown_seconds":60}"#.into()
         )
     );
     let before = settings(&e).await;
@@ -437,8 +438,8 @@ async fn runtime_limits_validate_apply_and_persist() {
             "image_429_cooldown_seconds 必须是 60～3600 的整数",
         ),
         (
-            json!({"key_image_min_interval": 121}),
-            "key_image_min_interval 必须是 15～120 的整数",
+            json!({"key_image_min_interval": 20}),
+            "包含未知或空的运行限制设置",
         ),
         (
             json!({"image_min_interval": 14}),
@@ -455,7 +456,8 @@ async fn runtime_limits_validate_apply_and_persist() {
     }
     assert_eq!(settings(&e).await, before);
 
-    let all = json!({"queue_timeout": 120, "key_image_min_interval": 25, "image_min_interval": 25, "image_429_cooldown_seconds": 90});
+    let all =
+        json!({"queue_timeout": 120, "image_min_interval": 25, "image_429_cooldown_seconds": 90});
     assert_eq!(
         api.text("PUT", "/runtime-limits", Some(all.clone())).await,
         (200, all.to_string())
@@ -464,27 +466,27 @@ async fn runtime_limits_validate_apply_and_persist() {
     assert_eq!(
         (
             l.queue_timeout,
-            l.key_image_min_interval,
             l.image_min_interval,
             l.image_429_cooldown_seconds
         ),
-        (120.0, 25.0, 25.0, 90.0)
+        (120.0, 25.0, 90.0)
     );
     assert_eq!(
         changed(&before, &settings(&e).await),
         map(&[
             ("runtime_queue_timeout", "120"),
-            ("runtime_key_image_min_interval", "25"),
             ("runtime_image_min_interval", "25"),
             ("runtime_image_429_cooldown_seconds", "90"),
         ])
     );
-    // 只改一项：响应仍是四项全量
+    // 只改一项：响应仍是三项全量
     assert_eq!(
-        api.text("PUT", "/runtime-limits", Some(json!({"queue_timeout": 20}))).await,
+        api.text("PUT", "/runtime-limits", Some(json!({"queue_timeout": 20})))
+            .await,
         (
             200,
-            r#"{"queue_timeout":20,"key_image_min_interval":25,"image_min_interval":25,"image_429_cooldown_seconds":90}"#.into()
+            r#"{"queue_timeout":20,"image_min_interval":25,"image_429_cooldown_seconds":90}"#
+                .into()
         )
     );
     assert_eq!(api.get("/runtime-limits").await["queue_timeout"], 20);

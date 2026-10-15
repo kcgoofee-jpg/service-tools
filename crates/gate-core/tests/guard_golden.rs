@@ -11,6 +11,10 @@
 //!   轨迹里的这种 `save` 当作不改任何东西（与旧版一样）；
 //! - 轨迹里的 `site_idle` 只重放它的副作用（`hourly_cap` 记上限、弹出 3 小时前的时间戳），不比返回值；
 //!   `paced_headroom` 没有副作用，跳过。
+//!
+//! docs/v3-deviations.md #64：10 分钟突发窗口删除（常量 `WINDOW_10M` / `BURST_DIVISOR`，`burst_cap` /
+//! `count_10m` / `burst_blocked` / `minutes_until_free_10m`）。轨迹里这几步同样只重放副作用；
+//! `token_block_reason` 旧版因突发窗口给出的 `burst_cap` 拒绝，3.0 放行（期望一侧换成 None）。
 
 use gate_core::guard::{
     self, AdaptPlan, FIELDS, GuardCore, GuardError, parse_setting_float, stamps_from_rows,
@@ -159,15 +163,16 @@ fn constants_golden() {
                     .map(|fl| json!([fl.name, fl.default, fl.min, fl.max, fl.label]))
                     .collect();
                 let mut want = obj(c.out());
-                want.shift_remove("IDLE_SHARE");
+                for k in ["IDLE_SHARE", "WINDOW_10M", "BURST_DIVISOR"] {
+                    want.shift_remove(k);
+                }
                 if let Some(Value::Array(fs)) = want.get_mut("FIELDS") {
                     fs.retain(|f| f[0] != REMOVED_FIELD);
                 }
                 assert_eq_py(
                     &c,
                     &json!({
-                        "HOUR": guard::HOUR, "WINDOW_3H": guard::WINDOW_3H, "WINDOW_10M": guard::WINDOW_10M,
-                        "BURST_DIVISOR": guard::BURST_DIVISOR, "HOURLY_MIN": guard::HOURLY_MIN,
+                        "HOUR": guard::HOUR, "WINDOW_3H": guard::WINDOW_3H, "HOURLY_MIN": guard::HOURLY_MIN,
                         "HOURLY_MAX": guard::HOURLY_MAX, "HOURLY_STEP": guard::HOURLY_STEP,
                         "FIELDS": fields,
                     }),
@@ -397,12 +402,35 @@ fn replay(c: &Case, counts: &mut BTreeMap<String, usize>) {
             "hourly_cap" => Ok(json!(g.hourly_cap(now))),
             "hourly_cap_ceiling" => Ok(json!(g.hourly_cap_ceiling(now))),
             "in_quiet" => Ok(json!(g.in_quiet(now))),
-            "burst_cap" => Ok(json!(g.burst_cap(now))),
+            // 突发窗口已删除（#64）：下面四步只重放旧版的副作用（记一次每小时上限 / 弹出 3 小时前的时间戳），
+            // 不比返回值
+            "burst_cap" => {
+                g.hourly_cap(now);
+                Ok(step["out"].clone())
+            }
+            "count_10m" => {
+                g.hour_count(tok, now);
+                Ok(step["out"].clone())
+            }
+            "burst_blocked" => {
+                if g.hourly_cap(now) != 0 {
+                    g.hour_count(tok, now);
+                }
+                Ok(step["out"].clone())
+            }
+            "minutes_until_free_10m" => {
+                g.hour_count(tok, now);
+                let in_10m = g
+                    .starts
+                    .get(tok)
+                    .is_some_and(|q| q.iter().any(|t| *t > now - 600.0));
+                if in_10m {
+                    g.hourly_cap(now);
+                }
+                Ok(step["out"].clone())
+            }
             "hour_count" => Ok(json!(g.hour_count(tok, now))),
-            "count_10m" => Ok(json!(g.count_10m(tok, now))),
-            "burst_blocked" => Ok(json!(g.burst_blocked(tok, now))),
             "minutes_until_free" => Ok(json!(g.minutes_until_free(tok, now))),
-            "minutes_until_free_10m" => Ok(json!(g.minutes_until_free_10m(tok, now))),
             "paced_allowance" => Ok(f(g.paced_allowance(now))),
             "minutes_until_paced" => Ok(json!(
                 g.minutes_until_paced(step["used"].as_f64().unwrap(), now)
@@ -563,6 +591,8 @@ fn replay(c: &Case, counts: &mut BTreeMap<String, usize>) {
         let want_out = match op {
             "save" => without_removed(&step["out"]),
             "describe" => describe_without_removed(&step["out"]),
+            // 突发窗口的拒绝 3.0 不再有（#64）
+            "token_block_reason" if step["out"][1] == "burst_cap" => Value::Null,
             _ => step["out"].clone(),
         };
         match (out, want_err) {

@@ -132,7 +132,6 @@ fn gateway_env(
         ("ADMIN_ALLOWED_ORIGINS", args.origins.clone()),
         ("ADMIN_COOKIE_SECURE", "0".into()),
         ("IMAGE_MIN_INTERVAL", "0".into()),
-        ("KEY_IMAGE_MIN_INTERVAL", "0".into()),
         ("TZ", "Asia/Shanghai".into()),
         // 本地调试用的额外项：假上游是明文 HTTP/1.1，不需要抖动；反复跑端到端不要被登录限流挡住
         ("POST_REQUEST_JITTER_MIN", "0".into()),

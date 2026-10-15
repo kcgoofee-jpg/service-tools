@@ -1111,7 +1111,7 @@ async fn run_case(case: &Value) -> Result<(), String> {
         ("TZ", "Asia/Shanghai".into()),
         ("DAY_RESET_HOUR", "7".into()),
         ("IMAGE_MIN_INTERVAL", num("image_min_interval")),
-        ("KEY_IMAGE_MIN_INTERVAL", num("key_image_min_interval")),
+        // 夹具 env 里的 key_image_min_interval：3.0 没有每 Key 出图间隔（docs/v3-deviations.md #64），不再传
         ("DEFAULT_KEY_EXPIRES_DAYS", int("default_expires_days")),
         (
             "KEY_INACTIVITY_DELETE_DAYS",

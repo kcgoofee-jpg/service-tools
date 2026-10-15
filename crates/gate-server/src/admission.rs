@@ -1,8 +1,12 @@
 //! 出图准入与额度预留（旧版 `image_routes.py` 的 guard_precheck / image_admission / _acquire_slots /
-//! quota_image_check / ImageReservation / reserve_image_budget / wait_for_user_image_slot / refund_local_reject）。
+//! quota_image_check / ImageReservation / reserve_image_budget）。
 //!
 //! 每一步都是一个 RAII 守卫：被拒或客户端断开时自动归还。真正发往上游之后，守卫随上游操作一起
 //! 移进后台任务（见 `routes::image::shielded`），保证「先记账、再释放额度预留和并发槽」。
+//!
+//! 每把 Key 的限速只有两层：这里的排队（同时生成 1 张 + 排队 1 张）和每分钟次数（RPM，`auth::check_rpm`）。
+//! 2.x 另有每把 Key 15 秒出图间隔（`wait_for_user_image_slot` / `refund_local_reject`）和每把 Key 一个的
+//! 信号量（`KEY_CONCURRENCY`），都与排队重复，已删除（docs/v3-deviations.md #64）。
 
 use crate::auth::site_flag_f64;
 use crate::error::{ApiError, GateError, InternalError};
@@ -115,9 +119,46 @@ pub struct Admission {
 
 impl Drop for Admission {
     fn drop(&mut self) {
-        self.guard
-            .with(|g| g.release_image(self.key_id, Some(self.entry_id)));
+        self.guard.release_image(self.key_id, Some(self.entry_id));
     }
+}
+
+fn queue_timeout() -> GateError {
+    GateError::with_code(
+        429,
+        "排队等待超时，当前站点繁忙，请稍后再试",
+        reasons::QUEUE_TIMEOUT,
+    )
+}
+
+/// 排进队以后等轮到这把 Key 的这一张：前一张出完（或被拒 / 取消）才往下走。超过排队超时回 429。
+async fn wait_key_turn(state: &AppState, key_id: i64, entry_id: i64) -> Result<(), GateError> {
+    if state.guard.with(|g| g.key_turn(key_id, entry_id)) {
+        return Ok(());
+    }
+    struct Waiting<'a>(&'a AppState);
+    impl Drop for Waiting<'_> {
+        fn drop(&mut self) {
+            self.0.global_waiting.fetch_sub(1, Ordering::Relaxed);
+        }
+    }
+    state.global_waiting.fetch_add(1, Ordering::Relaxed);
+    let _w = Waiting(state);
+    let turn = async {
+        loop {
+            let released = state.guard.released.notified();
+            tokio::pin!(released);
+            released.as_mut().enable();
+            if state.guard.with(|g| g.key_turn(key_id, entry_id)) {
+                return;
+            }
+            released.await;
+        }
+    };
+    let t = state.limits().queue_timeout;
+    tokio::time::timeout(Duration::from_secs_f64(t.max(0.0)), turn)
+        .await
+        .map_err(|_| queue_timeout())
 }
 
 pub async fn image_admission(
@@ -140,18 +181,20 @@ pub async fn image_admission(
             None => Ok(g.entries.last().map_or(0, |e| e.id)),
         });
     let entry_id = admitted.map_err(|r| gate(429, r))?;
-    let guard = state.guard.clone();
-    ctx.on_sent(move || guard.with(|g| g.mark_running(key_id, Some(entry_id))));
-    Ok(Some(Admission {
+    // 先拿到登记：等待时超时 / 客户端断开，登记照样归还
+    let admission = Admission {
         guard: state.guard.clone(),
         key_id,
         entry_id,
-    }))
+    };
+    wait_key_turn(state, key_id, entry_id).await?;
+    let guard = state.guard.clone();
+    ctx.on_sent(move || guard.with(|g| g.mark_running(key_id, Some(entry_id))));
+    Ok(Some(admission))
 }
 
-/// Key 并发槽（+ 文本请求的全站并发槽）与「正在处理」计数。
+/// 文本请求的全站并发槽与「正在处理」计数（出图请求只记数，不占槽）。
 pub struct Slots {
-    _key: Option<tokio::sync::OwnedSemaphorePermit>,
     _global: Option<tokio::sync::OwnedSemaphorePermit>,
     state: AppState,
 }
@@ -162,48 +205,32 @@ impl Drop for Slots {
     }
 }
 
-pub async fn acquire_slots(state: &AppState, key: &Key, image: bool) -> Result<Slots, GateError> {
+/// `_key` 只为调用方签名不变而保留：每把 Key 的信号量已删除（docs/v3-deviations.md #64）——出图由
+/// [`image_admission`] 的排队保证同一把 Key 同时只生成 1 张，标签补全由补全队列保证同一把 Key 一次一条，
+/// 文本请求走全站并发槽。
+pub async fn acquire_slots(state: &AppState, _key: &Key, image: bool) -> Result<Slots, GateError> {
     struct Waiting<'a>(&'a AppState);
     impl Drop for Waiting<'_> {
         fn drop(&mut self) {
             self.0.global_waiting.fetch_sub(1, Ordering::Relaxed);
         }
     }
-    let t = state.limits().queue_timeout;
-    let ksem = (!key.is_admin()).then(|| state.key_sem(key.id()));
-    state.global_waiting.fetch_add(1, Ordering::Relaxed);
-    let w = Waiting(state);
-    let got = tokio::time::timeout(Duration::from_secs_f64(t.max(0.0)), async {
-        let k = match ksem {
-            Some(s) => Some(s.acquire_owned().await.expect("semaphore closed")),
-            None => None,
-        };
-        let g = if image {
-            None
-        } else {
-            Some(
-                state
-                    .global_sem
-                    .clone()
-                    .acquire_owned()
-                    .await
-                    .expect("semaphore closed"),
-            )
-        };
-        (k, g)
-    })
-    .await;
-    drop(w);
-    let (k, g) = got.map_err(|_| {
-        GateError::with_code(
-            429,
-            "排队等待超时，当前站点繁忙，请稍后再试",
-            reasons::QUEUE_TIMEOUT,
+    let g = if image {
+        None
+    } else {
+        let t = state.limits().queue_timeout;
+        state.global_waiting.fetch_add(1, Ordering::Relaxed);
+        let w = Waiting(state);
+        let got = tokio::time::timeout(
+            Duration::from_secs_f64(t.max(0.0)),
+            state.global_sem.clone().acquire_owned(),
         )
-    })?;
+        .await;
+        drop(w);
+        Some(got.map_err(|_| queue_timeout())?.expect("semaphore closed"))
+    };
     state.global_active.fetch_add(1, Ordering::Relaxed);
     Ok(Slots {
-        _key: k,
         _global: g,
         state: state.clone(),
     })
@@ -414,7 +441,6 @@ impl Drop for Reserved {
 }
 
 /// 核对额度并登记预留（排队等待期间就占住，防止并发请求一起超额）。
-/// 被拒或超时（尚未到达上游）时归还这把 Key 的出图间隔占用，别让被拒的请求白占 15 秒。
 pub async fn reserve_image_budget(
     state: &AppState,
     key: &Key,
@@ -446,45 +472,12 @@ pub async fn reserve_image_budget(
             id,
             key: key.clone(),
         }),
-        Ok(Err(e)) => {
-            if matches!(e, ApiError::Gate(_)) && !key.is_admin() {
-                state.pacing.refund(key.id()).await;
-            }
-            Err(e)
-        }
-        Err(_) => {
-            if !key.is_admin() {
-                state.pacing.refund(key.id()).await;
-            }
-            Err(GateError::with_code(
-                429,
-                "图片预算核对排队超时，请稍后再试",
-                reasons::QUEUE_TIMEOUT,
-            )
-            .into())
-        }
+        Ok(Err(e)) => Err(e),
+        Err(_) => Err(GateError::with_code(
+            429,
+            "图片预算核对排队超时，请稍后再试",
+            reasons::QUEUE_TIMEOUT,
+        )
+        .into()),
     }
-}
-
-/// 每把 Key 的出图间隔（不占全站并发槽）。
-pub async fn wait_for_user_image_slot(state: &AppState, key: &Key) -> Result<(), GateError> {
-    if key.is_admin() {
-        return Ok(());
-    }
-    let l = state.limits();
-    state
-        .pacing
-        .wait(key.id(), l.key_image_min_interval, l.queue_timeout)
-        .await
-        .map_err(|_| {
-            GateError::with_code(429, "图片任务排队超时，请稍后再试", reasons::QUEUE_TIMEOUT)
-        })
-}
-
-/// 还没发到上游就被本地拒绝时归还 Key 的出图间隔占用（幂等）。
-pub async fn refund_local_reject(state: &AppState, ctx: &ReqCtx, key: &Key) {
-    if key.is_admin() || ctx.was_sent() {
-        return;
-    }
-    state.pacing.refund(key.id()).await;
 }

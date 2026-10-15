@@ -102,12 +102,12 @@ async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Requ
 
 // ------------------------------------------------------------------ 排队与冷却
 
-/// 当前生效的四个运行期限制（取整，与旧版 `int(getattr(settings, name))` 一致）。
+/// 当前生效的三个运行期限制（取整，与旧版 `int(getattr(settings, name))` 一致；
+/// 每 Key 出图间隔 `key_image_min_interval` 已删除，docs/v3-deviations.md #64）。
 fn runtime_limits_snapshot(state: &AppState) -> Value {
     let l = state.limits();
     json!({
         "queue_timeout": l.queue_timeout as i64,
-        "key_image_min_interval": l.key_image_min_interval as i64,
         "image_min_interval": l.image_min_interval as i64,
         "image_429_cooldown_seconds": l.image_429_cooldown_seconds as i64,
     })

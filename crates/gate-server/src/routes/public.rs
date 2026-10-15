@@ -542,10 +542,6 @@ async fn queue_status(State(state): State<AppState>) -> ApiResult {
         .reduce(f64::min)
         .unwrap_or(0.0);
     let lim = state.limits();
-    let pacing = state
-        .pacing
-        .waiting
-        .load(std::sync::atomic::Ordering::Relaxed);
     let (active, waiting) = (
         state
             .global_active
@@ -557,7 +553,7 @@ async fn queue_status(State(state): State<AppState>) -> ApiResult {
     Ok(ok_json(&json!({
         "global": {
             "active": active,
-            "waiting": waiting + pacing,
+            "waiting": waiting,
             "concurrency": usable.iter().map(|t| t.image_slots.limit() as i64).sum::<i64>(),
         },
         "image_next_slot_in": gate_core::pyc::round(next, 1),

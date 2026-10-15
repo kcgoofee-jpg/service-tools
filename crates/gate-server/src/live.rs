@@ -100,7 +100,6 @@ async fn slots_left(state: &AppState, cfg: &RegSettings) -> Result<Option<i64>, 
 /// 旧版 `live.build`：汇总数字（请求数、额度、排队数、账号保护、名额），不含 meta 与 me。键顺序照抄旧版。
 pub async fn build(state: &AppState, now: f64) -> Result<Map<String, Value>, InternalError> {
     struct Acct {
-        token_id: String,
         usable: bool,
         cooling: i64,
         next_in: f64,
@@ -117,7 +116,6 @@ pub async fn build(state: &AppState, now: f64) -> Result<Map<String, Value>, Int
         units_today += c.units; // 和每日上限比较用折算值（节约模式的图算半张）
         let f = t.fields();
         accounts.push(Acct {
-            token_id: t.token_id.clone(),
             usable: t.usable(now),
             cooling: if !f.disabled && f.admin_enabled {
                 ((f.blocked_until - now) as i64).max(0)
@@ -132,17 +130,8 @@ pub async fn build(state: &AppState, now: f64) -> Result<Map<String, Value>, Int
     let gv = |name: &str| values.get(name).copied().unwrap_or(0);
     let usable = (accounts.iter().filter(|a| a.usable).count() as i64).max(1);
     let v5_cap = site_flag(state, &GLOBAL_DAILY_V5).await?;
-    // 突发窗口（10 分钟分摊）：首页状态行必须跟成员拿到的 429 说同一句话。
-    // 任一可用账号还有余量就是 0；全部到顶才报最早空出来的分钟数。与放行判定同一个函数（guard.burst_blocked）
-    let (hour_cap, quiet, burst_cap, burst_wait) = state.guard.with(|g| {
-        let wait = accounts
-            .iter()
-            .filter(|a| a.usable)
-            .map(|a| g.burst_blocked(&a.token_id, now))
-            .min()
-            .unwrap_or(0);
-        (g.hourly_cap(now), g.in_quiet(now), g.burst_cap(now), wait)
-    });
+    // 10 分钟突发窗口已删除（docs/v3-deviations.md #64）：`guard` 段不再有 `burst_cap` / `burst_wait`
+    let (hour_cap, quiet) = state.guard.with(|g| (g.hourly_cap(now), g.in_quiet(now)));
     let min_interval = {
         let v = state.limits().image_min_interval;
         if v == 0.0 { 15.0 } else { v } // `float(x or 15)`
@@ -248,8 +237,6 @@ pub async fn build(state: &AppState, now: f64) -> Result<Map<String, Value>, Int
             // `min(..., default=0)`：没有可用账号时是整数 0
             "next_in": next_in.map_or(json!(0), pyval::float),
             "cooldown": state.cooldown.remaining(now),
-            "burst_cap": burst_cap,
-            "burst_wait": burst_wait,
             "blocked": blocked,
         }),
     );
@@ -469,7 +456,7 @@ fn content_sig(body: &Map<String, Value>, admin: bool) -> u64 {
         {
             let g2: Map<String, Value> = g
                 .iter()
-                .filter(|(k, _)| !matches!(k.as_str(), "next_in" | "cooldown" | "burst_wait"))
+                .filter(|(k, _)| !matches!(k.as_str(), "next_in" | "cooldown"))
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect();
             m.insert(k.clone(), Value::Object(g2));

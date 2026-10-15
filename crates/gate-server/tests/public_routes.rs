@@ -329,21 +329,14 @@ async fn public_live_shape_and_key_order() {
     assert!(v["quota"]["units_today"].is_f64(), "有账号时是浮点");
     assert_eq!(v["quota"]["images_cap"], 1000);
     assert_eq!(v["queue"], json!({"waiting": 0, "running": 0}));
+    // 10 分钟突发窗口已删除：没有 burst_cap / burst_wait（docs/v3-deviations.md #64）
     assert_eq!(
         keys(&v["guard"]),
         [
-            "hour",
-            "hour_cap",
-            "quiet",
-            "next_in",
-            "cooldown",
-            "burst_cap",
-            "burst_wait",
-            "blocked"
+            "hour", "hour_cap", "quiet", "next_in", "cooldown", "blocked"
         ]
     );
     assert_eq!(v["guard"]["hour_cap"], 150);
-    assert_eq!(v["guard"]["burst_cap"], 38);
     assert_eq!(v["guard"]["quiet"], false);
     assert_eq!(v["guard"]["next_in"], json!(0.0));
     assert_eq!(v["guard"]["blocked"], Value::Null);
@@ -1385,7 +1378,6 @@ async fn setup_page(extra: &[(&str, &str)]) -> Page {
         ("NAI_IMAGE_HOST", mock.url()),
         ("NAI_TEXT_HOST", mock.url()),
         ("NAI_TEXT_HOST_LEGACY", mock.url()),
-        ("KEY_IMAGE_MIN_INTERVAL", "0".into()),
         ("IMAGE_MIN_INTERVAL", "0".into()),
         (
             "SECRET_KEY",

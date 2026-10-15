@@ -14,8 +14,8 @@ pub const QUIET_CAP: &str = "quiet_cap"; // 安静时段的每小时上限
 /// 账号 3 小时上限。这个功能已经删除，但 `usage_log.reason` 里还留着历史记录，
 /// 旧版的 `LABELS` / `SITE_LEVEL` 仍然认它，所以常量保留（`reason_label("cap_3h")` 的结果依赖它）。
 pub const CAP_3H: &str = "cap_3h";
-/// 账号每 10 分钟突发窗口（抹平突发用；不能复用 hourly_cap：AIMD 拿 hourly_cap 判断「需求顶到过上限」，
-/// 突发拒绝不算需求）。
+/// 账号每 10 分钟突发窗口。这个功能 3.0 已删除（docs/v3-deviations.md #64），与 [`CAP_3H`] 一样只为
+/// `usage_log.reason` 里的历史记录保留（短说明、回填、单 Key 限流的排除项都还认它）。
 pub const BURST_CAP: &str = "burst_cap";
 pub const DAILY_CAP: &str = "daily_cap"; // 账号每日上限
 pub const PACED: &str = "paced"; // 全站每日上限按时段放行：这个时段的份额用完了
