@@ -267,10 +267,10 @@
 | `autopilot_*` | `autopilot_slots` / `autopilot_breaker` / `autopilot_key_guard`（`off` / `observe` / `enforce`，缺省 `observe`） | 线 enforce / enforce / enforce |
 | `register_*` | `register_open`、`register_max_users`、`register_daily_images`、`register_daily_v5`、`register_image_scope`、`register_expires_days`、`register_features`、`register_role_guild` / `register_role_id` / `register_role_note` | 线 1 / 未设（环境变量 0）/ 95 / 3 / all / 30 / `image,vibe,tags` / 空 |
 | `audit_*` | `audit_prompts`、`audit_thumbs`、`audit_retention_days`（见 §7） | 线 1 / 1 / 0 |
-| `bot_*` | `bot_gallery_forum`（默认「跑图分享」）、`bot_gallery_like`（默认 0）、`bot_gallery_ai`（默认 0）、`bot_gallery_ai_daily`（默认 30）、`bot_gallery_ai_model` | 线 `gallery_like` = 0、`gallery_ai` = 0（均关） |
+| `bot_*` | `bot_status`（机器人心跳，奶妹每分钟经桥接接口写一次：账号 / 服务器 / 网关延迟 / 启动时间 / `seen_at`；3 分钟没更新算离线，后台 Discord 页的「机器人状态」读它） | 随机器人上报 |
 | 其他 | `features_global`（JSON，缺省全开）、`v5_alert_threshold`（默认 20，范围 1～100）、模块开关（`module_<名字>`，默认开；「领 Key」模块的开关就是 `register_open`） | 线 `v5_alert_threshold` = 20 |
 
-线上库里还有一些代码已不再读取的残留键，看到不要当真：`anlas_pool_last`、`anlas_member_daily_cap`、`anlas_min_key_age_days`、`economy_mode`、`autopilot_economy`、`guard_daily_cap_fallback`、`guard_account_3h_cap`、`guard_account_10m_cap`、`ack_*`、`quota_shadow_*`。
+线上库里还有一些代码已不再读取的残留键，看到不要当真：`anlas_pool_last`、`anlas_member_daily_cap`、`anlas_min_key_age_days`、`economy_mode`、`autopilot_economy`、`guard_daily_cap_fallback`、`guard_account_3h_cap`、`guard_account_10m_cap`、`ack_*`、`quota_shadow_*`，以及 `bot_gallery_*`（跑图分享设置）、`bot_events`（机器人最近动作）——后两者随功能一起删除，见 `docs/v3-deviations.md` #54。
 
 ## 10. 拒绝原因码（`usage_log.reason`，`reasons.rs`）
 

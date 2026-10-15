@@ -1,4 +1,4 @@
-//! 奶妹：网关事件循环、斜杠命令分发、反馈弹窗、@ 回复、与网关的配置 / 心跳同步。
+//! 奶妹：网关事件循环、斜杠命令分发、反馈弹窗、@ 回复、向网关报心跳。
 //!
 //! 与 `integration/discord_bot.py` 逐行对应；与 Discord 的交互次序、ephemeral 标志、deferred 时机都照抄：
 //! - `/register /quota /resetkey /help /open /limit /ban /unban /slots /revoke`：先 `defer(ephemeral)`（3 秒内确认），
@@ -6,7 +6,7 @@
 //! - `/反馈`：**立刻弹出**一个只有一段文字的弹窗，不先问网关（docs/v3-deviations.md #52；旧版先取题目再弹窗，
 //!   网关慢于 3 秒时弹窗会失败）。提交时先 `defer(ephemeral)`，再把文字交给网关，回执只有本人可见；
 //! - 命令抛出任何错误 → 打 `[bug]` 日志，并回一句「出了点问题……」（已确认过就用跟进消息，否则直接回复）；
-//! - 不发私信、不加表情、不碰论坛（画廊点赞 / AI 评论没有移植）。
+//! - 不发私信、不加表情、不碰论坛（旧版的画廊点赞 / AI 评论已删除，docs/v3-deviations.md #54）。
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -15,7 +15,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use futures::StreamExt as _;
 use gate_core::pyc;
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 use tracing::{debug, error, info, warn};
 use twilight_gateway::{Config as GatewayConfig, Message, Shard, ShardId};
 use twilight_model::gateway::CloseFrame;
@@ -31,7 +31,7 @@ use crate::events::{
 use crate::handlers::{self, Backend, HandlerError};
 use crate::pystr::py_str;
 
-/// 配置同步 / 心跳间隔。
+/// 心跳间隔。
 pub const SYNC_INTERVAL: Duration = Duration::from_secs(60);
 
 /// 命令执行中可能出现的错误；全部会被 `tree.error` 等价逻辑接住。
@@ -108,8 +108,6 @@ struct Inner {
     guilds: HashMap<String, GuildInfo>,
     mentions: MentionLimiter,
     sync_started: bool,
-    /// 后台「Discord」页的配置（画廊相关，当前版本只读不执行）。
-    bot_config: Map<String, Value>,
 }
 
 /// 墙钟（Unix 秒）。测试里换成固定值，对拍时「Key 剩余有效期」才不会随时间漂移。
@@ -143,13 +141,6 @@ impl Naimei {
     pub fn with_clock(cfg: NaimeiConfig, discord_proxy: Option<String>, clock: Clock) -> Arc<Self> {
         let api = DiscordApi::new(&cfg.token, discord_proxy);
         let bridge = Bridge::new(cfg.backend.clone(), cfg.secret.clone());
-        let mut bot_config = Map::new();
-        // 与 Python 的 CONFIG 默认值一致；拉不到后台配置时一律按「关」
-        bot_config.insert("gallery_forum".into(), json!("跑图分享"));
-        bot_config.insert("gallery_like".into(), json!(0));
-        bot_config.insert("gallery_ai".into(), json!(0));
-        bot_config.insert("gallery_ai_daily".into(), json!(30));
-        bot_config.insert("gallery_ai_model".into(), json!("LongCat-2.5-Preview"));
         Arc::new(Naimei {
             cfg,
             api,
@@ -158,10 +149,7 @@ impl Naimei {
             started: Instant::now(),
             latency_ms: AtomicU64::new(u64::MAX),
             ready: AtomicBool::new(false),
-            inner: Mutex::new(Inner {
-                bot_config,
-                ..Inner::default()
-            }),
+            inner: Mutex::new(Inner::default()),
         })
     }
 
@@ -499,7 +487,7 @@ impl Naimei {
 
     // ---------- 启动 / 同步 ----------
 
-    /// READY：把斜杠命令同步到指定服务器，然后（只启动一次）开始每分钟的配置同步 / 心跳。
+    /// READY：把斜杠命令同步到指定服务器，然后（只启动一次）开始每分钟的心跳。
     pub async fn on_ready(self: Arc<Self>, ready: ReadyInfo) {
         let defs = commands::definitions();
         if let Err(e) = self
@@ -525,7 +513,7 @@ impl Naimei {
         }
     }
 
-    /// 每分钟：拉配置、报心跳（后台据此显示在线状态）。
+    /// 每分钟报一次心跳（后台据此显示在线状态）。
     pub async fn sync_loop(self: Arc<Self>) {
         let ready_at = self.now();
         loop {
@@ -537,18 +525,6 @@ impl Naimei {
     }
 
     pub async fn sync_once(&self, ready_at: f64) -> Result<(), BridgeError> {
-        if let Some(Value::Object(cfg)) = self
-            .bridge
-            .bot(reqwest::Method::GET, "/config", None)
-            .await?
-        {
-            let mut inner = self.lock();
-            for (k, v) in cfg {
-                if inner.bot_config.contains_key(&k) {
-                    inner.bot_config.insert(k, v);
-                }
-            }
-        }
         let status = self.status_report(ready_at);
         self.bridge
             .bot(
@@ -560,8 +536,7 @@ impl Naimei {
         Ok(())
     }
 
-    /// 心跳里的 `status`：键顺序与 Python 一致。
-    /// 画廊 AI 评论没有移植，`ai_ready` 恒为 false、`ai_today` 恒为 0。
+    /// 心跳里的 `status`：键顺序与 Python 一致（旧版多的 `ai_ready` / `ai_today` 随 AI 评论一起删了）。
     pub fn status_report(&self, ready_at: f64) -> Value {
         let inner = self.lock();
         let guild = inner
@@ -583,18 +558,11 @@ impl Naimei {
             "guild": guild,
             "latency_ms": latency,
             "ready_at": ready_at,
-            "ai_ready": false,
-            "ai_today": 0,
         })
     }
 
     pub fn is_ready(&self) -> bool {
         self.ready.load(Ordering::Relaxed)
-    }
-
-    /// 后台配置的当前值（测试用）。
-    pub fn bot_config(&self) -> Map<String, Value> {
-        self.lock().bot_config.clone()
     }
 }
 

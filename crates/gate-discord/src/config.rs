@@ -9,8 +9,9 @@
 //! | `SITE_URL` | 奶妹 | 空串（去掉末尾 `/`） |
 //! | `WARDEN_BOT_TOKEN` | 燕双鹰 | 空 = 不启动，睡到天荒地老 |
 //!
-//! docker-compose 里还给奶妹传了 `PRAISE_*` / `GALLERY_AI_DAILY` / `AUDIT_*`，那是画廊 AI 评论用的，
-//! 该功能没有移植（默认关闭、站长尚未决定），这些变量会被忽略。
+//! 2.x 的 docker-compose 还给奶妹传过 `PRAISE_*` / `GALLERY_AI_DAILY` / `AUDIT_*`，那是画廊 AI 评论用的。
+//! 该功能 3.0 没有移植，后来整体删除（docs/v3-deviations.md #54）；3.0 的 compose 不再传这些变量，
+//! 旧环境里残留的会被忽略。
 
 use anyhow::{Context, bail};
 

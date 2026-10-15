@@ -13,7 +13,7 @@ use axum::Router;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::post;
 use gate_discord::bridge::{Bridge, BridgeError, who_payload};
 use gate_discord::events::Interaction;
 use gate_discord::handlers::{self, Backend};
@@ -228,16 +228,10 @@ async fn feedback(State(s): State<Shared>, h: HeaderMap, Json(body): Json<Value>
     Json(json!({"message": "收到啦，谢谢你的反馈～奶妹会转给站长 ✨"})).into_response()
 }
 
-async fn bot_config(State(s): State<Shared>, h: HeaderMap) -> Response {
-    gate!(s, "GET", "/self-register/bot/config", h, Value::Null);
-    Json(json!({"gallery_forum": "跑图分享", "gallery_like": 0, "gallery_ai": 0, "gallery_ai_daily": 30,
-                "gallery_ai_model": "LongCat-2.5-Preview"}))
-    .into_response()
-}
-
+/// 心跳。3.0 起只有 `status`（`event` 和 `/self-register/bot/config` 随跑图分享设置一起删了：docs/v3-deviations.md #54）。
 async fn bot_report(State(s): State<Shared>, h: HeaderMap, Json(body): Json<Value>) -> Response {
     gate!(s, "POST", "/self-register/bot/report", h, body);
-    // BotReport：status / event 都可选
+    // BotReport：status 可选
     Json(json!({"ok": true})).into_response()
 }
 
@@ -252,7 +246,6 @@ async fn gateway() -> (Bridge, Shared, String) {
         .route("/self-register/ops", post(ops))
         .route("/self-register/issue", post(issue))
         .route("/self-register/feedback", post(feedback))
-        .route("/self-register/bot/config", get(bot_config))
         .route("/self-register/bot/report", post(bot_report))
         .with_state(seen.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -513,14 +506,8 @@ async fn feedback_contract() {
 #[tokio::test]
 async fn bot_endpoints_contract() {
     let (bridge, seen, _) = gateway().await;
-    let cfg = bridge
-        .bot(reqwest::Method::GET, "/config", None)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(cfg["gallery_like"], 0);
-    let status = json!({"status": {"user": "naimei", "guild": "测试服", "latency_ms": 42, "ready_at": 1.5,
-                                   "ai_ready": false, "ai_today": 0}});
+    let status =
+        json!({"status": {"user": "naimei", "guild": "测试服", "latency_ms": 42, "ready_at": 1.5}});
     let ack = bridge
         .bot(reqwest::Method::POST, "/report", Some(&status))
         .await
@@ -529,16 +516,11 @@ async fn bot_endpoints_contract() {
     assert_eq!(ack, json!({"ok": true}));
 
     let seen = seen.lock().unwrap();
+    assert_eq!(seen.requests.len(), 1, "机器人只报心跳，不再拉配置");
     assert_eq!(
         seen.requests[0],
-        (
-            "GET".into(),
-            "/self-register/bot/config".into(),
-            Value::Null
-        )
+        ("POST".into(), "/self-register/bot/report".into(), status)
     );
-    assert_eq!(seen.requests[1].0, "POST");
-    assert_eq!(seen.requests[1].2, status);
 }
 
 #[tokio::test]
@@ -551,7 +533,9 @@ async fn missing_secret_sends_nothing_and_errors() {
         Err(BridgeError::NoSecret)
     ));
     assert!(matches!(
-        bridge.bot(reqwest::Method::GET, "/config", None).await,
+        bridge
+            .bot(reqwest::Method::POST, "/report", Some(&json!({})))
+            .await,
         Err(BridgeError::NoSecret)
     ));
     assert!(seen.lock().unwrap().requests.is_empty());
@@ -570,7 +554,7 @@ async fn unreachable_or_hanging_gateway_degrades_like_python() {
     );
     assert_eq!(down.issue(SECRET, &json!({})).await, None);
     assert_eq!(
-        down.bot(reqwest::Method::GET, "/config", None)
+        down.bot(reqwest::Method::POST, "/report", Some(&json!({})))
             .await
             .unwrap(),
         None

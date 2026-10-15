@@ -231,10 +231,6 @@ async fn bridge(e: &Env, path: &str, body: Value) -> Resp {
     )
 }
 
-async fn bridge_get(e: &Env, path: &str) -> Resp {
-    parse(Call::new("GET", path).bearer(SECRET).send(&e.state).await)
-}
-
 fn detail(r: &Resp) -> &str {
     r.2["detail"].as_str().unwrap_or("")
 }
@@ -1443,33 +1439,17 @@ async fn feedback_cooldown_is_ten_minutes_per_person() {
 }
 
 #[tokio::test]
-async fn bot_config_and_report_match_legacy() {
+async fn bot_report_keeps_only_the_heartbeat() {
     let (e, _d) = setup_reg(&[]).await;
-    let cfg = bridge_get(&e, "/self-register/bot/config").await;
-    assert_eq!(cfg.0, 200);
-    assert_eq!(cfg.1["cache-control"], "no-store");
-    assert_eq!(
-        cfg.2,
-        json!({"gallery_forum": "跑图分享", "gallery_like": 0, "gallery_ai": 0,
-               "gallery_ai_daily": 30, "gallery_ai_model": "LongCat-2.5-Preview"})
-    );
-    let anon = parse(
+    // 机器人拉「跑图分享设置」的接口已删除（docs/v3-deviations.md #54）
+    let cfg = parse(
         Call::new("GET", "/self-register/bot/config")
+            .bearer(SECRET)
             .send(&e.state)
             .await,
     );
-    assert_eq!((anon.0, anon.2), (401, json!({"detail": "未授权"})));
-    // 站长在后台改过的配置（site_settings 的 bot_* 键）机器人下次来读就生效
-    e.state
-        .db
-        .set_setting("bot_gallery_like", "1")
-        .await
-        .unwrap();
-    assert_eq!(
-        bridge_get(&e, "/self-register/bot/config").await.2["gallery_like"],
-        1
-    );
-    // 心跳：只留白名单字段，加上 seen_at
+    assert_eq!(cfg.0, 404);
+    // 心跳：只留白名单字段，加上 seen_at；旧机器人带的 ai_ready / ai_today / 其它字段一律不存
     let report = bridge(
         &e,
         "/self-register/bot/report",
@@ -1483,34 +1463,38 @@ async fn bot_config_and_report_match_legacy() {
             .unwrap();
     assert_eq!(
         keys(&stored),
-        [
-            "user",
-            "guild",
-            "latency_ms",
-            "ready_at",
-            "ai_ready",
-            "ai_today",
-            "seen_at"
-        ]
+        ["user", "guild", "latency_ms", "ready_at", "seen_at"]
     );
     assert_eq!(stored["guild"], "测试服");
-    // 没有 status 也没有 event 的上报同样 200
+    // 没有 status 的上报同样 200，不动已存的心跳
     assert_eq!(
         bridge(&e, "/self-register/bot/report", json!({})).await.2,
         json!({"ok": true})
     );
-    // 事件（旧版仍接受）：最多留 50 条
+    assert_eq!(
+        serde_json::from_str::<Value>(
+            &e.state.db.get_setting("bot_status").await.unwrap().unwrap()
+        )
+        .unwrap(),
+        stored
+    );
+    // 旧机器人还会带 event：忽略，不再写 bot_events
     let ev = bridge(
         &e,
         "/self-register/bot/report",
         json!({"event": {"kind": "like", "title": "## 标题"}}),
     )
     .await;
-    assert_eq!(ev.0, 200);
-    let events: Value =
-        serde_json::from_str(&e.state.db.get_setting("bot_events").await.unwrap().unwrap())
-            .unwrap();
-    assert_eq!(events[0]["title"], "标题");
+    assert_eq!((ev.0, ev.2), (200, json!({"ok": true})));
+    assert_eq!(e.state.db.get_setting("bot_events").await.unwrap(), None);
+    // 鉴权不变：没带密钥 401；status 不是对象 422
+    let anon = parse(
+        Call::new("POST", "/self-register/bot/report")
+            .json(json!({"status": {}}))
+            .send(&e.state)
+            .await,
+    );
+    assert_eq!((anon.0, anon.2), (401, json!({"detail": "未授权"})));
     let bad = bridge(&e, "/self-register/bot/report", json!({"status": "x"})).await;
     assert_eq!(
         bad.2,

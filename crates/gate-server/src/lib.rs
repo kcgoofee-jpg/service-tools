@@ -8,7 +8,6 @@ pub mod allowance;
 pub mod audit;
 pub mod auth;
 pub mod body;
-pub mod bot_config;
 pub mod bugs;
 pub mod env;
 pub mod error;

@@ -1,9 +1,9 @@
-/** Discord：机器人状态与跑图分享设置、公告、捐赠 Key、封禁黑名单、成员问卷。 */
+/** Discord：机器人状态、公告、捐赠 Key、封禁黑名单、成员问卷。 */
 import { useAdmin } from "../Admin";
 import { LoadError, Loading, SectionHead } from "./_kit";
 import Announce from "./discord/announce";
 import BansCard from "./discord/bans";
-import BotCards from "./discord/bot";
+import BotStatusCard from "./discord/bot";
 import type { BotData, Donations } from "./discord/core";
 import DonationsCard from "./discord/donations";
 import SurveyCard from "./discord/survey";
@@ -28,7 +28,7 @@ export default function Discord() {
       <SectionHead title="Discord" desc="奶妹（机器人）、站点公告、捐赠和封禁名单" />
       {bot.loading && !bot.data && <Loading rows={3} />}
       {!bot.data && bot.error && <LoadError error={bot.error} />}
-      {bot.data && <BotCards data={bot.data} />}
+      {bot.data && <BotStatusCard data={bot.data} />}
       <Announce />
       <DonationsCard data={don.data} />
       <BansCard />

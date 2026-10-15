@@ -19,9 +19,9 @@ use axum::extract::{ConnectInfo, Request, State};
 use axum::http::HeaderValue;
 use axum::http::request::Parts;
 use axum::response::Response;
-use axum::routing::{get, post};
+use axum::routing::post;
 use gate_core::pyc::take_chars;
-use gate_core::{features, pyext};
+use gate_core::{bot_config, features, pyext};
 use serde_json::{Map, Value, json};
 use std::net::SocketAddr;
 use subtle::ConstantTimeEq;
@@ -36,7 +36,6 @@ pub fn router() -> Router<AppState> {
         .route("/self-register/slots", post(slots))
         .route("/self-register/issue", post(issue))
         .route("/self-register/feedback", post(feedback_submit))
-        .route("/self-register/bot/config", get(bot_config_get))
         .route("/self-register/bot/report", post(bot_report))
 }
 
@@ -673,27 +672,22 @@ async fn feedback_submit(State(state): State<AppState>, req: Request) -> ApiResu
     Ok(ok_json(&json!({"message": message})))
 }
 
-/// 机器人每分钟来读一次配置（后台「Discord」页可改，不用重启机器人）。
-async fn bot_config_get(State(state): State<AppState>, req: Request) -> ApiResult {
-    let (parts, _body) = req.into_parts();
-    authorize(&state, &parts, true)?;
-    let cfg = crate::bot_config::load(&state.db).await?;
-    Ok(no_store(ok_json(&Value::Object(cfg))))
-}
-
-/// 机器人上报心跳和动作（点赞 / 评论），后台显示在线状态和最近记录。
+/// 机器人每分钟上报一次心跳，后台「机器人状态」据此显示在线 / 离线。
+/// 3.0 起只收 `status`（`event`、`ai_ready` 之类旧字段会被忽略）：docs/v3-deviations.md #54。
 async fn bot_report(State(state): State<AppState>, req: Request) -> ApiResult {
     let (parts, body) = req.into_parts();
     let mut m = read_model(&parts, body).await?;
     let status = m.opt_dict("status");
-    let event = m.opt_dict("event");
     m.finish()?;
     authorize(&state, &parts, true)?;
-    crate::bot_config::report(&state.db, status.as_ref(), event.as_ref(), state.now())
-        .await
-        .map_err(|e| match e {
-            crate::bot_config::BotConfigError::Db(e) => ApiError::from(e),
-            other => internal(other),
-        })?;
+    if let Some(status) = &status {
+        state
+            .db
+            .set_setting(
+                bot_config::STATUS_KEY,
+                &bot_config::status_to_store(status, state.now()),
+            )
+            .await?;
+    }
     Ok(ok_json(&json!({"ok": true})))
 }
