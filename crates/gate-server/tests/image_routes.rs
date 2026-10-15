@@ -239,6 +239,57 @@ async fn one_image_per_key_at_a_time_without_per_key_interval() {
     assert_eq!(reasons, ["key_busy", "key_busy"], "{rows:?}");
 }
 
+/// 「V5 续杯」已删除（docs/v3-deviations.md #66）：旧版 `anlas_auto` 的 Key 当天个人 V5 用完、
+/// 账号 V5 也见底时会改用 Anlas 出同规格 V5；现在个人 V5 用完就是 402，不会悄悄花 Anlas。
+#[tokio::test]
+async fn no_v5_refill_with_anlas() {
+    let e = setup(&[]).await;
+    e.state
+        .db
+        .write(|tx| {
+            tx.execute(
+                "UPDATE api_keys SET anlas_auto=1, allow_anlas=1, daily_v5=1, image_model_scope='all' WHERE id=1",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    e.state
+        .db
+        .set_setting("quota_algo_last", r#"{"v5": {"percent": 0}}"#)
+        .await
+        .unwrap();
+    e.state
+        .db
+        .record_success(
+            &Success {
+                key_id: 1,
+                kind: "image".into(),
+                model: "nai-diffusion-5-full".into(),
+                day: e.state.day(),
+                images: 1,
+                v5: 1,
+                ..Default::default()
+            },
+            e.state.now(),
+        )
+        .await
+        .unwrap();
+    let (status, _, body) = call(
+        &e.state,
+        "POST",
+        "/ai/generate-image",
+        Some(TOKEN),
+        Some(image_body("nai-diffusion-5-full", 1)),
+    )
+    .await;
+    let text = String::from_utf8_lossy(&body).to_string();
+    assert_eq!(status, 402, "{text}");
+    assert!(text.contains("今日 V5 额度已用完（1 张/天）"), "{text}");
+    assert!(e.mock.requests_to("/ai/generate-image").is_empty());
+}
+
 /// 不识别客户端、不记设备（docs/v3-deviations.md #50）：不管 User-Agent、启动器请求头还是请求体长什么样，
 /// 用量日志的 client 列都是空串，后台日志接口也不返回这个字段。
 #[tokio::test]

@@ -414,39 +414,12 @@ async fn prepare(
     if image_count < 1 {
         return Err(GateError::new(400, "一次生成张数必须是正整数").into());
     }
+    // 2.x 这里还有「V5 续杯」：`anlas_auto` 的 Key 当天个人 V5 用完后改用 Anlas 生成同规格 V5。
+    // Anlas 自动分配早已下线、没有 Key 再是 anlas_auto，3.0 删除（docs/v3-deviations.md #66；列保留）
     let mut est = Est::from_cost(
         policy::estimate_image_cost(&body, true, true)
             .map_err(|e| pyerr_400(&e, "图片参数无效，无法估算费用"))?,
     );
-    // V5 续杯：自动分配了 Anlas 的成员当天个人 V5 用完后改用 Anlas 生成同规格 V5。
-    // 只在账号 V5 额度真的用完（≤ 1%）时才走 Anlas，否则会悄悄多用全站共享的 V5 额度。
-    if est.v5 > 0
-        && gate_core::pyval::number_like(key.get("anlas_auto")) == Some(1.0)
-        && key.allow_anlas()
-        && key.daily_v5() > 0
-    {
-        let last = state.db.get_setting("quota_algo_last").await?;
-        let v5_left = last
-            .as_deref()
-            .filter(|s| !s.is_empty())
-            .and_then(|s| serde_json::from_str::<Value>(s).ok())
-            .and_then(|v| {
-                v.get("v5")
-                    .filter(|x| truthy(x))
-                    .and_then(|x| x.get("percent"))
-                    .cloned()
-            })
-            .and_then(|p| gate_core::pyval::number_like(&p));
-        if v5_left.is_some_and(|l| l <= 1.0)
-            && state.db.get_counter(key.id(), &state.day()).await?.v5 >= key.daily_v5()
-        {
-            est = Est::from_cost(
-                policy::estimate_image_cost(&body, true, false)
-                    .map_err(|e| pyerr_400(&e, "图片参数无效，无法估算费用"))?,
-            );
-            notes.push("今日 V5 已用完，使用自动分配的 Anlas 续杯".into());
-        }
-    }
     let legacy_free_images = if tier == "legacy"
         && policy::legacy_normal_free_eligible(&body).map_err(|e| InternalError(e.to_string()))?
     {

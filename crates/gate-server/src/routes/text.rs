@@ -1021,8 +1021,8 @@ async fn me(state: &AppState, parts: &Parts) -> ApiResult {
     // get_counter 对 ≤ 0 的 anlas 给整数 0；float(0) 之后仍是 0.0
     let anlas_today = if c.anlas > 0.0 { c.anlas } else { 0.0 };
     let anlas_month = state.db.month_anlas(key.id(), &state.month()).await?;
-    let anlas_auto = pyval::number_like(key.get("anlas_auto")) == Some(1.0) && key.allow_anlas();
     let features = feature_view(state, &key).await?;
+    // 3.0 去掉的字段（docs/v3-deviations.md #61 / #66）：`daily_images_base`（保底）、`anlas_auto`（V5 续杯）
     Ok(ok_json(&json!({
         "name": key.name(),
         "is_admin": key.is_admin(),
@@ -1033,7 +1033,6 @@ async fn me(state: &AppState, parts: &Parts) -> ApiResult {
             "legacy_free_images_today": c.legacy_free_images,
             "anlas_today": pyc::round(anlas_today, 2),
             "daily_anlas": key.get("daily_anlas"),
-            "anlas_auto": anlas_auto,
             "v5_today": c.v5,
             "daily_v5": key.get("daily_v5"),
             "image_model_scope": key.get("image_model_scope"),
