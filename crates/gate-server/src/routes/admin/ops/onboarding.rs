@@ -3,6 +3,7 @@
 use super::upstream_health;
 use crate::audit::{audit_flags, audit_image_cap_mb, audit_image_keep_hours};
 use crate::body::read_json_body;
+use crate::defaults;
 use crate::error::{ApiError, ApiResult, HttpError, ok_json};
 use crate::ops;
 use crate::session::AdminSession;
@@ -35,7 +36,7 @@ async fn new_key_features(state: &AppState) -> Result<Value, ApiError> {
     let names = reg
         .features
         .filter(|f| !f.is_empty())
-        .unwrap_or_else(|| vec!["image".to_string()]);
+        .unwrap_or_else(|| vec![defaults::REGISTER_FEATURES.to_string()]);
     let dumped = features::dump(Some(names)).unwrap_or_default();
     Ok(match features::parse_list(&Value::String(dumped)) {
         Some(list) => json!(list),
@@ -48,7 +49,7 @@ async fn snapshot(state: &AppState) -> Result<Value, ApiError> {
     let reg = ops::registration_settings(state).await?;
     let mut registration = reg.to_map();
     registration.insert("active".into(), json!(ops::active_count(state).await?));
-    let (prompts, thumbs, days) = audit_flags(&state.db, &state.env).await?;
+    let (prompts, thumbs, days) = audit_flags(&state.db).await?;
     let labels: Map<String, Value> = FEATURES
         .iter()
         .map(|(n, l)| ((*n).to_string(), json!(l)))
@@ -60,6 +61,13 @@ async fn snapshot(state: &AppState) -> Result<Value, ApiError> {
             "labels": labels,
             // 后台「新建 Key」弹窗的默认功能，与服务端缺省逻辑一致
             "new_key": new_key_features(state).await?,
+        },
+        // 后台「新建 Key」弹窗里没有数据库设置的默认值（每日 V4.5 / V5 张数、有效天数在上面的 registration 里）：
+        // 前端不另写一份
+        "new_key": {
+            "rpm": defaults::MANUAL_KEY_RPM,
+            "daily_anlas": defaults::MANUAL_KEY_DAILY_ANLAS,
+            "monthly_anlas": defaults::MANUAL_KEY_MONTHLY_ANLAS,
         },
         "audit": {
             "prompts": prompts,

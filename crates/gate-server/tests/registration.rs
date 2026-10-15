@@ -182,7 +182,7 @@ async fn setup_reg(extra: &[(&str, &str)]) -> (Env, Discord) {
 }
 
 /// `legacy_expiry`：旧版夹具都是在 `REGISTER_EXPIRES_DAYS` 默认 30 天下录的；3.0 默认改成 0（不过期，
-/// docs/v3-deviations.md #70），对拍这些用例时显式给回 30。
+/// docs/v3-deviations.md #70），环境变量也删了（#93），对拍这些用例时把后台「领 Key」的有效天数设成 30。
 async fn setup_reg_with(extra: &[(&str, &str)], legacy_expiry: bool) -> (Env, Discord) {
     let d = Discord::start().await;
     let base = d.url();
@@ -195,12 +195,24 @@ async fn setup_reg_with(extra: &[(&str, &str)], legacy_expiry: bool) -> (Env, Di
         ("SITE_URL", "https://gate.test"),
         ("DISCORD_API_BASE", &base),
     ];
-    if legacy_expiry {
-        vars.push(("REGISTER_EXPIRES_DAYS", "30"));
-    }
     vars.extend_from_slice(extra);
     let e = setup(&vars).await;
+    if legacy_expiry {
+        set_db(&e, "register_expires_days", "30").await;
+    }
     (e, d)
+}
+
+/// 写一条后台设置（`site_settings`）。
+async fn set_db(e: &Env, key: &str, value: &str) {
+    e.state.db.set_setting(key, value).await.unwrap();
+}
+
+/// 只有拥有这个身份组的成员能领 Key（本服务器里的身份组）。原来是环境变量 `DISCORD_ROLE_ID`，
+/// 现在只来自后台「领 Key」的限定身份组设置（docs/v3-deviations.md #93）。
+async fn require_role(e: &Env, role: &str) {
+    set_db(e, "register_role_guild", GUILD).await;
+    set_db(e, "register_role_id", role).await;
 }
 
 fn who(id: &str, actor: &str) -> Value {
@@ -412,7 +424,8 @@ async fn wrong_bridge_secret_counts_toward_auth_block() {
 
 #[tokio::test]
 async fn info_has_only_what_the_bot_reads() {
-    let (e, _d) = setup_reg(&[("REGISTER_MAX_USERS", "10")]).await;
+    let (e, _d) = setup_reg(&[]).await;
+    set_db(&e, "register_max_users", "10").await;
     let info = bridge(&e, "/self-register/info", who(MEMBER, MEMBER)).await;
     assert_eq!(info.0, 200);
     assert_eq!(info.1["cache-control"], "no-store");
@@ -586,7 +599,8 @@ async fn issue_mints_a_key_exactly_like_legacy() {
 
 #[tokio::test]
 async fn issue_enforces_capacity_age_hourly_cap_and_expiry_rotation() {
-    let (e, _d) = setup_reg(&[("REGISTER_MAX_USERS", "1")]).await;
+    let (e, _d) = setup_reg(&[]).await;
+    set_db(&e, "register_max_users", "1").await;
     open_registration(&e).await;
     assert_eq!(issue(&e, MEMBER).await.0, 200);
     // 名额满：先到先得
@@ -655,7 +669,8 @@ async fn issue_enforces_capacity_age_hourly_cap_and_expiry_rotation() {
         )
     );
     // 每小时领取上限
-    let (e2, _d2) = setup_reg(&[("REGISTER_MAX_USERS", "0")]).await;
+    let (e2, _d2) = setup_reg(&[]).await;
+    set_db(&e2, "register_max_users", "0").await;
     open_registration(&e2).await;
     e2.state
         .db
@@ -682,7 +697,7 @@ async fn issue_enforces_capacity_age_hourly_cap_and_expiry_rotation() {
 
 #[tokio::test]
 async fn young_discord_accounts_are_refused() {
-    let (e, _d) = setup_reg(&[("REGISTER_MIN_ACCOUNT_DAYS", "7")]).await;
+    let (e, _d) = setup_reg(&[]).await;
     open_registration(&e).await;
     let snowflake = |age_days: f64| {
         let ms = e.state.now() * 1000.0 - age_days * 86_400_000.0;
@@ -698,7 +713,8 @@ async fn young_discord_accounts_are_refused() {
 
 #[tokio::test]
 async fn role_gate_uses_bot_token_against_the_configured_server() {
-    let (e, d) = setup_reg(&[("DISCORD_ROLE_ID", "900000000000000077")]).await;
+    let (e, d) = setup_reg(&[]).await;
+    require_role(&e, "900000000000000077").await;
     open_registration(&e).await;
     let path = format!("/guilds/{GUILD}/members/{MEMBER}");
     // 不在服务器
@@ -782,11 +798,8 @@ async fn role_gate_can_target_another_community_via_settings() {
 #[tokio::test]
 async fn unreachable_discord_never_mints_when_a_role_is_required() {
     // 基地址指向没人监听的端口：既证明请求只会发往 DISCORD_API_BASE，也验证网络错误的处理
-    let (e, _d) = setup_reg(&[
-        ("DISCORD_ROLE_ID", "900000000000000077"),
-        ("DISCORD_API_BASE", "http://127.0.0.1:1"),
-    ])
-    .await;
+    let (e, _d) = setup_reg(&[("DISCORD_API_BASE", "http://127.0.0.1:1")]).await;
+    require_role(&e, "900000000000000077").await;
     open_registration(&e).await;
     let r = issue(&e, MEMBER).await;
     assert_eq!(
@@ -1422,7 +1435,8 @@ async fn failed_role_grant_does_not_block_registration() {
 
 #[tokio::test]
 async fn departed_sweep_only_revokes_confirmed_departures() {
-    let (e, d) = setup_reg(&[("REGISTER_MAX_USERS", "0")]).await;
+    let (e, d) = setup_reg(&[]).await;
+    set_db(&e, "register_max_users", "0").await;
     open_registration(&e).await;
     let ids = [
         "900000000000000201",
@@ -1517,7 +1531,8 @@ async fn departed_sweep_only_revokes_confirmed_departures() {
 /// 邀请 Key 只由站长手动删：持有人退群时不回收，只留一条操作日志提醒（docs/v3-deviations.md #57）。
 #[tokio::test]
 async fn departed_sweep_keeps_invite_keys_and_logs_a_reminder() {
-    let (e, d) = setup_reg(&[("REGISTER_MAX_USERS", "0")]).await;
+    let (e, d) = setup_reg(&[]).await;
+    set_db(&e, "register_max_users", "0").await;
     open_registration(&e).await;
     let invited = "900000000000000211";
     let regular = "900000000000000212";
@@ -1777,7 +1792,7 @@ async fn web_login_is_always_on() {
             .unwrap()
             .starts_with("https://discord.com/oauth2/authorize?")
     );
-    assert!(d.seen().is_empty());
+    assert!(!set_cookies(&h).is_empty());
 }
 
 #[tokio::test]
@@ -2297,11 +2312,8 @@ async fn discord_base_comes_from_the_environment() {
         gate_server::env::EnvConfig::load(&std::collections::HashMap::<String, String>::new());
     assert_eq!(plain.discord_api_base, "https://discord.com/api/v10");
     // 跑一遍会碰 Discord 的流程：每个请求都落在假服务上
-    let (e, d) = setup_reg(&[
-        ("DISCORD_ROLE_ID", "900000000000000077"),
-        ("DISCORD_MEMBER_ROLE_ID", "900000000000000055"),
-    ])
-    .await;
+    let (e, d) = setup_reg(&[("DISCORD_MEMBER_ROLE_ID", "900000000000000055")]).await;
+    require_role(&e, "900000000000000077").await;
     open_registration(&e).await;
     d.script(
         "GET",
@@ -2600,9 +2612,9 @@ async fn trailing_slash_in_api_base_is_tolerated() {
         ("DISCORD_GUILD_ID", GUILD),
         ("SITE_URL", "https://gate.test"),
         ("DISCORD_API_BASE", &base),
-        ("DISCORD_ROLE_ID", "900000000000000077"),
     ])
     .await;
+    require_role(&e, "900000000000000077").await;
     open_registration(&e).await;
     d.script(
         "GET",

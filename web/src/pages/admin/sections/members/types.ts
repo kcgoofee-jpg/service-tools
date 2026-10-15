@@ -107,8 +107,11 @@ export type Coupon = {
 };
 
 export type OpsSnapshot = {
-  registration: { daily_images: number; daily_v5: number };
+  /** 「新成员默认」：后台「领 Key」的设置；手动新建 Key、邀请 Key 和 /register 用同一份 */
+  registration: { daily_images: number; daily_v5: number; expires_days: number };
   features: { labels: Record<string, string>; new_key: string[] | null };
+  /** 没有数据库设置的几项默认值（服务端 defaults.rs）；新建 Key 的表单不自己写一套 */
+  new_key: { rpm: number; daily_anlas: number; monthly_anlas: number };
 };
 
 /** 功能名（后端 features.FEATURES 的副本；接口给了 labels 就以接口为准） */

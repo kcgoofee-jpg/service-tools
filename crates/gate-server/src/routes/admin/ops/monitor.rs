@@ -257,7 +257,7 @@ fn disk_usage(path: &std::path::Path) -> Result<(u64, u64), InternalError> {
 /// 告警与记录功能的当前状态（不含任何密钥）。
 async fn server_status(State(state): State<AppState>, _s: AdminSession) -> ApiResult {
     let env = &state.env;
-    let (prompts, thumbs, days) = crate::audit::audit_flags(&state.db, env).await?;
+    let (prompts, thumbs, days) = crate::audit::audit_flags(&state.db).await?;
     let (free, total) = disk_usage(&env.data_dir)?;
     Ok(ok_json(&json!({
         "alerts": {

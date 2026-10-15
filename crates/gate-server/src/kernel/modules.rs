@@ -313,7 +313,11 @@ pub(super) async fn param_values(state: &AppState, name: &str) -> Vec<Value> {
             Value::String(gm::AUTOPILOT_KEY_GUARD_TEXT.into()),
         ],
         "registration" => vec![
-            Value::from(state.env.default_expires_days),
+            // 新领的 Key 的有效天数：后台「领 Key」的设置（没设过 = 0，不过期），不再有环境变量默认值
+            match crate::ops::registration_settings(state).await {
+                Ok(r) => Value::from(r.expires_days),
+                Err(e) => failed(e),
+            },
             Value::String(gm::idle_recycle_text(state.env.key_inactivity_delete_days)),
         ],
         _ => Vec::new(),

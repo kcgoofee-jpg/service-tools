@@ -841,7 +841,8 @@ async fn discord_bot_status_only() {
 
 fn ops_fixed(v: &Value) -> Value {
     json!({
-        "registration": v["registration"], "features": v["features"], "audit": v["audit"],
+        "registration": v["registration"], "features": v["features"], "new_key": v["new_key"],
+        "audit": v["audit"],
     })
 }
 
@@ -854,7 +855,7 @@ async fn ops_snapshot_defaults() {
         ops_fixed(&v),
         json!({
             "registration": {"configured": false, "open": false, "max_users": 0, "features": null, "daily_images": 30,
-                // 新 Key 默认不过期（REGISTER_EXPIRES_DAYS 默认 0，docs/v3-deviations.md #70）
+                // 新 Key 默认不过期（docs/v3-deviations.md #70）
                 "daily_v5": 0, "image_scope": "legacy", "expires_days": 0, "role_guild": "", "role_id": "", "role_note": "",
                 "active": 0},
             "features": {
@@ -863,6 +864,8 @@ async fn ops_snapshot_defaults() {
                     "tags": "标签补全"},
                 "new_key": ["image"],
             },
+            // 后台「新建 Key」弹窗里没有数据库设置的默认值（docs/v3-deviations.md #94）
+            "new_key": {"rpm": 10, "daily_anlas": 0.0, "monthly_anlas": 2500.0},
             "audit": {"prompts": false, "thumbs": false, "retention_days": 7, "image_cap_mb": 8192,
                 "image_bytes": 0, "image_keep_hours": 24, "announce_configured": false},
         })
@@ -873,7 +876,10 @@ async fn ops_snapshot_defaults() {
     );
     // 键顺序
     let keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
-    assert_eq!(keys, ["registration", "features", "audit", "upstream"]);
+    assert_eq!(
+        keys,
+        ["registration", "features", "new_key", "audit", "upstream"]
+    );
     let reg_keys: Vec<&str> = v["registration"]
         .as_object()
         .unwrap()
@@ -1119,7 +1125,7 @@ async fn ops_registration_put() {
 }
 
 #[tokio::test]
-async fn ops_registration_uses_env_defaults_when_configured() {
+async fn ops_registration_defaults_are_constants_not_env() {
     let secret = "x".repeat(32);
     let e = setup(&[
         ("DISCORD_CLIENT_ID", "1"),
@@ -1128,8 +1134,9 @@ async fn ops_registration_uses_env_defaults_when_configured() {
         ("REGISTRATION_BRIDGE_SECRET", &secret),
         ("DISCORD_GUILD_ID", "900000000000000001"),
         ("SITE_URL", "https://owl.example"),
+        // 这些环境变量 3.0 已删除（每日张数 / 模型范围归动态额度管，docs/v3-deviations.md #70；
+        // 名额 / 有效期 / 功能只在后台「领 Key」里设，#93）：设了也不读
         ("REGISTER_MAX_USERS", "12"),
-        // 这三个环境变量 3.0 已删除（归动态额度管，docs/v3-deviations.md #70）：设了也不读
         ("REGISTER_DAILY_IMAGES", "40"),
         ("REGISTER_DAILY_V5", "5"),
         ("REGISTER_IMAGE_SCOPE", "all"),
@@ -1169,11 +1176,11 @@ async fn ops_registration_uses_env_defaults_when_configured() {
     let v = api.get("/ops").await;
     assert_eq!(
         v["registration"],
-        json!({"configured": true, "open": false, "max_users": 12, "features": ["image", "vibe"], "daily_images": 30,
-               "daily_v5": 0, "image_scope": "legacy", "expires_days": 14, "role_guild": "", "role_id": "", "role_note": "",
+        json!({"configured": true, "open": false, "max_users": 10, "features": ["image"], "daily_images": 30,
+               "daily_v5": 0, "image_scope": "legacy", "expires_days": 0, "role_guild": "", "role_id": "", "role_note": "",
                "active": 2})
     );
-    // 站长在后台改过的值优先于 .env
+    // 站长在后台改过的值优先于 defaults 里的常量
     api.json("PUT", "/ops/registration", Some(json!({"max_users": 3})))
         .await;
     let v = api.get("/ops").await;

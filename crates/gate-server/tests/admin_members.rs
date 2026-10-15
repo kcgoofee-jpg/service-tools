@@ -367,12 +367,13 @@ async fn invite_keys_are_numbered_and_tagged() {
     assert_eq!(r.status, 200, "{}", r.text());
     let key = &r.json()["key"];
     assert_eq!(key["name"], "邀请-5");
-    // 没有注册服务：沿用环境默认额度，模型范围 all，30 天有效
-    assert_eq!(key["daily_images"], 100);
-    assert_eq!(key["daily_v5"], 50);
-    assert_eq!(key["image_model_scope"], "all");
+    // 额度、模型范围、有效期读后台「领 Key」的设置（没设过：30 张 / 0 张 V5 / 仅 V4.5 及更低 / 不过期），
+    // 有没有配注册服务都一样（docs/v3-deviations.md #94）
+    assert_eq!(key["daily_images"], 30);
+    assert_eq!(key["daily_v5"], 0);
+    assert_eq!(key["image_model_scope"], "legacy");
     assert_eq!(key["daily_anlas"], 0.0);
-    assert!(key["expires_at"].as_f64().unwrap() > e.state.now() + 29.0 * 86400.0);
+    assert!(key["expires_at"].is_null());
     let id = key["id"].as_i64().unwrap();
     let tags = rows(
         &e.state,
@@ -396,6 +397,69 @@ async fn invite_keys_are_numbered_and_tagged() {
             .any(|(act, t, ..)| act == "新建邀请 Key" && t == "邀请-5")
     );
     assert!(acts.iter().any(|(act, ..)| act == "POST /keys/invite"));
+}
+
+#[tokio::test]
+async fn new_key_defaults_follow_the_registration_settings() {
+    let (e, a) = ready().await;
+    // 手动新建：什么都不填 → 「新成员默认」（库里没设过用 defaults 里的常量）
+    let r = a.post(&format!("{A}/keys"), json!({"name": "默认"})).await;
+    assert_eq!(r.status, 200, "{}", r.text());
+    let key = &r.json()["key"];
+    assert_eq!(
+        (
+            &key["daily_images"],
+            &key["daily_v5"],
+            &key["rpm"],
+            &key["daily_anlas"],
+            &key["monthly_anlas"]
+        ),
+        (
+            &json!(30),
+            &json!(0),
+            &json!(10),
+            &json!(0.0),
+            &json!(2500.0)
+        )
+    );
+    assert!(key["expires_at"].is_null(), "默认不过期");
+    // 站长改了「领 Key」的设置：手动新建 Key 和一键邀请 Key 跟着变，不用另外改一处
+    for (k, v) in [
+        ("register_daily_images", "45"),
+        ("register_daily_v5", "6"),
+        ("register_expires_days", "14"),
+        ("register_image_scope", "all"),
+    ] {
+        e.state.db.set_setting(k, v).await.unwrap();
+    }
+    let r = a.post(&format!("{A}/keys"), json!({"name": "跟随"})).await;
+    let key = &r.json()["key"];
+    assert_eq!(
+        (&key["daily_images"], &key["daily_v5"]),
+        (&json!(45), &json!(6))
+    );
+    let left = key["expires_at"].as_f64().unwrap() - e.state.now();
+    assert!((left - 14.0 * 86400.0).abs() < 60.0, "{left}");
+    let r = a.post(&format!("{A}/keys/invite"), json!({})).await;
+    let key = &r.json()["key"];
+    assert_eq!(
+        (
+            &key["daily_images"],
+            &key["daily_v5"],
+            &key["image_model_scope"]
+        ),
+        (&json!(45), &json!(6), &json!("all"))
+    );
+    // 请求里填了的字段照旧优先
+    let r = a
+        .post(
+            &format!("{A}/keys"),
+            json!({"name": "手填", "daily_images": 7, "expires_days": 0, "rpm": 3}),
+        )
+        .await;
+    let key = &r.json()["key"];
+    assert_eq!((&key["daily_images"], &key["rpm"]), (&json!(7), &json!(3)));
+    assert!(key["expires_at"].is_null());
 }
 
 #[tokio::test]

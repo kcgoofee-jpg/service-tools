@@ -219,7 +219,7 @@ pub async fn bug_triage(state: &AppState) -> Result<(), KernelError> {
 pub async fn purge(state: &AppState) -> Result<(), KernelError> {
     let db = &state.db;
     // 0 = 长期保留：已向成员披露保留范围，用于防滥用、回测和优化算法
-    let days = audit_flags(db, &state.env).await?.2;
+    let days = audit_flags(db).await?.2;
     if days > 0 {
         db.purge_audit(state.now() - days as f64 * 86400.0).await?;
     }

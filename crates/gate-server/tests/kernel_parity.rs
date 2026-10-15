@@ -1032,6 +1032,12 @@ mod v3 {
                                 let params = m["params"].as_array_mut().unwrap();
                                 assert_eq!(params.pop().unwrap()["name"], "名额");
                             }
+                            // 新领的 Key 的有效天数：旧版是环境变量，3.0 读后台「领 Key」的设置（没设过 = 0，不过期）
+                            if m["name"] == "registration" {
+                                let p = &mut m["params"][0];
+                                assert_eq!(p["name"], "Key 有效天数");
+                                p["value"] = json!(0);
+                            }
                             if m["name"] == "allocation" {
                                 let p = &mut m["params"][3];
                                 assert_eq!(p["name"], "V5 每人范围");
@@ -1268,7 +1274,8 @@ async fn run_case(case: &Value) -> Result<(), String> {
         ("DAY_RESET_HOUR", "7".into()),
         ("IMAGE_MIN_INTERVAL", num("image_min_interval")),
         // 夹具 env 里的 key_image_min_interval：3.0 没有每 Key 出图间隔（docs/v3-deviations.md #64），不再传
-        ("DEFAULT_KEY_EXPIRES_DAYS", int("default_expires_days")),
+        // 夹具 env 里的 default_expires_days：3.0 没有这个环境变量（新 Key 的有效天数是后台「领 Key」的设置，
+        // docs/v3-deviations.md #93 #97），「领 Key」模块面板上那一项的期望在 v3::Expect 里改写
         (
             "KEY_INACTIVITY_DELETE_DAYS",
             int("key_inactivity_delete_days"),

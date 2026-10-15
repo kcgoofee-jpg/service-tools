@@ -321,7 +321,7 @@ async fn build_meta(state: &AppState) -> Result<Map<String, Value>, InternalErro
     m.insert("web_login".into(), json!(true));
     m.insert(
         "audit_notice".into(),
-        json!(crate::audit::audit_disclosure(&state.db, &state.env).await?),
+        json!(crate::audit::audit_disclosure(&state.db).await?),
     );
     m.insert("registration".into(), reg);
     Ok(m)

@@ -548,7 +548,7 @@ async fn modules_put_errors() {
 }
 
 #[tokio::test]
-async fn service_registrar_reads_settings_and_env_defaults() {
+async fn service_registrar_reads_settings_and_constant_defaults() {
     use gate_server::kernel::{KernelRegistrar, ServiceRegistrar};
     let e = setup(&[
         ("DISCORD_CLIENT_ID", "100000000"),
@@ -560,12 +560,13 @@ async fn service_registrar_reads_settings_and_env_defaults() {
         ),
         ("DISCORD_GUILD_ID", "9000000000000000099"),
         ("SITE_URL", "https://owl.example"),
+        // 环境变量 REGISTER_MAX_USERS 已删除（docs/v3-deviations.md #93）：设了也不读
         ("REGISTER_MAX_USERS", "20"),
     ])
     .await;
     let reg = ServiceRegistrar(e.state.registration.clone().expect("注册服务配齐了"));
     let s = reg.settings().await.unwrap();
-    assert_eq!(s.max_users, 20, "没有后台设置时用环境默认值");
+    assert_eq!(s.max_users, 10, "没有后台设置时用 defaults 里的常量");
     assert_eq!(reg.count_active().await.unwrap(), 0);
     // 后台保存的优先
     e.state

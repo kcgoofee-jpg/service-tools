@@ -9,6 +9,7 @@ pub mod audit;
 pub mod auth;
 pub mod body;
 pub mod bugs;
+pub mod defaults;
 pub mod env;
 pub mod error;
 pub mod exporter;

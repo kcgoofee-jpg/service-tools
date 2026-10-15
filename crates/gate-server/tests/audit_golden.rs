@@ -11,10 +11,8 @@ use gate_core::pyext::PyErr;
 use gate_db::{Db, DbError};
 use gate_golden::{Case, assert_eq_py};
 use gate_server::audit;
-use gate_server::env::EnvConfig;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
 use std::io::{Cursor, Read, Write};
 use std::path::Path;
 
@@ -144,25 +142,28 @@ fn audit_notice_matches_python() {
 
 // ------------------------------------------------------------------ 设置读取（真实 SQLite）
 
-fn env_of(c: &Case) -> EnvConfig {
-    let mut env = EnvConfig::load(&HashMap::<String, String>::new());
-    // 旧版 getattr(settings, name, default)：夹具里缺的属性取这三个默认值
-    env.audit_prompts = false;
-    env.audit_thumbs = false;
-    env.audit_retention_days = 7;
-    let e = c.get("env").and_then(Value::as_object);
-    if let Some(e) = e {
-        if let Some(v) = e.get("audit_prompts") {
-            env.audit_prompts = v.as_bool().unwrap();
-        }
-        if let Some(v) = e.get("audit_thumbs") {
-            env.audit_thumbs = v.as_bool().unwrap();
-        }
-        if let Some(v) = e.get("audit_retention_days") {
-            env.audit_retention_days = v.as_i64().unwrap();
+/// 旧版库里没有对应设置行时取环境变量 `AUDIT_PROMPTS` / `AUDIT_THUMBS` / `AUDIT_RETENTION_DAYS`；这三个环境变量已删除，
+/// 默认值固定为不记提示词 / 不存原图 / 保留 7 天（docs/v3-deviations.md #93）。
+/// 期望一侧：库里没有的那一项换成常量默认值（夹具里的 `env` 不再起作用）。
+fn legacy_flags_with_constant_defaults(c: &Case) -> Value {
+    let kv = c.raw["kv"].as_object().unwrap();
+    let mut want = c.out().clone();
+    if c.err().is_some() {
+        return want;
+    }
+    for (i, (key, now)) in [
+        ("audit_prompts", json!(audit::DEFAULT_PROMPTS)),
+        ("audit_thumbs", json!(audit::DEFAULT_THUMBS)),
+        ("audit_retention_days", json!(audit::DEFAULT_RETENTION_DAYS)),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if !kv.contains_key(key) {
+            want[i] = now;
         }
     }
-    env
+    want
 }
 
 fn db_err(e: &DbError) -> (String, String) {
@@ -185,7 +186,7 @@ async fn audit_settings_match_python() {
         let fn_name = c.get("fn").and_then(Value::as_str).unwrap();
         if fn_name == "constants" {
             let out = c.out();
-            assert_eq!(out["IMAGE_RETENTION_KEY"], audit::IMAGE_RETENTION_KEY);
+            // out["IMAGE_RETENTION_KEY"]（audit_image_retention_days）：设置已删除（docs/v3-deviations.md #92），不比
             assert_eq!(out["IMAGE_CAP_KEY"], audit::IMAGE_CAP_KEY);
             assert_eq!(out["THUMB_SIDE"], audit::THUMB_SIDE);
             assert_eq!(out["THUMB_QUALITY"], audit::THUMB_QUALITY);
@@ -200,12 +201,18 @@ async fn audit_settings_match_python() {
         for (k, v) in c.raw["kv"].as_object().unwrap() {
             db.set_setting(k, v.as_str().unwrap()).await.unwrap();
         }
-        let env = env_of(c);
         let got: Result<Value, (String, String)> = match fn_name {
-            "audit_flags" => audit::audit_flags(&db, &env)
-                .await
-                .map(|(p, t, d)| json!([p, t, d]))
-                .map_err(|e| db_err(&e)),
+            "audit_flags" => {
+                let got = audit::audit_flags(&db)
+                    .await
+                    .map(|(p, t, d)| json!([p, t, d]))
+                    .map_err(|e| db_err(&e));
+                if let (None, Ok(v)) = (c.err(), &got) {
+                    assert_eq_py(c, v, &legacy_flags_with_constant_defaults(c));
+                    continue;
+                }
+                got
+            }
             // 已删除：成员能下载几天的原图（docs/v3-deviations.md #49），夹具里的用例跳过
             "audit_image_days" => continue,
             "audit_image_keep_hours" => audit::audit_image_keep_hours(&db)
@@ -217,14 +224,25 @@ async fn audit_settings_match_python() {
                 .map(|v| json!(v))
                 .map_err(|e| db_err(&e)),
             "audit_disclosure" => {
-                let got = audit::audit_disclosure(&db, &env)
+                let got = audit::audit_disclosure(&db)
                     .await
                     .map(|v| json!(v))
                     .map_err(|e| db_err(&e));
                 if let (None, Ok(v)) = (c.err(), &got) {
                     // 期望值里去掉已删除的「打包下载」一段，见 `without_download_clause`
-                    let want = json!(without_download_clause(c.out().as_str().unwrap()));
-                    assert_eq_py(c, v, &want);
+                    let mut want = without_download_clause(c.out().as_str().unwrap());
+                    // 库里没有对应设置行的项，旧版取环境变量，3.0 取常量默认值：这样的用例，说明文字用
+                    // `audit_notice`（上面逐条对拍过）按常量默认值重新生成
+                    let kv = c.raw["kv"].as_object().unwrap();
+                    if ["audit_prompts", "audit_thumbs", "audit_retention_days"]
+                        .iter()
+                        .any(|k| !kv.contains_key(*k))
+                    {
+                        let (p, t, d) = audit::audit_flags(&db).await.unwrap();
+                        let keep = audit::audit_image_keep_hours(&db).await.unwrap();
+                        want = audit::audit_notice(p, t, d, keep);
+                    }
+                    assert_eq_py(c, v, &json!(want));
                     continue;
                 }
                 got
