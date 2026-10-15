@@ -181,8 +181,8 @@ async fn setup_reg(extra: &[(&str, &str)]) -> (Env, Discord) {
     setup_reg_with(extra, true).await
 }
 
-/// `legacy_expiry`：旧版夹具都是在 `REGISTER_EXPIRES_DAYS` 默认 30 天下录的；3.0 默认改成 0（不过期，
-/// docs/v3-deviations.md #70），环境变量也删了（#93），对拍这些用例时把后台「领 Key」的有效天数设成 30。
+/// `legacy_expiry`：多数用例按「有效 30 天」写的，所以默认把后台「领 Key」的有效天数设成 30；
+/// 实际默认值是 0（不过期），对应的环境变量已删除。
 async fn setup_reg_with(extra: &[(&str, &str)], legacy_expiry: bool) -> (Env, Discord) {
     let d = Discord::start().await;
     let base = d.url();
@@ -209,7 +209,7 @@ async fn set_db(e: &Env, key: &str, value: &str) {
 }
 
 /// 只有拥有这个身份组的成员能领 Key（本服务器里的身份组）。原来是环境变量 `DISCORD_ROLE_ID`，
-/// 现在只来自后台「领 Key」的限定身份组设置（docs/v3-deviations.md #93）。
+/// 现在只来自后台「领 Key」的限定身份组设置。
 async fn require_role(e: &Env, role: &str) {
     set_db(e, "register_role_guild", GUILD).await;
     set_db(e, "register_role_id", role).await;
@@ -429,7 +429,7 @@ async fn info_has_only_what_the_bot_reads() {
     let info = bridge(&e, "/self-register/info", who(MEMBER, MEMBER)).await;
     assert_eq!(info.0, 200);
     assert_eq!(info.1["cache-control"], "no-store");
-    // 名额、默认额度、默认功能、上游状态机器人都不读，已删除（docs/v3-deviations.md #74）
+    // 名额、默认额度、默认功能、上游状态机器人都不读，已删除（info 只留开关、公告和冷却）
     assert_eq!(
         info.2,
         json!({"open": false, "notice": "", "upstream": {"image_cooldown_seconds": 0}})
@@ -442,7 +442,7 @@ async fn info_has_only_what_the_bot_reads() {
 
 #[tokio::test]
 async fn ban_revokes_the_key_and_blocks_reissue_until_unban() {
-    // 机器人的管理员命令（/ban /unban）已删除（docs/v3-deviations.md #73）：封禁只剩后台和服务方法
+    // 机器人的管理员命令（/ban /unban）已删除：封禁只剩后台和服务方法
     let (e, _d) = setup_reg(&[]).await;
     open_registration(&e).await;
     assert_eq!(issue(&e, MEMBER).await.0, 200);
@@ -475,7 +475,7 @@ async fn ban_revokes_the_key_and_blocks_reissue_until_unban() {
 
 const WELCOME: &str = "🦉 **欢迎来到猫头鹰公益站！** 这是你的 API Key（只发这一次，请先保存）：\n`<KEY>`\n\n**三步开始出图（以柏宝绘为例）**\n1. 打开柏宝绘 → 渠道 → 配置 → 新建接入点\n2. 接口地址填 `https://gate.test`（**不要**加 /v1）\n3. API Key 填上面 `nai-` 开头的整串，保存后随便生成一张图试试\n其他支持自定义 NovelAI 地址的客户端同样这样填。\n\n**不确定填对没有？** 在 Discord 输入 `/quota`，能看到额度就说明 Key 正常；也可以在 https://gate.test 用 Discord 登录查看自己的额度。\n\n**规则**\n• 每日额度：每人每天最多 V4.5 及以下 30 张，全站共用、先到先得；每天 7 点重置\n• 已开通功能：文生图\n• 连续 3 天没有成功出图会被自动回收，之后不能再领（不另行提醒）\n• 每把 Key 同时生成 1 张、排队 1 张，多发的会被退回，等前一张出完再发\n• 只提供免费出图：V4.5 及以下总像素 ≤1024×1024（宽高取 64 的倍数，超出自动等比缩小）；≤28 步、每次 1 张；图生图 / 局部重绘不开放；Vibe 在「已开通功能」里时可用，消耗每日 Anlas 额度\n• Key 只给本服务器成员：退出服务器后 Key 自动失效\n• 一人一把，请勿分享：共用或转售会被回收\n\n**常用命令**：`/quota` 看今日额度 · `/resetkey` Key 丢了或泄露时换新 · `/help` 简要说明\n遇到问题到 🛠️｜问题反馈 发截图（记得打码 Key）。";
 
-/// 没配 `REGISTER_EXPIRES_DAYS`：新 Key 不过期，欢迎私信里也没有「有效期」那一行（docs/v3-deviations.md #70）
+/// 没配 `REGISTER_EXPIRES_DAYS`：新 Key 不过期，欢迎私信里也没有「有效期」那一行
 #[tokio::test]
 async fn issued_key_never_expires_by_default() {
     let (e, _d) = setup_reg_with(&[], false).await;
@@ -1067,7 +1067,7 @@ async fn quota_shows_quiet_window_and_member_default_anlas() {
     let q = bridge(&e, "/self-register/quota", who(MEMBER, MEMBER)).await;
     assert_eq!(q.2["quiet_now"], true);
     assert_eq!(q.2["quiet_window"], format!("{start}:00–{end}:00"));
-    // 安静时段上限：默认 20（放慢）；站长设成 0 就是完全暂停，机器人据此选说法（docs/v3-deviations.md #74）
+    // 安静时段上限：默认 20（放慢）；站长设成 0 就是完全暂停，机器人据此选说法
     assert_eq!(q.2["quiet_cap"], 20);
     e.state
         .guard
@@ -1100,7 +1100,7 @@ async fn quota_shows_quiet_window_and_member_default_anlas() {
 #[tokio::test]
 async fn feedback_takes_one_text() {
     let (e, _d) = setup_reg(&[]).await;
-    // 选择题的「取题目」接口已经去掉（docs/v3-deviations.md #52）
+    // 选择题的「取题目」接口已经去掉（反馈改成了一段文字）
     let gone = bridge(&e, "/self-register/feedback/questions", who(MEMBER, MEMBER)).await;
     assert_eq!(gone.0, 404);
     // 提交也要鉴权
@@ -1250,7 +1250,7 @@ async fn feedback_cooldown_is_ten_minutes_per_person() {
 #[tokio::test]
 async fn bot_report_keeps_only_the_heartbeat() {
     let (e, _d) = setup_reg(&[]).await;
-    // 机器人拉「跑图分享设置」的接口已删除（docs/v3-deviations.md #54）
+    // 机器人拉「跑图分享设置」的接口已删除（跑图分享整个删了）
     let cfg = parse(
         Call::new("GET", "/self-register/bot/config")
             .bearer(SECRET)
@@ -1383,7 +1383,7 @@ async fn member_role_is_granted_removed_and_retried() {
 
 #[tokio::test]
 async fn sync_roles_removes_at_most_five_per_run() {
-    // 待摘身份组一次堆起很多时（比如全站重置之后），每轮最多摘 5 个，剩下的留到下一轮（docs/v3-deviations.md #78）
+    // 待摘身份组一次堆起很多时（比如全站重置之后），每轮最多摘 5 个，剩下的留到下一轮
     let (e, d) = setup_reg(&[("DISCORD_MEMBER_ROLE_ID", "900000000000000055")]).await;
     let ids: Vec<String> = (0..7).map(|i| format!("90000000000000040{i}")).collect();
     for id in &ids {
@@ -1528,7 +1528,7 @@ async fn departed_sweep_only_revokes_confirmed_departures() {
     );
 }
 
-/// 邀请 Key 只由站长手动删：持有人退群时不回收，只留一条操作日志提醒（docs/v3-deviations.md #57）。
+/// 邀请 Key 只由站长手动删：持有人退群时不回收，只留一条操作日志提醒。
 #[tokio::test]
 async fn departed_sweep_keeps_invite_keys_and_logs_a_reminder() {
     let (e, d) = setup_reg(&[]).await;
@@ -1728,7 +1728,7 @@ async fn background_jobs_do_not_panic_and_report_through_the_service() {
 #[tokio::test]
 async fn the_gateway_never_opens_a_dm_channel() {
     // 领 Key / 换 Key / 奖励 / 封禁 / 撤销全部走一遍：假 Discord 上不能出现私信相关的请求
-    // （docs/v3-deviations.md #76：Discord 应用曾被标记，680009，成员私信出口整个删除）
+    // （Discord 应用曾被标记（680009），成员私信出口整个删除）
     let (e, d) = setup_reg(&[]).await;
     open_registration(&e).await;
     assert_eq!(issue(&e, MEMBER).await.0, 200);
@@ -1782,7 +1782,7 @@ async fn get_raw(e: &Env, path: &str, cookie: Option<&str>) -> (u16, HeaderMap, 
 #[tokio::test]
 async fn web_login_is_always_on() {
     let (e, _d) = setup_reg(&[]).await;
-    // 暂停开关 web_login_paused 已删除（docs/v3-deviations.md #92）：库里残留的值不再拦登录
+    // 暂停开关 web_login_paused 已删除：库里残留的值不再拦登录
     set_db(&e, "web_login_paused", "1").await;
     let (s, h, _) = get_raw(&e, "/login", None).await;
     assert_eq!(s, 307);
@@ -2333,34 +2333,48 @@ async fn issue_result_enum_is_provisioned_for_plain_requests() {
     );
 }
 
-// ------------------------------------------------------------------ 成员名 / 打包：对拍旧版 golden
+// ------------------------------------------------------------------ 成员名 / 打包
 
-/// 旧 Python 生成的夹具（脚本见标签 py-final）：成员名、zip / epub 的条目与文本内容（欢迎文案不再对拍，见 docs/v3-deviations.md #75）。
-fn golden() -> Value {
-    let path = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/registration_text.json"
-    );
-    serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
-}
-
+/// 成员名的写法：显示名和用户名都有且不同 → `显示名 (@用户名)`；只有一个，或两个一样 → 就是它；
+/// 都没有 → `Discord:<id>`；超过 60 个字符时从后面截断（显示名优先保留）。
 #[test]
-fn member_labels_match_legacy_golden() {
-    // 欢迎语不再和旧版对拍（规则改了好几处，docs/v3-deviations.md #75）；成员名的写法没变，仍然对拍
-    let g = golden();
-    for c in g["labels"].as_array().unwrap() {
-        let u = &c["user"];
-        let s = |k: &str| u.get(k).and_then(Value::as_str).unwrap_or("").to_string();
-        let user = DiscordUser {
-            id: s("id"),
-            username: s("username"),
-            global_name: s("global_name"),
-            avatar: String::new(),
-        };
+fn member_label_writing() {
+    const ID: &str = "900000000000000001";
+    let named = |username: &str, global_name: &str| DiscordUser {
+        id: ID.into(),
+        username: username.into(),
+        global_name: global_name.into(),
+        avatar: String::new(),
+    };
+    let cases = [
+        (named("neo", "Neo"), "Neo (@neo)".to_string()),
+        (named("neo", "neo"), "neo".to_string()),
+        (named("neo", ""), "neo".to_string()),
+        (named("", "Neo"), "Neo".to_string()),
+        (named("", ""), format!("Discord:{ID}")),
+        // 资料里压根没有这两个字段
+        (
+            DiscordUser {
+                id: ID.into(),
+                ..Default::default()
+            },
+            format!("Discord:{ID}"),
+        ),
+        // 超长：显示名占满 60 个字符，用户名被截掉
+        (named(&"u".repeat(90), &"d".repeat(90)), "d".repeat(60)),
+        (named(&"u".repeat(90), ""), "u".repeat(60)),
+        // 按字符数而不是字节数截断：40 个字符的显示名 + ` (@` + 17 个字符的用户名，正好 60 个，右括号被截掉
+        (
+            named(&"猫".repeat(70), &"头鹰".repeat(20)),
+            format!("{} (@{}", "头鹰".repeat(20), "猫".repeat(17)),
+        ),
+    ];
+    assert_eq!(cases.len(), 9);
+    for (user, want) in cases {
         assert_eq!(
             gate_server::registration::member_label(&user),
-            c["out"].as_str().unwrap(),
-            "{u}"
+            want,
+            "{user:?}"
         );
     }
 }
@@ -2384,39 +2398,109 @@ fn archive(bytes: Vec<u8>) -> (Vec<String>, serde_json::Map<String, Value>) {
     (names, files)
 }
 
+/// 后台导出的 zip：条目按顺序编号并带时间，类型串不认识的按 png；`prompts.txt` 列出每张图的正面 / 负面和参数
+/// （`extra` 里的 `params` 不是 JSON、是 `null` 或缺项时，对应的参数行就省略）。
 #[test]
-fn export_archives_match_legacy_golden() {
-    let g = golden();
-    let ex = &g["export"];
-    let rows: Vec<gate_db::repo::audit::AuditImage> = ex["rows"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|r| gate_db::repo::audit::AuditImage {
-            id: r["id"].as_i64().unwrap(),
-            ts: r["ts"].as_f64().unwrap(),
-            image_type: r["type"].as_str().unwrap().into(),
-            prompt: r["prompt"].as_str().unwrap().into(),
-            negative: r["negative"].as_str().unwrap().into(),
-            extra: r["extra"].as_str().unwrap().into(),
-            image: r["image"].as_str().unwrap().as_bytes().to_vec(),
-        })
-        .collect();
+fn export_zip_entries_and_prompt_list() {
+    let row =
+        |id: i64, ts: f64, ty: &str, prompt: &str, negative: &str, extra: &str, image: &str| {
+            gate_db::repo::audit::AuditImage {
+                id,
+                ts,
+                image_type: ty.into(),
+                prompt: prompt.into(),
+                negative: negative.into(),
+                extra: extra.into(),
+                image: image.as_bytes().to_vec(),
+            }
+        };
+    let rows = vec![
+        row(
+            1,
+            1759996400.0,
+            "image/png",
+            "1girl, <forest> & 'mist'",
+            "lowres \"bad\"",
+            r#"{"params":{"seed":42,"sampler":"k_euler","steps":28,"scale":5,"width":832,"height":1216}}"#,
+            "PNG-ONE",
+        ),
+        row(
+            2,
+            1759996500.0,
+            "image/jpeg",
+            "1boy",
+            "",
+            r#"{"params":{"seed":0,"scale":5.5,"steps":0,"width":832}}"#,
+            "JPEG-TWO",
+        ),
+        row(
+            3,
+            1759996600.0,
+            "image/webp",
+            "plain",
+            "neg",
+            "not json",
+            "WEBP-THREE",
+        ),
+        row(
+            4,
+            1759996700.0,
+            "image/gif",
+            "unknown type",
+            "",
+            "",
+            "GIF-FOUR",
+        ),
+        row(
+            5,
+            1759996800.0,
+            "image/png",
+            "null params",
+            "",
+            r#"{"params":null}"#,
+            "PNG-FIVE",
+        ),
+    ];
     let clock = gate_core::clock::Clock::new("Asia/Shanghai", 7);
-    let (now, who) = (ex["now"].as_f64().unwrap(), ex["who"].as_str().unwrap());
-    // 夹具里还有旧版的 epub 条目：成员自助导出（EPUB）3.0 删了（docs/v3-deviations.md #49），只对拍后台导出用的 zip
-    let (names, files) = archive(gate_server::exporter::build_zip(&rows, who, &clock, now));
-    let want = &ex["zip"];
-    let want_names: Vec<String> = want["names"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|n| n.as_str().unwrap().to_string())
-        .collect();
-    assert_eq!(names, want_names, "zip 条目顺序");
-    for (name, content) in want["files"].as_object().unwrap() {
-        assert_eq!(&files[name], content, "zip: {name}");
+    let (names, files) = archive(gate_server::exporter::build_zip(
+        &rows,
+        "小明",
+        &clock,
+        1760000000.0,
+    ));
+    assert_eq!(
+        names,
+        [
+            "0001_20251009-155320.png",
+            "0002_20251009-155500.jpg",
+            "0003_20251009-155640.webp",
+            "0004_20251009-155820.png",
+            "0005_20251009-160000.png",
+            "prompts.txt",
+        ]
+    );
+    // 图片条目：原样写入（这里只看字节数）
+    for (name, len) in [
+        ("0001_20251009-155320.png", 7),
+        ("0002_20251009-155500.jpg", 8),
+        ("0003_20251009-155640.webp", 10),
+        ("0004_20251009-155820.png", 8),
+        ("0005_20251009-160000.png", 8),
+    ] {
+        assert_eq!(files[name], json!(len), "{name}");
     }
+    assert_eq!(
+        files["prompts.txt"],
+        json!(
+            "小明 的作品 · 共 5 张 · 导出于 2025-10-09 16:53\n\n\
+             [0001_20251009-155320.png]\n正面：1girl, <forest> & 'mist'\n负面：lowres \"bad\"\n\
+             参数：种子 42 · k_euler · 28步 · CFG 5 · 832×1216\n\n\
+             [0002_20251009-155500.jpg]\n正面：1boy\n负面：\n参数：种子 0 · CFG 5.5\n\n\
+             [0003_20251009-155640.webp]\n正面：plain\n负面：neg\n\n\
+             [0004_20251009-155820.png]\n正面：unknown type\n负面：\n\n\
+             [0005_20251009-160000.png]\n正面：null params\n负面：\n"
+        )
+    );
 }
 
 // ------------------------------------------------------------------ 设置：名额 × V5 提示、校验、欢迎文案变体、记录开关（对拍旧版 ops.py）
@@ -2439,8 +2523,8 @@ async fn registration_settings_ops_match_legacy() {
         .set_setting("register_daily_v5", "3")
         .await
         .unwrap();
-    // 名额 × 每人 V5 超过全站 V5 日限（150）：不再提醒（`v5_capacity` 已删除，docs/v3-deviations.md #69；
-    // 机器人的 /limit 命令也已删除，#73），名额照常保存
+    // 名额 × 每人 V5 超过全站 V5 日限（150）：不再提醒（`v5_capacity` 已删除，机器人的 /limit 命令也已删除），
+    // 名额照常保存
     for max_users in [60, 50] {
         gate_server::ops::set_registration(
             &e.state,
@@ -2483,7 +2567,7 @@ async fn registration_settings_ops_match_legacy() {
         invalid(set(json!({"expires_days": 99999})).await),
         "expires_days 超出范围 0～3650"
     );
-    // 动态额度开着（默认）：新 Key 的张数 / V5 / 模型范围归算法管，不能手改（docs/v3-deviations.md #70）
+    // 动态额度开着（默认）：新 Key 的张数 / V5 / 模型范围归算法管，不能手改
     match set(json!({"image_scope": "all", "daily_images": 5})).await {
         Err(gate_server::ops::OpsError::Managed(m)) => assert_eq!(
             m,
