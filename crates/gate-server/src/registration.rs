@@ -30,6 +30,8 @@ use std::time::Duration;
 pub const DM_BURST: usize = 3;
 pub const DM_WINDOW: f64 = 600.0;
 pub const DM_DAILY: usize = 20;
+/// 邀请 Key 持有人退群后，多久再核对一次（docs/v3-deviations.md #57）。
+const INVITE_RECHECK_SECS: f64 = 30.0 * 86400.0;
 
 // ------------------------------------------------------------------ 错误
 
@@ -494,7 +496,7 @@ impl RegistrationService {
     /// 或任何其他情况一律跳过、下轮再查，宁可漏收也不误删。返回本次回收人数。
     ///
     /// 邀请 Key 只由站长手动删（与每日清空 / 全站重置同一口径）：持有人退群时不删 Key，只写一条操作日志
-    /// 「退群（邀请 Key 保留）」提醒站长，并照常记下核对时间（明天再查），不会每轮重复（docs/v3-deviations.md #57）。
+    /// 「退群（邀请 Key 保留）」提醒站长，并把下次核对推到 30 天后（每月最多提醒一条）（docs/v3-deviations.md #57）。
     pub async fn sweep_departed(&self, now: f64, batch: i64) -> Result<usize, DbError> {
         if !self.flag(&site_flags::MEMBER_SWEEP).await? {
             return Ok(0);
@@ -537,7 +539,10 @@ impl RegistrationService {
                         now,
                     )
                     .await;
-                    self.db.set_member_checked(&discord_id, now).await?;
+                    // 30 天后再核对一次：持有人一直不回来时，操作日志每月提醒一条而不是每天一条
+                    self.db
+                        .set_member_checked(&discord_id, now + INVITE_RECHECK_SECS)
+                        .await?;
                     continue;
                 }
                 if self.revoke(&discord_id, false).await? {

@@ -1785,7 +1785,11 @@ async fn departed_sweep_keeps_invite_keys_and_logs_a_reminder() {
         })
         .await
         .unwrap();
-    assert_eq!(checked, now, "记下核对时间，明天再查");
+    assert_eq!(
+        checked,
+        now + 30.0 * 86400.0,
+        "下次核对推到 30 天后，每月最多提醒一条"
+    );
     let gets = d
         .calls()
         .iter()
