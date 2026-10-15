@@ -1,8 +1,10 @@
-//! params / site_flags / features / bot_config 与旧 Python 的对拍（夹具生成脚本见标签 py-final）。
+//! site_flags / features / bot_config 与旧 Python 的对拍（夹具生成脚本见标签 py-final）。
+//!
+//! 私密参数 `Params`（`flags/params_*.jsonl`）随私密参数文件一起取消（docs/v3-deviations.md #91），这几份夹具不再有对应的
+//! 代码，保留在原处不动、不再读。
 
 use gate_core::bot_config::{self, BotConfigError};
 use gate_core::features::{self, FeaturesError, VibeAnlas};
-use gate_core::params::Params;
 use gate_core::site_flags::{self, Kind, Spec, SpecDefault};
 use gate_core::{pyval, site_flags::ALL};
 use gate_golden::{Case, assert_eq_py, assert_eq_py_ordered, load};
@@ -107,87 +109,6 @@ fn spec_json(s: &Spec) -> Value {
 
 fn obj(v: &Value) -> Map<String, Value> {
     v.as_object().cloned().unwrap_or_default()
-}
-
-// ---------------------------------------------------------------- params
-
-#[test]
-fn params_p_golden() {
-    let cases = load(M, "flags/params_p");
-    assert!(cases.len() > 400);
-    for c in cases {
-        let p = Params::from_map(obj(&c.raw["data"]));
-        let name = c.arg(0).as_str().unwrap();
-        let default = c.arg(1);
-        assert_eq_py(&c, &p.get(name, default), c.out());
-        // 类型化的快捷读法必须与通用读法一致
-        match default {
-            Value::Bool(d) => assert_eq!(json!(p.bool(name, *d)), *c.out(), "行 {}", c.line),
-            Value::Number(n) if !n.is_f64() => {
-                assert_eq!(
-                    json!(p.int(name, n.as_i64().unwrap())),
-                    *c.out(),
-                    "行 {}",
-                    c.line
-                )
-            }
-            Value::Number(n) => assert_eq_py(
-                &c,
-                &pyval::float(p.float(name, n.as_f64().unwrap())),
-                c.out(),
-            ),
-            _ => {}
-        }
-    }
-}
-
-#[test]
-fn params_snapshot_golden() {
-    let mut n_snapshot = 0;
-    for c in load(M, "flags/params_snapshot") {
-        let p = Params::from_map(obj(&c.raw["data"]));
-        match c.raw["fn"].as_str().unwrap() {
-            "snapshot" => {
-                let defaults: BTreeMap<String, Value> =
-                    obj(&c.raw["defaults"]).into_iter().collect();
-                assert_eq_py_ordered(&c, &p.snapshot(&defaults), c.out());
-                n_snapshot += 1;
-            }
-            "overridden" => {
-                let name = c.arg(0).as_str().unwrap();
-                assert_eq_py(&c, &json!(p.overridden(name)), c.out());
-            }
-            other => panic!("未知 {other}"),
-        }
-    }
-    assert!(n_snapshot > 100);
-}
-
-#[test]
-fn params_update_golden() {
-    for c in load(M, "flags/params_update") {
-        let mut p = Params::from_map(obj(&c.raw["data"]));
-        p.apply_update(&obj(c.arg(0)));
-        // Python 写文件时 sort_keys，顺序不影响读取，这里只比内容
-        assert_eq_py(&c, &Value::Object(p.as_map().clone()), c.out());
-    }
-}
-
-#[test]
-fn params_load_golden() {
-    for c in load(M, "flags/params_load") {
-        if c.raw["fn"] == "_load_missing" {
-            assert_eq_py(
-                &c,
-                &Value::Object(Params::empty().as_map().clone()),
-                c.out(),
-            );
-            continue;
-        }
-        let text = c.raw["text"].as_str().unwrap();
-        let p = Params::from_json_text(text);
-        assert_eq_py_ordered(&c, &Value::Object(p.as_map().clone()), c.out());
-    }
 }
 
 // ---------------------------------------------------------------- site_flags

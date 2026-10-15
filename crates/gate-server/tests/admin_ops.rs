@@ -530,7 +530,7 @@ async fn runtime_limits_validate_apply_and_persist() {
 
 // ------------------------------------------------------------------ 账号保护
 
-const GUARD_FIELDS: &str = r#""fields":{"account_daily_cap":{"default":1000,"min":0,"max":20000,"label":"每个上游账号每天最多出图张数"},"daily_burst":{"default":150,"min":0,"max":20000,"label":"每日上限按时段放行：每天重置时（默认 7 点）先放出这么多张，之后每小时补「每日上限 ÷ 24」张，没用完的留到后面；0 = 不分时段（整天先到先得）"},"account_hourly_cap":{"default":150,"min":0,"max":240,"label":"每个上游账号每小时最多出图张数（自动调整：上游 429 减半；前一天顶到过上限且没有 429 才 +10，范围 100～160）"},"quiet_start":{"default":0,"min":0,"max":23,"label":"安静时段开始（北京时间，整点）；与结束相同 = 不启用（2026-10-10 起不启用：夜里不限速）"},"quiet_end":{"default":0,"min":0,"max":23,"label":"安静时段结束（北京时间，整点；与开始相同表示不设安静时段）"},"quiet_hourly_cap":{"default":20,"min":0,"max":240,"label":"安静时段每小时最多出图张数；0 = 完全暂停出图（2026-10-13 站长：3-7 点停用）"},"interval_jitter":{"default":5,"min":0,"max":30,"label":"两次出图间隔额外随机增加 0～N 秒"},"key_image_queue":{"default":1,"min":0,"max":3,"label":"每把 Key 在生成中的那张之外，最多再排几张"},"queue_per_account":{"default":5,"min":0,"max":100,"label":"每个上游账号全站最多同时排几张图"}}"#;
+const GUARD_FIELDS: &str = r#""fields":{"account_daily_cap":{"default":1000,"min":0,"max":20000,"label":"每个上游账号每天最多出图张数"},"daily_burst":{"default":150,"min":0,"max":20000,"label":"每日上限按时段放行：每天重置时（默认 7 点）先放出这么多张，之后每小时补「每日上限 ÷ 24」张，没用完的留到后面；0 = 不分时段（整天先到先得）"},"account_hourly_cap":{"default":150,"min":0,"max":240,"label":"每个上游账号每小时最多出图张数（自动调整：上游 429 减半；前一天顶到过上限且没有 429 才上调一步；下限、上限、步长另有设置）"},"quiet_start":{"default":0,"min":0,"max":23,"label":"安静时段开始（北京时间，整点）；与结束相同 = 不启用（2026-10-10 起不启用：夜里不限速）"},"quiet_end":{"default":0,"min":0,"max":23,"label":"安静时段结束（北京时间，整点；与开始相同表示不设安静时段）"},"quiet_hourly_cap":{"default":20,"min":0,"max":240,"label":"安静时段每小时最多出图张数；0 = 完全暂停出图（2026-10-13 站长：3-7 点停用）"},"interval_jitter":{"default":5,"min":0,"max":30,"label":"两次出图间隔额外随机增加 0～N 秒"},"key_image_queue":{"default":1,"min":0,"max":3,"label":"每把 Key 在生成中的那张之外，最多再排几张"},"queue_per_account":{"default":5,"min":0,"max":100,"label":"每个上游账号全站最多同时排几张图"},"hourly_min":{"default":100,"min":0,"max":240,"label":"每小时上限自动调整的下限（上游 429 减半后不会低于它）"},"hourly_max":{"default":160,"min":0,"max":240,"label":"每小时上限自动调整的上限（平稳一天后自动上调，最高到这里）"},"hourly_step":{"default":10,"min":0,"max":100,"label":"每小时上限平稳一天后自动上调的步长；0 = 不自动上调"}}"#;
 
 fn guard_json(values: &str, quiet_now: bool, cap: i64, accounts: &str, queued: i64) -> String {
     format!(
@@ -542,7 +542,7 @@ fn guard_json(values: &str, quiet_now: bool, cap: i64, accounts: &str, queued: i
 async fn guard_get_put() {
     let e = setup(&[]).await;
     let api = Api::login(&e).await;
-    let defaults = r#"{"account_daily_cap":1000,"daily_burst":150,"account_hourly_cap":150,"quiet_start":0,"quiet_end":0,"quiet_hourly_cap":20,"interval_jitter":5,"key_image_queue":1,"queue_per_account":5}"#;
+    let defaults = r#"{"account_daily_cap":1000,"daily_burst":150,"account_hourly_cap":150,"quiet_start":0,"quiet_end":0,"quiet_hourly_cap":20,"interval_jitter":5,"key_image_queue":1,"queue_per_account":5,"hourly_min":100,"hourly_max":160,"hourly_step":10}"#;
     // 节约模式折算的 today_units 已删除（docs/v3-deviations.md #67）
     let acct0 = r#"[{"position":1,"usable":true,"today":0,"this_hour":0}]"#;
     assert_eq!(
@@ -551,7 +551,7 @@ async fn guard_get_put() {
     );
 
     let before = settings(&e).await;
-    let after_cap = r#"{"account_daily_cap":1000,"daily_burst":150,"account_hourly_cap":120,"quiet_start":0,"quiet_end":0,"quiet_hourly_cap":20,"interval_jitter":5,"key_image_queue":1,"queue_per_account":5}"#;
+    let after_cap = r#"{"account_daily_cap":1000,"daily_burst":150,"account_hourly_cap":120,"quiet_start":0,"quiet_end":0,"quiet_hourly_cap":20,"interval_jitter":5,"key_image_queue":1,"queue_per_account":5,"hourly_min":100,"hourly_max":160,"hourly_step":10}"#;
     assert_eq!(
         api.text("PUT", "/guard", Some(json!({"account_hourly_cap": 120})))
             .await,
@@ -574,7 +574,7 @@ async fn guard_get_put() {
     );
     assert_eq!(e.state.guard.with(|g| g.values["quiet_start"]), 3);
 
-    let label_cap = "每个上游账号每小时最多出图张数（自动调整：上游 429 减半；前一天顶到过上限且没有 429 才 +10，范围 100～160）";
+    let label_cap = "每个上游账号每小时最多出图张数（自动调整：上游 429 减半；前一天顶到过上限且没有 429 才上调一步；下限、上限、步长另有设置）";
     let frozen = settings(&e).await;
     for (body, detail) in [
         (
@@ -607,6 +607,70 @@ async fn guard_get_put() {
         && r.2 == "账号保护与排队"
         && r.3 == r#"{"account_hourly_cap":120}"#
         && r.4));
+}
+
+#[tokio::test]
+async fn guard_hourly_adjust_bounds_are_settings() {
+    // 每小时上限自动调整的下限 / 上限 / 步长：以前是私密参数文件 private_params.json 的 capacity.hourly_*，
+    // 现在和别的保护字段一样在后台改、存 site_settings（docs/v3-deviations.md #91）
+    let e = setup(&[]).await;
+    let api = Api::login(&e).await;
+    let v = api.get("/guard").await;
+    assert_eq!(
+        (
+            &v["values"]["hourly_min"],
+            &v["values"]["hourly_max"],
+            &v["values"]["hourly_step"]
+        ),
+        (&json!(100), &json!(160), &json!(10))
+    );
+    let before = settings(&e).await;
+    let (s, v) = api
+        .json(
+            "PUT",
+            "/guard",
+            Some(json!({"hourly_min": 90, "hourly_max": 200, "hourly_step": 20})),
+        )
+        .await;
+    assert_eq!(s, 200);
+    assert_eq!(
+        (
+            &v["values"]["hourly_min"],
+            &v["values"]["hourly_max"],
+            &v["values"]["hourly_step"]
+        ),
+        (&json!(90), &json!(200), &json!(20))
+    );
+    assert_eq!(
+        changed(&before, &settings(&e).await),
+        map(&[
+            ("guard_hourly_min", "90"),
+            ("guard_hourly_max", "200"),
+            ("guard_hourly_step", "20"),
+        ])
+    );
+    // 上游 429：150 减半是 75，被下限 90 托住
+    let change = e.state.guard.on_upstream_429(e.state.now()).await.unwrap();
+    assert_eq!(change, Some((150, 90)));
+    // 下限不能高于上限（只改一边也按现值比）；范围越界照旧 422；什么都没写
+    let frozen = settings(&e).await;
+    api.fails(
+        "PUT",
+        "/guard",
+        Some(json!({"hourly_min": 230})),
+        422,
+        "每小时上限自动调整的下限不能高于上限",
+    )
+    .await;
+    api.fails(
+        "PUT",
+        "/guard",
+        Some(json!({"hourly_step": 101})),
+        422,
+        "每小时上限平稳一天后自动上调的步长；0 = 不自动上调 必须在 0～100 之间",
+    )
+    .await;
+    assert_eq!(settings(&e).await, frozen);
 }
 
 #[tokio::test]

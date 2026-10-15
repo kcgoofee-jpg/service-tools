@@ -562,7 +562,12 @@ mod v3 {
     const DROPPED_SETTINGS: [&str; 2] = ["guard_base_daily_images", "quota_base_now"];
 
     /// 整个场景测的是 3.0 已经删掉的规则，没有可比的东西。
-    pub const REMOVED_SCENARIOS: [(&str, &str); 9] = [
+    pub const REMOVED_SCENARIOS: [(&str, &str); 10] = [
+        (
+            "v19_private_params",
+            "测的就是私密参数 allocation.min_coverage_hours 把昨天数据覆盖的下限改成 10 小时：\
+             私密参数文件已取消，下限固定为 20 小时（docs/v3-deviations.md #91）",
+        ),
         (
             "k23_enforce_slots_via_tick",
             "测的就是内核 tick 里「名额 +5」生效（名额 12 → 17）：规则已删除（docs/v3-deviations.md #68）",
@@ -1012,6 +1017,10 @@ mod v3 {
                             .and_then(Value::as_object_mut)
                         {
                             g.shift_remove("base_daily_images");
+                            // 每小时上限自动调整的下限 / 上限 / 步长（原来是私密参数，docs/v3-deviations.md #91）
+                            g.insert("hourly_min".into(), json!(100));
+                            g.insert("hourly_max".into(), json!(160));
+                            g.insert("hourly_step".into(), json!(10));
                         }
                     }
                     // 分配模块的面板参数「V5 每人范围 3～30 张」换成新公式的说明（#63）
@@ -1248,13 +1257,6 @@ async fn run_case(case: &Value) -> Result<(), String> {
 
     let mock = MockUpstream::start().await;
     let dir = tempfile::tempdir().unwrap();
-    if let Some(p) = case["private_params"].as_object() {
-        std::fs::write(
-            dir.path().join("private_params.json"),
-            serde_json::to_vec(p).unwrap(),
-        )
-        .unwrap();
-    }
     let num = |k: &str| gate_core::pyc::float_repr(env[k].as_f64().unwrap());
     let int = |k: &str| env[k].as_i64().unwrap().to_string();
     let vars: HashMap<String, String> = [

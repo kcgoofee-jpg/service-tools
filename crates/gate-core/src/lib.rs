@@ -15,7 +15,6 @@ pub mod idle;
 pub mod jsondump;
 pub mod key_status;
 pub mod modules;
-pub mod params;
 pub mod policy;
 pub mod pyc;
 pub mod pyext;

@@ -25,7 +25,6 @@ pub mod media;
 pub mod middleware;
 pub mod multipart;
 pub mod ops;
-pub mod params;
 pub mod reconciliation;
 pub mod registration;
 pub mod reqctx;

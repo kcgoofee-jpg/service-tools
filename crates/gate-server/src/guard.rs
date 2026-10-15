@@ -2,18 +2,16 @@
 //! 对应旧版 `app/guard.py` 里带 `await db` 的方法（load / save / seed_hour / token_block_reason /
 //! on_upstream_429 / adapt_daily）。核心状态放在同步 Mutex 里，从不跨 await 持锁：先查库，再算。
 
-use crate::params::ParamsStore;
 use gate_core::guard::{AdaptPlan, GuardCore, GuardError, parse_setting_float};
 use gate_core::reasons::Reason;
 use gate_db::Db;
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 pub struct Guard {
     core: Mutex<GuardCore>,
     db: Db,
-    params: Arc<ParamsStore>,
     /// 有出图条目被移除（出完 / 被拒 / 取消）：叫醒同一把 Key 排在后面的那张（见 `admission::image_admission`）。
     pub released: tokio::sync::Notify,
 }
@@ -33,11 +31,10 @@ impl From<GuardError> for GuardIoError {
 }
 
 impl Guard {
-    pub fn new(db: Db, tz: &str, reset_hour: i64, params: Arc<ParamsStore>) -> Self {
+    pub fn new(db: Db, tz: &str, reset_hour: i64) -> Self {
         Self {
             core: Mutex::new(GuardCore::new(tz, reset_hour)),
             db,
-            params,
             released: tokio::sync::Notify::new(),
         }
     }
@@ -72,6 +69,7 @@ impl Guard {
         body: &Map<String, Value>,
     ) -> Result<Vec<(String, i64)>, GuardIoError> {
         let updates = GuardCore::validate_save(body)?;
+        self.with(|c| c.check_hourly_bounds(&updates))?;
         if !updates.is_empty() {
             let writes: Vec<(String, String)> = updates
                 .iter()
@@ -107,8 +105,7 @@ impl Guard {
     /// 上游 429：每小时上限减半（AIMD）。返回 (旧, 新)。
     pub async fn on_upstream_429(&self, now: f64) -> Result<Option<(i64, i64)>, GuardIoError> {
         let prev = parse_setting_float(self.db.get_setting("guard_429_cap_at").await?.as_deref())?;
-        let params = self.params.get();
-        let r = self.with(|g| g.on_upstream_429(now, prev, &params))?;
+        let r = self.with(|g| g.on_upstream_429(now, prev))?;
         self.db.set_settings_bulk(&r.writes).await?;
         Ok(r.change)
     }
@@ -137,8 +134,7 @@ impl Guard {
                 let first = self.db.first_log_ts().await?;
                 let seen =
                     parse_setting_float(self.db.get_setting("guard_429_cap_at").await?.as_deref())?;
-                let params = self.params.get();
-                self.with(|g| g.adapt_daily_finish(now, hit, first, seen, &params))?
+                self.with(|g| g.adapt_daily_finish(now, hit, first, seen))?
             }
         };
         // 旧版：只改时间戳时单独 `set_setting`；真的加窗（上限 + 时间戳）是 `_set_adaptive` 里一次 `set_settings_bulk`，同一个事务

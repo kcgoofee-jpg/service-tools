@@ -12,6 +12,11 @@
 //! - 轨迹里的 `site_idle` 只重放它的副作用（`hourly_cap` 记上限、弹出 3 小时前的时间戳），不比返回值；
 //!   `paced_headroom` 没有副作用，跳过。
 //!
+//! docs/v3-deviations.md #91：取消私密参数文件，其中的 `capacity.hourly_min` / `hourly_max` / `hourly_step` 变成设置字段
+//! `hourly_min` / `hourly_max` / `hourly_step`（放在 `FIELDS` 最后），`capacity.hourly_decrease` 变成常量（`GuardCore.hourly_decrease`）。
+//! 夹具里没有这三个字段：设置表、`values`、`describe` 的期望一侧在末尾补上它们的默认值；轨迹状态里的 `v` 和 `constants`
+//! 里的 `FIELDS` 只比旧的那几项；轨迹的 `init.params` 在重放前换算成这几个字段的值（Python `int()` / `float()` 的换算在这里）。
+//!
 //! docs/v3-deviations.md #64：10 分钟突发窗口删除（常量 `WINDOW_10M` / `BURST_DIVISOR`，`burst_cap` /
 //! `count_10m` / `burst_blocked` / `minutes_until_free_10m`）。轨迹里这几步同样只重放副作用；
 //! `token_block_reason` 旧版因突发窗口给出的 `burst_cap` 拒绝，3.0 放行（期望一侧换成 None）。
@@ -19,7 +24,6 @@
 use gate_core::guard::{
     self, AdaptPlan, FIELDS, GuardCore, GuardError, parse_setting_float, stamps_from_rows,
 };
-use gate_core::params::Params;
 use gate_core::reasons::Reason;
 use gate_golden::{Case, assert_eq_py, assert_eq_py_ordered, f, load};
 use serde_json::{Map, Value, json};
@@ -36,10 +40,62 @@ const REMOVED_FIELD: &str = "base_daily_images";
 /// 它的说明（旧版校验失败的消息以它开头）。
 const REMOVED_LABEL: &str = "V4.5 每人每天保底张数";
 
-/// 期望一侧：去掉 `values` 里已删除的字段。
+/// 3.0 改过的字段说明（docs/v3-deviations.md #91）：每小时上限的自动调整范围和步长现在是设置，说明里不再写死
+/// 「+10，范围 100～160」。夹具冻结，期望一侧换成新说明。
+const LABEL_FIXES: [(&str, &str); 1] = [(
+    "每个上游账号每小时最多出图张数（自动调整：上游 429 减半；前一天顶到过上限且没有 429 才 +10，范围 100～160）",
+    "每个上游账号每小时最多出图张数（自动调整：上游 429 减半；前一天顶到过上限且没有 429 才上调一步；下限、上限、步长另有设置）",
+)];
+
+fn fix_label(s: &str) -> String {
+    LABEL_FIXES
+        .iter()
+        .fold(s.to_string(), |t, (old, new)| t.replace(old, new))
+}
+
+fn fix_labels(v: &Value) -> Value {
+    serde_json::from_str(&fix_label(&v.to_string())).unwrap()
+}
+
+/// 3.0 新增的设置字段个数（#91；在 `FIELDS` 最后，夹具里没有）。
+const ADDED_FIELDS: usize = 3;
+
+/// 旧版就有的字段（夹具对得上的那些）。
+fn legacy_fields() -> impl Iterator<Item = &'static guard::Field> {
+    FIELDS.iter().take(FIELDS.len() - ADDED_FIELDS)
+}
+
+/// 新增字段。
+fn added_fields() -> impl Iterator<Item = &'static guard::Field> {
+    FIELDS.iter().skip(FIELDS.len() - ADDED_FIELDS)
+}
+
+/// 期望一侧：`values` 去掉已删除的字段，末尾补上新增字段的默认值。
 fn without_removed(v: &Value) -> Value {
+    without_removed_at(v, None)
+}
+
+/// 同上；新增字段的值取 `g` 里的现值（轨迹的 `init.params` 会改它们）。
+fn without_removed_at(v: &Value, g: Option<&GuardCore>) -> Value {
     let mut m = obj(v);
     m.shift_remove(REMOVED_FIELD);
+    for fl in added_fields() {
+        let now = g.map_or(fl.default, |g| g.values[fl.name]);
+        m.insert(fl.name.to_string(), json!(now));
+    }
+    Value::Object(m)
+}
+
+/// 期望一侧：`describe().fields` 去掉已删除的字段，末尾补上新增字段。
+fn fields_without_removed(v: &Value) -> Value {
+    let mut m = obj(v);
+    m.shift_remove(REMOVED_FIELD);
+    for fl in added_fields() {
+        m.insert(
+            fl.name.to_string(),
+            json!({"default": fl.default, "min": fl.min, "max": fl.max, "label": fl.label}),
+        );
+    }
     Value::Object(m)
 }
 
@@ -57,15 +113,17 @@ fn writes_without_removed(v: &Value) -> Value {
 }
 
 /// 期望一侧：`describe()` 去掉已删除的字段。
-fn describe_without_removed(v: &Value) -> Value {
+fn describe_without_removed(v: &Value, g: &GuardCore) -> Value {
     let mut m = obj(v);
-    for k in ["values", "fields"] {
-        if let Some(x) = m.get(k) {
-            let x = without_removed(x);
-            m.insert(k.into(), x);
-        }
+    if let Some(x) = m.get("values") {
+        let x = without_removed_at(x, Some(g));
+        m.insert("values".into(), x);
     }
-    Value::Object(m)
+    if let Some(x) = m.get("fields") {
+        let x = fields_without_removed(x);
+        m.insert("fields".into(), x);
+    }
+    fix_labels(&Value::Object(m))
 }
 
 /// 期望一侧：轨迹状态里的 `v`（按旧版 FIELDS 顺序，已删除的 `base_daily_images` 在最后）。
@@ -74,7 +132,7 @@ fn state_without_removed(v: &Value) -> Value {
     if let Some(Value::Array(vals)) = m.get_mut("v") {
         assert_eq!(
             vals.len(),
-            FIELDS.len() + 1,
+            FIELDS.len() - ADDED_FIELDS + 1,
             "夹具里的 v 应带着已删除的字段"
         );
         vals.pop();
@@ -99,7 +157,7 @@ fn fnv_bytes(bytes: impl IntoIterator<Item = u8>) -> String {
 }
 
 fn state_json(g: &GuardCore) -> Value {
-    let v: Vec<Value> = FIELDS.iter().map(|fl| json!(g.values[fl.name])).collect();
+    let v: Vec<Value> = legacy_fields().map(|fl| json!(g.values[fl.name])).collect();
     let s: Map<String, Value> = g
         .starts
         .iter()
@@ -158,11 +216,10 @@ fn constants_golden() {
     for c in load(M, "guard/constants") {
         match c.raw["fn"].as_str().unwrap() {
             "constants" => {
-                let fields: Vec<Value> = FIELDS
-                    .iter()
+                let fields: Vec<Value> = legacy_fields()
                     .map(|fl| json!([fl.name, fl.default, fl.min, fl.max, fl.label]))
                     .collect();
-                let mut want = obj(c.out());
+                let mut want = obj(&fix_labels(c.out()));
                 for k in ["IDLE_SHARE", "WINDOW_10M", "BURST_DIVISOR"] {
                     want.shift_remove(k);
                 }
@@ -277,7 +334,7 @@ fn settings_golden() {
                     }
                     (Err(e), Some(ty)) => {
                         assert_eq!(err_type(e), ty, "第 {} 行", c.line);
-                        let msg = c.raw["err"]["msg"].as_str().unwrap();
+                        let msg = &fix_label(c.raw["err"]["msg"].as_str().unwrap());
                         let GuardError::Value(got) = e else {
                             unreachable!()
                         };
@@ -361,6 +418,44 @@ fn grids_golden() {
     assert!(n.0 == 576 && n.1 > 70, "{n:?}");
 }
 
+/// Python `int(v)`（夹具里的私密参数 `P("capacity.hourly_*", 整数起点值)`）；转不了返回 None（回到起点值）。
+fn py_int_of(v: &Value) -> Option<i64> {
+    match v {
+        Value::Bool(b) => Some(i64::from(*b)),
+        Value::Number(n) => n
+            .as_i64()
+            .or_else(|| n.as_f64().and_then(gate_core::pyc::int_of)),
+        Value::String(s) => gate_core::pyc::parse_int(s),
+        _ => None,
+    }
+}
+
+/// Python `float(v)`（`P("capacity.hourly_decrease", 0.5)`）。
+fn py_float_of(v: &Value) -> Option<f64> {
+    match v {
+        Value::Bool(b) => Some(f64::from(u8::from(*b))),
+        Value::Number(n) => n.as_f64(),
+        Value::String(s) => gate_core::pyc::parse_float(s),
+        _ => None,
+    }
+}
+
+/// 轨迹的私密参数 → 3.0 的设置字段与常量（其余的键，如 `capacity.idle_share`，旧版就不读了）。
+fn apply_params(g: &mut GuardCore, params: &Map<String, Value>) {
+    for (key, name) in [
+        ("capacity.hourly_min", "hourly_min"),
+        ("capacity.hourly_max", "hourly_max"),
+        ("capacity.hourly_step", "hourly_step"),
+    ] {
+        if let Some(n) = params.get(key).and_then(py_int_of) {
+            g.values.insert(name.into(), n);
+        }
+    }
+    if let Some(x) = params.get("capacity.hourly_decrease").and_then(py_float_of) {
+        g.hourly_decrease = x;
+    }
+}
+
 /// 一条轨迹的重放。返回各操作的执行次数，供上层断言覆盖面。
 fn replay(c: &Case, counts: &mut BTreeMap<String, usize>) {
     let init = &c.raw["init"];
@@ -376,7 +471,7 @@ fn replay(c: &Case, counts: &mut BTreeMap<String, usize>) {
         .into_iter()
         .map(|(k, v)| (k, v.as_str().unwrap().to_string()))
         .collect();
-    let params = Params::from_map(obj(&init["params"]));
+    apply_params(&mut g, &obj(&init["params"]));
 
     for (i, step) in c.raw["steps"].as_array().unwrap().iter().enumerate() {
         let ctx = format!("轨迹 {} 第 {i} 步 {}", c.raw["name"], step["op"]);
@@ -446,7 +541,7 @@ fn replay(c: &Case, counts: &mut BTreeMap<String, usize>) {
                 let prev = parse_setting_float(kv.get("guard_429_cap_at").map(String::as_str))
                     .map_err(|e| err_type(&e).to_string())?;
                 let r = g
-                    .on_upstream_429(now, prev, &params)
+                    .on_upstream_429(now, prev)
                     .map_err(|e| err_type(&e).to_string())?;
                 writes = r.writes;
                 Ok(r.change.map_or(Value::Null, |(a, b)| json!([a, b])))
@@ -463,14 +558,8 @@ fn replay(c: &Case, counts: &mut BTreeMap<String, usize>) {
                     AdaptPlan::NeedUsage => {
                         let seen = rd("guard_429_cap_at")?;
                         let first = step["first"].as_f64();
-                        g.adapt_daily_finish(
-                            now,
-                            step["hit"].as_bool().unwrap(),
-                            first,
-                            seen,
-                            &params,
-                        )
-                        .map_err(|e| err_type(&e).to_string())?
+                        g.adapt_daily_finish(now, step["hit"].as_bool().unwrap(), first, seen)
+                            .map_err(|e| err_type(&e).to_string())?
                     }
                 };
                 writes = adapted.writes;
@@ -559,13 +648,17 @@ fn replay(c: &Case, counts: &mut BTreeMap<String, usize>) {
                     let GuardError::Value(m) = &e else {
                         unreachable!()
                     };
-                    assert_eq!(m, step["err"]["msg"].as_str().unwrap(), "{ctx}：消息不同");
+                    assert_eq!(
+                        m,
+                        &fix_label(step["err"]["msg"].as_str().unwrap()),
+                        "{ctx}：消息不同"
+                    );
                     Err(err_type(&e).to_string())
                 }
             },
             "describe" => {
                 let got = g.describe(now);
-                let want = describe_without_removed(&step["out"]);
+                let want = describe_without_removed(&step["out"], &g);
                 assert_eq_py_ordered(c, &got, &want);
                 Ok(want)
             }
@@ -589,8 +682,8 @@ fn replay(c: &Case, counts: &mut BTreeMap<String, usize>) {
         };
 
         let want_out = match op {
-            "save" => without_removed(&step["out"]),
-            "describe" => describe_without_removed(&step["out"]),
+            "save" => without_removed_at(&step["out"], Some(&g)),
+            "describe" => describe_without_removed(&step["out"], &g),
             // 突发窗口的拒绝 3.0 不再有（#64）
             "token_block_reason" if step["out"][1] == "burst_cap" => Value::Null,
             // 每日上限的文案不再写「按算力折算」（节约模式已删除，#67）

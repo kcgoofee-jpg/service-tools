@@ -8,7 +8,6 @@ use crate::env::EnvConfig;
 use crate::guard::Guard;
 use crate::hooks::GateHooks;
 use crate::middleware::StatusStats;
-use crate::params::ParamsStore;
 use crate::registration::{MemberWeb, RegistrationService};
 use crate::runtime::{
     AuthGuard, ImageCooldown, KeyPauses, SlidingWindow, TagQueue, UpstreamHealth,
@@ -68,7 +67,6 @@ pub struct Inner {
     pub assets: Assets,
     pub status_stats: StatusStats,
     pub version: &'static str,
-    pub params: Arc<ParamsStore>,
     pub alerter: Arc<Alerter>,
     pub announcer: Arc<Alerter>,
     pub bugs: Arc<Bugs>,
@@ -146,8 +144,7 @@ impl AppState {
         let now = crate::time::now();
         let db = Db::open(env.db_path(), now, gate_core::reasons::BACKFILL)?;
         db.set_rule_version(VERSION);
-        let clock = Clock::new(&env.tz, env.day_reset_hour);
-        let params = Arc::new(ParamsStore::new(env.private_params_path()));
+        let clock = Clock::service();
         let alerter = Arc::new(Alerter::owner(&env));
         let announcer = Arc::new(Alerter::announcer(&env));
         let tasks = TaskTracker::new();
@@ -208,7 +205,6 @@ impl AppState {
             assets,
             status_stats: StatusStats::default(),
             version: VERSION,
-            params,
             alerter,
             announcer,
             bugs,

@@ -51,12 +51,11 @@
 //! 复盘里的 `base_blocks`），超过 B 只在全站空闲时放行。算法早就把 B 同步成 A，这一层从不生效；3.0 整层删除
 //! （docs/v3-deviations.md #61）：复盘的 `from` / `to` 只记 `[A]`，结果里没有 `base`，不再写 `guard_base_daily_images`。
 //!
-//! # `P(...)` 私密参数
+//! # 算法参数 [`QuotaParams`]
 //!
-//! `allocation.*` 等参数来自 `data/private_params.json`（见 `app/params.py`），由服务层解析后填进 [`QuotaParams`]：
-//! `P(name, default)` 的类型跟起点值一致（int 默认值 → `int(v)`；float → `float(v)`；转换失败回退起点值）。
-//! 3.0 只剩 `allocation.min_coverage_hours`；V5 的系数表 / 洪峰 / 收紧 / 人数下限参数随旧的 V5 公式删除，
-//! 文件里残留的键读到也不用（docs/v3-deviations.md #63）。
+//! 2.x 的 `allocation.*` 来自私密参数文件 `data/private_params.json`；3.0 取消了这个文件（docs/v3-deviations.md #91），
+//! 服务层直接用 [`QuotaParams::default`]（代码里的公开起点值）。当时只剩 `allocation.min_coverage_hours`；
+//! V5 的系数表 / 洪峰 / 收紧 / 人数下限参数随旧的 V5 公式删除（docs/v3-deviations.md #63）。
 //!
 //! # V5（docs/v3-deviations.md #63）
 //!
@@ -410,11 +409,11 @@ pub fn simple(prev_a: Option<i64>, usage: &[i64], budget: i64, cfg: &QuotaCfg) -
 // V5：恢复速度、全站 / 每人额度
 // ---------------------------------------------------------------------------
 
-/// 私密参数（`P("allocation.*", 起点值)`）的当前值。`Default` = 代码里的公开起点值。
+/// 算法参数。`Default` = 代码里的公开起点值（线上就用它；字段留着是为了让对拍夹具里用过别的值的用例仍能重放）。
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct QuotaParams {
-    /// `allocation.min_coverage_hours`
+    /// 昨天的日志至少覆盖多少小时才调整每人额度（2.x 的私密参数 `allocation.min_coverage_hours`）
     pub min_coverage_hours: i64,
 }
 

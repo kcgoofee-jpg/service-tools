@@ -349,9 +349,6 @@ impl EnvConfig {
     pub fn upstream_tokens_path(&self) -> PathBuf {
         self.data_dir.join("upstream_tokens.json")
     }
-    pub fn private_params_path(&self) -> PathBuf {
-        self.data_dir.join("private_params.json")
-    }
 }
 
 #[cfg(test)]
