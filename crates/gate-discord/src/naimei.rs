@@ -301,7 +301,7 @@ impl Naimei {
                 it,
                 &[
                     ("text", json!(text)),
-                    ("username", json!(gate_core::pyc::take_chars(username, 80))),
+                    ("username", json!(handlers::clip(username, 80))),
                 ],
             )
             .await?;

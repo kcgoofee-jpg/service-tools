@@ -1,9 +1,9 @@
 //! 网关事件的宽容解析：只取机器人用得到的字段。
 //!
-//! 为什么不用 `twilight_model` 的 `Event`：它会把整个 GUILD_CREATE / MESSAGE_CREATE / INTERACTION_CREATE
+//! 为什么不用 `twilight_model` 的 `Event`：它会把整个 GUILD_CREATE / INTERACTION_CREATE
 //! 严格反序列化（含频道、角色、组件树……）。Discord 新增一种频道或组件类型时，严格模型会整条事件解析失败，
-//! 机器人就悄悄丢掉用户的命令（用户只看到「应用程序没有响应」）。discord.py 是动态取字段的，天然不怕这个，
-//! 所以这里也只声明需要的字段、其余一律忽略。网关连接 / 心跳 / 重连仍全部交给 twilight-gateway。
+//! 机器人就悄悄丢掉用户的命令（用户只看到「应用程序没有响应」）。
+//! 所以这里只声明需要的字段、其余一律忽略。网关连接 / 心跳 / 重连仍全部交给 twilight-gateway。
 //!
 //! ID 一律保留 Discord 原样的十进制字符串，原样转给网关桥接。
 

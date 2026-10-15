@@ -3,7 +3,6 @@
 //! 网关回的内容缺字段或形状不对时返回 [`HandlerError`]，由上层统一回成员「出了点问题……」并打 `[bug]` 日志。
 //! 只在某个分支真的用到某个字段时才要求它存在（比如没有 V5 额度时不要求 `v5` 字段）。
 
-use gate_core::pyc;
 use serde_json::{Map, Value};
 
 use crate::events::Interaction;
@@ -42,6 +41,11 @@ pub enum HandlerError {
     Missing(String),
     #[error("网关响应格式不对：{0}")]
     Malformed(String),
+}
+
+/// 最多取前 `n` 个字符（按字符数，不会把汉字切半）。
+pub fn clip(s: &str, n: usize) -> &str {
+    s.char_indices().nth(n).map_or(s, |(i, _)| &s[..i])
 }
 
 fn obj(v: &Value) -> Result<&Map<String, Value>, HandlerError> {
@@ -288,7 +292,7 @@ pub fn register_payload(it: &Interaction, invite_key: &str) -> Result<Value, Han
     let user = it
         .actor()
         .ok_or_else(|| HandlerError::Malformed("交互里没有用户".into()))?;
-    let name = pyc::take_chars(&user.username, 80);
+    let name = clip(&user.username, 80);
     // 显示名：全局昵称，其次服务器昵称，最后用户名
     let global_name = user
         .global_name
@@ -303,9 +307,9 @@ pub fn register_payload(it: &Interaction, invite_key: &str) -> Result<Value, Han
         "guild_id": it.guild_id_str(),
         "name": name,
         "username": name,
-        "global_name": pyc::take_chars(global_name, 80),
-        "avatar": pyc::take_chars(avatar, 120),
-        "invite_key": pyc::take_chars(invite_key, 80),
+        "global_name": clip(global_name, 80),
+        "avatar": clip(avatar, 120),
+        "invite_key": clip(invite_key, 80),
     }))
 }
 
