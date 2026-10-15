@@ -241,73 +241,6 @@ fn drop_legacy_log_client(text: &str) -> String {
     v.to_string()
 }
 
-/// CSV 文本按「行 → 原样的单元格」切开（引号里的逗号和换行不算分隔）；去列、再拼回去时不动其余单元格的写法。
-fn csv_raw_rows(text: &str) -> Vec<Vec<String>> {
-    let (mut rows, mut row, mut cur) = (Vec::new(), Vec::new(), String::new());
-    let (mut quoted, mut chars) = (false, text.chars().peekable());
-    while let Some(c) = chars.next() {
-        match c {
-            '"' => {
-                quoted = !quoted;
-                cur.push(c);
-            }
-            ',' if !quoted => row.push(std::mem::take(&mut cur)),
-            '\r' if !quoted && chars.peek() == Some(&'\n') => {
-                chars.next();
-                row.push(std::mem::take(&mut cur));
-                rows.push(std::mem::take(&mut row));
-            }
-            _ => cur.push(c),
-        }
-    }
-    if !cur.is_empty() || !row.is_empty() {
-        row.push(cur);
-        rows.push(row);
-    }
-    rows
-}
-
-/// 去掉 CSV 里表头叫 `column` 的那一列（文件开头的 BOM 留在原处）。
-fn csv_drop_column(text: &str, column: &str) -> String {
-    let rows = csv_raw_rows(text);
-    let at = rows[0]
-        .iter()
-        .position(|h| h.trim_start_matches('\u{feff}') == column)
-        .unwrap_or_else(|| panic!("CSV 里没有 {column} 列：{}", rows[0].join(",")));
-    rows.into_iter()
-        .map(|mut r| {
-            r.remove(at);
-            r.join(",") + "\r\n"
-        })
-        .collect()
-}
-
-/// 旧版「客户端日志导出」zip 里的客户端痕迹：requests.csv 的 `user_agent` 列、keys.csv 的 `client_kinds` 列，
-/// 以及 README 里对应的说明。3.0 不再导出（docs/v3-deviations.md #50），比较时从旧版一侧去掉。
-fn drop_legacy_client_from_zip(zip: &Value) -> Value {
-    let mut zip = zip.clone();
-    let Some(files) = zip.as_object_mut() else {
-        return zip;
-    };
-    for (name, v) in files.iter_mut() {
-        let Some(text) = v.as_str() else { continue };
-        let new = match name.as_str() {
-            "requests.csv" => csv_drop_column(text, "user_agent"),
-            "keys.csv" => csv_drop_column(text, "client_kinds"),
-            "README.txt" => text
-                .replace("  user_agent 客户端自报的 UA · detail", "  detail")
-                .replace(" · client_kinds 用过的客户端种类（UA 去重）", "")
-                .replace(
-                    "  - 一把 Key 的 client_kinds 明显偏多（同一人在多个软件间切换是少数，转卖/共用往往多种客户端混用）\n",
-                    "",
-                ),
-            _ => continue,
-        };
-        *v = Value::String(new);
-    }
-    zip
-}
-
 /// 从成员页每一行里去掉某个字段（只在有意差异的场景用）。
 fn drop_member_field(text: &str, field: &str) -> String {
     let Ok(mut v) = serde_json::from_str::<Value>(text) else {
@@ -399,6 +332,32 @@ async fn run_variant(lines: &[Value], variant: &str, diffs: &mut Vec<String>) ->
         if let Some(at) = l["at"].as_f64() {
             gate_server::time::freeze(Some(at));
         }
+        if let Some(p) = l["path"]
+            .as_str()
+            .filter(|p| p.starts_with(REMOVED_CLIENT_EXPORT))
+        {
+            if l["status"] == 200 {
+                // 旧版：days 缺省 30，0 当 90，夹到 1..=90；操作者是后台登录的打码 IP
+                let days = p
+                    .split_once("days=")
+                    .and_then(|(_, d)| d.split('&').next()?.parse::<i64>().ok())
+                    .unwrap_or(30);
+                let days = if days == 0 { 90 } else { days.clamp(1, 90) };
+                state
+                    .db
+                    .add_admin_action(
+                        "后台 *.*.0.1",
+                        "导出客户端日志",
+                        &format!("{days}天"),
+                        "",
+                        true,
+                        state.now(),
+                    )
+                    .await
+                    .unwrap();
+            }
+            continue;
+        }
         if let Some(d) = &discord {
             d.set_closed(l["registrar"]["dm"] == "closed");
             d.clear();
@@ -470,9 +429,8 @@ async fn run_variant(lines: &[Value], variant: &str, diffs: &mut Vec<String>) ->
             }
         } else if l["zip"].is_object() {
             let got = zip_view(&body);
-            let want = drop_legacy_client_from_zip(&l["zip"]);
-            if got != want {
-                bad("zip 内容", want.to_string(), got.to_string());
+            if got != l["zip"] {
+                bad("zip 内容", l["zip"].to_string(), got.to_string());
             }
         } else if l["image"].is_object() {
             let got = if body.starts_with(&[0xff, 0xd8]) && body.len() >= 40 {
@@ -505,6 +463,10 @@ async fn run_variant(lines: &[Value], variant: &str, diffs: &mut Vec<String>) ->
     }
     steps
 }
+
+/// 3.0 删了「客户端日志导出」（docs/v3-deviations.md #53）：夹具里的这几步不发请求，
+/// 只按旧版的写法补记成功导出时的那条操作日志，后面的操作日志编号、列表才能对上。
+const REMOVED_CLIENT_EXPORT: &str = "/admin/api/logs/export";
 
 fn compare_snap(name: &str, want: &Value, got: &Value, diffs: &mut Vec<String>) {
     for t in SNAP_TABLES.iter().copied().chain([ERRORS_TABLE]) {

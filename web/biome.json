@@ -7,7 +7,7 @@
   "javascript": { "formatter": { "quoteStyle": "double", "semicolons": "always" } },
   "linter": {
     "rules": {
-      "recommended": true,
+      "preset": "recommended",
       "style": {
         "noRestrictedImports": {
           "level": "error",
@@ -35,7 +35,7 @@
           }
         }
       },
-      "a11y": { "recommended": true }
+      "a11y": { "preset": "recommended" }
     }
   }
 }

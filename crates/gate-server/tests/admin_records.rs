@@ -42,7 +42,6 @@ async fn every_endpoint_requires_login_and_same_origin() {
     let (e, a) = ready().await;
     let table: Vec<(&str, &str)> = vec![
         ("GET", "/logs"),
-        ("GET", "/logs/export"),
         ("GET", "/actions"),
         ("GET", "/errors"),
         ("POST", "/errors/abc/resolve"),
@@ -663,86 +662,6 @@ fn hex_bytes(h: &str) -> Vec<u8> {
         .step_by(2)
         .map(|i| u8::from_str_radix(&h[i..i + 2], 16).unwrap())
         .collect()
-}
-
-#[tokio::test]
-async fn client_log_export_is_a_zip_with_csvs_and_rate_limited() {
-    let (e, a) = ready().await;
-    a.sql(&format!(
-        "INSERT INTO discord_registrations(discord_id, key_id, created_at, username, display_name) VALUES ('900000000000000001', 1, 1.0, 'u1', '甲');\
-         INSERT INTO key_tags(key_id, tag, note, by, ts) VALUES (1, '观察', '备注', '站长', 1.0), (1, '常驻', '', '站长', 2.0);\
-         INSERT INTO usage_log(ts, key_id, key_name, kind, model, status, images, anlas, wait_ms, dur_ms, up_status, client, detail, reason, rid) VALUES \
-         ({0}, 1, '旧名', 'image', 'm', 'ok', 2, 0.0, 10, 20, 200, '柏宝绘', '', '', 'r1'), \
-         ({2}, 1, '旧名', 'image', 'm', 'ok', 1, 0.0, 10, 20, 200, 'SillyTavern', '=SUM(A1)', '', 'r2'), \
-         ({1}, 1, '旧名', 'image', 'm', 'rejected', 0, 0.0, 0, 0, 0, '', '含,逗号\"引号\"', 'key_rate', 'r3');",
-        e.state.now() - 3600.0,
-        e.state.now() - 40.0 * 86400.0,
-        e.state.now() - 3000.0
-    ))
-    .await;
-    let r = a.get(&format!("{A}/logs/export?days=abc")).await;
-    assert_eq!(
-        (r.status, r.json()["detail"][0]["loc"].clone()),
-        (422, json!(["query", "days"]))
-    );
-    let r = a.get(&format!("{A}/logs/export?days=7")).await;
-    assert_eq!(r.status, 200, "{}", r.text());
-    assert_eq!(r.headers["content-type"], "application/zip");
-    let disp = r.headers["content-disposition"].to_str().unwrap();
-    assert!(
-        disp.starts_with("attachment; filename=\"owl-client-logs-") && disp.ends_with(".zip\""),
-        "{disp}"
-    );
-    let files = zip_files(&r.body);
-    let names: Vec<&str> = files.iter().map(|(n, _)| n.as_str()).collect();
-    assert_eq!(names, ["README.txt", "requests.csv", "keys.csv"]);
-    let readme = String::from_utf8(files[0].1.clone()).unwrap();
-    assert!(
-        readme.starts_with("猫头鹰公益站 · 客户端日志导出\n导出时间："),
-        "{readme}"
-    );
-    assert!(readme.contains("（UTC+8）  范围：最近 7 天\n"), "{readme}");
-    assert!(!readme.contains("client_kinds") && !readme.contains("user_agent"));
-    assert!(!String::from_utf8_lossy(&files[2].1).contains("client_kinds"));
-    let req = String::from_utf8(files[1].1.clone()).unwrap();
-    let lines: Vec<&str> = req.trim_end().split("\r\n").collect();
-    assert!(
-        lines[0].starts_with('\u{feff}')
-            && lines[0].ends_with("wait_ms,dur_ms,up_status,detail,reason,rid")
-    );
-    assert_eq!(lines.len(), 3, "只有最近 7 天的 2 条请求：{req}");
-    assert!(
-        lines[1].contains(",1,测试成员,900000000000000001,u1,image,m,ok,2,0.0,10,20,200,,,r1"),
-        "{}",
-        lines[1]
-    );
-    assert!(
-        lines[2].contains(",'=SUM(A1),"),
-        "公式开头的文本前加 '：{}",
-        lines[2]
-    );
-    let keys = String::from_utf8(files[2].1.clone()).unwrap();
-    let k1 = keys.lines().nth(1).unwrap();
-    assert!(
-        k1.starts_with("1,测试成员,900000000000000001,u1,甲,1,0,0,1,"),
-        "{k1}"
-    );
-    assert!(
-        k1.ends_with(",3,观察（备注）；常驻"),
-        "成功出图 3 张、标签（不再导出客户端种类，docs/v3-deviations.md #50）：{k1}"
-    );
-    // 全站每分钟 1 次
-    a.get(&format!("{A}/logs/export"))
-        .await
-        .assert_detail(429, "导出太频繁，请 1 分钟后再试");
-    assert!(
-        a.actions()
-            .await
-            .iter()
-            .any(|(act, t, ..)| act == "导出客户端日志" && t == "7天")
-    );
-    let r2 = a.get(&format!("{A}/logs/export?days=0")).await;
-    assert_eq!(r2.status, 429);
 }
 
 #[tokio::test]

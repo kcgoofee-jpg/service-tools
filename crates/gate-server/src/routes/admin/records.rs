@@ -1,5 +1,5 @@
 //! 后台「日志与记录」接口（旧版 `app/admin.py` 的用量日志 / 操作日志 / Bug / 生成记录 / 反馈 / 问卷 / 捐赠 / 全站重置部分）。
-//! 导出（zip / CSV）的格式沿用旧版 `exporter.py` / `client_export.py` / `feedback.py`。
+//! 导出（zip / CSV）的格式沿用旧版 `exporter.py` / `feedback.py`。
 
 use super::req::{Ctx, R, Reject, bytes_response, internal, py_quote, sql_int};
 use super::{ActionLogged, actor};
@@ -12,18 +12,16 @@ use axum::extract::{Request, State};
 use axum::response::Response;
 use axum::routing::{get, post};
 use gate_core::{features, pyc, pyext, pyval};
-use gate_db::repo::admin_records::{ActionFilter, ClientExportData};
+use gate_db::repo::admin_records::ActionFilter;
 use gate_db::repo::usage::LogFilter;
 use serde_json::{Map, Value, json};
 use std::collections::{HashMap, VecDeque};
-use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{LazyLock, Mutex};
 
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/admin/api/logs", get(logs))
-        .route("/admin/api/logs/export", get(logs_export))
         .route("/admin/api/actions", get(admin_actions))
         .route("/admin/api/errors", get(errors_list))
         .route("/admin/api/errors/resolve-all", post(errors_resolve_all))
@@ -470,7 +468,7 @@ async fn audit_purge_images(State(state): State<AppState>, req: Request) -> R {
     Ok(resp)
 }
 
-// ----------------------------------------------------------------------------- CSV / 客户端日志导出
+// ----------------------------------------------------------------------------- CSV
 
 /// Python `csv.writer`（QUOTE_MINIMAL，行尾 `\r\n`）。
 fn csv_line(cells: &[String]) -> String {
@@ -499,237 +497,6 @@ fn cell(v: &Value) -> String {
         other => pyval::py_str(other),
     }
 }
-
-fn csv_bytes(header: &[&str], rows: &[Vec<String>]) -> Vec<u8> {
-    let mut s = String::from('\u{feff}');
-    s.push_str(&csv_line(
-        &header.iter().map(|h| (*h).to_string()).collect::<Vec<_>>(),
-    ));
-    for r in rows {
-        s.push_str(&csv_line(r));
-    }
-    s.into_bytes()
-}
-
-const CLIENT_README: &str = "猫头鹰公益站 · 客户端日志导出
-导出时间：{now}（UTC+8）  范围：{scope}
-
-requests.csv（每次请求一行，按时间升序）
-  time 时间 · key_id / key_name / discord_id / discord_user 是谁
-  kind 功能（image / image_stream / chat …）· model 模型 · status 结果（ok / rejected / error / cancelled）
-  images 张数 · anlas 消耗 · wait_ms 排队 · dur_ms 生成耗时 · up_status 上游状态码
-  detail / reason 网关备注、拒绝原因 · rid 错误编号
-
-keys.csv（每把 Key 一行）
-  ok_images 成功出图张数
-  tags 后台标签 · quota_auto 1=算法管、-1=手动 · is_test 测试 Key
-
-怎么看「蛀虫」（思路，不是结论）：
-  - 24 小时不停、节奏像机器（间隔几乎恒定）
-  - 深夜高频、拒绝（rejected）远多于成功
-";
-
-/// 旧版 `_ts`：时间戳 → 本地时间文本；空 / 0 为空串。
-fn ts_text(state: &AppState, v: &Value) -> String {
-    match pyval::number_like(v) {
-        Some(t) if t != 0.0 && t.is_finite() => state.clock.format(t, "%Y-%m-%d %H:%M:%S"),
-        _ => String::new(),
-    }
-}
-
-/// 旧版 `client_export.build_zip`。
-fn build_client_zip(
-    d: &ClientExportData,
-    days: i64,
-    state: &AppState,
-) -> Result<Vec<u8>, zip::result::ZipError> {
-    let names: HashMap<i64, &Value> = d
-        .keys
-        .iter()
-        .filter_map(|k| Some((k[0].as_i64()?, &k[1])))
-        .collect();
-    let reg: HashMap<i64, [&Value; 3]> = d
-        .registrations
-        .iter()
-        .filter_map(|r| Some((r[0].as_i64()?, [&r[1], &r[2], &r[3]])))
-        .collect();
-    let empty = Value::String(String::new());
-    let mut req_rows: Vec<Vec<String>> = Vec::new();
-    let mut ok_images: HashMap<i64, i64> = HashMap::new();
-    for u in &d.usage {
-        let kid = u[1].as_i64();
-        if u[5].as_str() == Some("ok")
-            && let Some(k) = kid
-        {
-            *ok_images.entry(k).or_insert(0) += u[6].as_i64().unwrap_or(0);
-        }
-        let r = kid
-            .and_then(|k| reg.get(&k))
-            .copied()
-            .unwrap_or([&empty, &empty, &empty]);
-        let name = kid.and_then(|k| names.get(&k).copied()).unwrap_or(&u[2]);
-        req_rows.push(vec![
-            ts_text(state, &u[0]),
-            cell(&u[1]),
-            cell(name),
-            cell(r[0]),
-            cell(r[1]),
-            cell(&u[3]),
-            cell(&u[4]),
-            cell(&u[5]),
-            cell(&u[6]),
-            cell(&u[7]),
-            cell(&u[8]),
-            cell(&u[9]),
-            cell(&u[10]),
-            cell(&u[11]),
-            cell(&u[12]),
-            cell(&u[13]),
-        ]);
-    }
-    let mut tags: HashMap<i64, Vec<String>> = HashMap::new();
-    for (k, tag, note) in &d.tags {
-        tags.entry(*k).or_default().push(if note.is_empty() {
-            tag.clone()
-        } else {
-            format!("{tag}（{note}）")
-        });
-    }
-    let mut key_rows: Vec<Vec<String>> = Vec::new();
-    for k in &d.keys {
-        let kid = k[0].as_i64().unwrap_or(0);
-        let r = reg.get(&kid).copied().unwrap_or([&empty, &empty, &empty]);
-        key_rows.push(vec![
-            cell(&k[0]),
-            cell(&k[1]),
-            cell(r[0]),
-            cell(r[1]),
-            cell(r[2]),
-            cell(&k[2]),
-            cell(&k[3]),
-            cell(&k[4]),
-            cell(&k[5]),
-            ts_text(state, &k[6]),
-            ts_text(state, &k[7]),
-            ok_images.get(&kid).copied().unwrap_or(0).to_string(),
-            safe_cell(&tags.get(&kid).map(|t| t.join("；")).unwrap_or_default()),
-        ]);
-    }
-    let scope = if days > 0 {
-        format!("最近 {days} 天")
-    } else {
-        "全部".to_string()
-    };
-    let now_txt = ts_text(state, &json!(state.now()));
-    let mut buf = std::io::Cursor::new(Vec::new());
-    let mut z = zip::ZipWriter::new(&mut buf);
-    let opts = zip::write::SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated);
-    z.start_file("README.txt", opts)?;
-    z.write_all(
-        CLIENT_README
-            .replace("{now}", &now_txt)
-            .replace("{scope}", &scope)
-            .as_bytes(),
-    )?;
-    z.start_file("requests.csv", opts)?;
-    z.write_all(&csv_bytes(
-        &[
-            "time",
-            "key_id",
-            "key_name",
-            "discord_id",
-            "discord_user",
-            "kind",
-            "model",
-            "status",
-            "images",
-            "anlas",
-            "wait_ms",
-            "dur_ms",
-            "up_status",
-            "detail",
-            "reason",
-            "rid",
-        ],
-        &req_rows,
-    ))?;
-    z.start_file("keys.csv", opts)?;
-    z.write_all(&csv_bytes(
-        &[
-            "key_id",
-            "key_name",
-            "discord_id",
-            "discord_user",
-            "discord_display",
-            "enabled",
-            "is_admin",
-            "is_test",
-            "quota_auto",
-            "created",
-            "last_used",
-            "ok_images",
-            "tags",
-        ],
-        &key_rows,
-    ))?;
-    z.finish()?;
-    Ok(buf.into_inner())
-}
-
-/// 导出限频（旧版模块级 `_LAST_LOG_EXPORT`）：全站每分钟 1 次；按数据库路径区分实例。
-static LAST_LOG_EXPORT: LazyLock<Mutex<HashMap<PathBuf, f64>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-/// 客户端日志导出（zip：请求、Key），给站长定期独立复核。只读，不含提示词和 Key 原文。
-async fn logs_export(State(state): State<AppState>, req: Request) -> R {
-    let mut cx = Ctx::new(state, req).await?;
-    let days = cx.query_int("days", 30);
-    cx.admin().await?;
-    let st = cx.state.clone();
-    // 全量读会占住读连接、拖慢出图记账：最多 90 天、每分钟 1 次（10/11 审查）
-    let days: i64 = (if days == 0 { 90 } else { days }).clamp(1, 90) as i64;
-    {
-        let mut last = LAST_LOG_EXPORT.lock().expect("log export");
-        let now = st.now();
-        let prev = last.get(st.db.path()).copied().unwrap_or(0.0);
-        if now - prev < 60.0 {
-            return Err(http(429, "导出太频繁，请 1 分钟后再试"));
-        }
-        last.insert(st.db.path().to_path_buf(), now);
-    }
-    let since = st.now() - days as f64 * 86400.0;
-    let data = st.db.client_export_data(since).await?;
-    let st2 = st.clone();
-    let blob = tokio::task::spawn_blocking(move || build_client_zip(&data, days, &st2))
-        .await
-        .map_err(internal)?
-        .map_err(internal)?;
-    let stamp = st.clock.format(st.now(), "%Y%m%d-%H%M");
-    log_action(
-        &st.db,
-        &actor(&st, &cx.parts),
-        "导出客户端日志",
-        &format!("{days}天"),
-        "",
-        true,
-        st.now(),
-    )
-    .await;
-    Ok(bytes_response(
-        blob,
-        "application/zip",
-        &[
-            (
-                "content-disposition",
-                format!("attachment; filename=\"owl-client-logs-{stamp}.zip\""),
-            ),
-            ("cache-control", "no-store".to_string()),
-        ],
-    ))
-}
-
-// ----------------------------------------------------------------------------- 成员反馈
 
 /// 成员 /反馈 提交的问卷，最新在前。
 async fn feedback_list(State(state): State<AppState>, req: Request) -> R {

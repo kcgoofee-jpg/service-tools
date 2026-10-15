@@ -1,20 +1,10 @@
 /** 用量日志：每次请求一行；按成员 / 功能 / 错误编号筛选，服务端分页，可导出客户端日志。 */
-import { Download } from "lucide-preact";
 import { useEffect, useState } from "preact/hooks";
 import { fullTime, num } from "../../../../lib/format";
-import { Badge, Button, cx, Skeleton } from "../../../../ui";
+import { Badge, cx, Skeleton } from "../../../../ui";
 import { useAdmin } from "../../Admin";
 import { LoadError } from "../_kit";
-import {
-  downloadFile,
-  Empty,
-  NARROW,
-  Pager,
-  TableScroll,
-  useDebounced,
-  useMedia,
-  usePageData,
-} from "../members/shared";
+import { Empty, NARROW, Pager, TableScroll, useDebounced, useMedia, usePageData } from "../members/shared";
 import { FEATURES, kindLabel, shortModel, timing } from "./format";
 import { intParam, useQueryState } from "./query";
 import type { LogsResp, UsageLog } from "./types";
@@ -123,7 +113,6 @@ export function Usage() {
   qs.set("per_page", String(per));
   qs.set("page", String(page));
   const { data, error, pending } = usePageData<LogsResp>(`/admin/api/logs?${qs}`);
-  const [exporting, setExporting] = useState(false);
 
   const filters = (
     <div class="xa-toolbar lg-filters-in">
@@ -191,19 +180,6 @@ export function Usage() {
         ) : (
           filters
         )}
-        <span class="spacer" />
-        <Button
-          disabled={exporting}
-          title="导出最近 30 天的客户端日志（zip：每次请求、每把 Key；不含提示词和 Key 原文），拿去独立复核"
-          onClick={async () => {
-            setExporting(true);
-            await downloadFile("/admin/api/logs/export?days=30", "owl-client-logs.zip");
-            setExporting(false);
-          }}
-        >
-          <Download size={15} aria-hidden="true" />
-          导出客户端日志
-        </Button>
       </div>
 
       {error && !data ? (

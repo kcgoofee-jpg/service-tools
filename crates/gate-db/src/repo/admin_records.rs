@@ -1,5 +1,5 @@
-//! 后台「日志与记录」接口用到的裸 SQL（旧版 `app/admin.py` / `feedback.py` / `client_export.py` 里直接用 `db._db` 写的那些）：
-//! 操作日志筛选、Bug 页的 Key 名、成员反馈、客户端日志导出，以及按「文本形式的 Key 编号」查生成记录。
+//! 后台「日志与记录」接口用到的裸 SQL（旧版 `app/admin.py` / `feedback.py` 里直接用 `db._db` 写的那些）：
+//! 操作日志筛选、Bug 页的 Key 名、成员反馈，以及按「文本形式的 Key 编号」查生成记录。
 
 use super::{SqlValue, marks};
 use crate::{Db, Result, value};
@@ -33,37 +33,6 @@ fn action_clause(f: &ActionFilter) -> (String, Vec<SqlValue>) {
         format!(" WHERE {}", where_.join(" AND "))
     };
     (clause, args)
-}
-
-/// 客户端日志导出读到的原始数据（单元格已是 JSON 标量：整数 / 浮点 / 文本 / 空）。
-#[derive(Debug, Clone, Default)]
-pub struct ClientExportData {
-    /// id, name, enabled, is_admin, is_test, quota_auto, created_at, last_used_at
-    pub keys: Vec<Vec<Value>>,
-    /// key_id, discord_id, username, display_name
-    pub registrations: Vec<Vec<Value>>,
-    /// ts, key_id, key_name, kind, model, status, images, anlas, wait_ms, dur_ms, up_status, detail, reason, rid
-    pub usage: Vec<Vec<Value>>,
-    /// key_id, tag, note
-    pub tags: Vec<(i64, String, String)>,
-}
-
-/// 一行 → 按列顺序的 JSON 标量（INTEGER / REAL / TEXT / NULL 保持原样）。
-fn cells(r: &rusqlite::Row<'_>, n: usize) -> rusqlite::Result<Vec<Value>> {
-    use rusqlite::types::ValueRef;
-    (0..n)
-        .map(|i| {
-            Ok(match r.get_ref(i)? {
-                ValueRef::Null => Value::Null,
-                ValueRef::Integer(v) => Value::from(v),
-                ValueRef::Real(f) => {
-                    serde_json::Number::from_f64(f).map_or(Value::Null, Value::Number)
-                }
-                ValueRef::Text(t) => Value::String(String::from_utf8_lossy(t).into_owned()),
-                ValueRef::Blob(b) => Value::String(String::from_utf8_lossy(b).into_owned()),
-            })
-        })
-        .collect()
 }
 
 impl Db {
@@ -106,48 +75,6 @@ impl Db {
                 c.prepare("SELECT DISTINCT action FROM admin_actions ORDER BY action")?;
             stmt.query_map([], |r| value::text_or(r, 0, "None"))?
                 .collect()
-        })
-        .await
-    }
-
-    /// 客户端日志导出：`since` 之后的请求（0 = 全部）+ Key + Discord 身份 + 标签。只读。
-    pub async fn client_export_data(&self, since: f64) -> Result<ClientExportData> {
-        self.read(move |c| {
-            let keys = c
-                .prepare(
-                    "SELECT id, name, enabled, is_admin, is_test, quota_auto, created_at, last_used_at FROM api_keys",
-                )?
-                .query_map([], |r| cells(r, 8))?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            let registrations = c
-                .prepare(
-                    "SELECT key_id, discord_id, username, display_name FROM discord_registrations WHERE key_id IS NOT NULL",
-                )?
-                .query_map([], |r| cells(r, 4))?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            let usage = c
-                .prepare(
-                    "SELECT ts, key_id, key_name, kind, model, status, images, anlas, wait_ms, dur_ms, up_status, \
-                     detail, reason, rid FROM usage_log WHERE ts>=? ORDER BY ts",
-                )?
-                .query_map([since], |r| cells(r, 14))?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            let tags = c
-                .prepare("SELECT key_id, tag, note FROM key_tags")?
-                .query_map([], |r| {
-                    Ok((
-                        value::i64_or(r, 0, 0)?,
-                        value::text_or(r, 1, "")?,
-                        value::text_or(r, 2, "")?,
-                    ))
-                })?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            Ok(ClientExportData {
-                keys,
-                registrations,
-                usage,
-                tags,
-            })
         })
         .await
     }

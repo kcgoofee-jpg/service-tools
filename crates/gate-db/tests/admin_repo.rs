@@ -301,45 +301,6 @@ async fn action_log_filters() {
 }
 
 #[tokio::test]
-async fn client_export_rows() {
-    let (db, _d) = open().await;
-    let a = key(&db, "甲").await;
-    sql(
-        &db,
-        &format!(
-            "             INSERT INTO discord_registrations(discord_id, key_id, created_at, username, display_name) VALUES ('9', {a}, 1.0, 'u', '甲');\
-             INSERT INTO key_tags(key_id, tag, note, by, ts) VALUES ({a}, '观察', '备注', '站长', 1.0);\
-             INSERT INTO usage_log(ts, key_id, key_name, kind, model, status, images, anlas, wait_ms, dur_ms, up_status, client, detail, reason, rid) VALUES \
-               (10.0, {a}, '甲', 'image', 'm', 'ok', 2, 0.0, 1, 2, 200, 'ua', '', '', 'r1'), (3.0, NULL, '', 'image', 'm', 'rejected', 0, 0.0, 0, 0, 0, '', 'd', 'key_invalid', '');"
-        ),
-    )
-    .await;
-    let d = db.client_export_data(5.0).await.unwrap();
-    assert_eq!(d.keys.len(), 1);
-    assert_eq!(d.keys[0][..2], [json!(a), json!("甲")]);
-    assert_eq!(d.keys[0][5], 1, "quota_auto");
-    assert_eq!(
-        d.registrations,
-        [vec![json!(a), json!("9"), json!("u"), json!("甲")]]
-    );
-    assert_eq!(d.usage.len(), 1, "since 之前的不要");
-    assert_eq!(
-        d.usage[0].len(),
-        14,
-        "不导出 client 列（docs/v3-deviations.md #50）：{:?}",
-        d.usage[0]
-    );
-    assert!(!d.usage[0].contains(&json!("ua")));
-    assert_eq!(
-        d.usage[0][..4],
-        [json!(10.0), json!(a), json!("甲"), json!("image")]
-    );
-    assert_eq!(d.usage[0][7], json!(0.0), "REAL 列保持浮点");
-    assert_eq!(d.tags, [(a, "观察".to_string(), "备注".to_string())]);
-    assert_eq!(db.client_export_data(0.0).await.unwrap().usage.len(), 2);
-}
-
-#[tokio::test]
 async fn audit_queries_bind_the_key_id_as_text_like_the_old_gateway() {
     let (db, _d) = open().await;
     let a = key(&db, "甲 乙").await;
