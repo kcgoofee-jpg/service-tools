@@ -10,7 +10,7 @@
 //! - 后台成员列表的第一位是「Kestrel」——后台写操作用例（重新生成 Key、停用 / 启用……）拿它开刀，
 //!   不会弄坏上面那位成员的会话。所以 Kestrel 的今日出图数必须是最多的；
 //! - 生成记录里只有缩略图、没有原图：后台「清空服务器上的全部原图」在没有原图时是禁用的，用例断言了这一点；
-//!   今天每一张成功出图都配一条生成记录，否则「观测」模块的交叉校验会报不一致；
+//!   今天每一张成功出图都配一条生成记录（记账恒等式：生成记录条数 = 成功出图张数，测试里断言）；
 //! - 捐赠只有「已处理」的：有待处理的，后台 Discord 侧栏角标会变成「! 1」，深色下白字配红底对比度只有 2.76，
 //!   端到端的无障碍用例（axe）会判 serious（前端样式问题，不是种子的问题）；
 //! - 所有 Discord ID 都在 `9000000000000000xx` 段，Token 都是 `nai-demo…` / `pst-demo…`。
@@ -228,8 +228,8 @@ fn events(now: f64, clock: &Clock, rng: &mut StdRng) -> Vec<Event> {
     out
 }
 
-/// 用量日志与计数器；顺带写生成记录——「观测」模块的交叉校验要求今天每一张成功出图都有一条生成记录
-/// （数量差超过 max(2, 0.5%) 就报不一致），所以生成记录跟着成功出图一起写，只有缩略图、没有原图。
+/// 用量日志与计数器；顺带写生成记录——和线上一样，今天每一张成功出图都有一条生成记录
+/// （记账恒等式，见文件末尾的测试），所以生成记录跟着成功出图一起写，只有缩略图、没有原图。
 async fn seed_usage(
     db: &Db,
     clock: &Clock,
@@ -677,11 +677,22 @@ mod tests {
             assert_eq!(today[0].1, "Kestrel", "{today:?}");
             assert!(today[0].0 > today[1].0 + 5, "领先要足够多：{today:?}");
 
-            // 「观测」交叉校验：今天的生成记录条数 = 成功出图张数；而且只有缩略图、没有原图
+            // 记账恒等式：今天的生成记录条数 = 成功出图张数；而且只有缩略图、没有原图
             let start = clock.local_midnight(&day).unwrap();
-            let logged = db.images_ok_from(start).await.unwrap();
+            let count = |sql: &'static str| {
+                db.read(move |c| c.query_row(sql, [start], |r| r.get::<usize, i64>(0)))
+            };
+            let logged = count(
+                "SELECT COALESCE(SUM(images),0) FROM usage_log WHERE ts>=? AND status='ok' AND kind LIKE 'image%'",
+            )
+            .await
+            .unwrap();
             assert!(logged > 0);
-            assert_eq!(db.audited_ok_from(start).await.unwrap(), logged);
+            let audited =
+                count("SELECT COUNT(*) FROM generation_audit WHERE ts>=? AND status='ok'")
+                    .await
+                    .unwrap();
+            assert_eq!(audited, logged);
             assert_eq!(db.audit_image_bytes().await.unwrap(), 0);
 
             // 会话成员没有问卷、没有券；没有待处理的捐赠

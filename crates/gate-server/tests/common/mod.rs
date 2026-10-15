@@ -19,7 +19,25 @@ pub const ADMIN_PASSWORD: &str = "dev-admin-password-123";
 pub struct Env {
     pub state: AppState,
     pub mock: MockUpstream,
+    vars: HashMap<String, String>,
     _dir: tempfile::TempDir,
+}
+
+fn env_config(vars: &HashMap<String, String>) -> EnvConfig {
+    let mut env = EnvConfig::load(vars);
+    // 这两项是代码常量（不读环境变量），测试里直接改：没有出图间隔，排队 5 秒就算超时
+    env.image_min_interval = 0.0;
+    env.queue_timeout = 5;
+    env
+}
+
+impl Env {
+    /// 模拟重启：用同一个数据目录、同样的环境变量重新建一份 `AppState`（内存里的缓存、计数都是空的）。
+    pub async fn restart(&self) -> AppState {
+        AppState::build(env_config(&self.vars), Assets::new(None))
+            .await
+            .unwrap()
+    }
 }
 
 pub async fn setup(extra: &[(&str, &str)]) -> Env {
@@ -38,11 +56,9 @@ pub async fn setup(extra: &[(&str, &str)]) -> Env {
     for (k, v) in extra {
         vars.insert(k.to_string(), v.to_string());
     }
-    let mut env = EnvConfig::load(&vars);
-    // 这两项是代码常量（不读环境变量），测试里直接改：没有出图间隔，排队 5 秒就算超时
-    env.image_min_interval = 0.0;
-    env.queue_timeout = 5;
-    let state = AppState::build(env, Assets::new(None)).await.unwrap();
+    let state = AppState::build(env_config(&vars), Assets::new(None))
+        .await
+        .unwrap();
     let key: NewKey = serde_json::from_value(json!({
         "name": "测试成员", "token": TOKEN, "daily_images": 100, "daily_v5": 10,
         "monthly_anlas": 0.0, "daily_text_tokens": 1000, "rpm": 60,
@@ -52,6 +68,7 @@ pub async fn setup(extra: &[(&str, &str)]) -> Env {
     Env {
         state,
         mock,
+        vars,
         _dir: dir,
     }
 }
@@ -149,4 +166,115 @@ pub async fn add_usage(db: &gate_db::Db, key_id: i64, day: &str, v5: i64, anlas:
     })
     .await
     .unwrap();
+}
+
+// ------------------------------------------------------------------ 定时任务测试用
+
+/// 时钟（`time::freeze`）是全进程共享的：用到它的测试先拿这把锁（每个测试文件各一把）。
+static CLOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// 串行化用到时钟的测试并冻结到 `at`（None = 真实时间）。返回的锁要一直拿到测试结束。
+pub async fn clock(at: Option<f64>) -> tokio::sync::MutexGuard<'static, ()> {
+    let guard = CLOCK.lock().await;
+    gate_server::time::freeze(at);
+    guard
+}
+
+/// 立即跑一轮某个定时任务（和循环里一样：记 `job_last`，失败记 Bug）。
+pub async fn run_job(state: &AppState, name: &str) -> Result<String, gate_server::jobs::JobError> {
+    let job = gate_server::jobs::find(name).unwrap_or_else(|| panic!("没有任务 {name}"));
+    gate_server::jobs::run_once(state, job).await
+}
+
+/// 读一项设置。
+pub async fn setting(state: &AppState, key: &str) -> Option<String> {
+    state.db.get_setting(key).await.unwrap()
+}
+
+/// 读一项 JSON 设置（没有或不是 JSON 时为 Null）。
+pub async fn setting_json(state: &AppState, key: &str) -> Value {
+    setting(state, key)
+        .await
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or(Value::Null)
+}
+
+/// 建一把合成的成员 Key（`nai-synthetic-<编号>`），可以再用 SQL 改列；返回库里的 id。
+pub async fn member_key(state: &AppState, n: i64, extra: &[(&str, Value)]) -> i64 {
+    let key: NewKey = serde_json::from_value(json!({
+        "name": format!("成员{n:02}"), "token": format!("nai-synthetic-{n:04}"), "daily_images": 100,
+        "daily_v5": 10, "monthly_anlas": 0.0, "daily_text_tokens": 1000, "rpm": 60,
+    }))
+    .unwrap();
+    state.db.create_key(&key, state.now()).await.unwrap();
+    let id = state
+        .db
+        .get_key_by_token(&format!("nai-synthetic-{n:04}"))
+        .await
+        .unwrap()
+        .unwrap()["id"]
+        .as_i64()
+        .unwrap();
+    let sql: Vec<String> = extra
+        .iter()
+        .map(|(col, v)| format!("UPDATE api_keys SET {col}={v} WHERE id={id}"))
+        .collect();
+    if !sql.is_empty() {
+        state.db.run_script(sql).await.unwrap();
+    }
+    id
+}
+
+/// 后台登录后的接口调用。
+pub struct Admin<'a> {
+    pub state: &'a AppState,
+    cookie: String,
+}
+
+impl<'a> Admin<'a> {
+    pub async fn login(state: &'a AppState) -> Self {
+        let (status, headers, _) = Call::new("POST", "/admin/api/login")
+            .json(json!({"password": ADMIN_PASSWORD}))
+            .send(state)
+            .await;
+        assert_eq!(status, 200);
+        let cookie = headers["set-cookie"]
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap()
+            .to_string();
+        Self { state, cookie }
+    }
+
+    /// `path` 不带 `/admin/api` 前缀。返回 (状态码, 原文)。
+    pub async fn call(&self, method: &str, path: &str, body: Option<Value>) -> (u16, String) {
+        let url = format!("/admin/api{path}");
+        let mut call = Call::new(method, &url).header("cookie", self.cookie.clone());
+        if let Some(b) = body {
+            let len = serde_json::to_vec(&b).unwrap().len();
+            call = call.header("content-length", len.to_string()).json(b);
+        }
+        let (status, _, bytes) = call.send(self.state).await;
+        (status.as_u16(), String::from_utf8(bytes).unwrap())
+    }
+
+    pub async fn json(&self, method: &str, path: &str, body: Option<Value>) -> (u16, Value) {
+        let (s, text) = self.call(method, path, body).await;
+        (s, serde_json::from_str(&text).unwrap_or(Value::Null))
+    }
+}
+
+/// 已经写进库的 Bug 的来源（等 Bug 写完再读）。
+pub async fn bug_sources(state: &AppState) -> Vec<String> {
+    state.bugs.idle().await;
+    state
+        .db
+        .list_error_events(true, 100)
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| r["source"].as_str().unwrap_or("").to_string())
+        .collect()
 }

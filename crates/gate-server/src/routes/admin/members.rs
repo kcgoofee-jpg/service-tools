@@ -725,7 +725,7 @@ async fn patch_key(State(state): State<AppState>, req: Request) -> R {
             st.db
                 .set_quota_auto(key_id, if quota_mode_auto { 1 } else { -1 })
                 .await?;
-            if quota_mode_auto && let Err(e) = crate::kernel::run_quota_algo(&st).await {
+            if quota_mode_auto && let Err(e) = crate::jobs::quota::run_now(&st).await {
                 let (ty, msg) = match &e {
                     crate::error::ApiError::Internal(i) => ("InternalError", i.0.clone()),
                     crate::error::ApiError::Http(h) => ("HTTPException", pyval::py_str(&h.detail)),

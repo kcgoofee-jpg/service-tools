@@ -520,7 +520,7 @@ async fn manual_resolve_is_not_marked_automatic() {
 async fn maintenance_round_runs_triage_at_most_every_ten_minutes() {
     let e = setup(&[]).await;
     let s = &e.state;
-    s.kernel
+    s.jobs
         .set_official_api(Some("http://127.0.0.1:9/never".into()));
     seed(
         &e,

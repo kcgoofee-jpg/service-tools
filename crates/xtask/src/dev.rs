@@ -176,7 +176,7 @@ async fn serve(args: Args) -> Result<()> {
     let state = AppState::build(env, assets).await?;
     // 官方状态页（维护循环会取）也指到死端口，保证不出本机
     state
-        .kernel
+        .jobs
         .set_official_api(Some(format!("http://127.0.0.1:{dead}/")));
     jobs::startup(&state)
         .await

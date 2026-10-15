@@ -1,24 +1,21 @@
-//! 后台里属于自适应内核的接口（旧版 `app/admin.py`）：动态额度、自动驾驶、模块。
+//! 后台里属于定时任务的接口：动态额度参数、定时任务的运行记录。
 //!
 //! | 接口 | 说明 |
 //! |---|---|
-//! | `GET /admin/api/quota-algo` | 当前结果、参数、最近 30 天的每日微调记录 |
+//! | `GET /admin/api/quota-algo` | 当前结果、参数、最近 30 天的每日微调记录、「V5 每 1% ≈ 张」 |
 //! | `PUT /admin/api/quota-algo` | 修改初始值 / 步长 / 范围，保存后立即重算 |
-//! | `GET /admin/api/autopilot` | 每条规则的最新判断和最近 7 天的每小时快照 |
-//! | `GET /admin/api/modules` | 模块：问题、开关、运行记录、交叉校验、关键参数当前值 |
-//! | `PUT /admin/api/modules/{name}` | 启用 / 关闭一个模块，然后立即跑一轮 |
-//! | `POST /admin/api/modules/run` | 手动立即执行一轮模块任务与交叉校验 |
+//! | `GET /admin/api/jobs` | 每个定时任务：名称、周期、上次运行的时间 / 结果 / 摘要 / 耗时 |
 
 use crate::body::read_json_body;
 use crate::error::{ApiError, HttpError, InternalError, ok_json};
-use crate::kernel::{Kernel, run_quota_algo};
+use crate::jobs::JOBS;
 use crate::session::AdminSession;
 use crate::state::AppState;
 use axum::Router;
-use axum::extract::{Path, Request, State};
+use axum::extract::{Request, State};
 use axum::response::Response;
-use axum::routing::{get, post, put};
-use gate_core::{jsondump, pyc, quota};
+use axum::routing::get;
+use gate_core::{jsondump, pyc, pyval, quota};
 use serde_json::{Map, Value, json};
 
 const BODY_LIMIT: usize = 1024 * 1024;
@@ -29,10 +26,7 @@ pub fn router() -> Router<AppState> {
             "/admin/api/quota-algo",
             get(quota_algo_get).put(quota_algo_put),
         )
-        .route("/admin/api/autopilot", get(autopilot_get))
-        .route("/admin/api/modules", get(modules_get))
-        .route("/admin/api/modules/run", post(modules_run_all))
-        .route("/admin/api/modules/{name}", put(modules_put))
+        .route("/admin/api/jobs", get(jobs_get))
 }
 
 /// `json.loads(await db.get_setting(key, default) or default)`；解析失败是 500（旧版没有捕获）。
@@ -43,7 +37,7 @@ async fn setting_json(state: &AppState, key: &str, default: &str) -> Result<Valu
         .ok_or_else(|| InternalError(format!("JSONDecodeError: {key} 不是合法 JSON")).into())
 }
 
-/// 动态额度：当前结果、参数、最近 30 天的每日微调记录。
+/// 动态额度：当前结果、参数、最近 30 天的每日微调记录，以及推算用的「V5 每 1% ≈ 张」。
 async fn quota_algo_get(
     State(state): State<AppState>,
     _s: AdminSession,
@@ -59,19 +53,12 @@ async fn quota_algo_get(
     }
     let last = setting_json(&state, quota::STATE_KEY, "{}").await?;
     let history = setting_json(&state, quota::HISTORY_KEY, "[]").await?;
-    Ok(ok_json(
-        &json!({"last": last, "history": history, "params": params}),
-    ))
-}
-
-/// 自动驾驶：每条规则的最新判断（观察模式下只记录不执行）和最近 7 天的每小时快照。
-async fn autopilot_get(
-    State(state): State<AppState>,
-    _s: AdminSession,
-) -> Result<Response, ApiError> {
-    let last = setting_json(&state, gate_core::autopilot::STATE_KEY, "{}").await?;
-    let history = setting_json(&state, gate_core::autopilot::HISTORY_KEY, "[]").await?;
-    Ok(ok_json(&json!({"last": last, "history": history})))
+    Ok(ok_json(&json!({
+        "last": last,
+        "history": history,
+        "params": params,
+        "images_per_percent": pyval::float(quota::V5_IMAGES_PER_PERCENT),
+    })))
 }
 
 /// `admin._num(value, int, lo, hi, name)`：严格解析后台数值——空值、小数、越界一律 422。
@@ -101,7 +88,7 @@ fn num_int(value: &Value, lo: i64, hi: i64, name: &str) -> Result<i64, HttpError
     Ok(v as i64)
 }
 
-/// 修改初始值 / 步长 / 范围；保存后立即重算。
+/// 修改初始值 / 步长 / 范围；保存后立即重算（也记进定时任务「动态额度」的运行记录）。
 async fn quota_algo_put(
     State(state): State<AppState>,
     _s: AdminSession,
@@ -109,8 +96,7 @@ async fn quota_algo_put(
 ) -> Result<Response, ApiError> {
     let (parts, body) = req.into_parts();
     let body = read_json_body(&parts.headers, body, BODY_LIMIT).await?;
-    // 极简模式（2026-10-11）：每人一个数 N；保底一层 3.0 已删除（docs/v3-deviations.md #61）。
-    // V5 每人上限由公式算出、没有可调的范围（`quota_v5_min` / `quota_v5_max` 已删除，#63）：传了也忽略
+    // 极简模式（2026-10-11）：每人一个数 N。V5 每人上限由公式算出、没有可调的范围：传了也忽略
     const BOUNDS: [(&str, i64, i64); 5] = [
         ("quota_auto_enabled", 0, 1),
         ("quota_target_avg", 10, 2000),
@@ -134,51 +120,35 @@ async fn quota_algo_put(
                 .await?;
         }
     }
-    let result = run_quota_algo(&state).await?;
+    let result = crate::jobs::quota::run_now(&state).await?;
     Ok(ok_json(&json!({"ok": true, "last": result})))
 }
 
-/// 模块：问题、开关、运行记录、交叉校验、关键参数当前值。
-async fn modules_get(
-    State(state): State<AppState>,
-    _s: AdminSession,
-) -> Result<Response, ApiError> {
-    Ok(ok_json(
-        &json!({"modules": state.kernel.snapshot(&state).await?}),
-    ))
-}
-
-/// 启用 / 关闭一个模块；关闭只停止自动调整，保护类的硬限制不受影响。
-async fn modules_put(
-    State(state): State<AppState>,
-    _s: AdminSession,
-    Path(name): Path<String>,
-    req: Request,
-) -> Result<Response, ApiError> {
-    if !Kernel::has_module(&name) {
-        return Err(HttpError::new(404, "没有这个模块").into());
-    }
-    let (parts, body) = req.into_parts();
-    let body = read_json_body(&parts.headers, body, BODY_LIMIT).await?;
-    let Some(Value::Bool(on)) = body.get("enabled") else {
-        return Err(HttpError::new(422, "enabled 必须是 true / false").into());
+/// 一个任务的上次运行：只放约定的四个字段；没跑过（或库里的记录读不懂）是 `null`。
+fn last_run(v: Option<&Value>) -> Value {
+    let Some(Value::Object(m)) = v else {
+        return Value::Null;
     };
-    state.kernel.set_enabled(&state, &name, *on).await?;
-    state.kernel.tick_all(&state).await?;
-    Ok(ok_json(
-        &json!({"ok": true, "modules": state.kernel.snapshot(&state).await?}),
-    ))
+    let pick = |k: &str| m.get(k).cloned().unwrap_or(Value::Null);
+    json!({"at": pick("at"), "ok": pick("ok"), "ms": pick("ms"), "summary": pick("summary")})
 }
 
-/// 手动立即执行一轮模块任务与交叉校验。
-async fn modules_run_all(
-    State(state): State<AppState>,
-    _s: AdminSession,
-) -> Result<Response, ApiError> {
-    state.kernel.tick_all(&state).await?;
-    Ok(ok_json(
-        &json!({"ok": true, "modules": state.kernel.snapshot(&state).await?}),
-    ))
+/// 定时任务：按登记顺序，每个任务的名称、周期和上次运行的结果。
+async fn jobs_get(State(state): State<AppState>, _s: AdminSession) -> Result<Response, ApiError> {
+    let last = state.jobs.last().await;
+    let jobs: Vec<Value> = JOBS
+        .iter()
+        .map(|j| {
+            json!({
+                "name": j.name,
+                "title": j.title,
+                "every": j.every,
+                "every_secs": j.every_secs as i64,
+                "last": last_run(last.get(j.name)),
+            })
+        })
+        .collect();
+    Ok(ok_json(&json!({"jobs": jobs})))
 }
 
 #[cfg(test)]
@@ -206,6 +176,18 @@ mod tests {
         assert_eq!(
             err(num_int(&json!(501), 1, 500, "x")),
             "x 必须在 1～500 之间"
+        );
+    }
+
+    #[test]
+    fn last_run_keeps_only_the_contract_fields() {
+        assert_eq!(last_run(None), Value::Null);
+        assert_eq!(last_run(Some(&json!("坏数据"))), Value::Null);
+        assert_eq!(
+            last_run(Some(
+                &json!({"at": 1.5, "ok": true, "ms": 3, "summary": "s", "x": 1})
+            )),
+            json!({"at": 1.5, "ok": true, "ms": 3, "summary": "s"})
         );
     }
 }
