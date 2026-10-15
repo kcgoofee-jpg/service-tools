@@ -1,9 +1,9 @@
 /** 账号保护与排队：每个上游账号的每日 / 每小时上限、安静时段、间隔抖动、排队数。 */
 import { useMemo, useState } from "preact/hooks";
-import { Badge, Card, Notice } from "../../../../ui";
+import { Card, Notice } from "../../../../ui";
 import { act, useAdmin } from "../../Admin";
-import { LoadError, Loading, Stat } from "../_kit";
-import { ConfirmDialog, Derive, NumField, SaveBar, useForm, withTone } from "../system/forms";
+import { LoadError, Loading } from "../_kit";
+import { ConfirmDialog, Derive, NumField, SaveBar, useForm } from "../system/forms";
 import { GUARD_ADVANCED, GUARD_CORE, type Guard, guardSpecs, pacedText } from "./core";
 
 const URL = "/admin/api/guard";
@@ -31,7 +31,6 @@ export default function GuardCard() {
   const cap = Number(form.raw("account_daily_cap")) || 0;
   const burst = Number(form.raw("daily_burst")) || 0;
   const paced = pacedText(cap, burst);
-  const quietOn = data.values.quiet_start !== data.values.quiet_end;
 
   const doSave = async () => {
     setSaving(true);
@@ -53,32 +52,6 @@ export default function GuardCard() {
       sub="每个上游账号的出图总量与节奏：总量和节奏比单人限额更能保护账号；保存后立即生效。"
     >
       <div class="stack-sm">
-        <div class="stats">
-          <Stat
-            label="当前每小时上限"
-            value={data.hourly_cap_now}
-            hint="最近 60 分钟（滚动窗口），每个账号"
-          />
-          <Stat label="排队中的图片" value={data.queued_images} hint="全站正在生成或排队" />
-          <Stat
-            label="时段"
-            value={data.quiet_now ? "安静时段" : "正常时段"}
-            hint={quietOn ? `${data.values.quiet_start} 点～${data.values.quiet_end} 点` : "未设安静时段"}
-          />
-        </div>
-        {data.accounts.length > 0 && (
-          <div class="chips">
-            {data.accounts.map((a) => (
-              <Badge key={a.position} {...withTone(!a.usable && "danger")}>
-                账号 {a.position}：今天 {a.today}
-                {data.values.account_daily_cap ? ` / ${data.values.account_daily_cap}` : ""} 张 · 最近 60 分钟{" "}
-                {a.this_hour}
-                {data.hourly_cap_now ? ` / ${data.hourly_cap_now}` : ""} 张
-              </Badge>
-            ))}
-          </div>
-        )}
-
         <form class="stack-sm" {...form.formProps} onSubmit={(e) => e.preventDefault()}>
           <div class="form-grid">
             {GUARD_CORE.map((n) => (
@@ -100,7 +73,7 @@ export default function GuardCard() {
             </div>
           </details>
           <p class="muted small">
-            V4.5 每人每天保底由「动态额度」管理：现在是每人 {data.values.base_daily_images} 张。
+            V4.5 由「动态额度」管理：每人上限 {data.values.base_daily_images} 张，先到先得。
           </p>
           <SaveBar form={form} onSave={trySave} saving={saving} label="保存账号保护" />
         </form>

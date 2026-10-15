@@ -1,12 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  hourlyPeak,
-  type PoolToken,
-  rechargeDerivation,
-  secText,
-  tokenFormatProblem,
-  tokenState,
-} from "./core";
+import { type PoolToken, rechargeDerivation, tokenFormatProblem, tokenState } from "./core";
 
 const tok = (over: Partial<PoolToken>): PoolToken => ({
   token_id: "t",
@@ -41,15 +34,10 @@ describe("令牌状态", () => {
   });
 });
 
-describe("推算与显示", () => {
+describe("推算", () => {
   it("恢复速度：每天 5% = 每 1% 约 4.8 小时，≈ 71 张 / 天", () => {
     const d = rechargeDerivation(5, 14.2);
     expect(d.hoursPerPercent).toBeCloseTo(4.8, 5);
     expect(d.imagesPerDay).toBe(71);
-  });
-  it("耗时与峰值", () => {
-    expect(secText(5925)).toBe("5.9 秒");
-    expect(secText(null)).toBe("—");
-    expect(hourlyPeak([{ t: 0, ok: 3, err: 2, r429: 0, images: 3, p50_ms: null }])).toBe(5);
   });
 });
