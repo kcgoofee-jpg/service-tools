@@ -115,6 +115,8 @@ test.describe("游客", () => {
       "1000 点",
       "分享核对",
       "保底",
+      "按算力折算",
+      "每小时自动恢复",
       "OpenAI 兼容",
     ]) {
       expect(text, `旧文案「${gone}」应已删除`).not.toContain(gone);
@@ -149,9 +151,9 @@ test.describe("游客", () => {
         coupons: [],
       },
       live: {
-        quota: { images_today: 123, units_today: 123, images_cap: 500, v5_today: 9, v5_cap: 60 },
+        quota: { images_today: 123, images_cap: 500, v5_today: 9, v5_cap: 60 },
         queue: { waiting: 0, running: 0 },
-        guard: { hour: 1, hour_cap: 100, burst_wait: 0, cooldown: 0, blocked: null },
+        guard: { hour: 1, hour_cap: 100, cooldown: 0, blocked: null },
         interval: 5,
       },
       status: { web_login: true },

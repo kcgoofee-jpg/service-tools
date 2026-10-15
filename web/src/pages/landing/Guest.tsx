@@ -183,7 +183,6 @@ function Rules() {
   const { meta, facts } = useStore();
   const m = meta.value;
   const f = facts.value;
-  const base = m.limits?.base_daily_images ?? 0;
   const extra = m.limits?.key_image_queue ?? 0;
   const quiet = m.limits?.quiet === true;
   const qs = m.limits?.quiet_start ?? f.quietStart;
@@ -197,8 +196,8 @@ function Rules() {
           1024×1024（或等像素），步数 ≤ 28。Vibe 消耗 Anlas，每人每天有上限。
         </li>
         <li>
-          <b>额度</b>：V4.5 {base > 0 ? `每人上限 ${base} 张` : "每人有每日上限"}，先到先得，每日 7
-          点重置；全站每小时上限按最近 60 分钟（滚动窗口）计算，不是整点重置。
+          <b>额度</b>：V4.5 和 V5 都有每日每人上限，全站共用、先到先得，每日 7 点重置；全站每小时上限按最近 60
+          分钟（滚动窗口）计算，不是整点重置。
         </li>
         <li>
           <b>一次一张</b>：每把 Key 同时只生成 1 张{extra > 0 ? `，最多再排 ${extra} 张` : ""}

@@ -1,24 +1,26 @@
 import { describe, expect, it } from "vitest";
 import { deriveV5, guardSpecs, imagesPerPercent, pacedText, type V5Plan } from "./core";
 
-const plan: V5Plan = { rate: 5, percent: null, k: 0.9, global: 63, people: 10, each: 6 };
+const plan: V5Plan = { rate: 5, percent: null, global: 71, people: 10, each: 7 };
 
-describe("deriveV5（全站 V5 = 恢复 × 每 1% 张数 × 系数；每人 = 全站 ÷ 人数，限制在范围内）", () => {
+describe("deriveV5（全站 V5 = 恢复 × 每 1% 张数；每人 = max(1, 全站 ÷ max(10, 人数))）", () => {
   it("与接口给的数字对得上", () => {
-    const d = deriveV5(plan, 14.2, 3, 30);
-    expect(d.calc).toBe(63);
+    const d = deriveV5(plan, 14.2);
+    expect(d.calc).toBe(71);
     expect(d.matches).toBe(true);
-    expect(d.perPersonRaw).toBe(6);
+    expect(d.each).toBe(7);
     expect(d.eachMatches).toBe(true);
   });
-  it("对不上时标出来（满电放宽等规则会让接口值更大）", () => {
-    const d = deriveV5({ ...plan, global: 260, each: 26, percent: 95 }, 14.2, 10, 30);
+  it("当天方案沿用 7 点定下的全站池：和现在的恢复速度算出来的不一样时标出来", () => {
+    const d = deriveV5({ ...plan, rate: 6 }, 14.2);
+    expect(d.calc).toBe(85);
     expect(d.matches).toBe(false);
-    expect(d.perPersonRaw).toBe(26);
+    expect(d.each).toBe(7);
   });
-  it("每人额度被下限 / 上限夹住", () => {
-    expect(deriveV5({ ...plan, global: 10, each: 3 }, 14.2, 3, 30).eachMatches).toBe(true);
-    expect(deriveV5({ ...plan, global: 1000, each: 30 }, 14.2, 3, 30).eachMatches).toBe(true);
+  it("人多时按人数平分，不再夹到 3～30；最少 1 张", () => {
+    expect(deriveV5({ ...plan, people: 40, each: 1 }, 14.2).each).toBe(1);
+    expect(deriveV5({ ...plan, global: 10, people: 40, each: 1 }, 14.2).eachMatches).toBe(true);
+    expect(deriveV5({ ...plan, global: 1000, each: 100 }, 14.2).eachMatches).toBe(true);
   });
 });
 
@@ -40,12 +42,11 @@ describe("保护推算", () => {
     expect(pacedText(0, 150)).toBeNull();
     expect(pacedText(1000, 0)).toBeNull();
   });
-  it("字段范围取自接口，由算法管理的每人上限不出现在表单里", () => {
+  it("字段范围取自接口", () => {
     const specs = guardSpecs({
       values: {},
       fields: {
         account_daily_cap: { default: 1000, min: 0, max: 20000, label: "x" },
-        base_daily_images: { default: 100, min: 0, max: 100000, label: "y" },
       },
     });
     expect(Object.keys(specs)).toEqual(["account_daily_cap"]);

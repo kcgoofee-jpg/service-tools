@@ -23,7 +23,7 @@ export default function RegistrationCard(props: { ops: Ops; algoOn: boolean }) {
   const pct = r.max_users > 0 ? Math.min(100, (r.active / r.max_users) * 100) : 0;
   const customFeatures = form.raw("features_mode") === "custom";
   const algoHint = props.algoOn
-    ? "由「额度与保护 › 动态额度」自动设置（每 10 分钟重算），关闭动态额度后才能手改"
+    ? "由动态额度管理（「额度与保护 › 动态额度」每 10 分钟重算），关闭动态额度后才能手改"
     : undefined;
 
   /** 返回 undefined = 已保存；返回字符串 = 失败原因 */

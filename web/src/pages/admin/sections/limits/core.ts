@@ -10,11 +10,12 @@ export type RateInfo = {
   notes?: string[];
   quiet?: { rate: number; hours: number; gain: number };
 };
+/** 当天的 V5 方案（7 点后第一次计算时定下，当天不变）：全站池 = ⌊恢复 × 每 1% 张数⌋，每人 = max(1, ⌊全站 ÷ people⌋) */
 export type V5Plan = {
   rate: number;
   percent: number | null;
-  k: number;
   global: number;
+  /** max(10, 前 3 个完整服务日用过 V5 的人数) */
   people: number;
   each: number;
   rate_info?: RateInfo;
@@ -29,8 +30,9 @@ export type QuotaReview = {
   ceiling_hits: number;
   hourly_blocks: number;
   coverage_hours?: number;
-  from: [number, number];
-  to: [number, number];
+  /** 每人上限 A：`[A]`（2.x 还带第二个数，3.0 只剩 A） */
+  from: number[];
+  to: number[];
   reasons: string[];
   v5_pct?: number | null;
   v5_rate?: number | null;
@@ -41,7 +43,6 @@ export type QuotaAlgo = {
   last: {
     enabled?: boolean;
     ceiling?: number;
-    base?: number;
     v5?: V5Plan;
     members?: number;
     cap?: number;
@@ -69,39 +70,35 @@ export function imagesPerPercent(m: ModulesLite | null | undefined): { value: nu
     : { value: DEFAULT_IMAGES_PER_PERCENT, fromApi: false };
 }
 
+/** 每人 V5 分池子时至少按这么多人算（与后端 quota::V5_MIN_PEOPLE 一致） */
+export const V5_MIN_PEOPLE = 10;
+
 export type V5Derivation = {
   rate: number;
   perPercent: number;
-  k: number;
-  /** rate × perPercent × k 向下取整 */
+  /** rate × perPercent 向下取整 */
   calc: number;
   global: number;
-  /** 与接口给的全站值是否一致（满电放宽等规则会让两者不同） */
+  /** 与接口给的全站值是否一致（当天方案 7 点后就定下，之后恢复速度变了也沿用） */
   matches: boolean;
   people: number;
-  perPersonRaw: number;
-  lo: number;
-  hi: number;
+  /** max(1, ⌊全站 ÷ 人数⌋) */
   each: number;
   eachMatches: boolean;
 };
 
-export function deriveV5(plan: V5Plan, perPercent: number, lo: number, hi: number): V5Derivation {
-  const calc = Math.floor(plan.rate * perPercent * plan.k);
-  const perPersonRaw = plan.people > 0 ? Math.floor(plan.global / plan.people) : 0;
-  const each = Math.max(lo, Math.min(hi, perPersonRaw));
+export function deriveV5(plan: V5Plan, perPercent: number): V5Derivation {
+  const calc = Math.floor(plan.rate * perPercent);
+  const people = Math.max(V5_MIN_PEOPLE, plan.people);
+  const each = Math.max(1, Math.floor(plan.global / people));
   return {
     rate: plan.rate,
     perPercent,
-    k: plan.k,
     calc,
     global: plan.global,
     matches: calc === plan.global,
     people: plan.people,
-    perPersonRaw,
-    lo,
-    hi,
-    each: plan.each,
+    each,
     eachMatches: each === plan.each,
   };
 }
@@ -154,13 +151,9 @@ export const GUARD_ADVANCED = [
   "key_image_queue",
   "queue_per_account",
 ];
-/** 由动态额度算法每天 7 点写入，后台不让手改（改了会被覆盖） */
-export const GUARD_ALGO_OWNED = new Set(["base_daily_images"]);
-
 export function guardSpecs(g: Guard): Record<string, FieldSpec> {
   const out: Record<string, FieldSpec> = {};
   for (const [name, f] of Object.entries(g.fields)) {
-    if (GUARD_ALGO_OWNED.has(name)) continue;
     const copy = GUARD_COPY[name];
     out[name] = {
       kind: "int",
@@ -189,14 +182,6 @@ export const RUNTIME_SPECS: Record<string, FieldSpec> = {
     max: 300,
     unit: "秒",
     hint: "一张图在某个排队环节最多等多久，超时就放弃（15～300）",
-  },
-  key_image_min_interval: {
-    kind: "int",
-    label: "同一把 Key 的图片任务间隔",
-    min: 15,
-    max: 120,
-    unit: "秒",
-    hint: "同一个成员两次出图至少隔多久（15～120）",
   },
   image_min_interval: {
     kind: "int",
@@ -275,22 +260,6 @@ export const ALGO_SPECS: Record<string, FieldSpec> = {
     max: 2000,
     unit: "张",
     hint: "需求拥挤、按需求平分时的底线（1～2000）",
-  },
-  quota_v5_min: {
-    kind: "int",
-    label: "V5 每人额度下限",
-    min: 0,
-    max: 500,
-    unit: "张",
-    hint: "按人头平分后太少时的底线（0～500）",
-  },
-  quota_v5_max: {
-    kind: "int",
-    label: "V5 每人额度上限",
-    min: 1,
-    max: 500,
-    unit: "张",
-    hint: "按人头平分后太多时的天花板（1～500）",
   },
 };
 export const MANUAL_N_SPEC: Record<string, FieldSpec> = {
