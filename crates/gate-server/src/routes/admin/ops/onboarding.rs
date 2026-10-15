@@ -118,7 +118,7 @@ async fn set_registration(
     Ok(ok_json(&snapshot(&state).await?))
 }
 
-/// 全局功能开关：`{"flags": {"text": false, ...}}`。关闭后所有成员（管理员 Key 除外）立即不可用。
+/// 全局功能开关：`{"flags": {"upscale": false, ...}}`。关闭后所有成员（管理员 Key 除外）立即不可用。
 async fn set_features(State(state): State<AppState>, _s: AdminSession, req: Request) -> ApiResult {
     let (parts, body) = req.into_parts();
     let body = read_json_body(&parts.headers, body, BODY_LIMIT).await?;

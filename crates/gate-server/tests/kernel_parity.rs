@@ -575,8 +575,6 @@ async fn run_case(case: &Value) -> Result<(), String> {
         ("DATA_DIR", dir.path().to_str().unwrap().to_string()),
         ("NAI_TOKENS", tokens.join(",")),
         ("NAI_IMAGE_HOST", mock.url()),
-        ("NAI_TEXT_HOST", mock.url()),
-        ("NAI_TEXT_HOST_LEGACY", mock.url()),
         ("ALERT_WEBHOOK_URL", format!("{}/alert-hook", mock.url())),
         ("TZ", "Asia/Shanghai".into()),
         ("DAY_RESET_HOUR", "7".into()),

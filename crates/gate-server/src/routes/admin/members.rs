@@ -64,7 +64,7 @@ fn http(status: u16, detail: impl Into<String>) -> Reject {
 
 const NO_KEY: &str = "key 不存在";
 const ANLAS_CAP: &str = "开通 Anlas 时必须设置每日或每月 Anlas 上限（0 = 不限），不能两项都留空";
-const FEATURES_HINT: &str = "image,upscale,augment,vibe,tags,text,voice";
+const FEATURES_HINT: &str = "image,upscale,augment,vibe,tags";
 const ROLE_HINT: &str = "身份组必须是 regular / invite / test / admin";
 
 // ----------------------------------------------------------------------------- 小工具
@@ -255,7 +255,6 @@ fn key_json(row: &Value, c: &Counter, generated: i64, role: Option<&str>) -> Val
         "daily_anlas": jget(row, "daily_anlas"),
         "daily_v5": jget(row, "daily_v5"),
         "monthly_anlas": jget(row, "monthly_anlas"),
-        "daily_text_tokens": jget(row, "daily_text_tokens"),
         "rpm": jget(row, "rpm"),
         "allow_anlas": jflag(row, "allow_anlas"),
         "allow_img2img": jflag(row, "allow_img2img"),
@@ -276,7 +275,6 @@ fn key_json(row: &Value, c: &Counter, generated: i64, role: Option<&str>) -> Val
             "legacy_free_images": c.legacy_free_images,
             "anlas": pyval::float(pyc::round(anlas, 2)),
             "v5": c.v5,
-            "text_tokens": c.text_tokens,
             "requests": c.requests,
         },
     })
@@ -513,12 +511,6 @@ async fn create_key(State(state): State<AppState>, req: Request) -> R {
         100_000,
         "daily_v5",
     )?;
-    let daily_text = num_int(
-        &field("daily_text_tokens", json!(env.default_daily_text_tokens)),
-        0,
-        100_000_000,
-        "daily_text_tokens",
-    )?;
     let rpm = num_int(&field("rpm", json!(env.default_rpm)), 1, 600, "rpm")?;
     let expires_days = num_int(
         &field("expires_days", json!(env.default_expires_days)),
@@ -555,7 +547,8 @@ async fn create_key(State(state): State<AppState>, req: Request) -> R {
         daily_anlas,
         daily_v5,
         monthly_anlas,
-        daily_text_tokens: daily_text,
+        // 文本接口已删除（docs/v3-deviations.md #81）：列保留（只增不减），新 Key 写 0，不再读
+        daily_text_tokens: 0,
         rpm,
         allow_anlas: truthy("allow_anlas"),
         allow_img2img: truthy("allow_img2img"),
@@ -790,12 +783,6 @@ async fn patch_key(State(state): State<AppState>, req: Request) -> R {
         fields.insert(
             "monthly_anlas".into(),
             pyval::float(num_float(v, 0.0, 100_000.0, "monthly_anlas")?),
-        );
-    }
-    if let Some(v) = body.get("daily_text_tokens") {
-        fields.insert(
-            "daily_text_tokens".into(),
-            json!(num_int(v, 0, 100_000_000, "daily_text_tokens")?),
         );
     }
     if let Some(v) = body.get("rpm") {
@@ -1323,12 +1310,11 @@ const TAG_NOTE_MAX: usize = 200;
 
 /// 自动标签：近 24 小时因这些「成员自己能改」的原因被拒 / 失败（按 detail 识别；顺序即优先级）。
 /// 「开着 Vibe」已移除（2026-10-14）：Vibe 氛围参考已全员开放，正常用 Vibe 不再是「成员自己能改的问题」。
-const AUTO_TAG_PATTERNS: [(&str, &str); 5] = [
+const AUTO_TAG_PATTERNS: [(&str, &str); 4] = [
     ("传了底图", "%img2img%"),
     ("画师串 NaN", "%NaN%"),
     ("角色超 6 个", "%角色太多%"),
     ("请求过快", "%请求过于频繁%"),
-    ("调文本接口", "%文本生成%"),
 ];
 
 /// 给成员打 / 改手动标签（只在后台显示）。body: `{tag, note}`
@@ -1502,12 +1488,12 @@ async fn members(State(state): State<AppState>, req: Request) -> R {
             e.1 = a_ts;
         }
     }
-    let today_counters: HashMap<i64, (i64, i64, f64, i64, i64)> = st
+    let today_counters: HashMap<i64, (i64, i64, f64, i64)> = st
         .db
         .counter_rows(&today)
         .await?
         .into_iter()
-        .map(|(k, images, v5, anlas, tokens, requests)| (k, (images, v5, anlas, tokens, requests)))
+        .map(|(k, images, v5, anlas, _tokens, requests)| (k, (images, v5, anlas, requests)))
         .collect();
 
     // 生图速率：每人最近 24 小时逐小时成功生图数（前端画 24 根小时条；跨天的开头几格是昨天同时段）
@@ -1523,10 +1509,8 @@ async fn members(State(state): State<AppState>, req: Request) -> R {
     let mut out: Vec<Obj> = Vec::new();
     for row in st.db.list_keys().await? {
         let id = row.get("id").and_then(Value::as_i64).unwrap_or(0);
-        let (images, v5, anlas, text_tokens, requests) = today_counters
-            .get(&id)
-            .copied()
-            .unwrap_or((0, 0, 0.0, 0, 0));
+        let (images, v5, anlas, requests) =
+            today_counters.get(&id).copied().unwrap_or((0, 0, 0.0, 0));
         let w = week.get(&id).cloned().unwrap_or(Value::Null);
         let wi = |k: &str| pyval::number_like(&jget(&w, k)).map_or(0, |x| x as i64);
         let wf = |k: &str| pyval::number_like(&jget(&w, k)).unwrap_or(0.0);
@@ -1570,7 +1554,7 @@ async fn members(State(state): State<AppState>, req: Request) -> R {
         put(
             "today",
             json!({"images": images, "v5": v5, "anlas": pyval::float(pyc::round(anlas, 2)),
-                   "text_tokens": text_tokens, "requests": requests}),
+                   "requests": requests}),
         );
         put(
             "week",

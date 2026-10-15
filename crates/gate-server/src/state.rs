@@ -90,7 +90,7 @@ pub struct Inner {
     /// V5 官方免费额度缓存（只有真实出图会刷新）。
     pub allowance: crate::allowance::ServerAllowance,
     pub health: UpstreamHealth,
-    /// 文本等非图片请求的全站并发（旧版 GLOBAL_CONCURRENCY）。
+    /// 标签补全等非出图请求的全站并发（旧版 GLOBAL_CONCURRENCY；文本接口已删，docs/v3-deviations.md #81）。
     pub global_sem: Arc<tokio::sync::Semaphore>,
     pub key_sems: Mutex<HashMap<i64, Arc<tokio::sync::Semaphore>>>,
     pub global_waiting: AtomicI64,
@@ -187,8 +187,6 @@ impl AppState {
         let nai = NaiClient::new(
             UpConfig {
                 image_host: env.image_host.clone(),
-                text_host: env.text_host.clone(),
-                legacy_text_host: env.text_host_legacy.clone(),
                 proxy: Some(env.upstream_proxy.clone()).filter(|s| !s.is_empty()),
                 custom_user_agent: Some(env.upstream_user_agent.clone()).filter(|s| !s.is_empty()),
                 http2: env.upstream_http2,

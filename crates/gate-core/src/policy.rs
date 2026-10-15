@@ -1,4 +1,4 @@
-//! 核心策略：Opus 免费档判定、Anlas 估算、参数钳制、token 估算（移植自 `app/policy.py`）。
+//! 核心策略：Opus 免费档判定、Anlas 估算、参数钳制（移植自 `app/policy.py`；文本生成部分已随文本接口删除，见 docs/v3-deviations.md #81）。
 //!
 //! 行为与旧 Python 逐字一致，对拍夹具见 `tests/golden/policy/`。要点：
 //! - 请求体是任意 JSON（`serde_json::Value`，保序）；会转发给上游的 body，键顺序与 Python dict 完全一致；
@@ -9,14 +9,13 @@
 //! - 随机源（`secrets` / `random`）由调用方注入。
 
 use crate::pyext::{
-    self, Obj, PyErr, PyResult, cmp_int_float, int_like, int_or, json_int, len_or_empty, nd_class,
-    num_eq_int, py_int, py_str, space_class, str_of_get, strict_int, truthy_opt,
+    self, Obj, PyErr, PyResult, int_like, int_or, json_int, len_or_empty, nd_class, num_eq_int,
+    py_str, space_class, str_of_get, strict_int, truthy_opt,
 };
 use crate::{pyc, pyval};
 use fancy_regex::Regex as FancyRegex;
 use regex::Regex;
 use serde_json::Value;
-use std::cmp::Ordering;
 use std::sync::OnceLock;
 
 // ----------------------------------------------------------------------------- 常量
@@ -117,11 +116,6 @@ pub const V5_MEDIUM_UC_PRESET: i64 = 0;
 pub const V5_MEDIUM_UC: &str = "lowres, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, \
 very displeasing, chromatic aberration, dithering, halftone, screentone, multiple views, logo, \
 too many watermarks, negative space, blank page";
-
-pub const TEXT_CONTEXT_TOKENS: i64 = 8192;
-/// 上游单次最大生成长度（真值：超过就 400）。
-pub const TEXT_MAX_GENERATION_TOKENS: i64 = 250;
-pub const TEXT_INPUT_BUDGET_TOKENS: i64 = 7000;
 
 const PNG_MAGIC: &[u8] = b"\x89PNG\r\n\x1a\n";
 
@@ -521,16 +515,6 @@ pub fn reference_surcharge(payload: &Value) -> PyResult<i64> {
         0
     };
     Ok(precise as i64 * 5 + extra)
-}
-
-// ----------------------------------------------------------------------------- tokens
-
-/// 粗略估算 token 数（中英混合，1 token ≈ 3.5 字符）。仅用于配额预检。
-pub fn estimate_tokens(text: &str) -> i64 {
-    if text.is_empty() {
-        return 0;
-    }
-    std::cmp::max(1, (pyc::len_chars(text) as f64 / 3.5).ceil() as i64)
 }
 
 // ----------------------------------------------------------------------------- 规范化
@@ -1486,141 +1470,7 @@ pub fn medium_normalize(payload: &Value) -> (Value, Vec<String>) {
     (Value::Object(out), notes)
 }
 
-// ----------------------------------------------------------------------------- 文本钳制
-
-/// `int > value`（int 在左，value 是 JSON 数 / bool）；其它类型 Python 抛 TypeError。
-fn int_gt_value(a: i128, v: &Value) -> PyResult<bool> {
-    match v {
-        Value::Bool(b) => Ok(a > i128::from(*b)),
-        Value::Number(n) => match pyext::int_of_number(n) {
-            Some(i) => Ok(a > i),
-            None => Ok(cmp_int_float(a, n.as_f64().unwrap_or(f64::NAN)) == Some(Ordering::Greater)),
-        },
-        other => Err(PyErr::Type(format!(
-            "'>' not supported between instances of 'int' and '{}'",
-            pyext::type_name(other)
-        ))),
-    }
-}
-
-/// 钳制文本补全的参数并按 token 预算截断过长的输入。返回 `(新 payload, 变更说明, 错误)`。
-pub fn clamp_text_params(
-    payload: &Value,
-    max_output_tokens: i64,
-    max_input_chars: i64,
-    max_input_tokens: i64,
-) -> PyResult<(Value, Vec<String>, Option<String>)> {
-    let mut notes: Vec<String> = Vec::new();
-    let mut out = dict_copy(payload)?;
-    let mut p = params_copy(&out);
-    out.insert("parameters".into(), Value::Null);
-
-    let input_text = str_or_empty(out.get("input"));
-    let input_len = pyc::len_chars(&input_text);
-    if input_len as i128 > i128::from(max_input_chars) {
-        out.insert("parameters".into(), Value::Object(p));
-        return Ok((
-            Value::Object(out),
-            notes,
-            Some(format!(
-                "输入过长（{input_len} 字符，上限 {max_input_chars}）"
-            )),
-        ));
-    }
-
-    // 上游单次生成上限就是 250 token（2026-10-13 实测：max_length=300 被 400 拒绝）。
-    // 站长把 max_text_output_tokens 设成 300 时每一次文本请求都会失败 —— 这里兜住它。
-    let cap = i128::from(max_output_tokens.clamp(1, TEXT_MAX_GENERATION_TOKENS));
-    let ml = int_or(p.get("max_length"), 0, 0)?;
-    if ml <= 0 {
-        p.insert("max_length".into(), json_int(std::cmp::min(150, cap)));
-    } else if ml > cap {
-        p.insert("max_length".into(), json_int(cap));
-        notes.push(if ml <= i128::from(max_output_tokens) {
-            format!("max_length 已按上游上限钳制到 {cap}")
-        } else {
-            format!("max_length 已钳制到 {cap}")
-        });
-    }
-    let min_l = int_or(p.get("min_length"), 1, 1)?;
-    // 注意：这里拿 int 去比原始的 p["max_length"]（可能是字符串 → TypeError，浮点 → 精确比较），与旧版一致
-    let max_len_val = p.get("max_length").cloned().unwrap_or(Value::Null);
-    if int_gt_value(min_l, &max_len_val)? {
-        p.insert("min_length".into(), max_len_val.clone());
-    }
-
-    // 上游文本模型的硬上限是「输入 + 输出 ≤ 8192 token」，超了直接 400。
-    // 按 token 预算做「中间省略」截断：保留开头（人设 / 规则 / 指令）与结尾（最近的对话），截掉中间。
-    let budget = std::cmp::max(
-        256,
-        std::cmp::min(
-            i128::from(max_input_tokens),
-            i128::from(TEXT_CONTEXT_TOKENS) - py_int(&max_len_val)? - 64,
-        ),
-    );
-    if i128::from(estimate_text_tokens(&input_text)) > budget {
-        let (truncated, cut_chars) = truncate_middle(&input_text, budget as i64, 0.35);
-        out.insert("input".into(), Value::String(truncated));
-        notes.push(format!(
-            "输入超出 {TEXT_CONTEXT_TOKENS} token 上下文，已省略中间 {cut_chars} 字符（保留开头与最近的结尾）"
-        ));
-    }
-    out.insert("parameters".into(), Value::Object(p));
-    Ok((Value::Object(out), notes, None))
-}
-
-/// 保守估算 token 数：中日韩按 1 token/字，其余按 0.34 token/字符。
-/// 估高 = 我们多截一点（安全）；估低 = 成员收到 400（糟）。
-pub fn estimate_text_tokens(text: &str) -> i64 {
-    let mut cjk: i64 = 0;
-    let mut total: i64 = 0;
-    for ch in text.chars() {
-        total += 1;
-        let code = ch as u32;
-        if (0x2E80..=0x9FFF).contains(&code)
-            || (0xAC00..=0xD7AF).contains(&code)
-            || (0xF900..=0xFAFF).contains(&code)
-            || (0xFF00..=0xFFEF).contains(&code)
-            || (0x3000..=0x303F).contains(&code)
-        {
-            cjk += 1;
-        }
-    }
-    let other = total - cjk;
-    cjk + (other as f64 * 0.34) as i64 + 8
-}
-
-/// 把文本截到 token 预算内：保留开头 `head_ratio` 与结尾其余，中间用一行省略号替代。
-/// 估算与实际有偏差，所以按比例缩了再复核，最多迭代 4 次。返回 `(截断后文本, 被省略的字符数)`。
-pub fn truncate_middle(text: &str, budget: i64, head_ratio: f64) -> (String, i64) {
-    const MARKER: &str = "\n…（中间省略）…\n";
-    let marker_len = pyc::len_chars(MARKER) as i64;
-    let mut current = text.to_string();
-    for _ in 0..4 {
-        let est = estimate_text_tokens(&current);
-        if est <= budget {
-            break;
-        }
-        let len = pyc::len_chars(&current) as i64;
-        let mut keep = ((i128::from(len) * i128::from(budget)) as f64 / est as f64 * 0.92) as i64;
-        keep = std::cmp::max(240, keep);
-        if keep >= len {
-            break;
-        }
-        let head = std::cmp::max(120, (keep as f64 * head_ratio) as i64);
-        let tail = std::cmp::max(80, keep - head);
-        current = format!(
-            "{}{MARKER}{}",
-            pyc::take_chars(&current, head as usize),
-            pyc::last_chars(&current, tail as usize)
-        );
-    }
-    let cut = std::cmp::max(
-        0,
-        pyc::len_chars(text) as i64 - (pyc::len_chars(&current) as i64 - marker_len),
-    );
-    (current, cut)
-}
+// ----------------------------------------------------------------------------- 图生图 / 局部重绘守卫
 
 /// 图生图 / 局部重绘的两条上游地雷（2026-10-13 逐组合实测）：
 /// 1. `action=infill` 不带 `parameters.mask` → 上游 500；
@@ -1650,19 +1500,6 @@ pub fn guard_image_action(body: &Value) -> (Value, Vec<String>, Option<String>) 
     }
     out.insert("parameters".into(), Value::Object(p));
     (Value::Object(out), notes, err)
-}
-
-/// Kayra / Erato / GLM / Xialong 等新模型走 text.novelai.net，老模型走 api.novelai.net。
-pub fn text_model_host<'a>(model: &str, modern_host: &'a str, legacy_host: &'a str) -> &'a str {
-    let m = model.to_lowercase();
-    if ["kayra", "erato", "glm", "xialong"]
-        .iter()
-        .any(|k| m.contains(k))
-    {
-        modern_host
-    } else {
-        legacy_host
-    }
 }
 
 // ----------------------------------------------------------------------------- 工具

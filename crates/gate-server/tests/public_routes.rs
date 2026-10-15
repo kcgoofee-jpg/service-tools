@@ -637,11 +637,7 @@ async fn public_status_exposes_only_safe_fields() {
         .iter()
         .map(|f| f["id"].as_str().unwrap())
         .collect();
-    assert_eq!(
-        ids,
-        ["image", "upscale", "augment", "vibe", "tags", "text"],
-        "voice 不对外"
-    );
+    assert_eq!(ids, ["image", "upscale", "augment", "vibe", "tags"]);
 
     // 上游状态
     for _ in 0..4 {
@@ -1390,8 +1386,6 @@ async fn setup_page(extra: &[(&str, &str)]) -> Page {
         ),
         ("NAI_TOKENS", "pst-synthetic-upstream-token".into()),
         ("NAI_IMAGE_HOST", mock.url()),
-        ("NAI_TEXT_HOST", mock.url()),
-        ("NAI_TEXT_HOST_LEGACY", mock.url()),
         ("KEY_IMAGE_MIN_INTERVAL", "0".into()),
         ("IMAGE_MIN_INTERVAL", "0".into()),
         (
