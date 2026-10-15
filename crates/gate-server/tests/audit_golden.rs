@@ -9,8 +9,8 @@
 use base64::Engine;
 use gate_core::pyext::PyErr;
 use gate_db::{Db, DbError};
-use gate_golden::{Case, assert_eq_py};
 use gate_server::audit;
+use gate_snapshot::{Case, assert_eq_py};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::io::{Cursor, Read, Write};
@@ -18,7 +18,7 @@ use std::path::Path;
 
 const M: &str = env!("CARGO_MANIFEST_DIR");
 
-/// 读 `tests/fixtures/<name>.jsonl`（或 `.jsonl.gz`）。夹具放在 fixtures 目录而不是 gate-golden 默认的 golden 目录。
+/// 读 `tests/fixtures/<name>.jsonl`（或 `.jsonl.gz`）。夹具放在 fixtures 目录而不是 gate-snapshot 默认的 golden 目录。
 fn load(name: &str) -> Vec<Case> {
     let dir = Path::new(M).join("tests").join("fixtures");
     let plain = dir.join(format!("{name}.jsonl"));

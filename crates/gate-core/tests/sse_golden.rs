@@ -2,7 +2,7 @@ mod common;
 
 use common::bytes_of;
 use gate_core::sse::{SseDecoder, SseEvent, encode_sse};
-use gate_golden::{assert_eq_py, load};
+use gate_snapshot::{assert_eq_py, load};
 use proptest::prelude::*;
 use serde_json::{Value, json};
 

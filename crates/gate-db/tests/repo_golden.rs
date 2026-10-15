@@ -13,7 +13,7 @@ use gate_db::repo::{
     usage::{LogFilter, NewLog, Success},
 };
 use gate_db::{Db, DbError};
-use gate_golden::{Case, as_f64, assert_eq_py, assert_eq_py_ordered, f as fjson, load};
+use gate_snapshot::{Case, as_f64, assert_eq_py, assert_eq_py_ordered, f as fjson, load};
 use rusqlite::types::ValueRef;
 use serde::Serialize;
 use serde_json::{Map, Value, json};

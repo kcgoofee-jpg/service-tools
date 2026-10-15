@@ -45,7 +45,7 @@ pub fn tag(o: &Obj) -> Value {
         Obj::BigInt { neg, digits } => {
             json!(["i", format!("{}{digits}", if *neg { "-" } else { "" })])
         }
-        Obj::Float(x) => json!(["f", gate_golden::f(*x)]),
+        Obj::Float(x) => json!(["f", gate_snapshot::f(*x)]),
         Obj::Str(s) => json!(["s", s]),
         Obj::Bytes(b) => json!(["B", b64(b)]),
         Obj::List(items) => json!(["l", items.iter().map(tag).collect::<Vec<_>>()]),

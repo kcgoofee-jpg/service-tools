@@ -1,5 +1,5 @@
 use gate_core::jsondump;
-use gate_golden::{assert_eq_py, load};
+use gate_snapshot::{assert_eq_py, load};
 use serde_json::json;
 
 const M: &str = env!("CARGO_MANIFEST_DIR");

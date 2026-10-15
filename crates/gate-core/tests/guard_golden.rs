@@ -25,7 +25,7 @@ use gate_core::guard::{
     self, AdaptPlan, FIELDS, GuardCore, GuardError, parse_setting_float, stamps_from_rows,
 };
 use gate_core::reasons::Reason;
-use gate_golden::{Case, assert_eq_py, assert_eq_py_ordered, f, load};
+use gate_snapshot::{Case, assert_eq_py, assert_eq_py_ordered, f, load};
 use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
 

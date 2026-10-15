@@ -18,7 +18,7 @@
 
 use gate_core::clock::Clock;
 use gate_core::quota::{self, *};
-use gate_golden::{Case, as_f64, assert_eq_py, assert_eq_py_ordered, f, load};
+use gate_snapshot::{Case, as_f64, assert_eq_py, assert_eq_py_ordered, f, load};
 use serde_json::{Map, Value, json};
 
 const M: &str = env!("CARGO_MANIFEST_DIR");
@@ -57,7 +57,7 @@ mod expect {
     /// 旧版 `_yesterday` 是否折算过 `used`（账号层面 `units < images`）；是的话返回实际张数之和。
     pub fn raw_used(yesterday: &Value) -> Option<i64> {
         let images = yesterday.get("upstream_images")?.as_i64()?;
-        let units = gate_golden::as_f64(yesterday.get("upstream_units")?)?;
+        let units = gate_snapshot::as_f64(yesterday.get("upstream_units")?)?;
         (images != 0 && units < images as f64).then(|| {
             yesterday["counters"]
                 .as_array()

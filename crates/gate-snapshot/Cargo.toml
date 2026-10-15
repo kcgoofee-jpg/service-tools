@@ -1,5 +1,5 @@
 [package]
-name = "gate-golden"
+name = "gate-snapshot"
 description = "只在测试时用：读取旧 Python 生成的 JSONL 夹具（生成脚本见标签 py-final），并按 Python 语义比较。"
 version.workspace = true
 edition.workspace = true

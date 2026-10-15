@@ -4,7 +4,7 @@
 use gate_core::pyext::PyResult;
 use gate_core::upstream_errors::upstream_error_message;
 use gate_core::upstream_policy as up;
-use gate_golden::{Case, as_f64, assert_eq_py_ordered, f, load};
+use gate_snapshot::{Case, as_f64, assert_eq_py_ordered, f, load};
 use serde_json::{Value, json};
 
 const M: &str = env!("CARGO_MANIFEST_DIR");

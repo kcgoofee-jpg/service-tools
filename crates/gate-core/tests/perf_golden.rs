@@ -1,5 +1,5 @@
 use gate_core::perf::{self, PerfParams, PerfRow, PerfStats};
-use gate_golden::{Case, as_f64, assert_eq_py, assert_eq_py_ordered, load};
+use gate_snapshot::{Case, as_f64, assert_eq_py, assert_eq_py_ordered, load};
 use serde_json::{Value, json};
 
 const M: &str = env!("CARGO_MANIFEST_DIR");

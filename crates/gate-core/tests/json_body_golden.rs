@@ -3,7 +3,7 @@ mod common;
 use common::{Raw, depth_of, raw_of, tag};
 use gate_core::json_body::{self, BodyJsonError, Lossy, MAX_JSON_DEPTH};
 use gate_core::pyloads::{self, JsonError, Options};
-use gate_golden::{Case, assert_eq_py, assert_eq_py_ordered, load};
+use gate_snapshot::{Case, assert_eq_py, assert_eq_py_ordered, load};
 use serde_json::{Value, json};
 
 const M: &str = env!("CARGO_MANIFEST_DIR");

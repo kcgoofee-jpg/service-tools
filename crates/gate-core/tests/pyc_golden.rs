@@ -1,5 +1,5 @@
 use gate_core::pyc;
-use gate_golden::{as_f64, assert_eq_py, f, load};
+use gate_snapshot::{as_f64, assert_eq_py, f, load};
 use serde_json::{Value, json};
 
 const M: &str = env!("CARGO_MANIFEST_DIR");

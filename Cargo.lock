@@ -891,7 +891,7 @@ version = "3.0.0"
 dependencies = [
  "base64 0.22.1",
  "fancy-regex",
- "gate-golden",
+ "gate-snapshot",
  "hex",
  "jiff",
  "proptest",
@@ -909,7 +909,7 @@ version = "3.0.0"
 dependencies = [
  "base64 0.22.1",
  "gate-core",
- "gate-golden",
+ "gate-snapshot",
  "jiff",
  "rand 0.9.5",
  "rusqlite",
@@ -940,14 +940,6 @@ dependencies = [
  "twilight-gateway",
  "twilight-http",
  "twilight-model",
-]
-
-[[package]]
-name = "gate-golden"
-version = "3.0.0"
-dependencies = [
- "flate2",
- "serde_json",
 ]
 
 [[package]]
@@ -986,7 +978,7 @@ dependencies = [
  "futures",
  "gate-core",
  "gate-db",
- "gate-golden",
+ "gate-snapshot",
  "gate-testkit",
  "gate-upstream",
  "hex",
@@ -1015,6 +1007,14 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "zip",
+]
+
+[[package]]
+name = "gate-snapshot"
+version = "3.0.0"
+dependencies = [
+ "flate2",
+ "serde_json",
 ]
 
 [[package]]

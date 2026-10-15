@@ -6,14 +6,14 @@ use gate_core::image_events::{
     image_envelope,
 };
 use gate_core::pymsgpack;
-use gate_golden::{assert_eq_py, load};
+use gate_snapshot::{assert_eq_py, load};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 const M: &str = env!("CARGO_MANIFEST_DIR");
 
 /// 夹具里的线上格式名：与旧版一致，只有恰好等于 `"msgpack"` 才走 msgpack，其余（包括拼错的）都走 SSE。
-fn wire_of(c: &gate_golden::Case) -> WireFormat {
+fn wire_of(c: &gate_snapshot::Case) -> WireFormat {
     if c.get("wire").and_then(Value::as_str).unwrap() == "msgpack" {
         WireFormat::Msgpack
     } else {
