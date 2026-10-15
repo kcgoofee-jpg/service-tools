@@ -3,6 +3,7 @@ import type { ComponentChildren } from "preact";
 import { useEffect, useId, useMemo, useRef, useState } from "preact/hooks";
 import { getJSON } from "../../../../lib/api";
 import { Button, Dialog, Field, Notice, Skeleton, toast } from "../../../../ui";
+import { useBusy } from "../_kit";
 import { call } from "./actions";
 import {
   buildBody,
@@ -13,7 +14,7 @@ import {
   type KeyForm,
 } from "./keyForm";
 import { roleOf } from "./logic";
-import { useBusy, useCloseGuard } from "./shared";
+import { useCloseGuard } from "./shared";
 import {
   FEATURE_LABELS,
   type KeyRow,
@@ -21,6 +22,7 @@ import {
   type OpsSnapshot,
   ROLE_LABEL,
   type Role,
+  featureIds as visibleFeatureIds,
 } from "./types";
 
 type Props = {
@@ -122,7 +124,7 @@ export function KeyDialog(props: Props) {
   const dirty = form !== null && JSON.stringify(form) !== initial.current;
   const guard = useCloseGuard(dirty, props.onClose);
   const labels = ops?.features.labels ?? FEATURE_LABELS;
-  const featureIds = useMemo(() => Object.keys(labels), [labels]);
+  const featureIds = useMemo(() => visibleFeatureIds(labels), [labels]);
 
   const set = <K extends keyof KeyForm>(k: K, v: KeyForm[K]) => {
     setForm((f) => (f ? { ...f, [k]: v } : f));
@@ -134,7 +136,7 @@ export function KeyDialog(props: Props) {
   const submit = async () => {
     if (!form || pending) return;
     setFormErr("");
-    const r = buildBody(form, editing);
+    const r = buildBody(form);
     if (!r.ok) {
       setErrors(r.errors);
       setFormErr("有填写不正确的地方，请按提示修改");
@@ -166,7 +168,6 @@ export function KeyDialog(props: Props) {
 
   const f = form;
   const manual = f?.quota === "manual";
-  const hasDiscord = !!(target?.discord_id || target?.discord);
   return (
     <Dialog
       key={guard.gen}
@@ -411,15 +412,8 @@ export function KeyDialog(props: Props) {
           <div class="xa-form__sec">其他</div>
           <div class="xa-form__grid">
             <NumField
-              label="每日文本 tokens"
-              hint="0 = 禁止使用文本"
-              value={f.daily_text_tokens}
-              error={errors.daily_text_tokens}
-              onInput={(v) => set("daily_text_tokens", v)}
-            />
-            <NumField
               label="每分钟请求数（RPM）"
-              hint="1～600"
+              hint={editing ? "1～600" : "1～600；留空用服务端默认值"}
               min={1}
               value={f.rpm}
               error={errors.rpm}
@@ -427,10 +421,10 @@ export function KeyDialog(props: Props) {
             />
             <NumField
               label="有效天数"
-              hint={editing ? "留空保持原有效期；0 = 永久" : "0 = 永久"}
+              hint={editing ? "留空保持原有效期；0 = 永久" : "留空 = 不设到期；0 = 永久"}
               value={f.expires}
               error={errors.expires}
-              placeholder={editing ? "留空保持原有效期" : undefined}
+              placeholder={editing ? "留空保持原有效期" : "不设到期"}
               onInput={(v) => set("expires", v)}
             />
           </div>
@@ -446,19 +440,6 @@ export function KeyDialog(props: Props) {
                 <small>还需服务器开启 ALLOW_IMG2IMG；会扣 Anlas 的请求还要允许消耗 Anlas</small>
               </span>
             </label>
-            {editing && hasDiscord && (
-              <label class="xa-check">
-                <input
-                  type="checkbox"
-                  checked={f.notify}
-                  onChange={(e) => set("notify", e.currentTarget.checked)}
-                />
-                <span>
-                  保存后私信通知成员
-                  <small>只在额度、模型、Anlas、有效期有变化时才发；Discord 申诉期默认不发</small>
-                </span>
-              </label>
-            )}
           </div>
           {formErr && (
             <p class="xa-formerr" role="alert">

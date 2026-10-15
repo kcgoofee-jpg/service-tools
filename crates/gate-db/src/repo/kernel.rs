@@ -232,18 +232,23 @@ impl Db {
 
     // ------------------------------------------------------------------ 自动驾驶（autopilot.run）
 
-    /// 熔断统计：`since` 之后上游真正出错的次数与出图请求总数（没有行时 SUM 为 NULL）。
+    /// 熔断统计：`since` 之后上游真正出错的次数与出图请求总数（没有行时 SUM 为 NULL），
+    /// 以及这些失败来自多少把不同的非测试 Key（docs/v3-deviations.md #58）。
     pub async fn autopilot_breaker_rows(&self, since: f64) -> Result<BreakerRows> {
+        const FAIL: &str = "status='error' AND (up_status>=500 OR up_status BETWEEN 200 AND 299)";
         self.read(move |c| {
             c.query_row(
-                "SELECT SUM(CASE WHEN status='error' AND (up_status>=500 OR up_status BETWEEN 200 AND 299) \
-                 THEN 1 ELSE 0 END), COUNT(*) FROM usage_log \
-                 WHERE ts>=? AND kind LIKE 'image%' AND status IN ('ok','error')",
+                &format!(
+                    "SELECT SUM(CASE WHEN {FAIL} THEN 1 ELSE 0 END), COUNT(*), \
+                     COUNT(DISTINCT CASE WHEN {FAIL} AND key_id IS NOT NULL AND {NOT_TEST} THEN key_id END) \
+                     FROM usage_log WHERE ts>=? AND kind LIKE 'image%' AND status IN ('ok','error')"
+                ),
                 [since],
                 |r| {
                     Ok(BreakerRows {
                         fails: value::i64_opt(r, 0)?,
                         total: value::i64_opt(r, 1)?,
+                        fail_keys: value::i64_or(r, 2, 0)?,
                     })
                 },
             )

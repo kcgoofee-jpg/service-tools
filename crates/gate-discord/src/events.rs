@@ -1,11 +1,11 @@
 //! 网关事件的宽容解析：只取机器人用得到的字段。
 //!
-//! 为什么不用 `twilight_model` 的 `Event`：它会把整个 GUILD_CREATE / MESSAGE_CREATE / INTERACTION_CREATE
+//! 为什么不用 `twilight_model` 的 `Event`：它会把整个 GUILD_CREATE / INTERACTION_CREATE
 //! 严格反序列化（含频道、角色、组件树……）。Discord 新增一种频道或组件类型时，严格模型会整条事件解析失败，
-//! 机器人就悄悄丢掉用户的命令（用户只看到「应用程序没有响应」）。discord.py 是动态取字段的，天然不怕这个，
-//! 所以这里也只声明需要的字段、其余一律忽略。网关连接 / 心跳 / 重连仍全部交给 twilight-gateway。
+//! 机器人就悄悄丢掉用户的命令（用户只看到「应用程序没有响应」）。
+//! 所以这里只声明需要的字段、其余一律忽略。网关连接 / 心跳 / 重连仍全部交给 twilight-gateway。
 //!
-//! ID 一律保留 Discord 原样的十进制字符串，原样转给网关桥接（对应 Python 的 `str(interaction.user.id)`）。
+//! ID 一律保留 Discord 原样的十进制字符串，原样转给网关桥接。
 
 use serde::Deserialize;
 use serde_json::Value;
@@ -23,12 +23,10 @@ pub struct User {
     /// 头像哈希（`a_` 开头表示动图）；没有头像是 null。
     #[serde(default)]
     pub avatar: Option<String>,
-    #[serde(default)]
-    pub bot: bool,
 }
 
 impl User {
-    /// discord.py `str(user)`：新式用户名（discriminator 为 "0"）只显示 name，旧式带 `#1234`。
+    /// 显示名：新式用户名（discriminator 为 "0"）只显示 name，旧式带 `#1234`。
     pub fn display_tag(&self) -> String {
         match self.discriminator.as_deref() {
             None | Some("0") | Some("") => self.username.clone(),
@@ -104,12 +102,12 @@ impl Interaction {
             .or(self.user.as_ref())
     }
 
-    /// 服务器昵称（discord.py `Member.nick`）；私聊没有。
+    /// 服务器昵称；私聊没有。
     pub fn nick(&self) -> Option<&str> {
         self.member.as_ref().and_then(|m| m.nick.as_deref())
     }
 
-    /// `str(interaction.guild_id)`：没有服务器时 Python 得到字符串 "None"。
+    /// 服务器 ID 的字符串；私聊没有服务器，给 `"None"`（网关会因为不是指定服务器而拒绝）。
     pub fn guild_id_str(&self) -> String {
         self.guild_id.clone().unwrap_or_else(|| "None".into())
     }
@@ -121,9 +119,8 @@ impl Interaction {
     }
 }
 
-/// 弹窗提交里各组件的取值：`custom_id` → 值列表。
-/// 组件树是 `Label(18){ component: Select(3){ custom_id, values } }` 或 `Label(18){ component: TextInput(4){ custom_id, value } }`
-/// （文字框只有一个字符串 `value`，按只有一个元素的列表给出；没填是空串），旧式 `ActionRow(1){ components: [...] }` 也认。
+/// 弹窗提交里各文字框的取值：`custom_id` → 值列表（只有一个元素；没填是空串，没有 `value` 字段是空列表）。
+/// 组件树是 `Label(18){ component: TextInput(4){ custom_id, value } }`，旧式 `ActionRow(1){ components: [...] }` 也认。
 pub fn modal_values(components: &[Value]) -> Vec<(String, Vec<String>)> {
     fn walk(v: &Value, out: &mut Vec<(String, Vec<String>)>) {
         if let Some(inner) = v.get("component") {
@@ -135,12 +132,8 @@ pub fn modal_values(components: &[Value]) -> Vec<(String, Vec<String>)> {
             }
         }
         if let Some(id) = v.get("custom_id").and_then(Value::as_str) {
-            let values = match (v.get("values").and_then(Value::as_array), v.get("value")) {
-                (Some(a), _) => a
-                    .iter()
-                    .filter_map(|x| x.as_str().map(str::to_owned))
-                    .collect(),
-                (None, Some(Value::String(text))) => vec![text.clone()],
+            let values = match v.get("value") {
+                Some(Value::String(text)) => vec![text.clone()],
                 _ => Vec::new(),
             };
             out.push((id.to_owned(), values));
@@ -160,29 +153,15 @@ pub struct ReadyInfo {
     pub application_id: String,
 }
 
-/// GUILD_CREATE / GUILD_UPDATE 里我们关心的部分（`/help` 之外只用来取服务器名与主人 ID）。
+/// GUILD_CREATE / GUILD_UPDATE 里我们关心的部分（只用来在心跳里报服务器名）。
 #[derive(Debug, Clone, Deserialize)]
 pub struct GuildInfo {
     pub id: String,
     #[serde(default)]
     pub name: Option<String>,
-    #[serde(default)]
-    pub owner_id: Option<String>,
     /// 掉线的服务器只有 id 和 `unavailable: true`。
     #[serde(default)]
     pub unavailable: bool,
-}
-
-/// MESSAGE_CREATE 里我们关心的部分。没有 MESSAGE_CONTENT Intent 时，`content` 只有在机器人被 @ 时才有值。
-#[derive(Debug, Clone, Deserialize)]
-pub struct MessageCreate {
-    pub id: String,
-    pub channel_id: String,
-    #[serde(default)]
-    pub guild_id: Option<String>,
-    pub author: User,
-    #[serde(default)]
-    pub content: String,
 }
 
 /// 一条网关消息分类后的结果。
@@ -192,7 +171,6 @@ pub enum Gateway {
     GuildCreate(GuildInfo),
     GuildUpdate(GuildInfo),
     GuildDelete(String),
-    MessageCreate(MessageCreate),
     Interaction(Box<Interaction>),
     /// 其他事件（含 HELLO / HEARTBEAT_ACK 等控制帧）：机器人不关心。
     Other,
@@ -250,16 +228,13 @@ pub fn parse(raw: &str) -> Result<Gateway, serde_json::Error> {
             Gateway::GuildUpdate(serde_json::from_str::<Frame<GuildInfo>>(raw)?.d)
         }
         Some("GUILD_DELETE") => {
-            // `unavailable: true` 只是 Discord 那边故障，discord.py 会保留缓存；真正被踢出 / 退出才删
+            // `unavailable: true` 只是 Discord 那边故障，保留缓存；真正被踢出 / 退出才删
             let gone = serde_json::from_str::<Frame<GuildGone>>(raw)?.d;
             if gone.unavailable {
                 Gateway::Other
             } else {
                 Gateway::GuildDelete(gone.id)
             }
-        }
-        Some("MESSAGE_CREATE") => {
-            Gateway::MessageCreate(serde_json::from_str::<Frame<MessageCreate>>(raw)?.d)
         }
         Some("INTERACTION_CREATE") => {
             Gateway::Interaction(Box::new(serde_json::from_str::<Frame<Interaction>>(raw)?.d))
@@ -305,17 +280,16 @@ mod tests {
 
     #[test]
     fn guild_create_ignores_unknown_shapes() {
-        // 频道类型 / 组件类型不认识也不能影响取 name / owner_id
+        // 频道类型 / 组件类型不认识也不能影响取 name
         let raw = frame(
             "GUILD_CREATE",
-            json!({"id": "900000000000000001", "name": "测试服", "owner_id": "900000000000000002",
+            json!({"id": "900000000000000001", "name": "测试服",
                    "channels": [{"id": "1", "type": 9999}], "threads": "whatever"}),
         );
         let Gateway::GuildCreate(g) = parse(&raw).unwrap() else {
             panic!("not guild create")
         };
         assert_eq!(g.name.as_deref(), Some("测试服"));
-        assert_eq!(g.owner_id.as_deref(), Some("900000000000000002"));
     }
 
     #[test]
@@ -370,25 +344,8 @@ mod tests {
     }
 
     #[test]
-    fn modal_values_walk_label_tree() {
-        let comps = vec![
-            json!({"type": 18, "id": 1, "component": {"type": 3, "id": 2, "custom_id": "sel-a", "values": ["满意"]}}),
-            json!({"type": 18, "id": 3, "component": {"type": 3, "id": 4, "custom_id": "sel-b", "values": []}}),
-            json!({"type": 1, "components": [{"type": 3, "custom_id": "sel-c", "values": ["x", "y"]}]}),
-        ];
-        assert_eq!(
-            modal_values(&comps),
-            vec![
-                ("sel-a".to_string(), vec!["满意".to_string()]),
-                ("sel-b".to_string(), vec![]),
-                ("sel-c".to_string(), vec!["x".to_string(), "y".to_string()]),
-            ]
-        );
-    }
-
-    #[test]
     fn modal_values_reads_text_input_value_in_label_and_action_row() {
-        // 3.0 的 /反馈：Label(18) 里包着 TextInput(4)，取值字段是 `value`
+        // /反馈：Label(18) 里包着 TextInput(4)，取值字段是 `value`
         let comps = vec![
             json!({"type": 18, "id": 1, "component": {"type": 4, "id": 2, "custom_id": "text", "value": "排队有点久\n希望快一点"}}),
             // 旧式 ActionRow(1) 包着的文字框，以及没填的文字框

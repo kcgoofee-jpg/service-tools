@@ -10,46 +10,6 @@ import { UsageMeter } from "./Usage";
 
 /* ---------------- 今日额度（登录成员首屏第一块） ---------------- */
 
-/** 全站最近 60 分钟用量：滚动窗口，不是整点重置。单独成组件：live 每秒变化，只重绘这一行。 */
-function HourlyMeter() {
-  const { live } = useStore();
-  const g = live.value?.guard;
-  const cap = g?.hour_cap ?? 0;
-  if (!(cap > 0)) return null;
-  return (
-    <UsageMeter
-      label="全站最近 60 分钟（滚动窗口）"
-      used={g?.hour ?? 0}
-      cap={cap}
-      hint="按滚动窗口计算，不是整点重置；额度随时间逐张恢复。"
-    />
-  );
-}
-
-function Timing({ me }: { me: MeMember }) {
-  const t = me.timing;
-  if (!t?.count || (!t.avg_dur_s && !t.avg_wait_s)) return null;
-  return (
-    <dl class="lp-facts">
-      {t.avg_dur_s ? (
-        <div>
-          <dt>我的平均出图耗时</dt>
-          <dd>
-            {t.avg_dur_s} 秒
-            {t.site_avg_dur_s ? <span class="muted">（全站 {t.site_avg_dur_s} 秒）</span> : null}
-          </dd>
-        </div>
-      ) : null}
-      {t.avg_wait_s ? (
-        <div>
-          <dt>我的平均排队等待</dt>
-          <dd>{t.avg_wait_s} 秒</dd>
-        </div>
-      ) : null}
-    </dl>
-  );
-}
-
 export function QuotaCard({ me }: { me: MeMember }) {
   return (
     <Card title="我今天的额度" sub={`每日 ${resetHour(me)} 点重置`} class="lp-quota">
@@ -64,9 +24,7 @@ export function QuotaCard({ me }: { me: MeMember }) {
             hint={r.hint}
           />
         ))}
-        <HourlyMeter />
       </div>
-      <Timing me={me} />
     </Card>
   );
 }
@@ -186,18 +144,6 @@ export function Coupons({ coupons }: { coupons: Coupon[] }) {
         </p>
         <p class="muted small">一张券只能用一次，用掉后不能撤销。</p>
       </Dialog>
-    </Card>
-  );
-}
-
-/* ---------------- 问卷入口 ---------------- */
-
-export function SurveyLink() {
-  return (
-    <Card title="使用体验问卷" sub="大约 1 分钟，帮站长决定下一步优化什么。">
-      <a class="btn" href="/survey">
-        去填写
-      </a>
     </Card>
   );
 }

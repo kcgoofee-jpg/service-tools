@@ -2,7 +2,6 @@ data/
 .env
 *.db
 .local/
-*.packed.html
 .DS_Store
 *.db-wal
 *.db-shm
@@ -30,3 +29,8 @@ web/playwright-report/
 *.db.gz
 *.enc
 *.log
+
+# Python 残留（2.x 已删除；工具脚本本地运行时的缓存与虚拟环境）
+__pycache__/
+*.pyc
+.venv/

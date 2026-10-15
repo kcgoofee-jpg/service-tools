@@ -57,8 +57,10 @@ impl Alerter {
             api_base: api_base.trim_end_matches('/').to_string(),
             last: Mutex::new(HashMap::new()),
             dm_channel: tokio::sync::Mutex::new(None),
+            // 没有 UA 会被 Discord 前面的 Cloudflare 判成机器人直接 403（1010），告警就悄悄发不出去（docs/v3-deviations.md #59）
             http: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(10))
+                .user_agent(gate_core::discord_ua::DISCORD_USER_AGENT)
                 .build()
                 .unwrap_or_default(),
             sent: Default::default(),
@@ -191,6 +193,37 @@ impl Alerter {
             }
             // 告警失败不能影响服务；不打印错误详情（可能含 URL / Token）
             Err(_) => tracing::warn!("alert delivery failed"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gate_core::discord_ua::DISCORD_USER_AGENT;
+    use gate_testkit::MockUpstream;
+
+    /// 告警请求必须带 Discord 认可的 UA（默认 UA 会被 Cloudflare 1010 拦），与注册服务、运维命令共用一个。
+    #[tokio::test]
+    async fn alert_requests_carry_the_shared_discord_user_agent() {
+        let mock = MockUpstream::start().await;
+        // 频道
+        let channel = Alerter::new(&mock.url(), "synthetic-bot", "", "900000000000000020", "");
+        channel.send("测试").await;
+        // Webhook
+        let hook = Alerter::new("", "", "", "", &format!("{}/alert-hook", mock.url()));
+        hook.send("测试").await;
+        let reqs = mock.requests();
+        assert_eq!(reqs.len(), 2);
+        assert_eq!(reqs[0].path, "/channels/900000000000000020/messages");
+        assert_eq!(reqs[1].path, "/alert-hook");
+        for r in &reqs {
+            assert_eq!(
+                r.header("user-agent"),
+                Some(DISCORD_USER_AGENT),
+                "{}",
+                r.path
+            );
         }
     }
 }

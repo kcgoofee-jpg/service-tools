@@ -1,7 +1,7 @@
 /**
  * 新建 / 编辑 Key 的表单模型：默认值、从已有 Key 还原、校验并拼出请求体（纯函数，单测覆盖）。
- * 规则与后端一致：数值不能为空 / 为负 / 带小数（整数字段）；0 表示不限（只有每日文本 tokens 的 0 是「禁止使用」）；
- * 开通 Anlas 时每日 / 每月 Anlas 上限不能都是 0。
+ * 规则与后端一致：数值不能为空 / 为负 / 带小数（整数字段）；0 表示不限；开通 Anlas 时每日 / 每月 Anlas 上限不能都是 0。
+ * 每分钟请求数、有效天数默认留空 = 不发给后端（新建的 Key 用服务端默认值：不设到期），不再带硬编码的默认值。
  */
 import type { KeyRow, OpsSnapshot, Role } from "./types";
 import { parseNum } from "./validate";
@@ -15,7 +15,6 @@ export type KeyForm = {
   daily_v5: string;
   daily_anlas: string;
   monthly_anlas: string;
-  daily_text_tokens: string;
   allow_anlas: boolean;
   exclude_global_v5: boolean;
   featMode: "all" | "custom";
@@ -23,12 +22,11 @@ export type KeyForm = {
   rpm: string;
   expires: string;
   allow_img2img: boolean;
-  notify: boolean;
 };
 
 export type FormErrors = Partial<Record<keyof KeyForm, string>>;
 
-/** 新建：数值默认跟「新成员默认额度」对齐（从 /ops 读），其余用与旧版相同的常量 */
+/** 新建：额度默认跟「新成员默认额度」对齐（从 /ops 读），缺失时用常量；每分钟请求数和有效天数留空 */
 export function createDefaults(ops: OpsSnapshot | null): KeyForm {
   const reg = ops?.registration;
   const pick = (v: number | undefined | null, d: number) => String(v ?? d);
@@ -41,15 +39,13 @@ export function createDefaults(ops: OpsSnapshot | null): KeyForm {
     daily_v5: pick(reg?.daily_v5, 50),
     daily_anlas: "100",
     monthly_anlas: "2500",
-    daily_text_tokens: "150000",
     allow_anlas: false,
     exclude_global_v5: false,
     featMode: "custom",
     feats: ops?.features.new_key ?? ["image"],
-    rpm: "10",
-    expires: pick(reg?.expires_days, 30),
+    rpm: "",
+    expires: "",
     allow_img2img: false,
-    notify: false,
   };
 }
 
@@ -63,7 +59,6 @@ export function formFromKey(k: KeyRow, role: Role): KeyForm {
     daily_v5: String(k.daily_v5),
     daily_anlas: String(k.daily_anlas),
     monthly_anlas: String(k.monthly_anlas),
-    daily_text_tokens: String(k.daily_text_tokens),
     allow_anlas: k.allow_anlas,
     exclude_global_v5: k.exclude_global_v5,
     featMode: k.features == null ? "all" : "custom",
@@ -71,13 +66,12 @@ export function formFromKey(k: KeyRow, role: Role): KeyForm {
     rpm: String(k.rpm),
     expires: "",
     allow_img2img: k.allow_img2img,
-    notify: false,
   };
 }
 
 export type BuildResult = { ok: true; body: Record<string, unknown> } | { ok: false; errors: FormErrors };
 
-export function buildBody(f: KeyForm, editing: boolean): BuildResult {
+export function buildBody(f: KeyForm): BuildResult {
   const errors: FormErrors = {};
   const num = (field: keyof KeyForm, label: string, o: { min?: number; max: number; int?: boolean }) => {
     const r = parseNum(String(f[field]), label, o);
@@ -91,13 +85,14 @@ export function buildBody(f: KeyForm, editing: boolean): BuildResult {
   const body: Record<string, unknown> = {
     name: f.name.trim(),
     role: f.role,
-    notify: f.notify,
+    // 后台操作不再私信成员；旧网关默认会私信，所以仍明确带 false，后端不再认这个参数后可以一起删
+    notify: false,
     allow_img2img: f.allow_img2img,
     quota: f.quota,
   };
-  body.daily_text_tokens = num("daily_text_tokens", "每日文本 tokens", { max: 100_000_000 });
-  body.rpm = num("rpm", "每分钟请求数", { min: 1, max: 600 });
-  if (!editing || f.expires.trim() !== "") body.expires_days = num("expires", "有效天数", { max: 3650 });
+  // 留空 = 不发：新建用服务端默认（不设到期），编辑保持原值
+  if (f.rpm.trim() !== "") body.rpm = num("rpm", "每分钟请求数", { min: 1, max: 600 });
+  if (f.expires.trim() !== "") body.expires_days = num("expires", "有效天数", { max: 3650 });
   if (manual) {
     body.image_model_scope = f.scope;
     body.daily_images = num("daily_images", "每日图片张数", { max: 1_000_000 });

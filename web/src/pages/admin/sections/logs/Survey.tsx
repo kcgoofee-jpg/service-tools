@@ -3,8 +3,8 @@ import { useState } from "preact/hooks";
 import { fullTime } from "../../../../lib/format";
 import { Badge, Button, Skeleton } from "../../../../ui";
 import { useAdmin } from "../../Admin";
-import { LoadError, Stat } from "../_kit";
-import { Empty, NARROW, TableScroll, useMedia } from "../members/shared";
+import { LoadError, Stat, TableWrap } from "../_kit";
+import { Empty, NARROW, useMedia } from "../members/shared";
 import { surveyStats } from "./feedbackStats";
 import type { SurveyResp, SurveyRow } from "./types";
 
@@ -54,7 +54,9 @@ export function Survey() {
       )}
       <div class="card lg-listcard">
         {rows.length === 0 ? (
-          <Empty title="还没有成员填过问卷">链接在奶妹的私信里：/survey</Empty>
+          <Empty title="还没有成员填过问卷">
+            成员登录后，在首页页脚的「使用体验问卷」里填写（/survey）。
+          </Empty>
         ) : narrow ? (
           <ul class="lg-cards" aria-label="成员问卷">
             {shown.map((r, i) => (
@@ -83,7 +85,7 @@ export function Survey() {
             ))}
           </ul>
         ) : (
-          <TableScroll label="成员问卷">
+          <TableWrap label="成员问卷">
             <table class="table lg-table">
               <caption class="sr-only">成员问卷</caption>
               <thead>
@@ -113,7 +115,7 @@ export function Survey() {
                 ))}
               </tbody>
             </table>
-          </TableScroll>
+          </TableWrap>
         )}
         {rows.length > shown.length && (
           <div class="lg-more">

@@ -1,7 +1,7 @@
 //! 可编程的假 NovelAI 上游。
 //!
 //! - 默认行为（不写脚本时）：出图返回装着 `n_samples` 张真 PNG 的 zip；流式出图按 `parameters.stream`
-//!   返回 msgpack（4 字节大端长度 + map）或 SSE，先若干 intermediate 再 final；文本流返回 SSE token；
+//!   返回 msgpack（4 字节大端长度 + map）或 SSE，先若干 intermediate 再 final；
 //!   订阅查询返回 Opus + V5 剩余 80%；补全返回固定标签；放大 / 导演工具返回 PNG；Vibe 编码返回二进制。
 //! - 脚本：`push(path, Reply)` 让该路径的下一次请求按脚本回（429 带 Retry-After、403 模型不存在、5xx、
 //!   流到一半断开、永不结束的流、卡住不回……），用完回到默认行为。
@@ -395,35 +395,6 @@ async fn default_reply(
                 chunks: image_stream(n, &wire),
             })
             .await
-        }
-        ("POST", "/ai/generate-stream") => {
-            let max = json_body
-                .get("parameters")
-                .and_then(|p| p.get("max_length"))
-                .and_then(Value::as_u64)
-                .unwrap_or(10)
-                .min(20);
-            let mut chunks: Vec<(Duration, Bytes)> = (0..max)
-                .map(|i| {
-                    (
-                        Duration::from_millis(1),
-                        Bytes::from(format!(
-                            "data: {}\n\n",
-                            json!({"token": format!(" word{i} ")})
-                        )),
-                    )
-                })
-                .collect();
-            chunks.push((Duration::ZERO, Bytes::from_static(b"data: [DONE]\n\n")));
-            render(Reply::Chunks {
-                status: 200,
-                content_type: "text/event-stream".into(),
-                chunks,
-            })
-            .await
-        }
-        ("POST", "/ai/generate") => {
-            json_response(200, &json!({"output": " Once upon a time ".repeat(3)}))
         }
         ("GET", "/user/subscription") => {
             let pct = *state.v5_percent.lock().expect("v5");

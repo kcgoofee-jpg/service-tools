@@ -2,10 +2,10 @@
 import { useMemo, useState } from "preact/hooks";
 import { fullTime } from "../../../../lib/format";
 import { Badge, Button, Card, Notice } from "../../../../ui";
-import { act, useAdmin } from "../../Admin";
-import { LoadError, Loading } from "../_kit";
+import { useAdmin } from "../../Admin";
+import { actOrError, ConfirmDialog, LoadError, Loading } from "../_kit";
 import type { FieldSpec } from "./core";
-import { ConfirmDialog, SelectField, TextAreaField, TextField, useForm, withTone } from "./forms";
+import { SelectField, TextAreaField, TextField, useForm, withTone } from "./forms";
 import {
   COMPONENTS,
   CREATE_STATUSES,
@@ -15,6 +15,7 @@ import {
   type Incident,
   leakWarnings,
   nextStatus,
+  PUBLIC_COMPONENTS,
   STANDARD_BODY,
   STATUS_LABEL,
   type Status,
@@ -69,9 +70,7 @@ function CreateForm() {
   const title = String(form.raw("title")).trim();
   const body = String(form.raw("body"));
   const ready = title.length > 0 && form.valid && comps.length > 0;
-  const compLabels = COMPONENTS.filter((c) => comps.includes(c.key));
-  const hidden = compLabels.filter((c) => !c.onPublicPage);
-  const onlyHidden = compLabels.length > 0 && compLabels.every((c) => !c.onPublicPage);
+  const compLabels = PUBLIC_COMPONENTS.filter((c) => comps.includes(c.key));
   const toggle = (k: string) => setComps((c) => (c.includes(k) ? c.filter((x) => x !== k) : [...c, k]));
 
   return (
@@ -92,13 +91,10 @@ function CreateForm() {
         <fieldset class="checks">
           <legend class="field__label">受影响的组件</legend>
           <div class="chips">
-            {COMPONENTS.map((c) => (
+            {PUBLIC_COMPONENTS.map((c) => (
               <label key={c.key} class="check">
                 <input type="checkbox" checked={comps.includes(c.key)} onChange={() => toggle(c.key)} />
-                <span>
-                  {c.label}
-                  {!c.onPublicPage && <span class="muted">（不显示在公开页）</span>}
-                </span>
+                <span>{c.label}</span>
               </label>
             ))}
           </div>
@@ -110,7 +106,6 @@ function CreateForm() {
         </fieldset>
         <TextAreaField form={form} name="body" rows={3} hint={BODY_HINT(status)} />
         <Warnings texts={[title, body]} />
-        {onlyHidden && <Notice tone="warn">只选了不显示在公开页的组件：这个事件不会出现在状态页上。</Notice>}
         <div class="savebar">
           <Button type="submit" variant="primary" disabled={!ready}>
             发布事件
@@ -120,20 +115,20 @@ function CreateForm() {
       <ConfirmDialog
         open={confirm}
         title="公开发布这个事件？"
-        confirmLabel="发布到状态页"
+        confirmText="发布到状态页"
         onClose={() => setConfirm(false)}
         onConfirm={async () => {
-          const ok = await act(
+          const err = await actOrError(
             "POST",
             "/admin/api/incidents",
             { title, impact: form.raw("impact"), components: comps, status, body: body.trim() },
             "事件已发布",
           );
-          if (ok) {
+          if (!err) {
             form.reset();
             setComps(["api"]);
-            setConfirm(false);
           }
+          return err;
         }}
       >
         <p>下面的内容会公开显示在状态页上，请确认没有内部细节：</p>
@@ -149,9 +144,6 @@ function CreateForm() {
             <b>{STATUS_LABEL[status]}</b> - {finalBody(status, body)}
           </div>
         </div>
-        {hidden.length > 0 && (
-          <p class="muted small">「{hidden.map((c) => c.label).join("」「")}」不会显示在公开状态页。</p>
-        )}
       </ConfirmDialog>
     </Card>
   );
@@ -196,14 +188,12 @@ function UpdateForm(props: { inc: Incident }) {
       <ConfirmDialog
         open={confirm}
         title="公开发布这条更新？"
-        confirmLabel="发布到状态页"
+        confirmText="发布到状态页"
         onClose={() => setConfirm(false)}
         onConfirm={async () => {
-          const ok = await act("POST", url, { status, body: body.trim() }, "更新已发布");
-          if (ok) {
-            form.reset();
-            setConfirm(false);
-          }
+          const err = await actOrError("POST", url, { status, body: body.trim() }, "更新已发布");
+          if (!err) form.reset();
+          return err;
         }}
       >
         <p>「{props.inc.title}」将公开显示：</p>

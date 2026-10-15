@@ -1,4 +1,4 @@
-//! 额度算法对拍：`tools/parity/golden/quota.py` 生成的夹具（旧 Python 的真实输出）。
+//! 额度算法对拍：旧 Python 生成的夹具（真实输出，生成脚本见标签 py-final）。
 //!
 //! 夹具冻结不改。3.0 有意改掉的行为在比较前从期望一侧改写（见 [`expect`]）：
 //! - docs/v3-deviations.md #61：「保底」一层删除——输入里的 `guard.base_daily_images`、`base_blocks` 去掉；

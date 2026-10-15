@@ -186,9 +186,6 @@
   border-radius: var(--radius);
   background: var(--surface);
 }
-.mb-card.is-off {
-  opacity: 0.75;
-}
 .mb-card.is-focus {
   border-color: var(--accent);
 }
@@ -217,9 +214,6 @@
 /* 表格行状态（放在最后，特异性最高） */
 .mb-table .mb-row {
   cursor: pointer;
-}
-.mb-table .mb-row.is-off td {
-  opacity: 0.6;
 }
 .mb-table .mb-row.is-open td {
   background: var(--accent-soft);
@@ -255,10 +249,6 @@
   gap: var(--sp-3);
   align-content: start;
   min-width: 0;
-}
-.mb-meters {
-  display: grid;
-  gap: var(--sp-3);
 }
 .mb-ctl {
   display: grid;
@@ -343,27 +333,6 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--sp-2);
-}
-
-/* 24 小时生图速率 */
-.mb-rate {
-  display: grid;
-  gap: 6px;
-}
-.mb-rate__bars {
-  display: grid;
-  grid-template-columns: repeat(24, 1fr);
-  align-items: end;
-  gap: 2px;
-  height: 36px;
-}
-.mb-rate__bars i {
-  display: block;
-  border-radius: 2px;
-  background: var(--surface-3);
-}
-.mb-rate__bars i.on {
-  background: var(--accent);
 }
 
 @media (max-width: 860px) {

@@ -1,9 +1,9 @@
 /** Anlas 与 V5 预算：全站月度 Anlas、全站每日 V5、V5 余量告警阈值、每人每日 Anlas。 */
 import { useState } from "preact/hooks";
-import { Card, Meter, Notice } from "../../../../ui";
+import { Card } from "../../../../ui";
 import { act, useAdmin } from "../../Admin";
 import { LoadError, Loading } from "../_kit";
-import { NumField, SaveBar, useForm, withTone } from "../system/forms";
+import { NumField, SaveBar, useForm } from "../system/forms";
 import { BUDGET_SPECS, type QuotaAlgo } from "./core";
 
 const URL = "/admin/api/settings";
@@ -13,14 +13,11 @@ type Settings = {
   global_daily_v5: number;
   member_daily_anlas: number;
   v5_alert_threshold: number;
-  v5_capacity: { need: number; global: number; short: boolean; message: string };
 };
-type OverviewLite = { month: { anlas: number }; anlas_budget: number };
 
 export default function BudgetCard() {
   const { data, error, loading } = useAdmin<Settings>(URL);
   const qa = useAdmin<QuotaAlgo>("/admin/api/quota-algo");
-  const ov = useAdmin<OverviewLite>("/admin/api/overview");
   const form = useForm(BUDGET_SPECS, data as Record<string, unknown> | null);
   const [saving, setSaving] = useState(false);
   if (loading && !data)
@@ -38,8 +35,6 @@ export default function BudgetCard() {
 
   // 动态额度开着时，算法每 10 分钟把全站 V5 日限写成它算出的值：手填的数字会被覆盖
   const algoManaged = !!qa.data && qa.data.params.quota_auto_enabled !== 0;
-  const used = ov.data?.month.anlas;
-  const budget = Number(form.raw("global_monthly_anlas")) || 0;
 
   const save = async () => {
     setSaving(true);
@@ -52,17 +47,6 @@ export default function BudgetCard() {
   return (
     <Card title="Anlas 与 V5 预算" sub="全站月度 Anlas 与每日 V5 额度；0 = 不限。">
       <div class="stack-sm">
-        {data.v5_capacity.short && <Notice tone="warn">{data.v5_capacity.message}</Notice>}
-        {used != null && budget > 0 && (
-          <Meter
-            label="本月已用 Anlas"
-            value={used}
-            max={budget}
-            {...withTone(used >= budget * 0.8 && "warn")}
-            text={`${Math.round(used * 100) / 100} / ${budget}`}
-            hint="来自总览：本月全站消耗（估算）与上面的预算对比；超过 80% 变黄"
-          />
-        )}
         <form {...form.formProps} onSubmit={(e) => e.preventDefault()}>
           <div class="form-grid">
             <NumField form={form} name="global_monthly_anlas" />

@@ -2,14 +2,31 @@
 //!
 //! 基地址从环境变量 `DISCORD_API_BASE` 读（默认官方地址）——测试里指向本机假服务，
 //! 绝不会真的发消息。Discord 前面有 Cloudflare：默认 UA 会被判成机器人直接 403（error code 1010），
-//! 所以统一用 patrol.py 里实测可用的那组 UA（2026-10-13）。
+//! 所以统一用 `DiscordBot (站点地址, 版本)`：站点地址读已有配置 `SITE_URL`，读不到就用与网关相同的中性写法
+//! （`gate_core::discord_ua`，网关的注册服务和站长告警也用它）。
 
 use anyhow::{Context, Result};
 use serde_json::Value;
+use std::path::Path;
 use std::time::Duration;
 
 pub const DEFAULT_API_BASE: &str = "https://discord.com/api/v10";
-pub const USER_AGENT: &str = "DiscordBot (https://gate.davidzhao.top, 1.0)";
+
+/// 站点地址：进程环境变量 `SITE_URL`；没有就读 `.env` 文件里的 `SITE_URL`（`NAI_GATE_ENV`，默认
+/// `/opt/service-tools/.env`，与巡检读机器人 Token 的是同一份）。都没有返回空串。
+fn site_url(process_env: Option<String>, env_file: &Path) -> String {
+    process_env.unwrap_or_else(|| crate::util::env_file_value(env_file, "SITE_URL"))
+}
+
+/// 请求 Discord 用的 UA：读得到站点地址就带上，否则用与网关相同的中性默认（见 [`gate_core::discord_ua`]）。
+pub fn user_agent_from_env() -> String {
+    let env_file = crate::util::env_nonempty("NAI_GATE_ENV")
+        .unwrap_or_else(|| "/opt/service-tools/.env".to_string());
+    gate_core::discord_ua::discord_user_agent(&site_url(
+        crate::util::env_nonempty("SITE_URL"),
+        Path::new(&env_file),
+    ))
+}
 
 /// `DISCORD_API_BASE`（去掉末尾斜杠）。
 pub fn api_base_from_env() -> String {
@@ -45,7 +62,7 @@ impl Discord {
     pub fn new(base: &str, token: &str, timeout: Duration) -> Result<Self> {
         let http = reqwest::Client::builder()
             .timeout(timeout)
-            .user_agent(USER_AGENT)
+            .user_agent(user_agent_from_env())
             .build()
             .context("创建 HTTP 客户端失败")?;
         Ok(Self {
@@ -92,4 +109,37 @@ pub fn message_body(text: &str) -> Value {
         "content": gate_core::pyc::take_chars(text, 1900),
         "allowed_mentions": {"parse": []},
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gate_core::discord_ua::{DISCORD_USER_AGENT, discord_user_agent};
+
+    #[test]
+    fn site_url_comes_from_existing_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let env_file = dir.path().join(".env");
+        // 读不到配置：中性默认，不写死任何域名
+        assert_eq!(site_url(None, &env_file), "");
+        assert_eq!(
+            discord_user_agent(&site_url(None, &env_file)),
+            DISCORD_USER_AGENT
+        );
+        // .env 里有 SITE_URL
+        std::fs::write(&env_file, "A=1\nSITE_URL=\"https://owl.example/\"\n").unwrap();
+        assert_eq!(site_url(None, &env_file), "https://owl.example/");
+        assert_eq!(
+            discord_user_agent(&site_url(None, &env_file)),
+            format!(
+                "DiscordBot (https://owl.example, {})",
+                env!("CARGO_PKG_VERSION")
+            )
+        );
+        // 进程环境变量优先
+        assert_eq!(
+            site_url(Some("https://gate.test".into()), &env_file),
+            "https://gate.test"
+        );
+    }
 }

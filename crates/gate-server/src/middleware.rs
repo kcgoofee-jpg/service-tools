@@ -166,14 +166,12 @@ mod tests {
             strip_v1_alias(req).uri().to_string(),
             "/ai/generate-image?x=1"
         );
+        // 只改 /v1/ai/* 与 /v1/user/*；其它 /v1/* 原样（比如 /v1/me）
         let req = Request::builder()
-            .uri("/v1/chat/completions")
+            .uri("/v1/me")
             .body(Body::empty())
             .unwrap();
-        assert_eq!(
-            strip_v1_alias(req).uri().to_string(),
-            "/v1/chat/completions"
-        );
+        assert_eq!(strip_v1_alias(req).uri().to_string(), "/v1/me");
         let req = Request::builder()
             .uri("/v1/user/subscription")
             .body(Body::empty())

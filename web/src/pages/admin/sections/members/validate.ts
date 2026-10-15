@@ -1,4 +1,4 @@
-/** 表单校验：与后端 admin.py 的 _num 同一套规则（空值、负数、小数、越界一律拒绝，绝不静默变成 0）。 */
+/** 表单校验：与后端 num_int / num_float（crates/gate-server/src/routes/admin）同一套规则（空值、负数、小数、越界一律拒绝，绝不静默变成 0）。 */
 export type NumResult = { ok: true; value: number } | { ok: false; error: string };
 
 export function parseNum(

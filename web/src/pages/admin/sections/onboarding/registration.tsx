@@ -1,26 +1,17 @@
 /** 自助领 Key：开放开关、名额、有效期、新成员默认额度与功能、限定身份组。 */
 import { useMemo, useState } from "preact/hooks";
 import { Badge, Button, Card, Meter, Notice, toast } from "../../../../ui";
-import { act } from "../../Admin";
-import {
-  ConfirmDialog,
-  Derive,
-  NumField,
-  SaveBar,
-  SelectField,
-  SwitchRow,
-  TextField,
-  useForm,
-  withTone,
-} from "../system/forms";
-import { FEATURE_PREFIX, type Ops, regBody, regServer, regSpecs, roleProblem, v5Need } from "./core";
+import { actOrError, ConfirmDialog } from "../_kit";
+import { featureIds } from "../members/types";
+import { NumField, SaveBar, SelectField, SwitchRow, TextField, useForm, withTone } from "../system/forms";
+import { FEATURE_PREFIX, type Ops, regBody, regServer, regSpecs, roleProblem } from "./core";
 
 const URL = "/admin/api/ops/registration";
 
 export default function RegistrationCard(props: { ops: Ops; algoOn: boolean }) {
   const r = props.ops.registration;
   const labels = props.ops.features.labels;
-  const names = useMemo(() => Object.keys(labels), [labels]);
+  const names = useMemo(() => featureIds(labels), [labels]);
   const specs = useMemo(() => regSpecs(labels), [labels]);
   const server = useMemo(() => regServer(r, labels), [r, labels]);
   const form = useForm(specs, server);
@@ -28,12 +19,6 @@ export default function RegistrationCard(props: { ops: Ops; algoOn: boolean }) {
   const [toggleTo, setToggleTo] = useState<boolean | null>(null);
   const [pendingSave, setPendingSave] = useState(false);
 
-  const seats = Number(form.raw("max_users"));
-  const per = Number(form.raw("daily_v5"));
-  const scope = String(form.raw("image_scope"));
-  const need = v5Need(Number.isFinite(seats) ? seats : 0, Number.isFinite(per) ? per : 0, scope);
-  const glob = r.v5_capacity.global;
-  const short = need > 0 && glob > 0 && need > glob;
   const roleErr = roleProblem(String(form.raw("role_guild")), String(form.raw("role_id")));
   const pct = r.max_users > 0 ? Math.min(100, (r.active / r.max_users) * 100) : 0;
   const customFeatures = form.raw("features_mode") === "custom";
@@ -41,15 +26,14 @@ export default function RegistrationCard(props: { ops: Ops; algoOn: boolean }) {
     ? "由「额度与保护 › 动态额度」自动设置（每 10 分钟重算），关闭动态额度后才能手改"
     : undefined;
 
+  /** 返回 undefined = 已保存；返回字符串 = 失败原因 */
   const send = async (notify: boolean) => {
     const body = regBody(form.changes(), form.raw as (n: string) => string | boolean, names, notify);
     setSaving(true);
-    const ok = await act("PUT", URL, body, "领 Key 设置已保存");
+    const err = await actOrError("PUT", URL, body, "领 Key 设置已保存");
     setSaving(false);
-    if (ok) {
-      form.commit();
-      setPendingSave(false);
-    }
+    if (!err) form.commit();
+    return err;
   };
   const trySave = () => {
     if (roleErr) {
@@ -58,10 +42,11 @@ export default function RegistrationCard(props: { ops: Ops; algoOn: boolean }) {
     }
     // 名额上限变化会在成员公告频道发名额公告：让站长选发不发
     if ("max_users" in form.changes()) setPendingSave(true);
-    else void send(true);
+    else void send(true).then((err) => err && toast(err, { error: true }));
   };
-  const setOpen = async (open: boolean, notify: boolean) => {
-    const ok = await act(
+  /** 返回 undefined = 已改；返回字符串 = 失败原因 */
+  const setOpen = (open: boolean, notify: boolean) =>
+    actOrError(
       "PUT",
       URL,
       { open, ...(notify ? {} : { notify: false }) },
@@ -73,8 +58,6 @@ export default function RegistrationCard(props: { ops: Ops; algoOn: boolean }) {
           ? "已暂停领 Key（已公告）"
           : "已暂停领 Key（未公告）",
     );
-    if (ok) setToggleTo(null);
-  };
 
   return (
     <Card
@@ -88,10 +71,9 @@ export default function RegistrationCard(props: { ops: Ops; algoOn: boolean }) {
     >
       <div class="stack-sm">
         {!r.configured && <Notice>Discord 机器人尚未配置：以下设置会保存，机器人启用后才生效。</Notice>}
-        {r.v5_capacity.short && <Notice tone="warn">{r.v5_capacity.message}</Notice>}
         <SwitchRow
           title="开放自助领取"
-          desc={`${r.open ? "成员可通过 Discord /register 自助领取 Key" : "新成员暂时无法领取 Key"}${r.reset_at ? ` · 重置时间 ${r.reset_at}` : ""}`}
+          desc={r.open ? "成员可通过 Discord /register 自助领取 Key" : "新成员暂时无法领取 Key"}
           checked={r.open}
           onChange={(v) => setToggleTo(v)}
         />
@@ -121,20 +103,6 @@ export default function RegistrationCard(props: { ops: Ops; algoOn: boolean }) {
               hint={algoHint ?? "新成员默认可用的模型范围"}
             />
           </div>
-          {scope === "all" && (
-            <Derive title="V5 名额推算" {...(short ? { tone: "warn" as const } : {})}>
-              {need > 0 ? (
-                <div>
-                  名额 <b>{seats}</b> × 每人 V5 <b>{per}</b> = <b>{need}</b> 张/天；全站 V5 日限{" "}
-                  <b>{glob > 0 ? glob : "不限"}</b>
-                  {short && <>：超出 {need - glob} 张，先用的人用满后，后面的人当天没有 V5</>}
-                </div>
-              ) : (
-                <div>名额不限或每人 V5 不限：无法推算总需求。</div>
-              )}
-            </Derive>
-          )}
-
           <fieldset class="checks">
             <legend class="form-section__title">限定身份组</legend>
             <p class="muted small">只有在指定服务器里拥有指定身份组的人能领 Key；留空 = 不限定。</p>
@@ -197,14 +165,12 @@ export default function RegistrationCard(props: { ops: Ops; algoOn: boolean }) {
       <ConfirmDialog
         open={toggleTo !== null}
         title={toggleTo ? "开放自助领 Key？" : "暂停自助领 Key？"}
-        confirmLabel={toggleTo ? "开放并公告" : "暂停并公告"}
-        tone="primary"
+        confirmText={toggleTo ? "开放并公告" : "暂停并公告"}
         onClose={() => setToggleTo(null)}
-        extra={
-          <Button onClick={() => void setOpen(toggleTo === true, false)}>
-            {toggleTo ? "仅开放，不公告" : "仅暂停，不公告"}
-          </Button>
-        }
+        extra={{
+          text: toggleTo ? "仅开放，不公告" : "仅暂停，不公告",
+          onClick: () => setOpen(toggleTo === true, false),
+        }}
         onConfirm={() => setOpen(toggleTo === true, true)}
       >
         <p>
@@ -216,10 +182,9 @@ export default function RegistrationCard(props: { ops: Ops; algoOn: boolean }) {
       <ConfirmDialog
         open={pendingSave}
         title="名额上限有变化"
-        confirmLabel="保存并公告"
-        tone="primary"
+        confirmText="保存并公告"
         onClose={() => setPendingSave(false)}
-        extra={<Button onClick={() => void send(false)}>仅保存，不公告</Button>}
+        extra={{ text: "仅保存，不公告", onClick: () => send(false) }}
         onConfirm={() => send(true)}
       >
         <p>

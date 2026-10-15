@@ -9,7 +9,7 @@ import { computed, signal } from "@preact/signals";
 import { getJSON } from "../../lib/api";
 import { bootData } from "../../lib/boot";
 import { subscribe } from "../../lib/live";
-import type { Live, Me, Meta, Status } from "./types";
+import type { Live, Me, Meta } from "./types";
 
 type Boot = { me?: unknown; live?: unknown; status?: unknown };
 
@@ -18,19 +18,16 @@ const isMe = (v: unknown): v is Me => isObj(v) && typeof v.logged_in === "boolea
 
 /** live 里带的站点信息比 /public/status 更新（≤30 秒 vs 每 30 秒拉一次）；live 里没有的字段（旧/新网关差异）用 status 的。 */
 const META_KEYS = [
-  "site",
   "discord_invite",
   "has_announcement",
   "algo_notice",
   "audit_notice",
   "web_login",
-  "home_join_open",
-  "key_inactivity_delete_days",
   "registration",
   "limits",
 ] as const satisfies ReadonlyArray<keyof Meta>;
 
-export function mergeMeta(status: Status | null, live: Live | null): Meta {
+export function mergeMeta(status: Meta | null, live: Live | null): Meta {
   const out: Record<string, unknown> = {};
   for (const k of META_KEYS) {
     const v = live?.[k] ?? status?.[k];
@@ -57,7 +54,7 @@ export function createStore() {
   const boot = bootData<Boot>();
   /** undefined = 还在读（显示骨架屏，不要先闪一下游客内容） */
   const me = signal<Me | undefined>(isMe(boot?.me) ? boot.me : undefined);
-  const status = signal<Status | null>(isObj(boot?.status) ? (boot.status as Status) : null);
+  const status = signal<Meta | null>(isObj(boot?.status) ? (boot.status as Meta) : null);
   const liveSub = subscribe<Live>(
     "/public/live/stream",
     "/public/live",
@@ -71,7 +68,6 @@ export function createStore() {
     quietCap: live.value?.rules?.quiet_cap ?? null,
     quietStart: live.value?.rules?.quiet_start ?? null,
     quietEnd: live.value?.rules?.quiet_end ?? null,
-    hourlyCap: live.value?.rules?.hourly_cap ?? 0,
   }));
 
   const loadMe = async () => {
@@ -84,7 +80,7 @@ export function createStore() {
   };
   const loadStatus = async () => {
     try {
-      status.value = await getJSON<Status>("/public/status", { cache: "no-store" });
+      status.value = await getJSON<Meta>("/public/status", { cache: "no-store" });
     } catch {
       /* 保留旧值；live 的 meta 也能补 */
     }
@@ -112,7 +108,7 @@ export function createStore() {
     };
   };
 
-  return { me, status, live, connection: liveSub.connected, meta, facts, reloadMe: loadMe, start };
+  return { me, live, connection: liveSub.connected, meta, facts, reloadMe: loadMe, start };
 }
 
 export type Store = ReturnType<typeof createStore>;

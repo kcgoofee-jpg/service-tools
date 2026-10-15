@@ -4,8 +4,7 @@ import { Button } from "../../../ui";
 import { act, useAdmin } from "../Admin";
 import { LoadError, Loading, SectionHead } from "./_kit";
 import ModuleCard from "./modules/card";
-import { failingChecks, type ModulesResponse, sortMods } from "./modules/core";
-import { useBadge } from "./system/badge";
+import { type ModulesResponse, sortMods } from "./modules/core";
 import { Sect, Switch } from "./system/forms";
 import "./modules.css";
 
@@ -14,7 +13,6 @@ export default function Modules() {
   const [errorFirst, setErrorFirst] = useState(true);
   const [running, setRunning] = useState(false);
   const mods = useMemo(() => sortMods(data?.modules ?? [], errorFirst), [data, errorFirst]);
-  useBadge("modules", data ? failingChecks(data.modules) : null);
 
   return (
     <Sect>

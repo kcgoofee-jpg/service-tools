@@ -69,9 +69,6 @@ impl Key {
     pub fn monthly_anlas(&self) -> f64 {
         self.float("monthly_anlas")
     }
-    pub fn daily_text_tokens(&self) -> i64 {
-        self.int("daily_text_tokens")
-    }
     pub fn allow_anlas(&self) -> bool {
         self.flag("allow_anlas")
     }

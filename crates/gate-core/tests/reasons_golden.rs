@@ -1,4 +1,4 @@
-//! `reasons` 与旧 Python（app/reasons.py）对拍：夹具由 tools/parity/golden/reasons.py 生成。
+//! `reasons` 与旧 Python（app/reasons.py）对拍：夹具由旧 Python 生成（脚本见标签 py-final）。
 //!
 //! 3.0 删掉的原因码 `over_base`（V4.5 保底用完后全站不空闲，docs/v3-deviations.md #61）：夹具冻结不改，
 //! 在期望一侧去掉它（常量本身、`SITE_LEVEL` / `LABELS` / `BACKFILL` 里的那一项）；历史记录里的

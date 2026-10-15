@@ -8,7 +8,7 @@
 //! | 字段 | 来源 | 参数 |
 //! |---|---|---|
 //! | `settings` | `SELECT value FROM site_settings WHERE key=?`，键见 [`SETTING_KEYS_READ`] | — |
-//! | `breaker` | `SELECT SUM(CASE WHEN status='error' AND (up_status>=500 OR up_status BETWEEN 200 AND 299) THEN 1 ELSE 0 END), COUNT(*) FROM usage_log WHERE ts>=? AND kind LIKE 'image%' AND status IN ('ok','error')`（SUM 可能为 NULL） | `(since)`，见 [`breaker_since`] |
+//! | `breaker` | `SELECT SUM(CASE WHEN status='error' AND (up_status>=500 OR up_status BETWEEN 200 AND 299) THEN 1 ELSE 0 END), COUNT(*) FROM usage_log WHERE ts>=? AND kind LIKE 'image%' AND status IN ('ok','error')`（SUM 可能为 NULL）；3.0 另取这些失败里不同的非测试 Key 数 `fail_keys`（docs/v3-deviations.md #58） | `(since)`，见 [`breaker_since`] |
 //! | `rejects` | `SELECT key_id, COUNT(*) FROM usage_log WHERE ts>=? AND status='rejected' AND key_id IS NOT NULL AND reason NOT IN (<`[`KEY_GUARD_SKIP_REASONS`]`>) GROUP BY key_id` | `(now - 3600)` |
 //! | `keys` | `SELECT id, name FROM api_keys WHERE enabled=1 AND is_admin=0 AND is_test=0`（**保持数据库返回顺序**：决定 `decisions` 的顺序） | — |
 //! | `guard` | 内存里的 Guard：`breaker_until`；没有 Guard 传 `None` | — |
@@ -77,7 +77,11 @@ pub const SETTING_KEYS_READ: [&str; 2] = ["autopilot_breaker_until", HISTORY_KEY
 // 纯规则
 // ---------------------------------------------------------------------------
 
-/// 最近 15 分钟上游失败 ≥ 5 次且占比 ≥ 30% → 熔断。
+/// 熔断还要求失败来自至少这么多把不同的非测试 Key：一个成员反复发畸形请求、测试 Key 出错都不算上游故障
+/// （与 docs/v3-deviations.md #7 / #8 的「≥ 2 把 Key 才算上游故障」同一口径，见 #58）。
+pub const BREAKER_MIN_KEYS: i64 = 2;
+
+/// 最近 15 分钟上游失败 ≥ 5 次且占比 ≥ 30% → 熔断（旧版规则，夹具对拍；3.0 另加 Key 数门槛，见 [`breaker_rule_keys`]）。
 pub fn breaker_rule(fails: i64, total: i64) -> (bool, String) {
     if fails >= 5 && total != 0 && (fails as f64 / total as f64) >= 0.3 {
         return (
@@ -86,6 +90,20 @@ pub fn breaker_rule(fails: i64, total: i64) -> (bool, String) {
         );
     }
     (false, format!("最近 15 分钟上游失败 {fails}/{total}：正常"))
+}
+
+/// [`breaker_rule`] 加上 Key 数门槛：失败只来自不到 [`BREAKER_MIN_KEYS`] 把非测试 Key 时不熔断。
+pub fn breaker_rule_keys(fails: i64, total: i64, fail_keys: i64) -> (bool, String) {
+    let (trip, why) = breaker_rule(fails, total);
+    if trip && fail_keys < BREAKER_MIN_KEYS {
+        return (
+            false,
+            format!(
+                "最近 15 分钟上游失败 {fails}/{total}，只来自 {fail_keys} 把 Key（多半是这把 Key 的请求有问题）：不熔断"
+            ),
+        );
+    }
+    (trip, why)
 }
 
 /// 单 Key 限流：1 小时内被拒 ≥ 这个次数，多半是客户端在死循环重试。
@@ -124,6 +142,10 @@ pub struct BreakerRows {
     /// `SUM(CASE …)`，没有行时为 NULL。
     pub fails: Option<i64>,
     pub total: Option<i64>,
+    /// 这些失败来自多少把不同的非测试 Key（`is_test=0`）。不到 [`BREAKER_MIN_KEYS`] 把不熔断
+    /// （docs/v3-deviations.md #58）。冻结夹具里没有这个字段，缺省为 0。
+    #[serde(default)]
+    pub fail_keys: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -189,11 +211,12 @@ fn run_inner(inp: &AutopilotInputs, clock: &Clock, cx: &mut Cx) -> Result<Value,
     let now = inp.now;
     let mut rules = Map::new();
 
-    // ---- 熔断：只看上次熔断结束之后的上游失败 ----
-    let _since = breaker_since(now, cx.get("autopilot_breaker_until"))?;
+    // ---- 熔断：只看上次熔断结束之后的上游失败（窗口由服务层按 `breaker_since` 查好）；失败须来自 ≥ 2 把非测试 Key ----
+    // 旧版在这里再算一遍 `since` 只为在 `autopilot_breaker_until` 读不懂时抛 ValueError；3.0 不再因此整轮失败
+    // （服务层读不懂时按没有失败处理，docs/v3-deviations.md #58）
     let fails = inp.breaker.fails.unwrap_or(0);
     let total = inp.breaker.total.unwrap_or(0);
-    let (trip, why) = breaker_rule(fails, total);
+    let (trip, why) = breaker_rule_keys(fails, total, inp.breaker.fail_keys);
     let mut breaker_v = Map::new();
     breaker_v.insert("mode".into(), json!(MODE));
     breaker_v.insert("value".into(), json!(trip));
@@ -316,4 +339,85 @@ fn run_inner(inp: &AutopilotInputs, clock: &Clock, cx: &mut Cx) -> Result<Value,
         cx.set(HISTORY_KEY, jsondump::dumps(&Value::Array(hist)));
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn breaker_needs_two_keys() {
+        // 旧版规则成立时，失败只来自 0 / 1 把 Key 不熔断（docs/v3-deviations.md #58）
+        assert!(breaker_rule(9, 10).0);
+        for keys in [0, 1] {
+            let (trip, why) = breaker_rule_keys(9, 10, keys);
+            assert!(!trip);
+            assert_eq!(
+                why,
+                format!(
+                    "最近 15 分钟上游失败 9/10，只来自 {keys} 把 Key（多半是这把 Key 的请求有问题）：不熔断"
+                )
+            );
+        }
+        assert_eq!(breaker_rule_keys(9, 10, 2), breaker_rule(9, 10));
+        assert_eq!(breaker_rule_keys(9, 10, 5), breaker_rule(9, 10));
+        // 旧版就不熔断的，Key 再多也不熔断，文案不变
+        assert_eq!(breaker_rule_keys(4, 10, 4), breaker_rule(4, 10));
+        assert_eq!(breaker_rule_keys(5, 100, 5), breaker_rule(5, 100));
+    }
+
+    fn inputs(fail_keys: i64, breaker_until: Option<&str>) -> AutopilotInputs {
+        // 规则一律执行，不再读 `autopilot_breaker` 模式（#68）
+        let mut settings = HashMap::new();
+        if let Some(v) = breaker_until {
+            settings.insert("autopilot_breaker_until".into(), v.into());
+        }
+        AutopilotInputs {
+            now: 1_791_950_400.0,
+            settings,
+            breaker: BreakerRows {
+                fails: Some(8),
+                total: Some(10),
+                fail_keys,
+            },
+            guard: Some(GuardState { breaker_until: 0.0 }),
+            pauses: None,
+            rejects: vec![],
+            keys: vec![],
+        }
+    }
+
+    fn tripped(out: &AutopilotOutputs) -> bool {
+        out.effects
+            .iter()
+            .any(|e| matches!(e, Effect::TripBreaker { .. }))
+    }
+
+    #[test]
+    fn one_key_cannot_stop_the_whole_site() {
+        let clock = Clock::new("Asia/Shanghai", 7);
+        let one = decide(&inputs(1, None), &clock);
+        assert!(one.error.is_none(), "{:?}", one.error);
+        assert!(!tripped(&one));
+        assert_eq!(
+            one.result.unwrap()["rules"]["breaker"]["value"],
+            json!(false)
+        );
+        let two = decide(&inputs(2, None), &clock);
+        assert!(tripped(&two));
+        assert_eq!(
+            two.result.unwrap()["rules"]["breaker"]["applied"],
+            json!(true)
+        );
+    }
+
+    #[test]
+    fn unreadable_breaker_until_no_longer_fails_the_round() {
+        // 旧版在熔断这一步抛 ValueError、整轮自动驾驶失败；3.0 照常往下走
+        // （服务层读不懂时按没有失败处理，见 gate-server kernel::algo，docs/v3-deviations.md #58）
+        let clock = Clock::new("Asia/Shanghai", 7);
+        let out = decide(&inputs(2, Some("not-a-number")), &clock);
+        assert!(out.error.is_none(), "{:?}", out.error);
+        assert!(out.result.is_some());
+    }
 }

@@ -197,6 +197,7 @@ pub async fn run_autopilot(state: &AppState) -> Result<Value, KernelError> {
         Err(_) => autopilot::BreakerRows {
             fails: None,
             total: None,
+            fail_keys: 0,
         },
     };
     let rejects = db

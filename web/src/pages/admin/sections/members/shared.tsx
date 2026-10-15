@@ -1,27 +1,16 @@
 /**
- * 总览 / 成员 / 日志 三个分区共用的小零件（组件库没有的：分段按钮、确认框、分页、下载、窗口宽度）。
+ * 总览 / 成员 / 日志 三个分区共用的小零件（组件库没有的：分段按钮、分页、下载、窗口宽度）。
  * 只用 ui 组件库和 tokens.css 的变量；样式在 shared.css（类名前缀 xa-）。
  */
 import { ChevronLeft, ChevronRight } from "lucide-preact";
 import type { ComponentChildren } from "preact";
 import { useEffect, useId, useRef, useState } from "preact/hooks";
 import { ApiError } from "../../../../lib/api";
-import { Button, cx, Dialog, Field, toast } from "../../../../ui";
-import { busy, useAdmin } from "../../Admin";
+import { Button, cx, toast } from "../../../../ui";
+import { useAdmin } from "../../Admin";
 import "./shared.css";
 
 /* ---------------- hooks ---------------- */
-
-/** 打开对话框 / 编辑表单期间暂停全局自动刷新（避免冲掉正在填的内容）。组件挂载期间有效。 */
-export function useBusy(active = true): void {
-  useEffect(() => {
-    if (!active) return;
-    busy.value++;
-    return () => {
-      busy.value--;
-    };
-  }, [active]);
-}
 
 /** 窗口宽度断点：只改布局（表格 ↔ 卡片），不改字号。 */
 export function useMedia(query: string): boolean {
@@ -91,81 +80,6 @@ export function Seg<T extends string>(props: {
         </button>
       ))}
     </div>
-  );
-}
-
-/* ---------------- 确认框 ---------------- */
-/**
- * 挂载即打开（父组件用 `{target && <ConfirmDialog …/>}` 控制）。
- * onConfirm 返回字符串 = 失败原因（显示在框里，保持打开）；返回 undefined = 成功，自动关闭。
- * 原生 <dialog> 在最上层，会盖住 toast，所以错误必须显示在框里。
- */
-export function ConfirmDialog(props: {
-  title: string;
-  children: ComponentChildren;
-  confirmText: string;
-  danger?: boolean;
-  /** 需要手动输入的确认词（高危操作） */
-  phrase?: string;
-  onConfirm: () => Promise<string | undefined> | string | undefined;
-  onClose: () => void;
-}) {
-  useBusy();
-  const [pending, setPending] = useState(false);
-  const [err, setErr] = useState("");
-  const [typed, setTyped] = useState("");
-  const ok = !props.phrase || typed.trim() === props.phrase;
-  const run = async () => {
-    if (pending || !ok) return;
-    setPending(true);
-    setErr("");
-    try {
-      const r = await props.onConfirm();
-      if (r === undefined) props.onClose();
-      else setErr(r);
-    } finally {
-      setPending(false);
-    }
-  };
-  return (
-    <Dialog
-      open
-      title={props.title}
-      onClose={props.onClose}
-      footer={
-        <>
-          <Button onClick={props.onClose}>取消</Button>
-          <Button variant={props.danger ? "danger" : "primary"} disabled={pending || !ok} onClick={run}>
-            {pending ? "处理中…" : props.confirmText}
-          </Button>
-        </>
-      }
-    >
-      <div class="xa-confirm">
-        {props.children}
-        {err && (
-          <p class="xa-formerr" role="alert">
-            {err}
-          </p>
-        )}
-        {props.phrase && (
-          <Field label={`请输入「${props.phrase}」确认`}>
-            <input
-              class="input"
-              value={typed}
-              autoComplete="off"
-              onInput={(e) => setTyped((e.target as HTMLInputElement).value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  void run();
-                }
-              }}
-            />
-          </Field>
-        )}
-      </div>
-    </Dialog>
   );
 }
 
@@ -276,23 +190,6 @@ export function Pager(props: {
   );
 }
 
-/**
- * 表格的滚动外框：表头粘在框顶（sticky），内容多时框内滚动。
- * 可滚动区域必须能用键盘聚焦（axe: scrollable-region-focusable），所以给 tabindex 和名称。
- */
-export function TableScroll(props: {
-  label: string;
-  class?: string | undefined;
-  children: ComponentChildren;
-}) {
-  return (
-    // biome-ignore lint/a11y/noNoninteractiveTabindex: 可滚动区域需要键盘可聚焦，才能用方向键滚动
-    <section class={cx("table-wrap xa-tbl", props.class)} tabIndex={0} aria-label={props.label}>
-      {props.children}
-    </section>
-  );
-}
-
 /* ---------------- 零散 ---------------- */
 export function Empty(props: { title: string; children?: ComponentChildren }) {
   return (
@@ -303,49 +200,8 @@ export function Empty(props: { title: string; children?: ComponentChildren }) {
   );
 }
 
-/** 头像：有 Discord 头像地址就显示，加载失败退回首字母。 */
-/** 头像首字：名字里第一个汉字 / 假名 / 英文字母 / 数字；名字是「(๑•̀ㅂ•́)」这类颜文字时改用用户名。 */
-const INITIAL = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}A-Za-z0-9]/u;
-export function initialOf(name: string, fallback?: string | null): string {
-  return (name.match(INITIAL)?.[0] ?? fallback?.match(INITIAL)?.[0] ?? "?").toUpperCase();
-}
-
-export function Avatar(props: {
-  name: string;
-  fallback?: string | null | undefined;
-  src?: string | null | undefined;
-  size?: number;
-}) {
-  const [failed, setFailed] = useState(false);
-  const size = props.size ?? 32;
-  const initial = initialOf(props.name, props.fallback);
-  const ok = props.src?.startsWith("https://cdn.discordapp.com/") && !failed;
-  return (
-    <span class="xa-avatar" style={{ width: `${size}px`, height: `${size}px` }} aria-hidden="true">
-      {initial}
-      {ok && (
-        <img
-          src={props.src ?? ""}
-          alt=""
-          width={size}
-          height={size}
-          loading="lazy"
-          referrerpolicy="no-referrer"
-          onError={() => setFailed(true)}
-        />
-      )}
-    </span>
-  );
-}
-
 /** 一条用量小条：文字写明数字，条本身只是装饰。max=0 表示不限。 */
-export function MiniBar(props: {
-  label: string;
-  used: number;
-  max: number;
-  tone?: "v5" | "warn";
-  unlimited?: string;
-}) {
+export function MiniBar(props: { label: string; used: number; max: number; tone?: "v5" | "warn" }) {
   const pct = props.max > 0 ? Math.min(100, (props.used / props.max) * 100) : 0;
   const full = props.max > 0 && props.used >= props.max;
   return (
@@ -359,7 +215,7 @@ export function MiniBar(props: {
       </span>
       <span class="xa-minibar__n tabular">
         {props.used}
-        <span class="muted"> / {props.max > 0 ? props.max : (props.unlimited ?? "不限")}</span>
+        <span class="muted"> / {props.max > 0 ? props.max : "不限"}</span>
       </span>
     </div>
   );

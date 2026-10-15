@@ -1,5 +1,5 @@
 //! 巡检各项检查的单元测试：全部在合成数据库上跑（gate-db 建库 + 手工灌数据），不碰 docker / 网络。
-//! 期望的文案都是照 deploy/ops/patrol.py 手工算出来的。
+//! 期望的文案都是照旧版 patrol.py（见标签 py-final）手工算出来的。
 
 mod common;
 

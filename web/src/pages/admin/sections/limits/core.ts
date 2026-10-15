@@ -106,46 +106,11 @@ export function deriveV5(plan: V5Plan, perPercent: number, lo: number, hi: numbe
   };
 }
 
-export const AP_RULES: Record<string, string> = {
-  slots: "名额上限",
-  breaker: "全站熔断",
-  key_guard: "单个 Key 守护",
-};
-export const AP_MODES: Record<string, { label: string; tone: "warn" | "ok" | "danger" | undefined }> = {
-  observe: { label: "观察", tone: "warn" },
-  enforce: { label: "执行", tone: "ok" },
-  off: { label: "关闭", tone: undefined },
-};
-
-/** /admin/api/autopilot */
-export type AutopilotRule = { mode: string; value: unknown; why: string };
-export type Autopilot = { last: { at?: number; rules?: Record<string, AutopilotRule> }; history: unknown[] };
-
-export function autopilotValue(rule: string, v: unknown): string {
-  if (rule === "slots") return typeof v === "number" ? `名额上限 → ${v}` : String(v ?? "—");
-  if (rule === "breaker") return v ? "暂停出图 5 分钟" : "正常";
-  if (rule === "key_guard") {
-    const list = Array.isArray(v) ? (v as Array<{ name?: string }>) : [];
-    return list.length ? list.map((x) => `${x.name ?? "?"}：暂停`).join("；") : "无";
-  }
-  return v == null ? "—" : String(v);
-}
-
 /** /admin/api/guard */
 export type GuardField = { default: number; min: number; max: number; label: string };
 export type Guard = {
   values: Record<string, number>;
   fields: Record<string, GuardField>;
-  quiet_now: boolean;
-  hourly_cap_now: number;
-  accounts: Array<{
-    position: number;
-    usable: boolean;
-    today: number;
-    today_units: number;
-    this_hour: number;
-  }>;
-  queued_images: number;
 };
 
 /** 保护字段的短标题 / 说明。接口的 label 是整段说明文字，这里取短名，说明放提示里。 */

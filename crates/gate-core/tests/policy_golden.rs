@@ -1,5 +1,9 @@
-//! `policy` 与旧 Python（app/policy.py）对拍：夹具由 tools/parity/golden/policy.py 生成。
+//! `policy` 与旧 Python（app/policy.py）对拍：夹具由旧 Python 生成（脚本见标签 py-final）。
 //! 每个移植的函数都有一个测试；请求体类函数同时比较返回值和（原地修改后的）入参，键顺序也要一致。
+//!
+//! 文本生成随文本接口整套删除（docs/v3-deviations.md #81）：夹具冻结不改，下面这些组整组不再测——
+//! `estimate_tokens` / `estimate_text_tokens` / `_truncate_middle` / `clamp_text_params` / `text_model_host`，
+//! 以及 `constants` 里的 `TEXT_CONTEXT_TOKENS` / `TEXT_MAX_GENERATION_TOKENS` / `TEXT_INPUT_BUDGET_TOKENS`。
 
 use gate_core::policy::{self, ImageCost};
 use gate_core::pyc;
@@ -133,9 +137,10 @@ fn constants_golden() {
             "V5_MEDIUM_SAMPLER" => json!(policy::V5_MEDIUM_SAMPLER),
             "V5_MEDIUM_UC_PRESET" => json!(policy::V5_MEDIUM_UC_PRESET),
             "V5_MEDIUM_UC" => json!(policy::V5_MEDIUM_UC),
-            "TEXT_CONTEXT_TOKENS" => json!(policy::TEXT_CONTEXT_TOKENS),
-            "TEXT_MAX_GENERATION_TOKENS" => json!(policy::TEXT_MAX_GENERATION_TOKENS),
-            "TEXT_INPUT_BUDGET_TOKENS" => json!(policy::TEXT_INPUT_BUDGET_TOKENS),
+            // 文本生成已删除（docs/v3-deviations.md #81）：这三个常量不再有
+            "TEXT_CONTEXT_TOKENS" | "TEXT_MAX_GENERATION_TOKENS" | "TEXT_INPUT_BUDGET_TOKENS" => {
+                continue;
+            }
             other => panic!("夹具里有未覆盖的常量 {other}"),
         };
         // 集合在夹具里已排序；元组 / 列表保持原序
@@ -185,36 +190,6 @@ fn char_classes_match_python_re() {
 
 // `free_paced_cap`（每人注水一天最多放出的张数）随注水一起删除（docs/v3-deviations.md #62），
 // 夹具 `policy/free_paced_cap` 冻结保留、不再对拍。
-
-#[test]
-fn estimate_tokens_golden() {
-    for c in load(M, "policy/estimate_tokens") {
-        assert_eq_py_ordered(&c, &json!(policy::estimate_tokens(s(c.arg(0)))), c.out());
-    }
-}
-
-#[test]
-fn estimate_text_tokens_golden() {
-    for c in load(M, "policy/estimate_text_tokens") {
-        assert_eq_py_ordered(
-            &c,
-            &json!(policy::estimate_text_tokens(s(c.arg(0)))),
-            c.out(),
-        );
-    }
-}
-
-#[test]
-fn truncate_middle_golden() {
-    for c in load(M, "policy/_truncate_middle") {
-        let ratio = c
-            .kwarg("head_ratio")
-            .and_then(Value::as_f64)
-            .unwrap_or(0.35);
-        let (text, cut) = policy::truncate_middle(s(c.arg(0)), int(c.arg(1)) as i64, ratio);
-        assert_eq_py_ordered(&c, &json!([text, cut]), c.out());
-    }
-}
 
 #[test]
 fn base64_data_golden() {
@@ -480,20 +455,6 @@ fn medium_normalize_golden() {
 }
 
 #[test]
-fn clamp_text_params_golden() {
-    for c in load(M, "policy/clamp_text_params") {
-        let got = policy::clamp_text_params(
-            c.arg(0),
-            kw_i64(&c, "max_output_tokens").unwrap(),
-            kw_i64(&c, "max_input_chars").unwrap(),
-            kw_i64(&c, "max_input_tokens").unwrap_or(policy::TEXT_INPUT_BUDGET_TOKENS),
-        )
-        .map(|(out, notes, err)| json!([out, strs(&notes), opt_str(err)]));
-        check(&c, got);
-    }
-}
-
-#[test]
 fn guard_image_action_golden() {
     for c in load(M, "policy/guard_image_action") {
         let (out, notes, err) = policy::guard_image_action(c.arg(0));
@@ -502,14 +463,6 @@ fn guard_image_action_golden() {
 }
 
 // ----------------------------------------------------------------------------- 杂项
-
-#[test]
-fn text_model_host_golden() {
-    for c in load(M, "policy/text_model_host") {
-        let got = policy::text_model_host(model_arg(&c), s(c.arg(1)), s(c.arg(2)));
-        assert_eq_py_ordered(&c, &json!(got), c.out());
-    }
-}
 
 #[test]
 fn mask_token_golden() {

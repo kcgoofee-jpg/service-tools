@@ -1,82 +1,59 @@
-//! 快照：Rust 版发给 Discord 的命令定义 / Intent / 在线状态，必须和旧 Python（discord.py）实际发出的逐字节一致。
-//! 夹具 `discord_commands.json` 由 `tools/parity/golden/discord_commands.py` 生成：
-//! 真跑 `build_client()` + `tree.sync()`，在 HTTP 层截下 `PUT /applications/{app}/guilds/{guild}/commands` 的请求体。
+//! 快照：奶妹发给 Discord 的命令定义必须和 `tests/snapshots/commands.json` 逐字符一致（含键顺序）。
+//!
+//! 改命令名 / 描述 / 选项时，成员在 Discord 里看到的东西就变了，所以要同时更新快照，评审时看 git diff 即可：
+//! `UPDATE_SNAPSHOT=1 cargo test -p gate-discord --test commands_snapshot` 会用当前输出覆盖快照文件。
 
 mod common;
 
 use common::{APP, GUILD, MockServer};
 use gate_discord::api::DiscordApi;
-use gate_discord::commands::{self, NAIMEI_INTENTS, WARDEN_INTENTS};
-use gate_discord::warden;
+use gate_discord::commands::{self, NAIMEI_INTENTS};
 use serde_json::Value;
 
-/// `/反馈` 在 3.0 改成一段文字（docs/v3-deviations.md #52）：冻结夹具里它的描述还写着「5 道选择题」，
-/// 比较前把期望里的这一句换成 3.0 的。命令名、选项、权限不变，其余命令逐字节照旧。
-const FEEDBACK_DESCRIPTION_V3: &str = "写几句话给站长（只有你能看到，不会私信你）";
+const SNAPSHOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/snapshots/commands.json");
 
-fn golden() -> Value {
-    let path = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/golden/discord_commands.json"
-    );
-    let mut v: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
-    let defs = v["sync_request"]["json"].as_array_mut().unwrap();
-    let mut replaced = 0;
-    for d in defs.iter_mut().filter(|d| d["name"] == "反馈") {
-        assert!(d["description"].as_str().unwrap().contains("5 道选择题"));
-        d["description"] = FEEDBACK_DESCRIPTION_V3.into();
-        replaced += 1;
+fn current() -> String {
+    let mut text = serde_json::to_string_pretty(&Value::Array(commands::definitions())).unwrap();
+    text.push('\n');
+    text
+}
+
+#[test]
+fn command_definitions_equal_the_snapshot() {
+    if std::env::var_os("UPDATE_SNAPSHOT").is_some() {
+        std::fs::create_dir_all(std::path::Path::new(SNAPSHOT).parent().unwrap()).unwrap();
+        std::fs::write(SNAPSHOT, current()).unwrap();
     }
-    assert_eq!(replaced, 1, "夹具里应该正好有一条 /反馈");
-    v
+    let expected = std::fs::read_to_string(SNAPSHOT).expect("读快照（UPDATE_SNAPSHOT=1 可生成）");
+    assert_eq!(
+        current(),
+        expected,
+        "命令定义和快照不一致；确认是有意的改动后用 UPDATE_SNAPSHOT=1 更新快照"
+    );
 }
 
 #[test]
-fn command_definitions_equal_discordpy_sync_body() {
-    let expected = &golden()["sync_request"]["json"];
-    let actual = Value::Array(commands::definitions());
-    // 逐字符比较（含键顺序）：JSON 文本完全一致才算过
-    assert_eq!(actual.to_string(), expected.to_string());
-    // 名字 / 描述 / 选项 / 权限的结构化比较，出错时更好读
-    assert_eq!(actual, *expected);
-}
-
-#[test]
-fn command_names_and_permissions_summary() {
+fn only_the_member_commands_are_registered() {
     let defs = commands::definitions();
     let names: Vec<&str> = defs.iter().map(|d| d["name"].as_str().unwrap()).collect();
-    assert_eq!(
-        names,
-        [
-            "register", "quota", "反馈", "resetkey", "help", "open", "limit", "ban", "unban",
-            "slots", "revoke"
-        ]
-    );
-    // 管理员命令 = manage_guild(32)；成员命令 = null（所有人可见）
+    assert_eq!(names, ["register", "quota", "反馈", "resetkey", "help"]);
     for d in &defs {
-        let admin = ["open", "limit", "ban", "unban", "slots", "revoke"]
-            .contains(&d["name"].as_str().unwrap());
-        assert_eq!(
-            d["default_member_permissions"],
-            if admin { Value::from(32) } else { Value::Null }
+        // 所有人都能用：没有权限限制；只注册斜杠命令，没有右键菜单命令
+        assert!(d["default_member_permissions"].is_null(), "{d}");
+        assert_eq!(d["type"], 1);
+        // 成员看到的描述不提已删除的东西
+        let desc = d["description"].as_str().unwrap();
+        assert!(
+            !desc.contains("服务状态") && !desc.contains("管理员"),
+            "{desc}"
         );
-        assert_eq!(d["type"], 1, "只注册斜杠命令，没有右键菜单命令");
     }
 }
 
 #[test]
-fn intents_match_discordpy() {
-    let g = golden();
-    assert_eq!(NAIMEI_INTENTS.bits(), g["intents"].as_u64().unwrap());
-    assert_eq!(WARDEN_INTENTS.bits(), g["warden_intents"].as_u64().unwrap());
-    // 513 = GUILDS(1) + GUILD_MESSAGES(512)：没有任何特权 Intent
-    assert_eq!(NAIMEI_INTENTS.bits(), 1 | 512);
-}
-
-#[test]
-fn warden_presence_frame_equals_discordpy() {
-    let expected = &golden()["warden_presence"]["payload"];
-    assert_eq!(warden::presence_payload(), expected.to_string());
+fn intents_are_guilds_only() {
+    // 513 → 1：不再有 GUILD_MESSAGES（不读频道消息，@奶妹 不回应），也没有任何特权 Intent
+    assert_eq!(NAIMEI_INTENTS.bits(), 1);
 }
 
 /// `PUT` 只发给 DISCORD_GUILD_ID 这一个公会，请求体就是上面那份定义；不碰全局命令。
@@ -90,10 +67,15 @@ async fn sync_goes_to_the_one_guild_endpoint_only() {
         .unwrap();
     let calls = server.discord_log();
     assert_eq!(calls.len(), 1);
-    let expected = &golden()["sync_request"];
-    assert_eq!(calls[0]["method"], expected["method"]);
-    assert_eq!(calls[0]["path"], expected["path"]);
-    assert_eq!(calls[0]["json"].to_string(), expected["json"].to_string());
+    assert_eq!(calls[0]["method"], "PUT");
+    assert_eq!(
+        calls[0]["path"],
+        format!("/applications/{APP}/guilds/{GUILD}/commands")
+    );
+    assert_eq!(
+        calls[0]["json"].to_string(),
+        Value::Array(commands::definitions()).to_string()
+    );
     // 机器人 Token 走 Authorization，且带 Bot 前缀
     assert_eq!(calls[0]["authorization"], "Bot test-token");
 }

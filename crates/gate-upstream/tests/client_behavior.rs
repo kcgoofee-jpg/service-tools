@@ -4,7 +4,6 @@ use bytes::Bytes;
 use gate_testkit::{MockUpstream, Reply};
 use gate_upstream::client::{
     BoxFuture, Callbacks, Config, HookResult, Hooks, NaiClient, NoObserver, RequestOpts,
-    UpstreamError,
 };
 use serde_json::json;
 use std::collections::HashMap;
@@ -89,8 +88,6 @@ impl Hooks for TestHooks {
 fn config(url: &str, interval: f64) -> Config {
     Config {
         image_host: url.into(),
-        text_host: url.into(),
-        legacy_text_host: url.into(),
         proxy: None,
         custom_user_agent: None,
         http2: false,
@@ -443,40 +440,4 @@ async fn image_stream_settles_completed_images() {
     s.finish().await;
     let tid = gate_upstream::headers::token_id(T1);
     assert_eq!(hooks.0.images.lock().unwrap().get(&tid), Some(&2));
-}
-
-#[tokio::test]
-async fn text_429_blocks_text_lane_only() {
-    let up = MockUpstream::start().await;
-    up.push("/ai/generate-stream", Reply::rate_limited("40"));
-    let c = NaiClient::new(
-        config(&up.url(), 0.0),
-        TestHooks::default(),
-        vec![(T1.into(), 0, false)],
-    )
-    .unwrap();
-    let body =
-        json!({"input": "hi", "model": "llama-3-erato-v1", "parameters": {"max_length": 40}});
-    let url = format!("{}/ai/generate-stream", up.url());
-    let e: UpstreamError = c.text_stream(&url, &body, &NoObserver).await.unwrap_err();
-    assert_eq!(
-        (e.status, e.message.as_str()),
-        (
-            429,
-            "上游限流(429)，文本 / 语音通道暂停约 40 秒，请稍后再试"
-        )
-    );
-    let e = c.text_stream(&url, &body, &NoObserver).await.unwrap_err();
-    assert_eq!(e.status, 503);
-    assert!(e.message.contains("生图不受影响"));
-    // 生图通道不受影响
-    let ib = image_body(1);
-    c.request(
-        image_opts(&up.url(), &ib, 1),
-        &Callbacks::default(),
-        None,
-        &NoObserver,
-    )
-    .await
-    .unwrap();
 }

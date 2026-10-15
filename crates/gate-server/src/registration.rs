@@ -5,9 +5,10 @@
 //!
 //! - 服务器 ID / 身份组 / 站点地址全部来自环境变量（`EnvConfig::registration`），这里不写死任何 ID。
 //! - Discord REST 的基地址来自 `DISCORD_API_BASE`（默认官方 v10），测试里指向本机假服务。
-//! - 私信只有 [`RegistrationService::send_dm`] 一个出口，经过私信总闸门（`dm_enabled`，默认关）和限速。
-//! - 后台循环（维护 / 每日清空）不在这里起：见文件末尾的 [`registrar_jobs`] / [`reset_delay_secs`] /
-//!   [`scheduled_reset`] / [`registration_reset_loop`]，由任务调度方安排。
+//! - 机器人不私信成员：发 Key 的结果只在 /register 的临时回复里给本人看，后台「重新生成 Key」「奖励成员」
+//!   把新 Key 展示给站长手动转交（Discord 应用曾被标记，错误码 680009，docs/v3-deviations.md #76）。
+//! - 后台循环不在这里起：见文件末尾的 [`registrar_jobs`]，由任务调度方安排。
+//!   每日清空自助注册（旧的 `REGISTER_RESET_AT`）已删除（docs/v3-deviations.md #77）。
 
 use crate::action_log::log_action;
 use crate::env::{EnvConfig, RegistrationEnv};
@@ -22,17 +23,14 @@ use gate_db::repo::registration::{NewRegistration, RegistrationProfile};
 use gate_db::{Db, DbError};
 use reqwest::Method;
 use serde_json::{Value, json};
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Duration;
 
-/// 开启时也限速：10 分钟最多 3 条、24 小时最多 20 条。
-pub const DM_BURST: usize = 3;
-pub const DM_WINDOW: f64 = 600.0;
-pub const DM_DAILY: usize = 20;
-
-/// Discord 要求机器人带可识别的 User-Agent（空的 / 默认的会被 Cloudflare 拦）。
-const USER_AGENT: &str = concat!("DiscordBot (nai-gate, ", env!("CARGO_PKG_VERSION"), ")");
+/// 身份组同步每轮最多摘几个（docs/v3-deviations.md #78）。
+pub const SYNC_ROLES_PER_RUN: usize = 5;
+/// 邀请 Key 持有人退群后，多久再核对一次（docs/v3-deviations.md #57）。
+const INVITE_RECHECK_SECS: f64 = 30.0 * 86400.0;
 
 // ------------------------------------------------------------------ 错误
 
@@ -119,36 +117,63 @@ pub fn member_label(user: &DiscordUser) -> String {
     take_chars(&label, 60).to_string()
 }
 
-/// 领取成功私信 / 临时回复：Key + 一步步配置教程 + 规则。控制在 Discord 2000 字以内。
-pub fn welcome_dm(
-    key: &str,
-    site: &str,
-    quota: &str,
-    expires_days: i64,
-    idle_days: i64,
-    notice: &str,
-    opened: &str,
-) -> String {
-    let mut rules = vec![format!("• 每日额度：{quota}（次日自动恢复）")];
-    if !opened.is_empty() {
-        rules.push(format!("• 已开通功能：{opened}"));
+/// 领取成功的欢迎语（/register 的临时回复，只有本人可见）所需的内容。
+pub struct Welcome<'a> {
+    pub key: &'a str,
+    /// 站点地址；结尾的 `/` 会去掉，和机器人 /help 里写的一致。
+    pub site: &'a str,
+    /// 每人每天最多出几张 V4.5 及以下的图，0 = 不限。
+    pub daily_images: i64,
+    /// 这把 Key 能不能用 V5（后台「可用模型」选了「含 V5」）。
+    pub v5: bool,
+    /// 每人每天最多出几张 V5，0 = 没有单独的个人上限。
+    pub daily_v5: i64,
+    /// 每天几点重置（服务日起点）。
+    pub reset_hour: i64,
+    /// 连续几天没有成功出图会被回收，0 = 不回收。
+    pub idle_days: i64,
+    /// 站点公告（生成记录声明），空串 = 没有。
+    pub notice: &'a str,
+    /// 已开通功能的名字，空串 = 不写这一行。
+    pub opened: &'a str,
+}
+
+/// 领取成功的欢迎语：Key + 一步步配置教程 + 规则。控制在 Discord 2000 字以内。
+///
+/// 额度是全站共用的池子、先到先得，每人的数字只是上限（docs/v3-deviations.md #75）。
+pub fn welcome_message(w: &Welcome) -> String {
+    let site = w.site.trim_end_matches('/');
+    let mut cap = if w.daily_images == 0 {
+        "V4.5 及以下不限张数".to_string()
+    } else {
+        format!("V4.5 及以下 {} 张", w.daily_images)
+    };
+    if w.v5 && w.daily_v5 != 0 {
+        cap.push_str(&format!("；V5 {} 张", w.daily_v5));
     }
-    if expires_days != 0 {
+    let mut rules = vec![format!(
+        "• 每日额度：每人每天最多 {cap}，全站共用、先到先得；每天 {} 点重置",
+        w.reset_hour
+    )];
+    if !w.opened.is_empty() {
+        rules.push(format!("• 已开通功能：{}", w.opened));
+    }
+    if w.idle_days != 0 {
         rules.push(format!(
-            "• 有效期 {expires_days} 天，到期后可重新 /register"
+            "• 连续 {} 天没有成功出图会被自动回收，之后不能再领（不另行提醒）",
+            w.idle_days
         ));
     }
-    if idle_days != 0 {
-        rules.push(format!(
-            "• 连续 {idle_days} 天没有成功出图会被自动回收，之后不能再领（不另行提醒）"
-        ));
-    }
-    rules.push("• 每把 Key 同时生成 1 张，多发的会被退回，等前一张出完再发".into());
-    rules.push(
-        "• 只提供免费出图：总像素 ≤1024×1024（尺寸可自定义，超出自动等比缩小）、≤28 步、每次 1 张；\
-         图生图 / 局部重绘不开放；Vibe 在「已开通功能」里时可用，消耗每日 Anlas 额度"
-            .into(),
-    );
+    rules.push("• 每把 Key 同时生成 1 张、排队 1 张，多发的会被退回，等前一张出完再发".into());
+    let v5_sizes = if w.v5 {
+        "；V5 只有 832×1216、1216×832、1024×1024 三种尺寸，其他尺寸会自动换成最接近的一种"
+    } else {
+        ""
+    };
+    rules.push(format!(
+        "• 只提供免费出图：V4.5 及以下总像素 ≤1024×1024（宽高取 64 的倍数，超出自动等比缩小）{v5_sizes}；\
+         ≤28 步、每次 1 张；图生图 / 局部重绘不开放；Vibe 在「已开通功能」里时可用，消耗每日 Anlas 额度"
+    ));
     rules.push("• Key 只给本服务器成员：退出服务器后 Key 自动失效".into());
     rules.push("• 一人一把，请勿分享：共用或转售会被回收".into());
     let mut text = format!(
@@ -159,14 +184,15 @@ pub fn welcome_dm(
          3. API Key 填上面 `nai-` 开头的整串，保存后随便生成一张图试试\n\
          其他支持自定义 NovelAI 地址的客户端同样这样填。\n\n\
          **不确定填对没有？** 在 Discord 输入 `/quota`，能看到额度就说明 Key 正常；也可以在 {site} 用 Discord 登录查看自己的额度。\n\n\
-         **规则**\n{}\n\n\
-         **常用命令**：`/quota` 看额度和服务状态 · `/resetkey` Key 丢了或泄露时换新 · `/help` 简要说明\n\
+         **规则**\n{rules}\n\n\
+         **常用命令**：`/quota` 看今日额度 · `/resetkey` Key 丢了或泄露时换新 · `/help` 简要说明\n\
          遇到问题到 🛠️｜问题反馈 发截图（记得打码 Key）。",
-        rules.join("\n")
+        key = w.key,
+        rules = rules.join("\n"),
     );
-    if !notice.is_empty() {
+    if !w.notice.is_empty() {
         text.push('\n');
-        text.push_str(notice);
+        text.push_str(w.notice);
     }
     take_chars(&text, 1990).to_string()
 }
@@ -220,14 +246,8 @@ pub struct Provisioned {
 /// `gift` 的结果。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Gift {
-    Existing {
-        key_id: i64,
-    },
-    New {
-        key_id: i64,
-        key: String,
-        message: String,
-    },
+    Existing { key_id: i64 },
+    New { key_id: i64, key: String },
 }
 
 /// 网页登录换到的身份。
@@ -270,10 +290,6 @@ pub struct RegistrationService {
     http: reqwest::Client,
     /// 与 `issue_direct` / `gift` / `ban` 共用：否则在发 Key 进行中（身份组核验等网络等待）封禁，仍会发出有效 Key。
     lock: tokio::sync::Mutex<()>,
-    /// 最近 24 小时成功发出的私信时间（进程内）。
-    dm_sent: Mutex<VecDeque<f64>>,
-    /// 最近一次被闸门拦下的原因，供调用方写日志。
-    last_dm_block: Mutex<String>,
 }
 
 impl RegistrationService {
@@ -281,7 +297,8 @@ impl RegistrationService {
     pub fn from_env(env: &EnvConfig, db: Db) -> Option<Self> {
         let cfg = env.registration.clone()?;
         let http = reqwest::Client::builder()
-            .user_agent(USER_AGENT)
+            // Discord 要求机器人带可识别的 User-Agent（空的 / 默认的会被 Cloudflare 1010 拦），与告警、运维命令共用
+            .user_agent(gate_core::discord_ua::DISCORD_USER_AGENT)
             // httpx 默认不跟随重定向；也避免把机器人 Token 带到别处
             .redirect(reqwest::redirect::Policy::none())
             .build()
@@ -294,8 +311,6 @@ impl RegistrationService {
             api_base: env.discord_api_base.trim_end_matches('/').to_string(),
             http,
             lock: tokio::sync::Mutex::new(()),
-            dm_sent: Mutex::new(VecDeque::new()),
-            last_dm_block: Mutex::new(String::new()),
         })
     }
 
@@ -307,13 +322,6 @@ impl RegistrationService {
     /// 发出 /register 的服务器（也是退群回收 / 身份组所在的服务器）。
     pub fn command_guild(&self) -> &str {
         &self.cfg.guild_id
-    }
-    pub fn admin_ids(&self) -> &[String] {
-        &self.cfg.admin_ids
-    }
-    /// `REGISTER_RESET_AT`（HH:MM，空 = 不每日清空）。
-    pub fn reset_at(&self) -> &str {
-        &self.cfg.reset_at
     }
     pub fn site_url(&self) -> &str {
         &self.cfg.site_url
@@ -471,13 +479,22 @@ impl RegistrationService {
     }
 
     /// 后台同步：Key 已过期 / 被停用 / 被删除的成员摘掉身份组，并重试之前失败的摘除。返回本次摘掉的人数。
+    ///
+    /// 每轮最多处理 [`SYNC_ROLES_PER_RUN`] 个（维护循环每 5 分钟一轮），和 `backfill_profiles(5)` 一样不制造突发请求：
+    /// 全站重置一次堆起几十个待办时，分几轮慢慢摘，剩下的留到下一轮（待办表不丢）。
     pub async fn sync_roles(&self) -> Result<usize, DbError> {
         if self.cfg.member_role_id.is_empty() {
             return Ok(0);
         }
         self.db.queue_expired_role_removals(now()).await?;
         let mut done = 0;
-        for discord_id in self.db.pending_role_removals().await? {
+        for discord_id in self
+            .db
+            .pending_role_removals()
+            .await?
+            .into_iter()
+            .take(SYNC_ROLES_PER_RUN)
+        {
             if self.set_role(&discord_id, false).await {
                 // 每摘一个就提交：不能在持有未提交写事务时去等下一个 Discord 请求
                 self.db.finish_role_removal(&discord_id).await?;
@@ -494,12 +511,16 @@ impl RegistrationService {
     /// 维护循环每 5 分钟调一次、每次只查 1 人 → 约 49 次读取 / 天，均匀分散，不发私信（申诉期间不制造突发请求）。
     /// 只有 Discord 明确回复「不是成员」（404 + code 10007）才回收；网络错误、限流、机器人不在服务器（10004）
     /// 或任何其他情况一律跳过、下轮再查，宁可漏收也不误删。返回本次回收人数。
+    ///
+    /// 邀请 Key 只由站长手动删（与每日清空 / 全站重置同一口径）：持有人退群时不删 Key，只写一条操作日志
+    /// 「退群（邀请 Key 保留）」提醒站长，并把下次核对推到 30 天后（每月最多提醒一条）（docs/v3-deviations.md #57）。
     pub async fn sweep_departed(&self, now: f64, batch: i64) -> Result<usize, DbError> {
         if !self.flag(&site_flags::MEMBER_SWEEP).await? {
             return Ok(0);
         }
         let mut removed = 0;
-        for discord_id in self.db.departed_candidates(now, batch).await? {
+        for cand in self.db.departed_candidates(now, batch).await? {
+            let discord_id = cand.discord_id;
             let path = format!("/guilds/{}/members/{discord_id}", self.cfg.guild_id);
             // 查不清（网络错误 / 404 的响应体读不出 code）都当作「没有响应」
             let answer: Option<(u16, Option<Value>)> = match self
@@ -517,12 +538,31 @@ impl RegistrationService {
                 && pyval::number_like(code) == Some(10007.0)
             {
                 let label = self.registration_profile(&discord_id).await?;
+                let who = ["display_name", "username"]
+                    .iter()
+                    .find_map(|k| label.get(k).filter(|v| pyval::truthy(v)))
+                    .map(pyext::py_str)
+                    .unwrap_or_else(|| discord_id.clone());
+                if let Some((key_id, key_name)) = &cand.invite_key {
+                    log_action(
+                        &self.db,
+                        "系统",
+                        "退群（邀请 Key 保留）",
+                        &format!("Key #{key_id} {key_name}"),
+                        &format!(
+                            "Discord:{discord_id} {who} 已不在服务器；邀请 Key 只由站长手动删除，未回收"
+                        ),
+                        true,
+                        now,
+                    )
+                    .await;
+                    // 30 天后再核对一次：持有人一直不回来时，操作日志每月提醒一条而不是每天一条
+                    self.db
+                        .set_member_checked(&discord_id, now + INVITE_RECHECK_SECS)
+                        .await?;
+                    continue;
+                }
                 if self.revoke(&discord_id, false).await? {
-                    let who = ["display_name", "username"]
-                        .iter()
-                        .find_map(|k| label.get(k).filter(|v| pyval::truthy(v)))
-                        .map(pyext::py_str)
-                        .unwrap_or_else(|| discord_id.clone());
                     log_action(
                         &self.db,
                         "系统",
@@ -661,31 +701,6 @@ impl RegistrationService {
             self.db.queue_role_removal(discord_id, now()).await?;
         }
         Ok(true)
-    }
-
-    /// 清空所有自助注册用户（删 Key 和记录，保留用量账本），用户需重新 /register。
-    ///
-    /// 带「邀请」标签的 Key 不在清空范围：和手动全站重置同一口径（2026-10-13），私邀的朋友不受每日轮换影响。
-    pub async fn reset_all(&self) -> Result<usize, DbError> {
-        // 被停用的成员不在清空范围内；邀请 Key 豁免
-        let rows = self.db.reset_all_candidates().await?;
-        for discord_id in &rows {
-            self.revoke(discord_id, false).await?;
-        }
-        self.sync_roles().await?;
-        if !rows.is_empty() {
-            log_action(
-                &self.db,
-                "系统",
-                "每日清空自助注册",
-                "",
-                &format!("清空 {} 人（REGISTER_RESET_AT）", rows.len()),
-                true,
-                now(),
-            )
-            .await;
-        }
-        Ok(rows.len())
     }
 
     // ---- 网页登录 ----
@@ -1024,30 +1039,7 @@ impl RegistrationService {
         Ok(Gift::New {
             key_id,
             key: res.key,
-            message: res.message,
         })
-    }
-
-    /// 奶妹回复某条消息（站长在后台点了才发；不会自己找人回复）。
-    pub async fn reply_in_channel(&self, channel_id: &str, message_id: &str, text: &str) -> bool {
-        let (Ok(channel), Ok(message)) =
-            (pyext::py_int_str(channel_id), pyext::py_int_str(message_id))
-        else {
-            return false;
-        };
-        let body = json!({
-            "content": take_chars(text, 1900),
-            "message_reference": {"message_id": message.to_string(), "fail_if_not_exists": false},
-            "allowed_mentions": {"parse": [], "replied_user": true},
-        });
-        self.discord(
-            Method::POST,
-            &format!("/channels/{channel}/messages"),
-            &self.bot_auth(),
-            Some(&body),
-        )
-        .await
-        .is_ok()
     }
 
     /// 唯一发 Key 的地方：建 api_keys 行、写 discord_registrations、按成员名改 Key 名、
@@ -1119,22 +1111,6 @@ impl RegistrationService {
             self.set_role(user_id, true).await;
         }
         let notice = crate::audit::audit_disclosure(&self.db, &self.env).await?;
-        // 保底一层已删除（docs/v3-deviations.md #61）：这里只剩每人上限；下面的文案由欢迎语改写一并处理
-        let base = cfg.daily_images;
-        let legacy = if base != 0 && cfg.daily_images != 0 && base < cfg.daily_images {
-            format!(
-                "V4.5 及以下保底 {base} 张、全站空闲时最多 {} 张",
-                cfg.daily_images
-            )
-        } else {
-            format!("V4.5 及以下 {} 张", cfg.daily_images)
-        };
-        let quota = legacy
-            + &if cfg.daily_v5 != 0 {
-                format!("；V5 {} 张", cfg.daily_v5)
-            } else {
-                String::new()
-            };
         let opened = match &cfg.features {
             Some(list) => list
                 .iter()
@@ -1148,79 +1124,18 @@ impl RegistrationService {
                 .join("、"),
             None => "全部已开放功能".to_string(),
         };
-        let message = welcome_dm(
-            &key,
-            &self.cfg.site_url,
-            &quota,
-            cfg.expires_days,
-            self.cfg.idle_days,
-            &notice,
-            &opened,
-        );
+        let message = welcome_message(&Welcome {
+            key: &key,
+            site: &self.cfg.site_url,
+            daily_images: cfg.daily_images,
+            v5: cfg.image_scope == "all",
+            daily_v5: cfg.daily_v5,
+            reset_hour: self.env.day_reset_hour.clamp(0, 23),
+            idle_days: self.cfg.idle_days,
+            notice: &notice,
+            opened: &opened,
+        });
         Ok(Provisioned { key, message })
-    }
-
-    // ---- 私信 ----
-
-    /// 私信能不能发：返回空串表示可以，否则返回原因（总开关关闭 / 超过限速）。
-    pub async fn dm_block_reason(&self, now: f64) -> Result<String, DbError> {
-        if !self.flag(&site_flags::DM_ENABLED).await? {
-            return Ok("私信总开关已关闭".into());
-        }
-        let mut sent = self.dm_sent.lock().expect("dm");
-        while sent.front().is_some_and(|t| *t < now - 86400.0) {
-            sent.pop_front();
-        }
-        if sent.len() >= DM_DAILY {
-            return Ok(format!("24 小时内已发 {DM_DAILY} 条私信，达到上限"));
-        }
-        if sent.iter().filter(|t| **t > now - DM_WINDOW).count() >= DM_BURST {
-            return Ok(format!("10 分钟内已发 {DM_BURST} 条私信，达到上限"));
-        }
-        Ok(String::new())
-    }
-
-    /// 最近一次私信被闸门拦下的原因（没被拦为空串）。
-    pub fn last_dm_block(&self) -> String {
-        self.last_dm_block.lock().expect("dm").clone()
-    }
-
-    /// 机器人私信成员（唯一出口，经过总闸门和限速）；被拦下或对方关闭私信都返回 false，不报错。
-    /// 被闸门拦下时原因写在 [`Self::last_dm_block`]。
-    pub async fn send_dm(&self, discord_id: &str, text: &str) -> bool {
-        // 读不到开关就当作关着（Discord 应用被风控过，宁可少发）
-        let reason = self
-            .dm_block_reason(now())
-            .await
-            .unwrap_or_else(|_| "私信总开关读取失败".into());
-        *self.last_dm_block.lock().expect("dm") = reason.clone();
-        if !reason.is_empty() {
-            return false;
-        }
-        self.dm_sent.lock().expect("dm").push_back(now());
-        let auth = self.bot_auth();
-        let Ok(channel) = self
-            .discord(
-                Method::POST,
-                "/users/@me/channels",
-                &auth,
-                Some(&json!({"recipient_id": discord_id})),
-            )
-            .await
-        else {
-            return false;
-        };
-        let Some(id) = channel.get("id").map(pyext::py_str) else {
-            return false;
-        };
-        self.discord(
-            Method::POST,
-            &format!("/channels/{id}/messages"),
-            &auth,
-            Some(&json!({"content": take_chars(text, 1900), "allowed_mentions": {"parse": []}})),
-        )
-        .await
-        .is_ok()
     }
 }
 
@@ -1269,74 +1184,6 @@ pub async fn registrar_jobs(state: &AppState) {
     }
 }
 
-/// 距离下一次每日清空还有多少秒（`REGISTER_RESET_AT=HH:MM`，按 TZ）。
-/// 没配 / 格式不对返回 None：调用方等一小时后再看（旧版 `registration_reset_loop`）。
-pub fn reset_delay_secs(at: &str, tz: &jiff::tz::TimeZone, now: f64) -> Option<f64> {
-    let parts: Vec<&str> = at.split(':').collect();
-    let [h, m] = parts.as_slice() else {
-        return None;
-    };
-    let (hour, minute) = (gate_core::pyc::parse_int(h)?, gate_core::pyc::parse_int(m)?);
-    if !(0..24).contains(&hour) || !(0..60).contains(&minute) {
-        return None;
-    }
-    let secs = now.floor();
-    let nanos = ((now - secs) * 1e9) as i32;
-    let here = jiff::Timestamp::new(secs as i64, nanos)
-        .ok()?
-        .to_zoned(tz.clone());
-    let mut target = here
-        .with()
-        .hour(hour as i8)
-        .minute(minute as i8)
-        .second(0)
-        .subsec_nanosecond(0)
-        .build()
-        .ok()?;
-    if target.timestamp() <= here.timestamp() {
-        target = target.checked_add(jiff::Span::new().days(1)).ok()?;
-    }
-    let delta = target.timestamp().as_nanosecond() - here.timestamp().as_nanosecond();
-    Some(delta as f64 / 1e9)
-}
-
-/// 每日清空（到点时调用一次）。出错记 Bug，不抛出。返回清掉的人数。
-pub async fn scheduled_reset(state: &AppState) -> Option<usize> {
-    let svc = state.registration.as_ref()?;
-    match svc.reset_all().await {
-        Ok(n) => {
-            tracing::info!("scheduled registration reset: removed {n} user(s)");
-            Some(n)
-        }
-        Err(e) => {
-            state.bugs.capture(crate::bugs::Report {
-                source: "registration_reset",
-                error: Some(("DbError", &e.to_string())),
-                ..Default::default()
-            });
-            None
-        }
-    }
-}
-
-/// 旧版 `registration_reset_loop` 的完整循环（不自己 spawn；`shutdown` 取消时返回）。
-pub async fn registration_reset_loop(state: AppState) {
-    loop {
-        let delay = state
-            .registration
-            .as_ref()
-            .and_then(|svc| reset_delay_secs(svc.reset_at(), state.clock.tz(), state.now()));
-        let wait = Duration::from_secs_f64(delay.unwrap_or(3600.0).max(0.0));
-        tokio::select! {
-            () = tokio::time::sleep(wait) => {}
-            () = state.shutdown.cancelled() => return,
-        }
-        if delay.is_some() {
-            scheduled_reset(&state).await;
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1376,36 +1223,93 @@ mod tests {
         );
     }
 
-    #[test]
-    fn reset_delay() {
-        let tz = jiff::tz::TimeZone::get("Asia/Shanghai").unwrap();
-        // 2026-10-14 06:59:59 +08:00 = 1791932399
-        assert_eq!(reset_delay_secs("07:00", &tz, 1_791_932_399.0), Some(1.0));
-        // 刚过点：等到明天
-        assert_eq!(
-            reset_delay_secs("07:00", &tz, 1_791_932_400.0),
-            Some(86400.0)
-        );
-        assert_eq!(reset_delay_secs("", &tz, 0.0), None);
-        assert_eq!(reset_delay_secs("25:00", &tz, 0.0), None);
-        assert_eq!(reset_delay_secs("7", &tz, 0.0), None);
-        assert_eq!(reset_delay_secs("07:00:00", &tz, 0.0), None);
+    fn welcome(daily_images: i64, daily_v5: i64) -> Welcome<'static> {
+        Welcome {
+            key: "nai-x",
+            site: "https://site.test/",
+            daily_images,
+            v5: daily_v5 != 0,
+            daily_v5,
+            reset_hour: 7,
+            idle_days: 3,
+            notice: "",
+            opened: "文生图",
+        }
     }
 
     #[test]
-    fn welcome_text_fits_discord() {
-        let t = welcome_dm(
-            "nai-x",
-            "https://site.test/",
-            "V4.5 及以下 30 张",
-            30,
-            3,
-            "",
-            "文生图",
+    fn welcome_text_states_the_current_rules() {
+        let t = welcome_message(&welcome(30, 0));
+        assert!(t.contains("`nai-x`"));
+        // 接口地址不带结尾斜杠，和机器人 /help 一致
+        assert!(
+            t.contains("接口地址填 `https://site.test`（**不要**加 /v1）"),
+            "{t}"
         );
-        assert!(t.contains("`nai-x`") && t.contains("接口地址填 `https://site.test/`"));
-        assert!(t.contains("• 有效期 30 天，到期后可重新 /register"));
-        assert!(t.contains("• 一人一把，请勿分享"));
+        assert!(!t.contains("https://site.test/"), "{t}");
+        // 每日 7 点重置，没有「保底」「次日自动恢复」「有效期」
+        assert!(
+            t.contains(
+                "• 每日额度：每人每天最多 V4.5 及以下 30 张，全站共用、先到先得；每天 7 点重置"
+            ),
+            "{t}"
+        );
+        for gone in ["保底", "次日自动恢复", "有效期", "全站空闲"] {
+            assert!(!t.contains(gone), "{gone}：{t}");
+        }
+        assert!(
+            t.contains("• 每把 Key 同时生成 1 张、排队 1 张，多发的会被退回"),
+            "{t}"
+        );
+        // 不能用 V5 时不提 V5 的额度和尺寸
+        assert!(!t.contains("832×1216") && !t.contains("V5"), "{t}");
+        assert!(t.contains("• 一人一把，请勿分享：共用或转售会被回收"));
         assert!(t.chars().count() <= 1990);
+    }
+
+    #[test]
+    fn welcome_text_covers_v5_sizes_and_unlimited() {
+        let t = welcome_message(&welcome(0, 3));
+        assert!(
+            t.contains("每人每天最多 V4.5 及以下不限张数；V5 3 张，全站共用、先到先得"),
+            "{t}"
+        );
+        assert!(
+            t.contains(
+                "V5 只有 832×1216、1216×832、1024×1024 三种尺寸，其他尺寸会自动换成最接近的一种"
+            ),
+            "{t}"
+        );
+        // 能用 V5 但没有单独的个人上限：不写 V5 张数，尺寸照写
+        let t = welcome_message(&Welcome {
+            v5: true,
+            ..welcome(30, 0)
+        });
+        assert!(
+            t.contains("每人每天最多 V4.5 及以下 30 张，全站共用"),
+            "{t}"
+        );
+        assert!(t.contains("V5 只有 832×1216"), "{t}");
+        // 不回收、没有已开通功能、有公告
+        let t = welcome_message(&Welcome {
+            idle_days: 0,
+            opened: "",
+            notice: "📢 本站会记录提示词。",
+            ..welcome(30, 0)
+        });
+        assert!(
+            !t.contains("自动回收") && !t.contains("• 已开通功能："),
+            "{t}"
+        );
+        assert!(t.ends_with("\n📢 本站会记录提示词。"), "{t}");
+    }
+
+    #[test]
+    fn welcome_text_is_cut_at_discords_limit() {
+        let t = welcome_message(&Welcome {
+            notice: &"长".repeat(3000),
+            ..welcome(30, 3)
+        });
+        assert_eq!(t.chars().count(), 1990);
     }
 }

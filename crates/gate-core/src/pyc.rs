@@ -2,7 +2,7 @@
 //!
 //! 这里只放「Rust 默认行为与 CPython 不同」的那几处：舍入、求和、浮点转字符串、
 //! 字符串解析成数字、按码点切片、空白判定、整除 / 取模。每个函数都有 golden 夹具对拍
-//! （tools/parity/golden/pyc.py）。
+//! （夹具生成脚本见标签 py-final）。
 
 /// `round(x)`（不带 ndigits）：银行家舍入，结果是整数。
 pub fn round0(x: f64) -> i64 {

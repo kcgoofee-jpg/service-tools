@@ -31,6 +31,15 @@ pub struct NewRegistration<'a> {
     pub member_role: bool,
 }
 
+/// 退群核对的一个对象。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DepartedCandidate {
+    pub discord_id: String,
+    /// 领到的是站长发的邀请 Key（带「邀请」标签）时：`(key_id, Key 名字)`。
+    /// 邀请 Key 只由站长手动删，退群时不回收（docs/v3-deviations.md #57）。
+    pub invite_key: Option<(i64, String)>,
+}
+
 impl Db {
     /// 这个 Discord 账号领到的 Key（`SELECT key_id FROM discord_registrations WHERE discord_id=?`）。
     pub async fn registration_key_id(&self, discord_id: &str) -> Result<Option<i64>> {
@@ -189,15 +198,28 @@ impl Db {
 
     // ------------------------------------------------------------------ 退群回收 / 资料补全
 
-    /// 该核对「是否还在服务器」的领取记录（最久没核对的在前）。
-    pub async fn departed_candidates(&self, now: f64, batch: i64) -> Result<Vec<String>> {
+    /// 该核对「是否还在服务器」的领取记录（最久没核对的在前），并带上是不是邀请 Key。
+    /// 邀请 Key 的持有人照样核对（退群时给站长留一条提醒），但不回收（docs/v3-deviations.md #57）。
+    pub async fn departed_candidates(
+        &self,
+        now: f64,
+        batch: i64,
+    ) -> Result<Vec<DepartedCandidate>> {
         self.read(move |c| {
             let mut stmt = c.prepare(
-                "SELECT discord_id FROM discord_registrations WHERE COALESCE(member_checked_at, 0) < ? \
-                 ORDER BY COALESCE(member_checked_at, 0) LIMIT ?",
+                "SELECT r.discord_id, k.id, k.name FROM discord_registrations r \
+                 LEFT JOIN api_keys k ON k.id=r.key_id \
+                   AND EXISTS (SELECT 1 FROM key_tags t WHERE t.key_id=r.key_id AND t.tag=?) \
+                 WHERE COALESCE(r.member_checked_at, 0) < ? \
+                 ORDER BY COALESCE(r.member_checked_at, 0) LIMIT ?",
             )?;
-            stmt.query_map(params![now - 86400.0, batch], |r| {
-                value::text_or(r, 0, "None")
+            stmt.query_map(params![INVITE_TAG, now - 86400.0, batch], |r| {
+                let invite_id = value::i64_opt(r, 1)?;
+                let name = value::text_or(r, 2, "")?;
+                Ok(DepartedCandidate {
+                    discord_id: value::text_or(r, 0, "None")?,
+                    invite_key: invite_id.map(|id| (id, name)),
+                })
             })?
             .collect()
         })

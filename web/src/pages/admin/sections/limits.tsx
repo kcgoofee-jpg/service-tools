@@ -1,6 +1,5 @@
-/** 额度与保护：动态额度、自动驾驶、账号保护与排队、图片排队与冷却、Anlas 与 V5 预算。 */
+/** 额度与保护：动态额度、账号保护与排队、图片排队与冷却、Anlas 与 V5 预算。 */
 import { SectionHead } from "./_kit";
-import AutopilotCard from "./limits/autopilot";
 import BudgetCard from "./limits/budget";
 import GuardCard from "./limits/guard";
 import QuotaCard from "./limits/quota";
@@ -12,7 +11,6 @@ export default function Limits() {
     <Sect>
       <SectionHead title="额度与保护" desc="每人每天能出多少张，以及保护上游账号的硬上限" />
       <QuotaCard />
-      <AutopilotCard />
       <GuardCard />
       <RuntimeCard />
       <BudgetCard />

@@ -20,10 +20,8 @@ hex.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 rand.workspace = true
-http.workspace = true
 
 [dev-dependencies]
-axum.workspace = true
 tempfile = "3"
 gate-testkit = { path = "../gate-testkit" }
 

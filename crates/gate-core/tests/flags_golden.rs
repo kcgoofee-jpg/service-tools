@@ -1,4 +1,4 @@
-//! params / site_flags / features / bot_config 与旧 Python 的对拍（夹具：tools/parity/golden/flags.py）。
+//! params / site_flags / features / bot_config 与旧 Python 的对拍（夹具生成脚本见标签 py-final）。
 
 use gate_core::bot_config::{self, BotConfigError};
 use gate_core::features::{self, FeaturesError, VibeAnlas};
@@ -201,8 +201,13 @@ const DOC_FIXES: [(&str, &str); 1] = [(
 /// 3.0 删掉的设置。冻结夹具里还有它们的用例，登记表里已经没有，逐个用例跳过；`all_keys` / `facts_table`
 /// 在期望值一侧去掉它们：
 /// - `member_image_download`：成员自助导出原图（docs/v3-deviations.md #49）；
+/// - `dm_enabled`：成员私信总闸门，机器人不再私信成员（docs/v3-deviations.md #76）；
 /// - `guard_base_daily_images`：V4.5 保底（docs/v3-deviations.md #61）。
-const REMOVED_KEYS: [&str; 2] = ["member_image_download", "guard_base_daily_images"];
+const REMOVED_KEYS: [&str; 3] = [
+    "member_image_download",
+    "dm_enabled",
+    "guard_base_daily_images",
+];
 
 fn is_removed(key: &str) -> bool {
     REMOVED_KEYS.contains(&key)
@@ -380,6 +385,44 @@ fn pairs(p: &[(&str, &str)]) -> Value {
     Value::Array(p.iter().map(|(a, b)| json!([a, b])).collect())
 }
 
+// 文本生成 / 语音随文本接口整套删除（docs/v3-deviations.md #81）：功能表里没有 `text` / `voice` 了。
+// 冻结夹具照旧留着，比较时在期望值一侧把这两个功能去掉（列表里的名字、成对的 (名字, 说明) 条目、
+// 开关字典的键、逗号串里的名字）；`kinds_for("text" / "voice")` 期望空列表；检查某个已删功能的用例不再跑。
+
+const REMOVED_FEATURES: [&str; 2] = ["text", "voice"];
+
+fn is_removed_feature(v: &Value) -> bool {
+    match v {
+        Value::String(s) => REMOVED_FEATURES.contains(&s.as_str()),
+        // (名字, 说明) / (用量 kind, 功能) 成对的条目
+        Value::Array(pair) => pair
+            .iter()
+            .take(2)
+            .any(|x| x.as_str().is_some_and(|s| REMOVED_FEATURES.contains(&s))),
+        _ => false,
+    }
+}
+
+/// 期望值一侧去掉已删除的功能。
+fn without_removed_features(v: &Value) -> Value {
+    match v {
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .filter(|x| !is_removed_feature(x))
+                .map(without_removed_features)
+                .collect(),
+        ),
+        Value::Object(m) => Value::Object(
+            m.iter()
+                .filter(|(k, _)| !REMOVED_FEATURES.contains(&k.as_str()))
+                .map(|(k, x)| (k.clone(), without_removed_features(x)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
 #[test]
 fn features_pure_golden() {
     for c in load(M, "flags/features_pure") {
@@ -393,11 +436,20 @@ fn features_pure_golden() {
                         "ANLAS_FEATURES": pairs(&features::ANLAS_FEATURES),
                         "KIND_FEATURE": pairs(&features::KIND_FEATURE),
                     }),
-                    c.out(),
+                    &without_removed_features(c.out()),
                 );
                 continue;
             }
-            "kinds_for" => Ok(json!(features::kinds_for(c.arg(0).as_str().unwrap()))),
+            "kinds_for" => {
+                let name = c.arg(0).as_str().unwrap();
+                let want = if REMOVED_FEATURES.contains(&name) {
+                    json!([])
+                } else {
+                    c.out().clone()
+                };
+                assert_eq_py_ordered(&c, &json!(features::kinds_for(name)), &want);
+                continue;
+            }
             "parse_list" => Ok(features::parse_list(c.arg(0)).map_or(Value::Null, |l| json!(l))),
             "normalize" => Ok(json!(features::normalize(str_list(c.arg(0))))),
             "dump" => {
@@ -425,7 +477,23 @@ fn features_pure_golden() {
             }
             other => panic!("未知 {other}"),
         };
-        check(&c, got, true, false);
+        match (c.err(), got) {
+            (None, Ok(v)) => {
+                // dump 的结果是逗号串，其余是列表 / 字典 / null
+                let want = match c.out() {
+                    Value::String(joined) => Value::String(
+                        joined
+                            .split(',')
+                            .filter(|n| !REMOVED_FEATURES.contains(n))
+                            .collect::<Vec<_>>()
+                            .join(","),
+                    ),
+                    other => without_removed_features(other),
+                };
+                assert_eq_py_ordered(&c, &v, &want);
+            }
+            (_, got) => check(&c, got, true, false),
+        }
     }
 }
 
@@ -437,6 +505,9 @@ fn features_check_golden() {
         let kv = c.arg(0);
         let key = c.arg(1);
         let name = c.arg(2).as_str().unwrap();
+        if REMOVED_FEATURES.contains(&name) {
+            continue;
+        }
         let env = (!c.arg(3).is_null()).then(|| c.arg(3));
         let now = c.arg(4).as_f64().unwrap();
         let global = kv.get(features::GLOBAL_KEY).and_then(Value::as_str);

@@ -26,9 +26,6 @@
   row-gap: 6px;
   align-content: start;
 }
-.form-grid--wide {
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
-}
 .form-section {
   display: grid;
   gap: var(--sp-3);
@@ -211,15 +208,6 @@
   overflow-wrap: anywhere;
 }
 
-.confirm {
-  display: grid;
-  gap: var(--sp-4);
-  font-size: var(--fs-md);
-}
-.confirm p {
-  margin: 0;
-}
-
 /* 卡片里的并排操作 */
 .actions {
   display: flex;
@@ -238,9 +226,6 @@
 }
 .tnum {
   font-variant-numeric: tabular-nums;
-}
-.danger-zone {
-  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
 }
 .table td .muted,
 .table th .muted {

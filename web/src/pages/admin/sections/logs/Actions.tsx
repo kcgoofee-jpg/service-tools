@@ -2,8 +2,8 @@
 import { useMemo } from "preact/hooks";
 import { fullTime } from "../../../../lib/format";
 import { Badge, cx, Skeleton } from "../../../../ui";
-import { LoadError } from "../_kit";
-import { Empty, NARROW, Pager, TableScroll, useMedia, usePageData } from "../members/shared";
+import { LoadError, TableWrap } from "../_kit";
+import { Empty, NARROW, Pager, useMedia, usePageData } from "../members/shared";
 import { actionKindGroups, actionLabel } from "./actionNames";
 import { intParam, useQueryState } from "./query";
 import type { ActionRow, ActionsResp } from "./types";
@@ -95,7 +95,7 @@ export function Actions() {
               ))}
             </ul>
           ) : (
-            <TableScroll label="操作日志">
+            <TableWrap label="操作日志">
               <table class="table lg-table">
                 <caption class="sr-only">操作日志</caption>
                 <thead>
@@ -125,7 +125,7 @@ export function Actions() {
                   ))}
                 </tbody>
               </table>
-            </TableScroll>
+            </TableWrap>
           )}
           <Pager
             page={data.page}

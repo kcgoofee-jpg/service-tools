@@ -11,8 +11,8 @@
 ## 组成
 
 ```
-客户端（柏宝绘 / Launcher / OpenAI 兼容…）──HTTPS──▶ Caddy ──▶ nai-gate ──(Chrome TLS 指纹)──▶ NovelAI
-浏览器（首页 / 后台 / 状态页）            ──HTTPS──▶ Caddy ──▶ nai-gate ──▶ SQLite（data/nai_gate.db）
+客户端（柏宝绘 / Launcher 等 NovelAI 客户端）──HTTPS──▶ Caddy ──▶ nai-gate ──(Chrome TLS 指纹)──▶ NovelAI
+浏览器（首页 / 后台 / 状态页）               ──HTTPS──▶ Caddy ──▶ nai-gate ──▶ SQLite（data/nai_gate.db）
 Discord（/register 等）──▶ nai-bots naimei ──(桥接密钥)──▶ nai-gate
 ```
 
@@ -20,9 +20,9 @@ Discord（/register 等）──▶ nai-bots naimei ──(桥接密钥)──�
 
 | 二进制 | 作用 |
 |---|---|
-| `nai-gate` | 网关：成员接口（出图 / 流式 / 工具 / 文本 / OpenAI 兼容）、首页与实时看板、后台、状态页、Discord 登录、后台任务（自适应额度内核、维护、闲置回收）。 |
-| `nai-bots` | Discord 机器人：`naimei`（奶妹，日常：领 Key、查额度、反馈）和 `warden`（燕双鹰，执法，只在线）。只拿自己需要的变量，拿不到上游 Token。 |
-| `nai-ops` | 运维：巡检、快照、脱敏快照、提示词统计、状态页事件、公告、逐条私信（默认只演练）、冒烟。 |
+| `nai-gate` | 网关：成员接口（出图 / 流式 / 工具 / 标签补全 / 查询自己的额度）、首页与实时看板、后台、状态页、Discord 登录、后台任务（自适应额度内核、维护、闲置回收）。 |
+| `nai-bots` | Discord 机器人 `naimei`（奶妹）：`/register` 领 Key、`/quota` 看额度、`/resetkey` 换 Key、`/help`、`/反馈`。不私信、不读频道消息、没有管理员命令；只拿自己需要的变量，拿不到上游 Token。 |
+| `nai-ops` | 运维：巡检（只有「危险」才私信站长）、快照、脱敏快照、冒烟。 |
 
 代码结构：
 
@@ -41,13 +41,13 @@ Discord（/register 等）──▶ nai-bots naimei ──(桥接密钥)──�
 镜像由 GitHub Actions 构建（`.github/workflows/ci.yml`），服务器只加载、不编译。完整流程（发布、切换、回滚、巡检、备份）见
 [docs/OPERATIONS.md](docs/OPERATIONS.md)。最少需要：
 
-1. 一台能访问 `image.novelai.net` / `text.novelai.net` 的服务器、一个域名、Docker 与 Caddy（示例配置 `deploy/Caddyfile.example`）。
+1. 一台能访问 `image.novelai.net` 的服务器、一个域名、Docker 与 Caddy（示例配置 `deploy/Caddyfile.example`，与 `compose.yml` 的 `service-tools_edge` 网络配套）。
 2. `.env`：参照 `.env.example`，至少设置强 `ADMIN_PASSWORD` 和 `NAI_TOKENS`；Discord 自助领取另需 `DISCORD_*` 与 `REGISTRATION_BRIDGE_SECRET`。
 3. `deploy/v3/compose.yml` + 镜像 `owl-gate:current`，`docker compose up -d`；`curl http://127.0.0.1:3003/healthz` → `{"ok":true,...}`。
 
 ## 成员怎么接入
 
-在 Discord 里 `/register` 领 Key，然后在客户端里填：接口地址填站点域名（NovelAI 客户端），或 `https://<域名>/v1`（OpenAI 兼容客户端）；
+在 Discord 里 `/register` 领 Key，然后在客户端里填：接口地址填站点域名（NovelAI 客户端）；
 Key 填领到的 `nai-…`。首页用 Discord 登录后能看到自己的额度和排队位置。
 
 ## 开发
@@ -76,6 +76,8 @@ tools/ci/check-fixtures.sh                  # 公开仓库红线：夹具只许�
 - [docs/OPERATIONS.md](docs/OPERATIONS.md)：运维手册
 - [docs/v3-deviations.md](docs/v3-deviations.md)：3.0 与 2.x 的有意差异（每条有原因）
 - [docs/用户限制说明.md](docs/用户限制说明.md)：给成员看的限制说明
+- [deploy/ops/SYSTEM-FACTS.md](deploy/ops/SYSTEM-FACTS.md)：系统事实清单（额度、账号保护、告警、Key 的一生，数字以代码为准）
+- [docs/research/novelai-v5-官方资料整理.md](docs/research/novelai-v5-官方资料整理.md)：NovelAI V5 官方资料整理（额度算法的依据）
 - [CHANGELOG.md](CHANGELOG.md)
 
 ## 安全与隐私

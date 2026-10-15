@@ -29,6 +29,9 @@ import { ApiError, getJSON, sendJSON } from "../../lib/api";
 import { effectiveTheme, themeChoice, toggleTheme } from "../../lib/theme";
 import { Button, cx, Dialog, Field, Skeleton, toast } from "../../ui";
 import "./admin.css";
+import { memberLabel } from "./sections/members/logic";
+import type { Member } from "./sections/members/types";
+import { type ModulesResponse, moduleState } from "./sections/modules/core";
 
 /* ---------------- 分区注册表 ---------------- */
 export type SectionId =
@@ -165,19 +168,17 @@ function startTicker(): () => void {
   };
 }
 
-/** 取后台数据：url 为 null 时不取。返回 {data, error, loading, reload}。 */
+/** 取后台数据：url 为 null 时不取。返回 {data, error, loading}；之后跟着全局刷新节拍自动重取。 */
 export function useAdmin<T>(url: string | null): {
   data: T | null;
   error: string | null;
   loading: boolean;
-  reload: () => void;
 } {
   const [state, setState] = useState<{ data: T | null; error: string | null; loading: boolean }>({
     data: null,
     error: null,
     loading: !!url,
   });
-  const [nonce, setNonce] = useState(0);
   const t = tick.value;
   useEffect(() => {
     if (!url) return;
@@ -192,8 +193,8 @@ export function useAdmin<T>(url: string | null): {
     return () => {
       alive = false;
     };
-  }, [url, t, nonce]);
-  return { ...state, reload: () => setNonce((n) => n + 1) };
+  }, [url, t]);
+  return state;
 }
 
 /** 后台写操作：成功 toast，失败 toast 错误；返回结果或 null。成功后触发一次全局刷新。 */
@@ -216,9 +217,6 @@ export async function act<T = unknown>(
 }
 
 /* ---------------- 侧栏角标（任何分区都在提醒，直到问题处理掉） ---------------- */
-type ModulesResp = {
-  modules?: Array<{ enabled?: boolean; last?: { ok?: boolean; checks?: Array<{ level?: string }> } }>;
-};
 type BotResp = { status?: { online?: boolean } };
 
 function setNav(id: SectionId, value: number | string | null): void {
@@ -228,7 +226,7 @@ function setNav(id: SectionId, value: number | string | null): void {
   navBadges.value = next;
 }
 
-/** 与旧版一致：每次刷新节拍都看一次未处理 Bug、模块自检、奶妹在线、未处理捐赠。 */
+/** 侧栏角标的唯一来源：每次刷新节拍都看一次未处理 Bug、模块自检、奶妹在线、未处理捐赠（各分区页面不再自己写角标）。 */
 function BadgePoller() {
   const t = tick.value;
   useEffect(() => {
@@ -236,18 +234,13 @@ function BadgePoller() {
     const quiet = <T,>(url: string) => getJSON<T>(url).catch(() => null);
     void Promise.all([
       quiet<{ open?: number }>("/admin/api/errors"),
-      quiet<ModulesResp>("/admin/api/modules"),
+      quiet<ModulesResponse>("/admin/api/modules"),
       quiet<BotResp>("/admin/api/discord-bot"),
       quiet<{ open?: number }>("/admin/api/donations/count"),
     ]).then(([bugs, mods, bot, donations]) => {
       if (!alive) return;
       if (bugs) setNav("logs", bugs.open ?? 0);
-      if (mods?.modules) {
-        const bad = mods.modules.filter(
-          (m) => m.enabled && (m.last?.ok === false || (m.last?.checks ?? []).some((c) => c.level === "bad")),
-        ).length;
-        setNav("modules", bad);
-      }
+      if (mods?.modules) setNav("modules", mods.modules.filter((m) => moduleState(m) === "bad").length);
       const offline = bot?.status ? !bot.status.online : false;
       const open = donations?.open ?? 0;
       setNav("discord", offline ? (open ? `! ${open}` : "!") : open);
@@ -314,8 +307,6 @@ function Login() {
 }
 
 /* ---------------- 命令面板（⌘K / Ctrl+K） ---------------- */
-type Member = { id: number; name: string; discord_id?: string | null; username?: string | null };
-
 function CommandPalette(props: { open: boolean; onClose: () => void }) {
   const { route } = useLocation();
   const [q, setQ] = useState("");
@@ -328,7 +319,8 @@ function CommandPalette(props: { open: boolean; onClose: () => void }) {
     setSel(0);
     setTimeout(() => input.current?.focus(), 0);
     getJSON<{ members?: Member[] } | Member[]>("/admin/api/members")
-      .then((r) => setMembers(Array.isArray(r) ? r : (r.members ?? [])))
+      // 以成员为主：停用的 Key 不列出（谁用过、什么时候停用的，操作日志里都有）
+      .then((r) => setMembers((Array.isArray(r) ? r : (r.members ?? [])).filter((m) => m.enabled)))
       .catch(() => setMembers([]));
   }, [props.open]);
   const items = useMemo(() => {
@@ -342,12 +334,14 @@ function CommandPalette(props: { open: boolean; onClose: () => void }) {
     const mem = needle
       ? members
           .filter((m) =>
-            `${m.name} ${m.username ?? ""} ${m.discord_id ?? ""} #${m.id}`.toLowerCase().includes(needle),
+            `${m.name} ${m.discord?.username ?? ""} ${m.discord?.display_name ?? ""} ${m.discord_id ?? ""} #${m.id}`
+              .toLowerCase()
+              .includes(needle),
           )
           .slice(0, 8)
           .map((m) => ({
             key: `m:${m.id}`,
-            label: m.name,
+            label: memberLabel(m),
             hint: `成员 #${m.id}`,
             go: () => route(`/admin/members?focus=${m.id}`),
           }))

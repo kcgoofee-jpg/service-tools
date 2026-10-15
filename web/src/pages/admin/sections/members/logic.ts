@@ -121,9 +121,7 @@ export function memberIssues(m: Member, now: number): Issue[] {
 }
 
 export const needsAttention = (m: Member, now: number): boolean =>
-  m.enabled &&
-  !m.is_admin &&
-  memberIssues(m, now).some((x) => x.level === "bad" || (x.need && !acked(m, now)));
+  !m.is_admin && memberIssues(m, now).some((x) => x.level === "bad" || (x.need && !acked(m, now)));
 
 /* ---------------- 一句话结论与列表状态 ---------------- */
 export function memberVerdict(m: Member, now: number): { title: string; sub: string } {
@@ -132,8 +130,7 @@ export function memberVerdict(m: Member, now: number): { title: string; sub: str
   const used = m.today.images;
   let title: string;
   const bad = issues.find((x) => x.level === "bad");
-  if (!m.enabled) title = "已停用，Key 现在不能用";
-  else if (bad) title = bad.title;
+  if (bad) title = bad.title;
   else if (issues.some((x) => x.need) && !acked(m, now)) {
     title = `有 ${issues.filter((x) => x.need).length} 件事要看一眼`;
   } else if (!m.first_image_at && !m.is_admin) {
@@ -160,7 +157,6 @@ export type StatusBadge = {
 };
 /** 列表里每行只放一个最重要的状态 */
 export function memberStatus(m: Member, now: number): StatusBadge | null {
-  if (!m.enabled) return { tone: "danger", text: "已停用" };
   if (m.share && m.share.paused_until > now) return { tone: "danger", text: "已限流" };
   if (m.expires_at && m.expires_at < now) return { tone: "danger", text: "已过期" };
   if (needsAttention(m, now)) {
@@ -208,10 +204,7 @@ export function buildFilters(everyone: Member[], now: number, idleDays: number):
       id: "reclaim",
       label: `快被回收（满 ${idleDays} 天未生图）`,
       // 与后端回收口径一致：只看最近一次成功生图（没生过图的从创建时间算），站长 / 测试 / 邀请 Key 豁免
-      test: (m) =>
-        roleOf(m) === "regular" &&
-        m.enabled &&
-        now - (m.last_image_at ?? m.created_at) > (idleDays - 1) * DAY,
+      test: (m) => roleOf(m) === "regular" && now - (m.last_image_at ?? m.created_at) > (idleDays - 1) * DAY,
     });
   }
   more.push(

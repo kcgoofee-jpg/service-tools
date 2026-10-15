@@ -1,9 +1,15 @@
-//! 自动驾驶对拍：`tools/parity/golden/autopilot.py` 生成的夹具（旧 Python 的真实输出）。夹具冻结不改，
+//! 自动驾驶对拍：旧 Python 生成的夹具（真实输出，生成脚本见标签 py-final）。夹具冻结不改，
 //! 3.0 有意删掉的东西在这里按输入过滤 / 在期望一侧改写：
 //!
 //! - docs/v3-deviations.md #51：2.x 单 Key 守护的「换网段」「多客户端全天在用」两条规则（输入 `events`，恒为空）。
 //!   `pure` 里只测这两条规则的 `key_guard_rule` 用例跳过；`run` 里 `events` 在解析前去掉，某把 Key 的 `events`
 //!   会触发这两条规则的用例只做部分对拍（见下）。
+//! - docs/v3-deviations.md #58：熔断另要求失败来自 ≥ 2 把不同的非测试 Key。冻结夹具的 `breaker` 输入是旧版
+//!   不分 Key 的统计，没有 `fail_keys`：逐位对拍时按「失败来自 2 把 Key」补上 `fail_keys = 2`（这时旧版的结论
+//!   全部成立）；再用 `fail_keys = 1`（失败全来自同一把 Key）把每条用例跑一遍：一律不熔断（没有 `TripBreaker`、
+//!   `rules.breaker.value` 为 false），异常类型与单 Key 限流不变。同一条里还删了 `decide` 中只为复刻旧版报错而
+//!   再算一遍的 `breaker_since`：`autopilot_breaker_until` 读不懂时旧版整轮抛 ValueError，3.0 继续往下走；这类用例
+//!   只断言旧版报错之前已产生的副作用（去掉名额那部分）原样是 3.0 副作用的前缀。
 //! - docs/v3-deviations.md #68：「名额 +5」（`slots`）与每条规则的 `off` / `observe` / `enforce` 模式删除，
 //!   熔断与单 Key 限流一律执行。`slots_rule` 用例跳过，`run` 的输入去掉 `registrar` / `global_daily_v5_default` /
 //!   `queue_hours`；期望里去掉名额那一条规则、它的写入（`register_max_users`、`autopilot_slots_at`、
@@ -231,11 +237,67 @@ fn check_enforced(c: &Case, inp: &AutopilotInputs, out: &autopilot::AutopilotOut
     );
 }
 
+/// 把夹具输入里的 `breaker` 补上 `fail_keys`（docs/v3-deviations.md #58）。
+fn with_fail_keys(raw: &Value, n: i64) -> Value {
+    let mut v = raw.clone();
+    v["breaker"]
+        .as_object_mut()
+        .expect("breaker 是对象")
+        .insert("fail_keys".into(), json!(n));
+    v
+}
+
+/// 失败全来自同一把 Key 时：不熔断，其余与期望一致。返回期望里本来会熔断（`breaker.value` 为真）的话 true。
+fn assert_single_key_never_trips(
+    c: &Case,
+    raw_inputs: &Value,
+    want: &autopilot::AutopilotOutputs,
+) -> bool {
+    let inp: AutopilotInputs = serde_json::from_value(with_fail_keys(raw_inputs, 1)).unwrap();
+    let ck = Clock::new("Asia/Shanghai", 7);
+    let out = autopilot::decide(&inp, &ck);
+    assert_eq!(
+        out.error, want.error,
+        "第 {} 行（1 把 Key）异常类型",
+        c.line
+    );
+    assert!(
+        !out.effects
+            .iter()
+            .any(|e| matches!(e, Effect::TripBreaker { .. })),
+        "第 {} 行：失败只来自 1 把 Key 不该熔断",
+        c.line
+    );
+    let Some(got) = &out.result else {
+        return false;
+    };
+    assert_eq!(
+        got["rules"]["breaker"]["value"],
+        json!(false),
+        "第 {} 行",
+        c.line
+    );
+    assert!(
+        got["rules"]["breaker"].get("applied").is_none(),
+        "第 {} 行",
+        c.line
+    );
+    let expected = want.result.as_ref().unwrap();
+    // 名额规则 3.0 已删除（#68），只剩单 Key 限流要与 2 把 Key 时一致
+    assert_eq_py_ordered(
+        c,
+        &got["rules"]["key_guard"],
+        &expected["rules"]["key_guard"],
+    );
+    expected["rules"]["breaker"]["value"] == json!(true)
+}
+
 #[test]
 fn run_golden() {
     let ck = Clock::new("Asia/Shanghai", 7);
     let (mut errs, mut breaker, mut pauses, mut partial, mut no_slots_err) = (0, 0, 0, 0, 0);
     let mut observed = 0;
+    let (mut since_dev, mut single_key_suppressed) = (0, 0);
     for c in load(M, "autopilot/run") {
         // `events` 输入已随被删规则一起去掉；没触发被删规则的用例里它本来就不起作用，去掉后结果不变
         let removed = run_case_hits_removed_rules(&c.raw["inputs"]);
@@ -248,10 +310,39 @@ fn run_golden() {
         ] {
             raw_inputs.as_object_mut().unwrap().remove(k);
         }
-        let inp: AutopilotInputs = serde_json::from_value(raw_inputs)
+        // 旧版的结论按「失败来自 2 把 Key」成立（#58）
+        let raw_inputs = with_fail_keys(&raw_inputs, BREAKER_MIN_KEYS);
+        let inp: AutopilotInputs = serde_json::from_value(raw_inputs.clone())
             .unwrap_or_else(|e| panic!("第 {} 行输入解析失败: {e}", c.line));
         let out = autopilot::decide(&inp, &ck);
         let want_err = c.raw["err"].as_str();
+        let since_err = breaker_since(
+            inp.now,
+            inp.settings
+                .get("autopilot_breaker_until")
+                .map(String::as_str),
+        )
+        .is_err();
+        if since_err && want_err == Some("ValueError") && out.error.as_deref() != want_err {
+            // 旧版在熔断这一步因为 `autopilot_breaker_until` 读不懂而整轮报错；3.0 继续（#58）。
+            // 旧版报错前的副作用（去掉名额那部分，#68）必须原样是 3.0 副作用的前缀
+            since_dev += 1;
+            let effects = serde_json::to_value(&out.effects).unwrap();
+            let want_effects = effects_without_slots(&c.raw["effects"]);
+            let want_effects = want_effects.as_array().unwrap();
+            let got = effects.as_array().unwrap();
+            assert!(
+                got.len() >= want_effects.len(),
+                "第 {} 行：旧版报错前的副作用必须都在",
+                c.line
+            );
+            assert_eq_py_ordered(
+                &c,
+                &Value::Array(got[..want_effects.len()].to_vec()),
+                &Value::Array(want_effects.clone()),
+            );
+            continue;
+        }
         // 旧版在名额那一步（读上一轮额度复盘 / 额度状态）就抛了异常、没走到熔断：3.0 没有这一步（#68），
         // 照常往下（可能在后面别处才报错）
         if want_err.is_some() && out.error.as_deref() != want_err {
@@ -265,6 +356,9 @@ fn run_golden() {
         }
         assert_eq!(out.error.as_deref(), want_err, "第 {} 行异常类型", c.line);
         errs += usize::from(want_err.is_some());
+        if !removed && assert_single_key_never_trips(&c, &raw_inputs, &out) {
+            single_key_suppressed += 1;
+        }
         let enforced = old_mode(&c.raw["inputs"], "breaker") == "enforce"
             && old_mode(&c.raw["inputs"], "key_guard") == "enforce";
         if removed || !enforced {
@@ -340,5 +434,13 @@ fn run_golden() {
     assert!(
         partial > 100 && observed > 50,
         "部分对拍的用例：{partial}（其中旧版只观察 / 关闭的 {observed}）"
+    );
+    assert!(
+        single_key_suppressed > 20,
+        "旧版会熔断、失败只来自 1 把 Key 时不熔断的用例太少: {single_key_suppressed}"
+    );
+    assert!(
+        since_dev > 0,
+        "应有 `autopilot_breaker_until` 读不懂、3.0 不再整轮报错的用例"
     );
 }

@@ -95,11 +95,9 @@ pub struct RegistrationEnv {
     pub key_expires_days: i64,
     pub key_rpm: i64,
     pub max_users: i64,
-    pub reset_at: String,
     pub key_features: String,
     pub min_account_days: i64,
     pub member_role_id: String,
-    pub admin_ids: Vec<String>,
     pub idle_days: i64,
 }
 
@@ -121,8 +119,6 @@ pub struct EnvConfig {
     pub nai_token_v5_daily_limits: Vec<i64>,
     pub nai_token_allow_anlas: Vec<bool>,
     pub image_host: String,
-    pub text_host: String,
-    pub text_host_legacy: String,
     pub upstream_proxy: String,
     pub upstream_user_agent: String,
     pub upstream_http2: bool,
@@ -169,12 +165,8 @@ pub struct EnvConfig {
     pub default_daily_anlas: f64,
     pub default_daily_v5: i64,
     pub default_monthly_anlas: f64,
-    pub default_daily_text_tokens: i64,
     pub default_rpm: i64,
     pub default_expires_days: i64,
-    // 文本
-    pub max_text_output_tokens: i64,
-    pub max_input_chars: i64,
     pub seed_demo_key: bool,
     pub registration: Option<RegistrationEnv>,
 }
@@ -263,19 +255,12 @@ impl EnvConfig {
                 key_expires_days: r.nonneg("REGISTER_EXPIRES_DAYS", 0),
                 key_rpm: r.nonneg("REGISTER_RPM", 5).max(1),
                 max_users: r.nonneg("REGISTER_MAX_USERS", 10),
-                reset_at: r.trimmed("REGISTER_RESET_AT"),
                 key_features: {
                     let f = r.str("REGISTER_FEATURES", "image");
                     f.trim().to_string()
                 },
                 min_account_days: r.nonneg("REGISTER_MIN_ACCOUNT_DAYS", 7),
                 member_role_id: r.trimmed("DISCORD_MEMBER_ROLE_ID"),
-                admin_ids: r
-                    .str("ADMIN_DISCORD_IDS", "")
-                    .split(',')
-                    .map(|x| x.trim().to_string())
-                    .filter(|x| !x.is_empty() && x.chars().all(|c| c.is_ascii_digit()))
-                    .collect(),
                 idle_days: r.nonneg("KEY_INACTIVITY_DELETE_DAYS", 3),
             })
         })();
@@ -299,8 +284,6 @@ impl EnvConfig {
             nai_token_allow_anlas: per_token_bools("NAI_TOKEN_ALLOW_ANLAS", true),
             nai_tokens,
             image_host: r.str("NAI_IMAGE_HOST", "https://image.novelai.net"),
-            text_host: r.str("NAI_TEXT_HOST", "https://text.novelai.net"),
-            text_host_legacy: r.str("NAI_TEXT_HOST_LEGACY", "https://api.novelai.net"),
             upstream_proxy: r.trimmed("UPSTREAM_PROXY"),
             upstream_user_agent: r.trimmed("UPSTREAM_USER_AGENT"),
             upstream_http2: r.bool("UPSTREAM_HTTP2", true),
@@ -340,11 +323,8 @@ impl EnvConfig {
             default_daily_anlas: r.float("DEFAULT_DAILY_ANLAS", 100.0),
             default_daily_v5: r.int("DEFAULT_DAILY_V5", 50),
             default_monthly_anlas: r.float("DEFAULT_MONTHLY_ANLAS", 2500.0),
-            default_daily_text_tokens: r.int("DEFAULT_DAILY_TEXT_TOKENS", 150000),
             default_rpm: r.int("DEFAULT_RPM", 10),
             default_expires_days: r.int("DEFAULT_KEY_EXPIRES_DAYS", 30),
-            max_text_output_tokens: r.int("MAX_TEXT_OUTPUT_TOKENS", 250),
-            max_input_chars: r.int("MAX_INPUT_CHARS", 24000),
             seed_demo_key: r.bool("SEED_DEMO_KEY", false),
             forwarded_allow_ips: split_list("FORWARDED_ALLOW_IPS", "127.0.0.1"),
             registration,
@@ -404,7 +384,6 @@ mod tests {
         assert!(!c.upstream_http2);
         assert!(c.admin_cookie_secure, "只有 0/false/no/off 才关闭");
         assert!(c.registration.is_none());
-        assert_eq!(c.max_text_output_tokens, 250);
     }
 
     #[test]
@@ -422,12 +401,10 @@ mod tests {
         let mut ok = env(&base);
         ok.insert("REGISTRATION_BRIDGE_SECRET".into(), "a".repeat(32));
         ok.insert("REGISTER_RPM".into(), "0".into());
-        ok.insert("ADMIN_DISCORD_IDS".into(), "123, abc,456".into());
         let reg = EnvConfig::load(&ok).registration.unwrap();
         assert_eq!(reg.guild_id, "42");
         assert_eq!(reg.site_url, "https://x.test/");
         assert_eq!(reg.key_rpm, 1);
-        assert_eq!(reg.admin_ids, ["123", "456"]);
         // 新领的 Key 默认不过期（站长 10-15，docs/v3-deviations.md #70）
         assert_eq!(reg.key_expires_days, 0);
         ok.insert("REGISTER_EXPIRES_DAYS".into(), "30".into());

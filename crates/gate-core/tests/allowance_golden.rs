@@ -1,4 +1,4 @@
-//! allowance.rs 与旧 Python 对拍（夹具：tools/parity/golden/allowance.py）。
+//! allowance.rs 与旧 Python 对拍（夹具生成脚本见标签 py-final）。
 //!
 //! 每条夹具是一条操作轨迹：真实 `AllowanceCache` 在假时钟 / 假 HTTP 客户端下执行的 resolve / note_period /
 //! period / snapshot / 改阈值。这里用 `AllowanceCore` 的 check_cache → finish_resolve → note_period 重放，

@@ -730,11 +730,11 @@ async fn ops_snapshot_defaults() {
             "registration": {"configured": false, "open": false, "max_users": 0, "features": null, "daily_images": 30,
                 // 新 Key 默认不过期（REGISTER_EXPIRES_DAYS 默认 0，docs/v3-deviations.md #70）
                 "daily_v5": 0, "image_scope": "legacy", "expires_days": 0, "role_guild": "", "role_id": "", "role_note": "",
-                "active": 0, "reset_at": ""},
+                "active": 0},
             "features": {
-                "global": {"image": true, "upscale": true, "augment": true, "vibe": true, "tags": true, "text": true, "voice": true},
+                "global": {"image": true, "upscale": true, "augment": true, "vibe": true, "tags": true},
                 "labels": {"image": "文生图", "upscale": "放大", "augment": "导演工具（线稿、上色等）", "vibe": "Vibe 编码",
-                    "tags": "标签补全", "text": "文本生成 / OpenAI 兼容聊天", "voice": "语音合成"},
+                    "tags": "标签补全"},
                 "new_key": ["image"],
             },
             "audit": {"prompts": false, "thumbs": false, "retention_days": 7, "image_cap_mb": 8192,
@@ -769,7 +769,6 @@ async fn ops_snapshot_defaults() {
             "role_id",
             "role_note",
             "active",
-            "reset_at"
         ]
     );
 }
@@ -842,17 +841,27 @@ async fn ops_registration_put() {
         .json(
             "PUT",
             "/ops/registration",
-            Some(json!({"features": ["voice", "image", "text"]})),
+            Some(json!({"features": ["tags", "image", "vibe"]})),
         )
         .await;
     assert_eq!(
         feats(&v),
         (
-            json!(["image", "text", "voice"]),
-            json!(["image", "text", "voice"])
+            json!(["image", "vibe", "tags"]),
+            json!(["image", "vibe", "tags"])
         )
     );
-    assert_eq!(settings(&e).await["register_features"], "image,text,voice");
+    assert_eq!(settings(&e).await["register_features"], "image,vibe,tags");
+    // 文本生成 / 语音已不是功能（docs/v3-deviations.md #81）：和别的未知名字一样 422，库里的值不变
+    api.fails(
+        "PUT",
+        "/ops/registration",
+        Some(json!({"features": ["image", "text"]})),
+        422,
+        "features 必须是功能名列表",
+    )
+    .await;
+    assert_eq!(settings(&e).await["register_features"], "image,vibe,tags");
     let (_, v) = api
         .json("PUT", "/ops/registration", Some(json!({"features": null})))
         .await;
@@ -1000,7 +1009,6 @@ async fn ops_registration_uses_env_defaults_when_configured() {
         ("REGISTER_IMAGE_SCOPE", "all"),
         ("REGISTER_EXPIRES_DAYS", "14"),
         ("REGISTER_FEATURES", "image,vibe"),
-        ("REGISTER_RESET_AT", "每日 7 点"),
     ])
     .await;
     let api = Api::login(&e).await;
@@ -1037,7 +1045,7 @@ async fn ops_registration_uses_env_defaults_when_configured() {
         v["registration"],
         json!({"configured": true, "open": false, "max_users": 12, "features": ["image", "vibe"], "daily_images": 30,
                "daily_v5": 0, "image_scope": "legacy", "expires_days": 14, "role_guild": "", "role_id": "", "role_note": "",
-               "active": 2, "reset_at": "每日 7 点"})
+               "active": 2})
     );
     // 站长在后台改过的值优先于 .env
     api.json("PUT", "/ops/registration", Some(json!({"max_users": 3})))
@@ -1060,31 +1068,34 @@ async fn ops_features_put() {
         .json(
             "PUT",
             "/ops/features",
-            Some(json!({"flags": {"text": false}})),
+            Some(json!({"flags": {"upscale": false}})),
         )
         .await;
     assert_eq!(s, 200);
-    assert_eq!(v["features"]["global"]["text"], false);
+    assert_eq!(v["features"]["global"]["upscale"], false);
     assert_eq!(
         settings(&e).await["features_global"],
-        r#"{"image": true, "upscale": true, "augment": true, "vibe": true, "tags": true, "text": false, "voice": true}"#
+        r#"{"image": true, "upscale": false, "augment": true, "vibe": true, "tags": true}"#
     );
     // 多项一起改，库里始终按功能顺序、Python 的默认分隔符
     api.json(
         "PUT",
         "/ops/features",
-        Some(json!({"flags": {"voice": false, "image": true}})),
+        Some(json!({"flags": {"tags": false, "image": true}})),
     )
     .await;
     assert_eq!(
         settings(&e).await["features_global"],
-        r#"{"image": true, "upscale": true, "augment": true, "vibe": true, "tags": true, "text": false, "voice": false}"#
+        r#"{"image": true, "upscale": false, "augment": true, "vibe": true, "tags": false}"#
     );
     let frozen = settings(&e).await;
     for body in [
         json!({"flags": {}}),
         json!({"flags": {"bogus": true}}),
-        json!({"flags": {"text": 1}}),
+        json!({"flags": {"upscale": 1}}),
+        // 文本生成 / 语音已不是功能（docs/v3-deviations.md #81）
+        json!({"flags": {"text": false}}),
+        json!({"flags": {"voice": true}}),
         json!({"flags": [1]}),
         json!({}),
     ] {
@@ -1101,7 +1112,7 @@ async fn ops_features_put() {
     let rows = actions(&e).await;
     assert!(rows.iter().any(|r| r.1 == "修改全局功能开关"
         && r.2 == "全站功能开关"
-        && r.3 == r#"{"flags":{"text":false}}"#
+        && r.3 == r#"{"flags":{"upscale":false}}"#
         && r.4));
 }
 
@@ -2349,7 +2360,7 @@ async fn reconciliation_only_one_at_a_time() {
 
 // ------------------------------------------------------------------ 总览 / 状态 / 监控
 
-/// 往库里灌一批合成数据：成员出图、文本、拒绝、上游 429，外加内存里的状态码计数。
+/// 往库里灌一批合成数据：成员出图、文本（文本接口删除前留下的旧记录）、拒绝、上游 429，外加内存里的状态码计数。
 async fn seed_usage(e: &Env) -> i64 {
     let db = &e.state.db;
     let key = db.get_key_by_token(TOKEN).await.unwrap().unwrap();
@@ -2477,22 +2488,14 @@ async fn overview_reports_today_week_pool_and_feature_usage() {
                "today": {"ok": 2, "error": 1, "rejected": 1, "images": 3, "tokens": 0, "anlas": 0.0},
                "week": {"ok": 2, "error": 1, "rejected": 1, "images": 3, "tokens": 0, "anlas": 0.0}})
     );
-    assert_eq!(
-        usage("text")["today"],
-        json!({"ok": 1, "error": 0, "rejected": 0, "images": 0, "tokens": 120, "anlas": 0.0})
-    );
+    // 旧的文本记录不再归到任何功能下（文本生成 / 语音已删，docs/v3-deviations.md #81），总览的今日合计里照旧有
     let ids: Vec<&str> = v["feature_usage"]
         .as_array()
         .unwrap()
         .iter()
         .map(|f| f["id"].as_str().unwrap())
         .collect();
-    assert_eq!(
-        ids,
-        [
-            "image", "upscale", "augment", "vibe", "tags", "text", "voice"
-        ]
-    );
+    assert_eq!(ids, ["image", "upscale", "augment", "vibe", "tags"]);
     // 全站预算改了（全站 V5 要先关掉动态额度才能手改，#70），总览跟着变
     e.state
         .db

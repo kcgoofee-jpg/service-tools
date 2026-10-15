@@ -1,13 +1,12 @@
-//! 猫头鹰公益站的两个 Discord 机器人（3.0 Rust 版，替换 `integration/discord_bot.py` 与 `warden_bot.py`）：
+//! 猫头鹰公益站的 Discord 机器人「奶妹」（`nai-bots naimei`）。
 //!
-//! - **奶妹**（`nai-bots naimei`）：`/register /quota /resetkey /help /反馈` 与管理员命令，
-//!   以及每分钟一次的配置同步 / 心跳；
-//! - **燕双鹰**（`nai-bots warden`）：零 Intent、不接命令、不发私信，只保持在线并显示「正在观看 一人一 Key」。
+//! 命令：`/register`（领 Key）、`/quota`（今日额度）、`/resetkey`（换 Key）、`/help`、`/反馈`（写几句话给站长），
+//! 以及每分钟一次的心跳（后台据此显示在线状态）。管理员操作都在网页后台，机器人里没有管理员命令，
+//! 也不回应频道里的 @（docs/v3-deviations.md #73）；执法用的燕双鹰已删除（#72）。
 //!
 //! 重要约束（Discord 曾因 OAuth 突发 + 群发私信 + 机器人在 NSFW 论坛自动点赞给应用打过标记，错误码 680009）：
-//! 与 Python 版相比，**对 Discord 可见的行为必须完全一致**——命令名 / 描述 / 选项 / 权限、公会级注册、
-//! ephemeral 回复、Intent（奶妹只有 GUILDS + GUILD_MESSAGES，没有 MESSAGE_CONTENT；燕双鹰为 0）、
-//! 在线状态与 allowed_mentions；没有私信；没有论坛点赞 / AI 评论。
+//! 命令只注册到一个服务器（公会级），回复一律 ephemeral（只有本人可见）；Intent 只有 GUILDS，
+//! 没有任何特权 Intent；没有私信；没有论坛点赞 / AI 评论；`allowed_mentions` 不允许任何 @。
 
 pub mod api;
 pub mod bridge;
@@ -16,5 +15,3 @@ pub mod config;
 pub mod events;
 pub mod handlers;
 pub mod naimei;
-pub mod pystr;
-pub mod warden;

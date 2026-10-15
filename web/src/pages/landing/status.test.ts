@@ -3,7 +3,7 @@ import { createEstimator, dailyUsage, deriveStatus } from "./status";
 import type { Live } from "./types";
 
 /**
- * 下面的 API 原文逐字来自 app/guard.py（token_block_reason / admit_image）与 app/main.py（check_image_cooldown）：
+ * 下面的 API 原文逐字来自 crates/gate-core/src/guard.rs（出图限量的拒绝原因）与 crates/gate-server/src/auth.rs（图片冷却）：
  * 成员收到的 429 原因和 /public/live 的 guard.blocked.text 是同一句。首页的说法必须和它同一口径（站长规定）。
  */
 const API = {

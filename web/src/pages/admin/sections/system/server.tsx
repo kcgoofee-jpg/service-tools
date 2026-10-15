@@ -1,22 +1,16 @@
 /** 服务器状态：磁盘、上游健康、告警渠道、生成记录与原图存储（清空原图）。 */
 import { useState } from "preact/hooks";
-import { duration, fullTime } from "../../../../lib/format";
-import { Badge, Button, Card, Meter, Notice, toast } from "../../../../ui";
-import { act, useAdmin } from "../../Admin";
-import { LoadError, Loading, Stat } from "../_kit";
+import { duration } from "../../../../lib/format";
+import { Badge, Button, Card, Meter, Notice } from "../../../../ui";
+import { useAdmin } from "../../Admin";
+import { actOrError, ConfirmDialog, LoadError, Loading, Stat } from "../_kit";
+import type { AuditInfo } from "../onboarding/core";
 import { bytesText, mbText } from "./core";
-import { ConfirmDialog, Kv, withTone } from "./forms";
+import { Kv, withTone } from "./forms";
 
 export type ServerStatus = {
   alerts: { configured: boolean; sent: number };
-  audit: {
-    prompts: boolean;
-    thumbs: boolean;
-    retention_days: number;
-    image_cap_mb: number;
-    image_bytes: number;
-    image_keep_hours: number;
-  };
+  audit: AuditInfo;
   upstream: { status: string; recent: number; failed: number; image_cooldown_seconds: number };
   protection: {
     auth_fail_max: number;
@@ -35,7 +29,6 @@ const UP_LABEL: Record<string, { text: string; tone: "ok" | "warn" | undefined }
 
 export function ServerCard() {
   const st = useAdmin<ServerStatus>("/admin/api/status");
-  const ov = useAdmin<{ log_since: number | null }>("/admin/api/overview");
   if (st.loading && !st.data)
     return (
       <Card title="服务器状态">
@@ -77,11 +70,6 @@ export function ServerCard() {
                 : ""
             }`}
           />
-          <Stat
-            label="系统记录起点"
-            value={ov.data?.log_since ? fullTime(ov.data.log_since) : "—"}
-            hint="用量日志最早的一条"
-          />
         </div>
         <Kv
           rows={[
@@ -104,7 +92,7 @@ export function AlertsCard() {
   return (
     <Card
       title="告警渠道"
-      sub="只有重大事故会私信：上游 Token 失效、账号可能被封控、服务停了、磁盘快满。其余情况在「总览」查看，不打扰。"
+      sub="只有重大事故才发告警：上游 Token 失效、账号可能被封控、服务停了、磁盘快满。其余要处理的事列在「总览」里，不打扰。"
       actions={
         <Badge {...withTone(a.configured ? "ok" : "warn")}>{a.configured ? "已配置" : "未配置"}</Badge>
       }
@@ -124,13 +112,11 @@ export function AlertsCard() {
       <ConfirmDialog
         open={open}
         title="发送测试告警？"
-        confirmLabel="发送"
-        tone="primary"
+        confirmText="发送"
         onClose={() => setOpen(false)}
-        onConfirm={async () => {
-          const ok = await act("POST", "/admin/api/alerts/test", undefined, "测试告警已发出，请检查告警渠道");
-          if (ok) setOpen(false);
-        }}
+        onConfirm={() =>
+          actOrError("POST", "/admin/api/alerts/test", undefined, "测试告警已发出，请检查告警渠道")
+        }
       >
         <p>会向告警渠道发一条真实的测试消息（10 秒内只能发一次）。</p>
       </ConfirmDialog>
@@ -143,67 +129,31 @@ export function StorageCard() {
   const [open, setOpen] = useState(false);
   if (!data) return null;
   const a = data.audit;
-  const record = a.prompts || a.thumbs;
-  const usedMb = a.image_bytes / 1048576;
   return (
     <Card
-      title="生成记录与原图"
-      sub="开关和保留时长在「领 Key 与功能」里设置，这里是当前状态；清空只删原图，提示词和参数保留。"
-      actions={<Badge {...withTone(record ? "ok" : undefined)}>{record ? "记录中" : "已关闭"}</Badge>}
+      title="清空原图"
+      sub="开关、保留时长和容量上限在「领 Key 与功能」里设置；这里只管一次性清空，只删原图，提示词和参数保留。"
     >
-      <div class="stack-sm">
-        <Kv
-          rows={[
-            [
-              "提示词",
-              a.prompts
-                ? `记录中（${a.retention_days > 0 ? `保留 ${a.retention_days} 天` : "长期保留"}）`
-                : "不记录",
-            ],
-            [
-              "原图",
-              a.thumbs
-                ? `保存中（${a.image_keep_hours > 0 ? `保存 ${a.image_keep_hours} 小时` : "不按时间删"}，超出容量上限时删最旧的）`
-                : "不保存",
-            ],
-          ]}
-        />
-        {a.image_cap_mb > 0 ? (
-          <Meter
-            label="原图占用"
-            value={usedMb}
-            max={a.image_cap_mb}
-            text={`${bytesText(a.image_bytes)} / ${mbText(a.image_cap_mb)}`}
-            hint="存成文件、不进数据库；超过上限后自动删掉最旧的"
-          />
-        ) : (
-          <p class="small">原图占用 {bytesText(a.image_bytes)}（容量上限不限）。</p>
-        )}
-        <div class="actions">
-          <Button variant="danger" disabled={a.image_bytes <= 0} onClick={() => setOpen(true)}>
-            清空服务器上的全部原图
-          </Button>
-        </div>
+      <div class="actions">
+        <Button variant="danger" disabled={a.image_bytes <= 0} onClick={() => setOpen(true)}>
+          清空服务器上的全部原图
+        </Button>
       </div>
       <ConfirmDialog
         open={open}
         title="清空全部原图？"
-        confirmLabel="清空"
-        tone="danger"
-        requireText="清空"
+        confirmText="清空"
+        danger
+        phrase="清空"
         onClose={() => setOpen(false)}
-        onConfirm={async () => {
-          const r = await act<{ purged: number }>(
+        onConfirm={() =>
+          actOrError<{ purged: number }>(
             "POST",
             "/admin/api/audit/purge-images",
             { confirm: "清空" },
-            "",
-          );
-          if (r) {
-            toast(`已清空 ${r.purged} 张原图`);
-            setOpen(false);
-          }
-        }}
+            (r) => `已清空 ${r.purged} 张原图`,
+          )
+        }
       >
         <Notice tone="danger">
           将删除服务器上的全部原图（当前占用 {bytesText(a.image_bytes)}

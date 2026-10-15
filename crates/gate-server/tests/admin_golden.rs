@@ -1,6 +1,6 @@
 //! 后台「成员 / 记录」接口与旧 Python 的路由级对拍。
 //!
-//! 夹具由 `tools/parity/golden/admin_routes.py` 在旧网关上生成：同一份合成种子（`admin_routes_seed*.sql`）、
+//! 夹具由旧网关生成（脚本见标签 py-final）：同一份合成种子（`admin_routes_seed*.sql`）、
 //! 同一个冻结时间，按顺序发同样的请求，记录每一步的状态码、响应原文、下载响应头、zip 内容、（假）注册服务收到的调用，
 //! 以及写操作之后关键表的内容。这里用同样的种子和时间重放，逐步比较——响应原文逐字节一致（含 JSON 键顺序、浮点写法）。
 //!
@@ -8,6 +8,8 @@
 //! 不比的东西：`api_keys.anlas_auto` / `v5_pinned` 两列（3.0 已删除功能，见 docs/v3-deviations.md）、
 //! 客户端 / 设备识别的痕迹（用量日志每行的 `client`、成员页的 `last_client`、导出 zip 里的 `user_agent` /
 //! `client_kinds` 两列：docs/v3-deviations.md #50）、
+//! 文本生成 / 语音的痕迹（Key 上的 `daily_text_tokens`、今日 / 已用的 `text_tokens`、功能表里的 `text` / `voice`：
+//! docs/v3-deviations.md #81；只测它们的两步——`daily_text_tokens` 越界——不发请求，只补记操作日志）、
 //! 新建 Key 的随机串（统一成 nai-<rand>）、缩略图字节（编码器不同，只比是不是 JPEG）。
 
 mod admin_util;
@@ -161,6 +163,8 @@ async fn snapshot(db: &Db, errors: bool) -> Value {
                     o.shift_remove("v5_pinned");
                     // 3.0 新增：停用原因（docs/v3-deviations.md #47）
                     o.shift_remove("disabled_reason");
+                    // 文本额度不再读写（docs/v3-deviations.md #81）：两边都不比这一列
+                    o.shift_remove("daily_text_tokens");
                 }
                 // 3.0 新增的列（docs/v3-deviations.md #45）：旧版没有，比较时去掉
                 if t == ERRORS_TABLE
@@ -221,6 +225,13 @@ fn drop_deleted_member_fields(text: &str) -> String {
                 for k in ["anlas_auto", "anlas_mode", "v5_pinned", "last_client"] {
                     o.shift_remove(k);
                 }
+                // 今日的文本 token 计数、自动标签「调文本接口」：docs/v3-deviations.md #81
+                if let Some(Value::Object(today)) = o.get_mut("today") {
+                    today.shift_remove("text_tokens");
+                }
+                if let Some(Value::Array(tags)) = o.get_mut("auto_tags") {
+                    tags.retain(|t| t["tag"] != "调文本接口");
+                }
             }
         }
     }
@@ -254,6 +265,177 @@ fn drop_member_field(text: &str, field: &str) -> String {
         }
     }
     v.to_string()
+}
+
+// ------------------------------------------------------------------ 文本生成 / 语音（docs/v3-deviations.md #81）
+//
+// 冻结夹具是旧版的输出：Key 带 `daily_text_tokens`、今日 / 已用带 `text_tokens`、功能表有 `text` / `voice`，
+// 功能名校验的提示是「image,upscale,augment,vibe,tags,text,voice」。3.0 都没了，比较时在旧版（期望）一侧改写。
+
+const REMOVED_FEATURES: [&str; 2] = ["text", "voice"];
+const LEGACY_FEATURES_HINT: &str = "image,upscale,augment,vibe,tags,text,voice";
+const FEATURES_HINT: &str = "image,upscale,augment,vibe,tags";
+
+/// 逗号串（`api_keys.features`）里去掉已删除的功能名。
+fn features_csv(s: &str) -> String {
+    s.split(',')
+        .filter(|n| !REMOVED_FEATURES.contains(n))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// 旧版的 Key / 成员 JSON 在新版里的样子：去掉 `daily_text_tokens`、`used` / `today` 里的 `text_tokens`，
+/// 功能列表（`features`）去掉 `text` / `voice`。
+fn drop_removed_text_fields(v: &mut Value) {
+    match v {
+        Value::Array(items) => items.iter_mut().for_each(drop_removed_text_fields),
+        Value::Object(o) => {
+            o.shift_remove("daily_text_tokens");
+            for k in ["used", "today"] {
+                if let Some(Value::Object(inner)) = o.get_mut(k) {
+                    inner.shift_remove("text_tokens");
+                }
+            }
+            match o.get_mut("features") {
+                Some(Value::Array(a)) => {
+                    a.retain(|x| !x.as_str().is_some_and(|n| REMOVED_FEATURES.contains(&n)))
+                }
+                Some(Value::String(csv)) => *csv = features_csv(csv),
+                _ => {}
+            }
+            o.values_mut().for_each(drop_removed_text_fields);
+        }
+        _ => {}
+    }
+}
+
+/// 把旧版响应原文改写成新版的样子（功能名提示、Key / 成员 JSON 里的文本字段）。
+fn v3_text(want: &str, path: &str) -> String {
+    let want = want.replace(LEGACY_FEATURES_HINT, FEATURES_HINT);
+    let key_like = path.starts_with("/admin/api/keys") || path.starts_with("/admin/api/members");
+    if !key_like {
+        return want;
+    }
+    match serde_json::from_str::<Value>(&want) {
+        Ok(mut v) => {
+            drop_removed_text_fields(&mut v);
+            v.to_string()
+        }
+        Err(_) => want,
+    }
+}
+
+/// 请求体里的 `features` 去掉 `text` / `voice`（旧版接受，3.0 这两个名字已不是功能）。
+/// 返回 (改写后的请求体, 旧 / 新两种紧凑写法，用来改写旧版操作日志里记下的请求体)。
+fn v3_request(body: &Value) -> (Value, Option<(String, String)>) {
+    let mut body = body.clone();
+    let Some(Value::Array(list)) = body.get("features").cloned() else {
+        return (body, None);
+    };
+    let kept: Vec<Value> = list
+        .iter()
+        .filter(|x| !x.as_str().is_some_and(|n| REMOVED_FEATURES.contains(&n)))
+        .cloned()
+        .collect();
+    if kept.len() == list.len() {
+        return (body, None);
+    }
+    let pair = (
+        format!("\"features\":{}", Value::Array(list)),
+        format!("\"features\":{}", Value::Array(kept.clone())),
+    );
+    body["features"] = Value::Array(kept);
+    (body, Some(pair))
+}
+
+/// 旧版快照（期望）改写成新版的样子：`api_keys` 去掉 `daily_text_tokens`、功能串去掉 `text` / `voice`，
+/// 操作日志里的功能名提示和请求体按 `rewrites` 改。
+fn v3_snapshot(want: &Value, rewrites: &[(String, String)]) -> Value {
+    let mut out = want.clone();
+    if let Some(Value::Array(rows)) = out.get_mut("api_keys") {
+        for r in rows {
+            if let Some(o) = r.as_object_mut() {
+                o.shift_remove("daily_text_tokens");
+                if let Some(Value::String(csv)) = o.get_mut("features") {
+                    *csv = features_csv(csv);
+                }
+            }
+        }
+    }
+    if let Some(Value::Array(rows)) = out.get_mut("admin_actions") {
+        for r in rows {
+            if let Some(Value::String(detail)) = r.get_mut("detail") {
+                let mut d = detail.replace(LEGACY_FEATURES_HINT, FEATURES_HINT);
+                for (old, new) in rewrites {
+                    d = d.replace(old, new);
+                }
+                *detail = d;
+            }
+        }
+    }
+    out
+}
+
+/// 3.0 删了成员私信出口（docs/v3-deviations.md #76）：冻结夹具里 reg 场景发给 Discord 的请求全是私信 / 回复消息，
+/// 期望一侧把这些请求去掉（新版一个都不发）。
+fn drop_dm_calls(calls: &Value) -> Value {
+    let kept: Vec<Value> = calls
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|c| {
+            let path = c[1].as_str().unwrap_or("");
+            path != "/users/@me/channels" && !path.ends_with("/messages")
+        })
+        .collect();
+    Value::Array(kept)
+}
+
+/// 「奖励成员」的响应：旧版新发 Key 时带 `dm_sent`，私信没发出去才带 `dm_block` / `key`，传了 `reply` 才带 `replied`；
+/// 3.0 不私信，新发 Key 一律带回 `key`（放在最后），上面三个字段都没有（docs/v3-deviations.md #76）。
+fn v3_gift_text(text: &str) -> String {
+    let mut v: Value = serde_json::from_str(text).expect("旧版奖励响应是 JSON");
+    if let Some(o) = v.as_object_mut() {
+        let key = o.shift_remove("key");
+        for k in ["dm_sent", "dm_block", "replied"] {
+            o.shift_remove(k);
+        }
+        if o.get("new_key") == Some(&json!(true)) {
+            o.insert("key".into(), key.unwrap_or_else(|| json!("nai-<rand>")));
+        }
+    }
+    v.to_string()
+}
+
+/// 种子里自带的一条历史「私信成员」记录（旧版留下的老数据，库里原样保留、后台照常显示）。
+const SEED_DM_DETAIL: &str = "已私信：你好";
+
+/// 期望一侧的操作日志：去掉旧版跑步骤时新写的「私信成员」记录（种子里的历史行保留；行号顺着往前补）、
+/// 「奖励成员」备注里的「已私信」「已回复」。
+fn v3_admin_actions(rows: &Value) -> Value {
+    let mut out = Vec::new();
+    let mut removed = 0;
+    for r in rows.as_array().cloned().unwrap_or_default() {
+        if r["action"] == "私信成员" && r["detail"] != SEED_DM_DETAIL {
+            removed += 1;
+            continue;
+        }
+        let mut r = r;
+        let o = r.as_object_mut().expect("操作日志每行是对象");
+        if let Some(id) = o.get("id").and_then(Value::as_i64) {
+            o.insert("id".into(), json!(id - removed));
+        }
+        if o.get("action") == Some(&json!("奖励成员")) {
+            let detail = o["detail"].as_str().unwrap_or("").to_string();
+            o.insert(
+                "detail".into(),
+                json!(detail.replace(" · 已私信", "").replace(" · 已回复", "")),
+            );
+        }
+        out.push(r);
+    }
+    Value::Array(out)
 }
 
 fn first_diff(a: &str, b: &str) -> String {
@@ -309,12 +491,20 @@ async fn run_variant(lines: &[Value], variant: &str, diffs: &mut Vec<String>) ->
         .trim_start_matches("nai_gate_admin=")
         .to_string();
     let mut steps = 0;
+    // 旧版操作日志里记下的请求体，按 3.0 实际收到的（去掉 text / voice 的功能列表）改写
+    let mut rewrites: Vec<(String, String)> = Vec::new();
     for l in &lines[start + 1..] {
         match l["kind"].as_str().unwrap() {
             "meta" => break,
             "final" => {
                 let got = snapshot(&state.db, true).await;
-                compare_snap(&format!("{variant}: 最终数据库"), &l["db"], &got, diffs);
+                compare_snap(
+                    &format!("{variant}: 最终数据库"),
+                    &l["db"],
+                    &got,
+                    &rewrites,
+                    diffs,
+                );
                 break;
             }
             _ => {}
@@ -358,11 +548,59 @@ async fn run_variant(lines: &[Value], variant: &str, diffs: &mut Vec<String>) ->
             }
             continue;
         }
+        // 只测「文本额度越界」的两步（docs/v3-deviations.md #81）：3.0 不再校验这个字段，同样不发请求，
+        // 只按旧版的写法补记失败的那条操作日志，后面的操作日志编号、列表才能对上。
+        if l["status"] == 422 && l["json"].get("daily_text_tokens").is_some() {
+            let path = l["path"].as_str().unwrap();
+            let (action, target) = if l["method"] == "POST" {
+                ("新建 Key", String::new())
+            } else {
+                let id: i64 = path.rsplit('/').next().unwrap().parse().unwrap();
+                let row = state.db.get_key(id).await.unwrap().expect("Key 存在");
+                (
+                    "修改 Key",
+                    format!("Key #{id} {}", row["name"].as_str().unwrap()),
+                )
+            };
+            let why = serde_json::from_str::<Value>(l["text"].as_str().unwrap()).unwrap()["detail"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            state
+                .db
+                .add_admin_action(
+                    "后台 *.*.0.1",
+                    action,
+                    &target,
+                    &format!("失败（422）：{why}"),
+                    false,
+                    state.now(),
+                )
+                .await
+                .unwrap();
+            continue;
+        }
         if let Some(d) = &discord {
-            d.set_closed(l["registrar"]["dm"] == "closed");
             d.clear();
         }
-        let (status, headers, body) = send(&state, l, &cookie).await;
+        // 按已删除的功能筛选用量日志（?feature=text / voice）：3.0 回 422「未知功能」，纯读取、没有副作用，跳过
+        if l["method"] == "GET"
+            && l["path"].as_str().is_some_and(|p| {
+                REMOVED_FEATURES
+                    .iter()
+                    .any(|f| p.contains(&format!("feature={f}")))
+            })
+        {
+            continue;
+        }
+        // 功能列表里的 text / voice：3.0 不认这两个名字，请求里去掉再发
+        let mut step = l.clone();
+        if step["json"].is_object() {
+            let (body, rewrite) = v3_request(&l["json"]);
+            step["json"] = body;
+            rewrites.extend(rewrite);
+        }
+        let (status, headers, body) = send(&state, &step, &cookie).await;
         let mut bad = |what: &str, want: String, got: String| {
             diffs.push(format!("[{name}] {what}\n{}", first_diff(&want, &got)));
         };
@@ -403,7 +641,10 @@ async fn run_variant(lines: &[Value], variant: &str, diffs: &mut Vec<String>) ->
             let is_logs_list = l["path"]
                 .as_str()
                 .is_some_and(|p| p == "/admin/api/logs" || p.starts_with("/admin/api/logs?"));
-            let want = if l["path"] == "/admin/api/members" {
+            let is_gift = l["path"] == "/admin/api/gift" && l["status"] == 200;
+            let want = if is_gift {
+                v3_gift_text(want)
+            } else if l["path"] == "/admin/api/members" {
                 drop_deleted_member_fields(want)
             } else if is_logs_list {
                 drop_legacy_log_client(want)
@@ -412,6 +653,8 @@ async fn run_variant(lines: &[Value], variant: &str, diffs: &mut Vec<String>) ->
             } else {
                 want.to_string()
             };
+            let path = l["path"].as_str().unwrap_or("");
+            let want = v3_text(&want, path);
             // 「early」场景是凌晨 0–7 点：旧版把「今日重置」的起点算成当天 7 点（在未来），一律返回 null；
             // 3.0 按当前服务日起算（docs/v3-deviations.md #46），这一个字段两边都不比。
             let (want, got) = if variant == "early" && l["path"] == "/admin/api/members" {
@@ -422,7 +665,8 @@ async fn run_variant(lines: &[Value], variant: &str, diffs: &mut Vec<String>) ->
             } else {
                 (want, got)
             };
-            let got = if l["path"] == "/admin/api/members" || is_logs_list {
+            let key_like = path.starts_with("/admin/api/keys");
+            let got = if l["path"] == "/admin/api/members" || is_logs_list || key_like || is_gift {
                 // 与上面同样经 serde 重新序列化，只比结构、键顺序和数值类型
                 serde_json::from_str::<Value>(&got).map_or(got, |v| v.to_string())
             } else if is_errors_list {
@@ -451,9 +695,8 @@ async fn run_variant(lines: &[Value], variant: &str, diffs: &mut Vec<String>) ->
         if let Some(d) = &discord {
             let got = Value::Array(d.calls());
             let got: Value = serde_json::from_str(&norm_text(&got.to_string())).unwrap();
-            // 私信里的欢迎语在 3.0 改过几句（docs/v3-deviations.md #48）
-            let want: Value =
-                serde_json::from_str(&common::v3_welcome(&l["calls"].to_string())).unwrap();
+            // 旧版的 Discord 请求全是私信 / 回复消息，3.0 一个都不发（docs/v3-deviations.md #76）
+            let want = drop_dm_calls(&l["calls"]);
             if got != want {
                 bad(
                     "发给 Discord 的请求",
@@ -464,7 +707,7 @@ async fn run_variant(lines: &[Value], variant: &str, diffs: &mut Vec<String>) ->
         }
         if l["db"].is_object() {
             let got = snapshot(&state.db, l["db"].get(ERRORS_TABLE).is_some()).await;
-            compare_snap(&name, &l["db"], &got, diffs);
+            compare_snap(&name, &l["db"], &got, &rewrites, diffs);
         }
     }
     steps
@@ -474,13 +717,25 @@ async fn run_variant(lines: &[Value], variant: &str, diffs: &mut Vec<String>) ->
 /// 只按旧版的写法补记成功导出时的那条操作日志，后面的操作日志编号、列表才能对上。
 const REMOVED_CLIENT_EXPORT: &str = "/admin/api/logs/export";
 
-fn compare_snap(name: &str, want: &Value, got: &Value, diffs: &mut Vec<String>) {
+fn compare_snap(
+    name: &str,
+    want: &Value,
+    got: &Value,
+    rewrites: &[(String, String)],
+    diffs: &mut Vec<String>,
+) {
+    let want = &v3_snapshot(want, rewrites);
     for t in SNAP_TABLES.iter().copied().chain([ERRORS_TABLE]) {
         if want.get(t).is_none() {
             continue;
         }
         // 按序列化文本比：键顺序（列顺序）和数字类型（整数 / 浮点）都要一致
-        let (w, g) = (want[t].to_string(), got[t].to_string());
+        let want_rows = if t == "admin_actions" {
+            v3_admin_actions(&want[t])
+        } else {
+            want[t].clone()
+        };
+        let (w, g) = (want_rows.to_string(), got[t].to_string());
         if w != g {
             diffs.push(format!("[{name}] 表 {t} 内容不同\n{}", first_diff(&w, &g)));
         }

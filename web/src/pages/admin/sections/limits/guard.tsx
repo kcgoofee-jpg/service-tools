@@ -1,9 +1,9 @@
 /** 账号保护与排队：每个上游账号的每日 / 每小时上限、安静时段、间隔抖动、排队数。 */
 import { useMemo, useState } from "preact/hooks";
-import { Badge, Card, Notice } from "../../../../ui";
-import { act, useAdmin } from "../../Admin";
-import { LoadError, Loading, Stat } from "../_kit";
-import { ConfirmDialog, Derive, NumField, SaveBar, useForm, withTone } from "../system/forms";
+import { Card, Notice, toast } from "../../../../ui";
+import { useAdmin } from "../../Admin";
+import { actOrError, ConfirmDialog, LoadError, Loading } from "../_kit";
+import { Derive, NumField, SaveBar, useForm } from "../system/forms";
 import { GUARD_ADVANCED, GUARD_CORE, type Guard, guardSpecs, pacedText } from "./core";
 
 const URL = "/admin/api/guard";
@@ -31,20 +31,21 @@ export default function GuardCard() {
   const cap = Number(form.raw("account_daily_cap")) || 0;
   const burst = Number(form.raw("daily_burst")) || 0;
   const paced = pacedText(cap, burst);
-  const quietOn = data.values.quiet_start !== data.values.quiet_end;
 
+  /** 返回 undefined = 已保存；返回字符串 = 失败原因 */
   const doSave = async () => {
     setSaving(true);
-    const ok = await act("PUT", URL, form.changes(), "账号保护已保存，立即生效");
+    const err = await actOrError("PUT", URL, form.changes(), "账号保护已保存，立即生效");
     setSaving(false);
-    if (ok) form.commit();
+    if (!err) form.commit();
+    return err;
   };
   const trySave = () => {
     const ch = form.changes();
     // 每小时 / 每日上限是保护唯一上游账号的硬闸门：填 0 = 关掉该项，必须确认
     const zeros = ["account_hourly_cap", "account_daily_cap"].filter((k) => k in ch && ch[k] === 0);
     if (zeros.length) setZero(zeros.map((k) => form.specs[k]?.label ?? k));
-    else void doSave();
+    else void doSave().then((err) => err && toast(err, { error: true }));
   };
 
   return (
@@ -53,32 +54,6 @@ export default function GuardCard() {
       sub="每个上游账号的出图总量与节奏：总量和节奏比单人限额更能保护账号；保存后立即生效。"
     >
       <div class="stack-sm">
-        <div class="stats">
-          <Stat
-            label="当前每小时上限"
-            value={data.hourly_cap_now}
-            hint="最近 60 分钟（滚动窗口），每个账号"
-          />
-          <Stat label="排队中的图片" value={data.queued_images} hint="全站正在生成或排队" />
-          <Stat
-            label="时段"
-            value={data.quiet_now ? "安静时段" : "正常时段"}
-            hint={quietOn ? `${data.values.quiet_start} 点～${data.values.quiet_end} 点` : "未设安静时段"}
-          />
-        </div>
-        {data.accounts.length > 0 && (
-          <div class="chips">
-            {data.accounts.map((a) => (
-              <Badge key={a.position} {...withTone(!a.usable && "danger")}>
-                账号 {a.position}：今天 {a.today}
-                {data.values.account_daily_cap ? ` / ${data.values.account_daily_cap}` : ""} 张 · 最近 60 分钟{" "}
-                {a.this_hour}
-                {data.hourly_cap_now ? ` / ${data.hourly_cap_now}` : ""} 张
-              </Badge>
-            ))}
-          </div>
-        )}
-
         <form class="stack-sm" {...form.formProps} onSubmit={(e) => e.preventDefault()}>
           <div class="form-grid">
             {GUARD_CORE.map((n) => (
@@ -100,7 +75,7 @@ export default function GuardCard() {
             </div>
           </details>
           <p class="muted small">
-            V4.5 每人每天保底由「动态额度」管理：现在是每人 {data.values.base_daily_images} 张。
+            V4.5 由「动态额度」管理：每人上限 {data.values.base_daily_images} 张，先到先得。
           </p>
           <SaveBar form={form} onSave={trySave} saving={saving} label="保存账号保护" />
         </form>
@@ -109,13 +84,10 @@ export default function GuardCard() {
       <ConfirmDialog
         open={zero !== null}
         title="确定关掉这项保护？"
-        confirmLabel="关掉保护并保存"
-        tone="danger"
+        confirmText="关掉保护并保存"
+        danger
         onClose={() => setZero(null)}
-        onConfirm={async () => {
-          await doSave();
-          setZero(null);
-        }}
+        onConfirm={doSave}
       >
         <Notice tone="warn">
           「{(zero ?? []).join("」「")}」填了
