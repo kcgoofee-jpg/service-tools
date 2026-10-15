@@ -9,7 +9,7 @@
 | `/opt/caddy` | `Caddyfile`（= 仓库 `deploy/Caddyfile.production`）。 |
 
 3.0 只有一个镜像 `owl-gate`，两个进程：`owl-gate`（网关，`nai-gate serve`）、`owl-naimei`（奶妹，`nai-bots naimei`）。
-燕双鹰已删除（docs/v3-deviations.md #72）；2.x 的容器（`nai-gate`、`nai-gate-discord`、`nai-gate-warden`）只停不删，用来秒级回滚。
+燕双鹰已删除（它什么都不做）；2.x 的容器（`nai-gate`、`nai-gate-discord`、`nai-gate-warden`）只停不删，用来秒级回滚。
 
 ## 发布
 
@@ -108,7 +108,7 @@ cd /opt/owl && docker compose -p owl --env-file /opt/service-tools/.env -f compo
 - **没有第三层**：2.x 的私密参数文件 `data/private_params.json` 3.0 不再读（文件留在原处，备份脚本照旧带着它，只是为了能回滚到 2.x）。
 - **代码常量**：时区 Asia/Shanghai、服务日 07:00 重置、标签补全并发 1、无效 Key 防爆破和后台登录限流的几个数、新 Key 的每分钟请求数等，没有后台入口也没有环境变量，要改只能改代码（`gate-core/src/clock.rs`、`gate-server/src/env.rs`、`gate-server/src/defaults.rs`）。
 
-线上 `.env` 里残留的 `DEFAULT_*`、`REGISTER_*`、`AUDIT_*`、`DISCORD_ROLE_ID`、`SEED_DEMO_KEY`、`TZ`、`DAY_RESET_HOUR`、`GLOBAL_CONCURRENCY`、`GLOBAL_MONTHLY_ANLAS`、`GLOBAL_DAILY_ANLAS`、`QUEUE_TIMEOUT`、`IMAGE_MIN_INTERVAL`、`IMAGE_429_COOLDOWN_SECONDS`、`AUTH_FAIL_*`、`LOGIN_*`、`ALLOW_IMG2IMG`、`SAFE_CLAMP`、`MAX_PIXELS`、`MAX_STEPS`、`ALERT_CHANNEL_ID`、`ALERT_WEBHOOK_URL` 3.0 不再读，可以删掉（`docs/v3-deviations.md` #91～#95、#102、#105）。删之前先确认后台设置里已经有你要的值——比如名额 `register_max_users`、新领 Key 的有效天数 `register_expires_days`：库里没有这一行时，3.0 用代码默认（10 / 不过期），不再回落到 `.env`。回滚到 2.x 时 2.x 仍会读这些变量。
+线上 `.env` 里残留的 `DEFAULT_*`、`REGISTER_*`、`AUDIT_*`、`DISCORD_ROLE_ID`、`SEED_DEMO_KEY`、`TZ`、`DAY_RESET_HOUR`、`GLOBAL_CONCURRENCY`、`GLOBAL_MONTHLY_ANLAS`、`GLOBAL_DAILY_ANLAS`、`QUEUE_TIMEOUT`、`IMAGE_MIN_INTERVAL`、`IMAGE_429_COOLDOWN_SECONDS`、`AUTH_FAIL_*`、`LOGIN_*`、`ALLOW_IMG2IMG`、`SAFE_CLAMP`、`MAX_PIXELS`、`MAX_STEPS`、`ALERT_CHANNEL_ID`、`ALERT_WEBHOOK_URL` 3.0 不再读，可以删掉。删之前先确认后台设置里已经有你要的值——比如名额 `register_max_users`、新领 Key 的有效天数 `register_expires_days`：库里没有这一行时，3.0 用代码默认（10 / 不过期），不再回落到 `.env`。回滚到 2.x 时 2.x 仍会读这些变量。
 
 ## 常用命令
 
@@ -122,7 +122,7 @@ docker exec owl-gate nai-ops smoke http://127.0.0.1:8000   # 线上冒烟（不�
 curl -s http://127.0.0.1:3003/healthz
 ```
 
-状态页事件（发布 / 更新 / 解决）在后台「系统」页的「状态页事件」里操作；`nai-ops` 里没有 `incident`、`announce`、`dm-broadcast`、`prompt-stats`（已删除，docs/v3-deviations.md #71）。
+状态页事件（发布 / 更新 / 解决）在后台「系统」页的「状态页事件」里操作；`nai-ops` 里没有 `incident`、`announce`、`dm-broadcast`、`prompt-stats`（已删除）。
 
 ## 安全红线
 
@@ -139,7 +139,7 @@ curl -s http://127.0.0.1:3003/healthz
 不私信；关掉所有自动互动。处置记录之外，留下下面这些通用原则：
 
 1. **核心功能（领 Key、出图）不要单点依赖任何可被第三方一键掐断的授权链路。** 斜杠命令的 interaction 本身就证明了身份，能不发起新授权就不发起。
-2. **任何自动化群发 / 群互动默认关、能一键关。** 私信、自动点赞、自动评论、@全体……出事要能在 1 分钟内停。（现在的做法更彻底：这些出口都删掉了，见 docs/v3-deviations.md #54 #73 #76。）
+2. **任何自动化群发 / 群互动默认关、能一键关。** 私信、自动点赞、自动评论、@全体……出事要能在 1 分钟内停。（现在的做法更彻底：这些出口都删掉了。）
 3. **最小权限**：OAuth scope、Bot 权限、Intent 只要真正用到的（奶妹现在只有 GUILDS）；能用 Bot Token 核验的就别用用户授权。
 4. **双通路**：面向用户的关键动作尽量有「不依赖该平台某项特性」的备用路。
 5. **出事响应顺序**：先停掉可疑自动化（止血）→ 查根因（后台操作日志里的失败记录、容器日志）→ 上线绕开故障的修复，优先恢复核心 →
