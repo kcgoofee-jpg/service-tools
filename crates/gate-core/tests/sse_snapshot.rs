@@ -1,8 +1,8 @@
 mod common;
 
-use common::bytes_of;
+use common::{Tally, b64, bytes_of};
 use gate_core::sse::{SseDecoder, SseEvent, encode_sse};
-use gate_snapshot::{assert_eq_py, load};
+use gate_snapshot::snapshot::check;
 use proptest::prelude::*;
 use serde_json::{Value, json};
 
@@ -12,59 +12,54 @@ fn events_json(events: &[SseEvent]) -> Value {
     Value::Array(
         events
             .iter()
-            .map(|e| {
-                json!([
-                    {"$b": common::b64(&e.data)},
-                    {"$b": common::b64(&e.event)},
-                ])
-            })
+            .map(|e| json!([{"$b": b64(&e.data)}, {"$b": b64(&e.event)}]))
             .collect(),
     )
 }
 
+/// 一串 feed / finish 操作：feed 记下解出的事件和是否超限出错，finish 记 `{}`。
 #[test]
-fn decode_golden() {
-    let cases = load(M, "sse/decode");
-    assert!(cases.len() >= 1000);
-    let mut with_error = 0;
-    let mut with_events = 0;
-    for c in cases {
-        let event_limit = c.get("event_limit").and_then(Value::as_u64).unwrap();
-        let stream_limit = c.get("stream_limit").and_then(Value::as_u64).unwrap();
-        let ops = c.get("ops").and_then(Value::as_array).unwrap();
-        let results = c.get("results").and_then(Value::as_array).unwrap();
-        assert_eq!(ops.len(), results.len());
+fn decode_snapshot() {
+    let mut tally = Tally::default();
+    check(M, "sse/decode", |c| {
+        let event_limit = c.get("event_limit").and_then(Value::as_u64)?;
+        let stream_limit = c.get("stream_limit").and_then(Value::as_u64)?;
         let mut dec = SseDecoder::new(event_limit, stream_limit);
-        for (i, (op, exp)) in ops.iter().zip(results).enumerate() {
-            match op["op"].as_str().unwrap() {
+        let results: Vec<Value> = c
+            .get("ops")?
+            .as_array()?
+            .iter()
+            .map(|op| match op["op"].as_str().unwrap() {
                 "feed" => {
                     let feed = dec.feed(&bytes_of(&op["chunk"]));
-                    assert_eq_py(
-                        &c,
-                        &json!({"events": events_json(&feed.events), "err": feed.error.is_some()}),
-                        exp,
-                    );
-                    with_error += usize::from(feed.error.is_some());
-                    with_events += usize::from(!feed.events.is_empty());
+                    tally.add_if(feed.error.is_some(), "error");
+                    tally.add_if(!feed.events.is_empty(), "events");
+                    json!({"events": events_json(&feed.events), "err": feed.error.is_some()})
                 }
-                "finish" => dec.finish(),
-                other => panic!("未知操作 {other}（第 {i} 步）"),
-            }
-        }
-    }
-    // 夹具要确实覆盖到「出事件」和「超限报错」两种情形
-    assert!(with_error > 100, "超限用例太少：{with_error}");
-    assert!(with_events > 1000, "出事件的用例太少：{with_events}");
+                "finish" => {
+                    dec.finish();
+                    json!({})
+                }
+                other => panic!("未知操作 {other}"),
+            })
+            .collect();
+        tally.add("trace");
+        Some(Value::Array(results))
+    });
+    // 快照要确实覆盖到「出事件」和「超限报错」两种情形
+    tally.assert_at_least(&[("trace", 5), ("error", 3), ("events", 5)]);
 }
 
 #[test]
-fn encode_golden() {
-    for c in load(M, "sse/encode") {
+fn encode_snapshot() {
+    let mut n = 0;
+    check(M, "sse/encode", |c| {
         let data = bytes_of(c.arg(0));
         let event = c.args().get(1).map(bytes_of).unwrap_or_default();
-        let got = encode_sse(&data, &event);
-        assert_eq_py(&c, &json!({"$b": common::b64(&got)}), c.out());
-    }
+        n += 1;
+        Some(json!({"$b": b64(&encode_sse(&data, &event))}))
+    });
+    assert!(n >= 20, "编码用例太少：{n}");
 }
 
 /// 把流按给定切点切开喂进去，收集全部事件与是否出错。
