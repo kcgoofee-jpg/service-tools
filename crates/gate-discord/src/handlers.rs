@@ -1,31 +1,26 @@
 //! 命令回复文案：网关桥接响应 → 回复文本。全是纯函数，不碰 Discord / 网络，方便单测。
 //!
-//! 与 `integration/discord_bot.py` / `discord_registration.py` 逐分支对应，文案逐字照抄。
-//! Python 里 `data["x"]` 缺键会抛 `KeyError`、类型不对会抛 `TypeError` / `AttributeError`，
-//! 这些异常最终被 `tree.error` 接住并回「出了点问题……」；这里统一返回 `HandlerError`，由上层回同一句话。
-//! 注意保持 Python 的求值短路：某个分支没走到，就不能去要那个键。
+//! 网关回的内容缺字段或形状不对时返回 [`HandlerError`]，由上层统一回成员「出了点问题……」并打 `[bug]` 日志。
+//! 只在某个分支真的用到某个字段时才要求它存在（比如没有 V5 额度时不要求 `v5` 字段）。
 
-use gate_core::{pyc, pyval};
+use gate_core::pyc;
 use serde_json::{Map, Value};
 
 use crate::events::Interaction;
-use crate::pystr::py_str;
 
-// ---------- 文案常量（测试里与 Python 源码里的字符串逐字比对） ----------
+// ---------- 文案常量 ----------
 
-/// `tree.error`：命令抛出任何异常时回给成员的话。
+/// 命令出错时回给成员的话。
 pub const GENERIC_ERROR: &str = "出了点问题，已自动记录，请稍后再试；一直不行请在频道里告诉站长。";
-/// `backend()` 连不上网关 / 返回体不是 JSON。
+/// 连不上网关 / 返回体不是 JSON。
 pub const BACKEND_UNAVAILABLE: &str = "服务暂时不可用，请稍后再试。";
-/// `backend()` 非 200 且响应里没有 `detail`。
+/// 网关回了非 200，但响应里没有文字说明（`detail` 不是字符串，例如请求格式校验的错误列表）。
 pub const BACKEND_FAILED: &str = "请求失败。";
 pub const REGISTER_WRONG_GUILD: &str = "请在指定服务器使用 /register。";
-pub const REGISTER_NOT_CONFIGURED: &str = "领 Key 功能尚未配置完成。";
 pub const REGISTER_UNAVAILABLE: &str = "领 Key 暂不可用，请稍后再试。";
 pub const REGISTER_DONE: &str = "领取成功。";
 pub const REGISTER_NOT_ELIGIBLE: &str = "未通过资格检查。";
 pub const FEEDBACK_DEFAULT_RECEIPT: &str = "收到啦～";
-// /反馈 在 3.0 改成一段文字（docs/v3-deviations.md #52）：下面这几句是 3.0 新写的，不在旧 Python 里。
 pub const FEEDBACK_MODAL_TITLE: &str = "猫头鹰公益站 · 反馈";
 pub const FEEDBACK_LABEL: &str = "想对站长说的话";
 pub const FEEDBACK_PLACEHOLDER: &str =
@@ -36,67 +31,62 @@ pub const FEEDBACK_TEXT_ID: &str = "text";
 /// 文字框的字数范围，和网关一致（网关会再校验一遍）。
 pub const FEEDBACK_MIN_LENGTH: u32 = 2;
 pub const FEEDBACK_MAX_LENGTH: u32 = 1000;
-pub const HELP_COMMANDS: &str = "`/register` 领取 Key（结果仅你可见，含配置教程）· `/quota` 额度和服务状态 · `/resetkey` 换新 Key · `/反馈` 写几句话给站长";
+pub const HELP_COMMANDS: &str = "`/register` 领取 Key（结果仅你可见，含配置教程）· `/quota` 查看今日额度 · `/resetkey` 换新 Key · `/反馈` 写几句话给站长";
 pub const HELP_CLOSED: &str = "⚠ 领 Key 当前已关闭，开放时间看站长公告。";
 pub const QUOTA_DISABLED: &str = "⚠ 这把 Key 已被停用，请联系站长。";
 
-/// 全部「整句常量」，供文案测试遍历。
-pub const ALL_COPY: &[&str] = &[
-    GENERIC_ERROR,
-    BACKEND_UNAVAILABLE,
-    BACKEND_FAILED,
-    REGISTER_WRONG_GUILD,
-    REGISTER_NOT_CONFIGURED,
-    REGISTER_UNAVAILABLE,
-    REGISTER_DONE,
-    REGISTER_NOT_ELIGIBLE,
-    FEEDBACK_DEFAULT_RECEIPT,
-    FEEDBACK_MODAL_TITLE,
-    FEEDBACK_LABEL,
-    FEEDBACK_PLACEHOLDER,
-    HELP_COMMANDS,
-    HELP_CLOSED,
-    QUOTA_DISABLED,
-];
-
-/// 上游状态 → 文案（`STATUS_TEXT`）。
-const STATUS_TEXT: &[(&str, &str)] = &[
-    ("ok", "🟢 正常"),
-    ("idle", "🟢 正常（近期无请求）"),
-    ("degraded", "🟠 不稳定（近期失败较多）"),
-];
-
-/// 对应 Python 里会被 `tree.error` 接住的 `KeyError` / `TypeError` / `AttributeError`。
+/// 网关响应读不懂：缺字段，或字段的形状不对。
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum HandlerError {
-    #[error("KeyError: '{0}'")]
-    Key(String),
-    #[error("TypeError: {0}")]
-    Type(String),
+    #[error("网关响应缺少字段 {0}")]
+    Missing(String),
+    #[error("网关响应格式不对：{0}")]
+    Malformed(String),
 }
 
 fn obj(v: &Value) -> Result<&Map<String, Value>, HandlerError> {
     v.as_object()
-        .ok_or_else(|| HandlerError::Type("response is not a JSON object".into()))
+        .ok_or_else(|| HandlerError::Malformed("不是 JSON 对象".into()))
 }
 
-/// `d["k"]`
+/// 必填字段。
 fn key<'a>(d: &'a Map<String, Value>, k: &str) -> Result<&'a Value, HandlerError> {
-    d.get(k).ok_or_else(|| HandlerError::Key(k.to_owned()))
+    d.get(k).ok_or_else(|| HandlerError::Missing(k.to_owned()))
 }
 
+/// 值算不算「有内容」：null / false / 0 / 空串 / 空列表 / 空对象都算没有。
+fn truthy(v: &Value) -> bool {
+    match v {
+        Value::Null => false,
+        Value::Bool(b) => *b,
+        Value::Number(n) => n.as_f64().is_some_and(|x| x != 0.0),
+        Value::String(s) => !s.is_empty(),
+        Value::Array(a) => !a.is_empty(),
+        Value::Object(o) => !o.is_empty(),
+    }
+}
+
+/// 必填字段，并且要「有内容」。
 fn truthy_key(d: &Map<String, Value>, k: &str) -> Result<bool, HandlerError> {
-    Ok(pyval::truthy(key(d, k)?))
+    Ok(truthy(key(d, k)?))
 }
 
-/// `d.get(k)` 的真值（缺键 = None = 假）。
+/// 可选字段的「有内容」（缺键 = 没有）。
 fn get_truthy(d: &Map<String, Value>, k: &str) -> bool {
-    d.get(k).is_some_and(pyval::truthy)
+    d.get(k).is_some_and(truthy)
 }
 
-// ---------- backend() 结果 ----------
+/// 把网关给的值拼进文案：字符串原样，其余（数字等）用 JSON 写法。
+fn show(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
+}
 
-/// `backend()` 的返回值 `(status, data)`：200 时 `data` 是网关的 JSON；
+// ---------- 网关响应 ----------
+
+/// 一次网关调用的结果 `(status, data)`：200 时 `data` 是网关的 JSON；
 /// 其他状态时 `data` 是 `detail`（取不到则「请求失败。」）；连不上 / 非 JSON 时是 `(0, 服务暂时不可用……)`。
 #[derive(Debug, Clone, PartialEq)]
 pub struct Backend {
@@ -116,15 +106,18 @@ impl Backend {
         self.status == 200
     }
 
-    /// `str(data)`：非 200 时发给成员的就是它。
+    /// 非 200 时发给成员的文字：网关的 `detail` 是字符串就原样给，否则给固定的「请求失败。」。
     pub fn text(&self) -> String {
-        py_str(&self.data)
+        match &self.data {
+            Value::String(s) => s.clone(),
+            _ => BACKEND_FAILED.to_owned(),
+        }
     }
 }
 
-/// 把网关的 HTTP 响应翻译成 `Backend`。
+/// 把网关的 HTTP 响应翻译成 [`Backend`]。
 /// 先解析 JSON（失败 = 服务暂时不可用，哪怕状态码是 502），再看状态码；
-/// 非 200 时 Python 对解析结果调 `.get("detail", ...)`，非对象会 AttributeError → `Err`。
+/// 非 200 时取 `detail`，响应不是 JSON 对象则算读不懂。
 pub fn interpret_backend(status: u16, body: &[u8]) -> Result<Backend, HandlerError> {
     let Ok(data) = serde_json::from_slice::<Value>(body) else {
         return Ok(Backend::unavailable());
@@ -144,62 +137,56 @@ pub fn interpret_backend(status: u16, body: &[u8]) -> Result<Backend, HandlerErr
 
 // ---------- /quota ----------
 
-fn status_line(status: &Value) -> Result<String, HandlerError> {
-    if matches!(status, Value::Array(_) | Value::Object(_)) {
-        // dict.get(unhashable) → TypeError
-        return Err(HandlerError::Type("unhashable type".into()));
+/// 安静时段那一行：上限为 0 时完全暂停出图，大于 0 时只是放慢。
+fn quiet_line(d: &Map<String, Value>) -> String {
+    let window = d.get("quiet_window").map(show).unwrap_or_default();
+    // 网关没给 quiet_cap 时按「暂停」写（旧网关就是这么回的）
+    let paused = d
+        .get("quiet_cap")
+        .and_then(Value::as_f64)
+        .is_none_or(|cap| cap <= 0.0);
+    if paused {
+        format!("🌙 安静时段（{window}）暂停出图，到点自动恢复")
+    } else {
+        format!("🌙 安静时段（{window}）出图会放慢，到点自动恢复")
     }
-    let text = status
-        .as_str()
-        .and_then(|s| {
-            STATUS_TEXT
-                .iter()
-                .find(|(k, _)| *k == s)
-                .map(|(_, v)| (*v).to_owned())
-        })
-        .unwrap_or_else(|| py_str(status));
-    Ok(format!("服务状态：{text}"))
 }
 
-/// `/quota` 的回复。`info` 是 `/self-register/info` 返回 200 时的 JSON（没拿到就是 `None`，不显示服务状态）。
-/// `now` 是 `time.time()`。
+/// `/quota` 的回复。`info` 是 `/self-register/info` 返回 200 时的 JSON（没拿到就是 `None`，不显示限流冷却）。
+/// `now` 是当前 Unix 秒（算 Key 剩余有效期）。
 pub fn quota_text(data: &Value, info: Option<&Value>, now: f64) -> Result<String, HandlerError> {
     let d = obj(data)?;
-    let images = key(d, "images")?; // Python 在求 get 的默认值时就会取 data['images']
-    let legacy = d.get("legacy").unwrap_or(images);
+    // 兼容只回 images 的旧网关：legacy 没有就用 images
+    let used_legacy = match d.get("legacy") {
+        Some(v) => v,
+        None => key(d, "images")?,
+    };
     let mut first = format!(
         "今日 V4.5：{} / {}",
-        py_str(legacy),
-        py_str(key(d, "daily_images")?)
+        show(used_legacy),
+        show(key(d, "daily_images")?)
     );
     if let Some(hour) = d.get("reset_hour").filter(|v| !v.is_null()) {
-        first.push_str(&format!("（每天 {} 点重置）", py_str(hour)));
+        first.push_str(&format!("（每天 {} 点重置）", show(hour)));
     }
     let mut lines = vec![first];
     if truthy_key(d, "daily_v5")? {
         lines.push(format!(
             "今日 V5：{} / {}",
-            py_str(key(d, "v5")?),
-            py_str(key(d, "daily_v5")?)
+            show(key(d, "v5")?),
+            show(key(d, "daily_v5")?)
         ));
     }
     if get_truthy(d, "daily_anlas") {
         let anlas = d.get("anlas").cloned().unwrap_or_else(|| Value::from(0));
         lines.push(format!(
             "今日 Anlas：{} / {}",
-            py_str(&anlas),
-            py_str(key(d, "daily_anlas")?)
+            show(&anlas),
+            show(key(d, "daily_anlas")?)
         ));
     }
     if get_truthy(d, "quiet_now") {
-        let window = d
-            .get("quiet_window")
-            .cloned()
-            .unwrap_or_else(|| Value::String(String::new()));
-        lines.push(format!(
-            "🌙 安静时段（{}）暂停出图，到点自动恢复",
-            py_str(&window)
-        ));
+        lines.push(quiet_line(d));
     }
     let scope = if key(d, "image_model_scope")? == &Value::String("all".into()) {
         "含 V5"
@@ -210,26 +197,18 @@ pub fn quota_text(data: &Value, info: Option<&Value>, now: f64) -> Result<String
 
     let features = key(d, "features")?
         .as_array()
-        .ok_or_else(|| HandlerError::Type("features is not a list".into()))?;
+        .ok_or_else(|| HandlerError::Malformed("features 不是列表".into()))?;
     let mut opened: Vec<&str> = Vec::new();
     let mut closed: Vec<&str> = Vec::new();
     for f in features {
         let f = obj(f)?;
-        // "、".join(...) 只接受 str，label 不是字符串会 TypeError；生成器按 on 的真值分两组各取一次 label
-        let on = truthy_key(f, "on")?;
-        let label = key(f, "label");
-        if on {
-            opened.push(
-                label?
-                    .as_str()
-                    .ok_or_else(|| HandlerError::Type("label is not a string".into()))?,
-            );
+        let label = key(f, "label")?
+            .as_str()
+            .ok_or_else(|| HandlerError::Malformed("label 不是字符串".into()))?;
+        if truthy_key(f, "on")? {
+            opened.push(label);
         } else {
-            closed.push(
-                label?
-                    .as_str()
-                    .ok_or_else(|| HandlerError::Type("label is not a string".into()))?,
-            );
+            closed.push(label);
         }
     }
     let opened = if opened.is_empty() {
@@ -243,11 +222,12 @@ pub fn quota_text(data: &Value, info: Option<&Value>, now: f64) -> Result<String
     }
 
     let expires = key(d, "expires_at")?;
-    if pyval::truthy(expires) {
-        let at = pyval::number_like(expires)
-            .ok_or_else(|| HandlerError::Type("expires_at is not a number".into()))?;
-        let days = pyc::int_of(pyc::floordiv_f(at - now, 86400.0))
-            .ok_or_else(|| HandlerError::Type("expires_at is not finite".into()))?;
+    if truthy(expires) {
+        let at = expires
+            .as_f64()
+            .filter(|at| at.is_finite())
+            .ok_or_else(|| HandlerError::Malformed("expires_at 不是数字".into()))?;
+        let days = ((at - now) / 86400.0).floor() as i64;
         lines.push(format!("Key 剩余有效期：约 {} 天", days.max(0)));
     }
     if !truthy_key(d, "enabled")? {
@@ -255,34 +235,24 @@ pub fn quota_text(data: &Value, info: Option<&Value>, now: f64) -> Result<String
     }
 
     if let Some(info) = info {
-        let up = key(obj(info)?, "upstream")?;
-        let up = obj(up)?;
-        let mut state = status_line(key(up, "status")?)?;
-        if truthy_key(up, "recent")? {
-            state.push_str(&format!(
-                "（近 10 分钟 {} 次请求，失败 {} 次）",
-                py_str(key(up, "recent")?),
-                py_str(key(up, "failed")?)
-            ));
-        }
-        lines.push(state);
+        let up = obj(key(obj(info)?, "upstream")?)?;
         if truthy_key(up, "image_cooldown_seconds")? {
             lines.push(format!(
                 "⏳ 上游限流冷却中，约 {} 秒后恢复生图",
-                py_str(key(up, "image_cooldown_seconds")?)
+                show(key(up, "image_cooldown_seconds")?)
             ));
         }
     }
     Ok(lines.join("\n"))
 }
 
-// ---------- /resetkey /help /slots /revoke / 管理命令 ----------
+// ---------- /resetkey /help ----------
 
 pub fn resetkey_text(data: &Value) -> Result<String, HandlerError> {
     let k = key(obj(data)?, "key")?;
     Ok(format!(
         "新的 Key（只有你能看到这条消息，请妥善保存）：\n`{}`\n旧 Key 已失效。",
-        py_str(k)
+        show(k)
     ))
 }
 
@@ -300,74 +270,26 @@ pub fn help_text(site: &str, info: Option<&Value>) -> Result<String, HandlerErro
             lines.push(HELP_CLOSED.to_owned());
         }
         let notice = key(d, "notice")?;
-        if pyval::truthy(notice) {
-            // "📢 " + data["notice"]：不是字符串会 TypeError
+        if truthy(notice) {
             let notice = notice
                 .as_str()
-                .ok_or_else(|| HandlerError::Type("notice is not a string".into()))?;
+                .ok_or_else(|| HandlerError::Malformed("notice 不是字符串".into()))?;
             lines.push(format!("📢 {notice}"));
         }
     }
     Ok(lines.join("\n"))
 }
 
-/// 管理命令（/open /limit /ban /unban）统一回复：200 取 `data["message"]`，否则 `str(data)`。
-pub fn ops_text(b: &Backend) -> Result<String, HandlerError> {
-    if b.is_ok() {
-        Ok(py_str(key(obj(&b.data)?, "message")?))
-    } else {
-        Ok(b.text())
-    }
-}
-
-pub fn slots_text(data: &Value) -> Result<String, HandlerError> {
-    let d = obj(data)?;
-    let max = key(d, "max")?;
-    let cap = if pyval::truthy(max) {
-        py_str(max)
-    } else {
-        "不限".to_owned()
-    };
-    let reset_at = key(d, "reset_at")?;
-    let reset = if pyval::truthy(reset_at) {
-        format!("，每天 {} 自动清空", py_str(reset_at))
-    } else {
-        String::new()
-    };
-    let open = d.get("open").is_none_or(pyval::truthy);
-    let state = if open { "开放中" } else { "已关闭" };
-    Ok(format!(
-        "已领取 {} / {cap}{reset}；领 Key {state}",
-        py_str(key(d, "active")?)
-    ))
-}
-
-/// `/revoke`：200 → 「已撤销 <@id> 的 Key。」（`member.mention`），否则 `str(data)`。
-pub fn revoke_text(member_id: &str, b: &Backend) -> String {
-    if b.is_ok() {
-        let mention = format!("<@{member_id}>");
-        format!("已撤销 {mention} 的 Key。")
-    } else {
-        b.text()
-    }
-}
-
-/// 有人 @奶妹 时的回复，`<@主人ID>` 会真的 @ 到服务器主人。
-pub fn mention_reply_text(owner: u64) -> String {
-    format!("我在床上陪主人呢 <@{owner}>")
-}
-
 // ---------- /register ----------
 
-/// `/register` 发给 `/self-register/issue` 的 JSON（键顺序与 Python 一致）。
-/// `invite_key` 是已经 `.strip()` 过的 /register 选项。
+/// `/register` 发给 `/self-register/issue` 的 JSON。
+/// `invite_key` 是已经去掉首尾空白的 /register 选项。
 pub fn register_payload(it: &Interaction, invite_key: &str) -> Result<Value, HandlerError> {
     let user = it
         .actor()
-        .ok_or_else(|| HandlerError::Type("interaction has no user".into()))?;
+        .ok_or_else(|| HandlerError::Malformed("交互里没有用户".into()))?;
     let name = pyc::take_chars(&user.username, 80);
-    // getattr(user, "global_name", "") or getattr(user, "display_name", "") or ""
-    // Member.display_name = nick or global_name or name
+    // 显示名：全局昵称，其次服务器昵称，最后用户名
     let global_name = user
         .global_name
         .as_deref()
@@ -391,19 +313,20 @@ pub fn register_payload(it: &Interaction, invite_key: &str) -> Result<Value, Han
 pub fn register_message(status: u16, body: &[u8]) -> Result<String, HandlerError> {
     match status {
         200 | 403 => {
-            // 状态码是 200 / 403 时 Python 才会解析 JSON；解析失败是 ValueError，被捕获后回「暂不可用」
+            // 只有 200 / 403 才解析 JSON；解析失败按「暂不可用」回
             let Ok(data) = serde_json::from_slice::<Value>(body) else {
                 return Ok(REGISTER_UNAVAILABLE.to_owned());
             };
-            let d = obj(&data)?; // 非对象：AttributeError，不在 except 里 → 走 tree.error
+            let d = obj(&data)?;
             if status == 200 {
-                Ok(match d.get("message").filter(|v| pyval::truthy(v)) {
-                    Some(m) => py_str(m),
+                Ok(match d.get("message").filter(|v| truthy(v)) {
+                    Some(m) => show(m),
                     None => REGISTER_DONE.to_owned(),
                 })
             } else {
                 Ok(d.get("detail")
-                    .map_or_else(|| REGISTER_NOT_ELIGIBLE.to_owned(), py_str))
+                    .and_then(Value::as_str)
+                    .map_or_else(|| REGISTER_NOT_ELIGIBLE.to_owned(), str::to_owned))
             }
         }
         _ => Ok(REGISTER_UNAVAILABLE.to_owned()),
@@ -444,12 +367,13 @@ pub fn feedback_text(submitted: &[(String, Vec<String>)]) -> String {
         .unwrap_or_default()
 }
 
-/// 提交后的回执：`result.get("message", "收到啦～")`（200 且是对象）否则 `str(result)`。
+/// 提交后的回执：200 且是对象 → `message`（没有则「收到啦～」），否则网关的说明文字。
 pub fn feedback_receipt(b: &Backend) -> String {
     match (&b.data, b.is_ok()) {
         (Value::Object(o), true) => o
             .get("message")
-            .map_or_else(|| FEEDBACK_DEFAULT_RECEIPT.to_owned(), py_str),
+            .map_or_else(|| FEEDBACK_DEFAULT_RECEIPT.to_owned(), show),
+        (_, true) => FEEDBACK_DEFAULT_RECEIPT.to_owned(),
         _ => b.text(),
     }
 }
@@ -465,14 +389,13 @@ mod tests {
         json!({
             "enabled": true, "expires_at": null, "daily_images": 20, "images": 5, "legacy": 4,
             "anlas": 0, "daily_anlas": 0, "daily_v5": 0, "v5": 0, "image_model_scope": "all",
-            "reset_hour": 7, "quiet_now": false, "quiet_window": "",
+            "reset_hour": 7, "quiet_now": false, "quiet_window": "", "quiet_cap": 20,
             "features": [{"id": "image", "label": "文生图", "on": true}, {"id": "upscale", "label": "放大", "on": false}],
         })
     }
 
-    fn info(status: &str, recent: i64, failed: i64, cooldown: i64) -> Value {
-        json!({"open": true, "notice": "", "upstream": {
-            "status": status, "recent": recent, "failed": failed, "image_cooldown_seconds": cooldown}})
+    fn info(cooldown: i64) -> Value {
+        json!({"open": true, "notice": "", "upstream": {"image_cooldown_seconds": cooldown}})
     }
 
     #[test]
@@ -502,10 +425,11 @@ mod tests {
         d["anlas"] = json!(42);
         d["quiet_now"] = json!(true);
         d["quiet_window"] = json!("2:00–6:00");
+        d["quiet_cap"] = json!(0);
         d["image_model_scope"] = json!("legacy");
         d["expires_at"] = json!(NOW + 86400.0 * 3.5);
         d["enabled"] = json!(false);
-        let text = quota_text(&d, Some(&info("degraded", 12, 7, 33)), NOW).unwrap();
+        let text = quota_text(&d, Some(&info(33)), NOW).unwrap();
         assert_eq!(
             text,
             "今日 V4.5：4 / 20（每天 7 点重置）\n\
@@ -517,9 +441,49 @@ mod tests {
              未开通：放大\n\
              Key 剩余有效期：约 3 天\n\
              ⚠ 这把 Key 已被停用，请联系站长。\n\
-             服务状态：🟠 不稳定（近期失败较多）（近 10 分钟 12 次请求，失败 7 次）\n\
              ⏳ 上游限流冷却中，约 33 秒后恢复生图"
         );
+    }
+
+    #[test]
+    fn quota_has_no_service_status_line() {
+        // 服务状态那一行（docs/v3-deviations.md #74）已删除：info 里就算还带着 status / recent / failed 也不显示
+        let info = json!({"open": true, "notice": "", "upstream": {
+            "status": "degraded", "recent": 12, "failed": 7, "image_cooldown_seconds": 0}});
+        let text = quota_text(&quota_data(), Some(&info), NOW).unwrap();
+        assert!(
+            !text.contains("服务状态") && !text.contains("近 10 分钟"),
+            "{text}"
+        );
+        assert_eq!(text, quota_text(&quota_data(), None, NOW).unwrap());
+    }
+
+    #[test]
+    fn quiet_hours_pause_only_when_the_cap_is_zero() {
+        let mut d = quota_data();
+        d["quiet_now"] = json!(true);
+        d["quiet_window"] = json!("3:00–7:00");
+        // 上限 > 0：放慢，不是暂停
+        d["quiet_cap"] = json!(20);
+        let slow = quota_text(&d, None, NOW).unwrap();
+        assert!(
+            slow.contains("🌙 安静时段（3:00–7:00）出图会放慢，到点自动恢复\n"),
+            "{slow}"
+        );
+        assert!(!slow.contains("暂停出图"), "{slow}");
+        // 上限 = 0：暂停出图
+        d["quiet_cap"] = json!(0);
+        let paused = quota_text(&d, None, NOW).unwrap();
+        assert!(
+            paused.contains("🌙 安静时段（3:00–7:00）暂停出图，到点自动恢复\n"),
+            "{paused}"
+        );
+        // 网关没给 quiet_cap（旧网关）：按暂停写
+        d.as_object_mut().unwrap().remove("quiet_cap");
+        assert!(quota_text(&d, None, NOW).unwrap().contains("暂停出图"));
+        // 不在安静时段：不显示这一行
+        d["quiet_now"] = json!(false);
+        assert!(!quota_text(&d, None, NOW).unwrap().contains("安静时段"));
     }
 
     #[test]
@@ -527,67 +491,52 @@ mod tests {
         let mut d = quota_data();
         d["features"] = json!([{"id": "image", "label": "文生图", "on": false}]);
         d["expires_at"] = json!(NOW - 86400.0 * 10.0);
-        let text = quota_text(&d, Some(&info("idle", 0, 0, 0)), NOW).unwrap();
+        let text = quota_text(&d, Some(&info(0)), NOW).unwrap();
         assert!(text.contains("已开通功能：无\n未开通：文生图\n"), "{text}");
-        assert!(text.contains("Key 剩余有效期：约 0 天\n"), "{text}");
-        assert!(text.ends_with("服务状态：🟢 正常（近期无请求）"), "{text}");
+        assert!(text.ends_with("Key 剩余有效期：约 0 天"), "{text}");
     }
 
     #[test]
-    fn quota_unknown_upstream_status_is_printed_raw() {
-        let text = quota_text(&quota_data(), Some(&info("weird", 0, 0, 0)), NOW).unwrap();
-        assert!(text.ends_with("服务状态：weird"), "{text}");
-        let ok = quota_text(&quota_data(), Some(&info("ok", 3, 0, 0)), NOW).unwrap();
-        assert!(
-            ok.ends_with("服务状态：🟢 正常（近 10 分钟 3 次请求，失败 0 次）"),
-            "{ok}"
-        );
-    }
-
-    #[test]
-    fn quota_missing_keys_are_errors_like_keyerror() {
+    fn quota_missing_or_malformed_fields_are_errors() {
         let mut d = quota_data();
         d.as_object_mut().unwrap().remove("daily_images");
         assert_eq!(
             quota_text(&d, None, NOW),
-            Err(HandlerError::Key("daily_images".into()))
+            Err(HandlerError::Missing("daily_images".into()))
         );
-        // legacy 存在也要求 images 存在（Python 先求默认值）
+        // legacy 和 images 都没有
         let mut d = quota_data();
+        d.as_object_mut().unwrap().remove("legacy");
         d.as_object_mut().unwrap().remove("images");
         assert_eq!(
             quota_text(&d, None, NOW),
-            Err(HandlerError::Key("images".into()))
+            Err(HandlerError::Missing("images".into()))
         );
-        // daily_v5 为假时不会去取 v5
+        // 没有 V5 额度时不要求 v5 字段
         let mut d = quota_data();
         d.as_object_mut().unwrap().remove("v5");
         assert!(quota_text(&d, None, NOW).is_ok());
+        // 有 V5 额度却没有 v5 字段
+        d["daily_v5"] = json!(3);
+        assert_eq!(
+            quota_text(&d, None, NOW),
+            Err(HandlerError::Missing("v5".into()))
+        );
         assert!(quota_text(&json!([1]), None, NOW).is_err());
+        // info 里缺 upstream
+        assert_eq!(
+            quota_text(&quota_data(), Some(&json!({"open": true})), NOW),
+            Err(HandlerError::Missing("upstream".into()))
+        );
     }
 
     #[test]
-    fn resetkey_and_slots() {
+    fn resetkey_text_shows_the_key_once() {
         assert_eq!(
             resetkey_text(&json!({"key": "nai-abc"})).unwrap(),
             "新的 Key（只有你能看到这条消息，请妥善保存）：\n`nai-abc`\n旧 Key 已失效。"
         );
         assert!(resetkey_text(&json!({})).is_err());
-        assert_eq!(
-            slots_text(&json!({"active": 12, "max": 50, "open": true, "reset_at": "07:00"}))
-                .unwrap(),
-            "已领取 12 / 50，每天 07:00 自动清空；领 Key 开放中"
-        );
-        assert_eq!(
-            slots_text(&json!({"active": 3, "max": 0, "open": false, "reset_at": ""})).unwrap(),
-            "已领取 3 / 不限；领 Key 已关闭"
-        );
-        // open 缺省按开放；reset_at 为 null 不显示
-        assert_eq!(
-            slots_text(&json!({"active": 3, "max": 9, "reset_at": null})).unwrap(),
-            "已领取 3 / 9；领 Key 开放中"
-        );
-        assert!(slots_text(&json!({"active": 3, "max": 9})).is_err());
     }
 
     #[test]
@@ -609,40 +558,13 @@ mod tests {
     }
 
     #[test]
-    fn ops_and_revoke() {
-        let ok = Backend {
-            status: 200,
-            data: json!({"message": "已开放领 Key。"}),
-        };
-        assert_eq!(ops_text(&ok).unwrap(), "已开放领 Key。");
-        assert!(
-            ops_text(&Backend {
-                status: 200,
-                data: json!({})
-            })
-            .is_err()
-        );
-        let denied = Backend {
-            status: 403,
-            data: json!("没有管理员权限。"),
-        };
-        assert_eq!(ops_text(&denied).unwrap(), "没有管理员权限。");
-        assert_eq!(
-            revoke_text("900000000000000077", &ok),
-            "已撤销 <@900000000000000077> 的 Key。"
-        );
-        let missing = Backend {
-            status: 404,
-            data: json!("该用户没有已领取的 Key。"),
-        };
-        assert_eq!(
-            revoke_text("900000000000000077", &missing),
-            "该用户没有已领取的 Key。"
-        );
-        assert_eq!(
-            ops_text(&Backend::unavailable()).unwrap(),
-            BACKEND_UNAVAILABLE
-        );
+    fn help_lists_exactly_the_member_commands() {
+        for name in ["/register", "/quota", "/resetkey", "/反馈"] {
+            assert!(HELP_COMMANDS.contains(name), "{name}");
+        }
+        for gone in ["/open", "/limit", "/ban", "/unban", "/slots", "/revoke"] {
+            assert!(!HELP_COMMANDS.contains(gone), "{gone}");
+        }
     }
 
     #[test]
@@ -655,9 +577,12 @@ mod tests {
                 data: json!({"a": 1})
             }
         );
-        let denied =
-            interpret_backend(403, "{\"detail\":\"没有管理员权限。\"}".as_bytes()).unwrap();
-        assert_eq!(denied.text(), "没有管理员权限。");
+        let denied = interpret_backend(
+            403,
+            "{\"detail\":\"请在指定服务器使用该命令。\"}".as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(denied.text(), "请在指定服务器使用该命令。");
         // 非 200 又没有 detail
         assert_eq!(
             interpret_backend(500, b"{}").unwrap().text(),
@@ -669,11 +594,11 @@ mod tests {
             Backend::unavailable()
         );
         assert_eq!(interpret_backend(200, b"").unwrap(), Backend::unavailable());
-        // 非 200 且 JSON 不是对象：.get 抛 AttributeError
+        // 非 200 且 JSON 不是对象：读不懂
         assert!(interpret_backend(422, b"[1]").is_err());
-        // 422 校验错误的 detail 是列表 → str(list)
+        // 请求格式校验的错误：detail 是列表，不把内部结构给成员看，给固定文案
         let v = interpret_backend(422, br#"{"detail":[{"msg":"x"}]}"#).unwrap();
-        assert_eq!(v.text(), "[{'msg': 'x'}]");
+        assert_eq!(v.text(), BACKEND_FAILED);
     }
 
     #[test]
@@ -692,6 +617,11 @@ mod tests {
             "账号太新"
         );
         assert_eq!(register_message(403, b"{}").unwrap(), REGISTER_NOT_ELIGIBLE);
+        // detail 不是字符串：固定文案
+        assert_eq!(
+            register_message(403, br#"{"detail":[1]}"#).unwrap(),
+            REGISTER_NOT_ELIGIBLE
+        );
         assert_eq!(
             register_message(200, b"nope").unwrap(),
             REGISTER_UNAVAILABLE
@@ -727,7 +657,7 @@ mod tests {
             status: 200,
             data: json!([1]),
         };
-        assert_eq!(feedback_receipt(&list), "[1]");
+        assert_eq!(feedback_receipt(&list), FEEDBACK_DEFAULT_RECEIPT);
         let cd = Backend {
             status: 400,
             data: json!("刚刚已经收到你的反馈啦，过 10 分钟再提交新的吧。"),
@@ -791,7 +721,7 @@ mod tests {
 
     #[test]
     fn register_payload_global_name_fallbacks() {
-        // 没有 global_name：display_name = nick or name
+        // 没有 global_name：用服务器昵称
         let it = interaction(
             json!({"id": "900000000000000005", "username": "alice", "global_name": null, "avatar": null}),
             json!("昵称"),

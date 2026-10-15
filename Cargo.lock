@@ -931,8 +931,6 @@ dependencies = [
  "clap",
  "futures",
  "gate-core",
- "gate-golden",
- "rand 0.9.5",
  "reqwest",
  "rustls",
  "serde",

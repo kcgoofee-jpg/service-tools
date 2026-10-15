@@ -1,32 +1,33 @@
-//! 与旧 Python 逐场景对拍：同样的交互 / 消息 / 网关脚本进来，
-//! 发给网关桥接的请求、发给 Discord 的请求（路径 / 查询 / JSON 逐键逐序）必须和 discord.py 实际发出的一致。
+//! 命令流程：同样的交互进来，发给网关桥接的请求、发给 Discord 的请求（路径 / 查询 / JSON）和回给成员的文字
+//! 必须是下面写的这样。网关和 Discord 都换成 `common::MockServer`（本机假服务），测试里不连任何真实的 Discord。
 //!
-//! 夹具 `discord_flows.jsonl.gz` 由 `tools/parity/golden/discord_commands.py` 在旧代码上生成：
-//! 真实的 discord.py `CommandTree` + 真实的 `Interaction` + 旧的 `backend()` / `handle_register()`，
-//! 底层网络换成假的并逐条记录。这里把同样的输入喂给 Rust 版，底层网络换成 `common::MockServer`。
+//! 管理员命令（`/open /limit /ban /unban /slots /revoke`）和 @奶妹 的自动回复已删除（docs/v3-deviations.md #73），
+//! `/quota` 不再显示服务状态（#74），所以这里没有它们；`/反馈` 见 `feedback_text.rs`。
 
 mod common;
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use common::{
-    BOT_ID, GUILD, MockServer, NOW, OWNER, SECRET, SITE, deep_replace, modal_placeholders,
-};
-use gate_discord::bridge::{COMMAND_TIMEOUT, REGISTER_TIMEOUT};
+use common::{APP, BOT_ID, GUILD, MockServer, NOW, SECRET, SITE};
 use gate_discord::config::NaimeiConfig;
-use gate_discord::events::{GuildInfo, Interaction, MessageCreate, User};
+use gate_discord::events::{GuildInfo, Interaction, ReadyInfo, User};
+use gate_discord::handlers::{
+    BACKEND_FAILED, BACKEND_UNAVAILABLE, GENERIC_ERROR, HELP_COMMANDS, REGISTER_NOT_ELIGIBLE,
+    REGISTER_UNAVAILABLE, REGISTER_WRONG_GUILD,
+};
 use gate_discord::naimei::Naimei;
-use serde_json::Value;
+use serde_json::{Value, json};
 
-fn naimei(server: &MockServer, secret: Option<&str>) -> Arc<Naimei> {
+const MEMBER: &str = "900000000000000005";
+
+fn naimei(server: &MockServer) -> Arc<Naimei> {
     let cfg = NaimeiConfig {
         token: "test-token".into(),
         guild_id: GUILD.parse().unwrap(),
         backend: server.backend_url(),
         site: SITE.into(),
-        secret: secret.map(str::to_owned),
+        secret: SECRET.into(),
     };
     let app = Naimei::with_clock(cfg, Some(server.discord_proxy()), Box::new(|| NOW));
     app.set_bot_user(User {
@@ -38,311 +39,571 @@ fn naimei(server: &MockServer, secret: Option<&str>) -> Arc<Naimei> {
     app.upsert_guild(GuildInfo {
         id: GUILD.into(),
         name: Some("测试服".into()),
-        owner_id: Some(OWNER.into()),
         unavailable: false,
     });
     app
 }
 
-fn secret_for(cfg: &Value) -> Option<&'static str> {
-    match cfg["secret"].as_str().unwrap_or("set") {
-        "unset" => None,
-        "empty" => Some(""),
-        _ => Some(SECRET),
-    }
+fn member() -> Value {
+    json!({"user": {"id": MEMBER, "username": "alice", "global_name": "Alice", "avatar": "a1b2c3",
+                    "discriminator": "0"}, "nick": null, "roles": []})
 }
 
-/// Discord 请求：只留夹具里有的键，查询值按 discord.py 的写法（1 / 0）统一，消息随机 nonce 换占位符。
-fn normalize_discord(calls: Vec<Value>, placeholders: &HashMap<String, String>) -> Vec<Value> {
-    calls
-        .into_iter()
-        .map(|c| {
-            let mut query = serde_json::Map::new();
-            for (k, v) in c["query"].as_object().cloned().unwrap_or_default() {
-                let v = match v.as_str() {
-                    Some("true") => "1".to_owned(),
-                    Some("false") => "0".to_owned(),
-                    Some(other) => other.to_owned(),
-                    None => String::new(),
-                };
-                query.insert(k, Value::String(v));
-            }
-            let mut body = c["json"].clone();
-            if body.get("nonce").is_some() {
-                body["nonce"] = Value::String("<nonce>".into());
-            }
-            deep_replace(&mut body, placeholders);
-            serde_json::json!({"method": c["method"], "path": c["path"], "query": query, "json": body})
-        })
-        .collect()
+/// 斜杠命令（在指定服务器里）。
+fn slash(n: u32, name: &str, options: Value) -> Interaction {
+    in_guild(n, name, options, GUILD)
 }
 
-/// 桥接请求：去掉 Rust 侧多出来的 content_type，并校验它是 JSON（有请求体时）。
-/// 夹具里的 `timeout` 另行校验（见 `golden_timeouts_match_constants`）。
-fn normalize_bridge(calls: Vec<Value>) -> Vec<Value> {
-    calls
-        .into_iter()
-        .map(|c| {
-            if !c["json"].is_null() {
-                assert_eq!(c["content_type"], "application/json", "{c}");
-            }
-            serde_json::json!({
-                "method": c["method"], "path": c["path"], "authorization": c["authorization"], "json": c["json"],
-            })
-        })
-        .collect()
+fn in_guild(n: u32, name: &str, options: Value, guild: &str) -> Interaction {
+    serde_json::from_value(json!({
+        "id": format!("9000000000000003{n:02}"), "application_id": APP, "type": 2, "token": format!("tok-{n}"),
+        "guild_id": guild, "channel_id": "900000000000000004", "member": member(),
+        "data": {"id": "900000000000000050", "name": name, "type": 1, "guild_id": guild, "options": options},
+    }))
+    .unwrap()
 }
 
-fn strip_timeout(calls: &Value) -> Vec<Value> {
-    calls
-        .as_array()
-        .unwrap()
+fn callback_path(n: u32) -> String {
+    format!("/interactions/9000000000000003{n:02}/tok-{n}/callback")
+}
+
+fn followup_path(n: u32) -> String {
+    format!("/webhooks/{APP}/tok-{n}")
+}
+
+/// 成员看到的跟进消息：只有本人可见（flags 64）。
+fn ephemeral(content: &str) -> Value {
+    json!({"content": content, "tts": false, "flags": 64})
+}
+
+fn bridge_paths(server: &MockServer) -> Vec<String> {
+    server
+        .bridge_log()
         .iter()
-        .map(|c| {
-            let mut c = c.clone();
-            c.as_object_mut().unwrap().remove("timeout");
-            c
-        })
+        .map(|c| c["path"].as_str().unwrap().to_owned())
         .collect()
 }
 
-fn compare(label: &str, actual: &[Value], expected: &[Value], failures: &mut Vec<String>) {
-    let a = Value::Array(actual.to_vec()).to_string();
-    let e = Value::Array(expected.to_vec()).to_string();
-    if a != e {
-        failures.push(format!("{label}\n  实际: {a}\n  期望: {e}"));
+/// 一次正常的「先确认、再跟进」：返回跟进消息的内容，同时检查确认的请求形状。
+fn expect_deferred_reply(server: &MockServer, n: u32) -> String {
+    let calls = server.discord_log();
+    assert_eq!(calls.len(), 2, "{calls:?}");
+    assert_eq!(calls[0]["method"], "POST");
+    assert_eq!(calls[0]["path"], callback_path(n));
+    assert_eq!(calls[0]["query"], json!({"with_response": "true"}));
+    // 斜杠命令：类型 5（正在思考），只有本人可见
+    assert_eq!(calls[0]["json"], json!({"type": 5, "data": {"flags": 64}}));
+    assert_eq!(calls[1]["method"], "POST");
+    assert_eq!(calls[1]["path"], followup_path(n));
+    assert_eq!(
+        calls[1]["query"],
+        json!({"wait": "true", "with_components": "false"})
+    );
+    assert_eq!(calls[1]["json"]["flags"], 64);
+    assert_eq!(calls[1]["json"]["tts"], false);
+    // 跟进消息和确认一样，不带机器人 Authorization（令牌即鉴权）
+    assert!(calls[1]["authorization"].is_null(), "{}", calls[1]);
+    calls[1]["json"]["content"].as_str().unwrap().to_owned()
+}
+
+// ------------------------------------------------------------------ /register
+
+fn register_options(key: Option<&str>) -> Value {
+    match key {
+        Some(k) => json!([{"name": "key", "type": 3, "value": k}]),
+        None => json!([]),
     }
 }
 
-/// `/help` 里 `/反馈` 的说明：冻结夹具是旧版原文，3.0 改成「写几句话给站长」。
-const LEGACY_HELP_FEEDBACK: &str = "`/反馈` 给站长提意见";
-const V3_HELP_FEEDBACK: &str = "`/反馈` 写几句话给站长";
-
-/// 把期望里的旧版 `/help` 文案换成 3.0 的（docs/v3-deviations.md #52）。
-fn v3_help_copy(v: &mut Value) {
-    match v {
-        Value::String(s) => {
-            if s.contains(LEGACY_HELP_FEEDBACK) {
-                *s = s.replace(LEGACY_HELP_FEEDBACK, V3_HELP_FEEDBACK);
-            }
-        }
-        Value::Array(a) => a.iter_mut().for_each(v3_help_copy),
-        Value::Object(o) => o.values_mut().for_each(v3_help_copy),
-        _ => {}
-    }
-}
-
-/// 心跳场景里，旧版每分钟先 `GET /self-register/bot/config` 拉「跑图分享设置」，再上报带 `ai_ready` / `ai_today` 的心跳。
-/// 设置和 AI 评论 3.0 都删了（docs/v3-deviations.md #54）：期望里去掉那次 GET、心跳里的两个字段和 `config_after`。
-const REMOVED_BOT_CONFIG_PATH: &str = "/self-register/bot/config";
-const REMOVED_STATUS_FIELDS: [&str; 2] = ["ai_ready", "ai_today"];
-
-/// 只测「拉到的配置怎么处理」的心跳场景（后台返回 500 / 不是对象）：配置没了，场景也就没有意义，滤掉。
-/// `sync_config_connect_error` 同时让上报失败，上报失败不报错这一半仍然成立，保留。
-const REMOVED_SYNC_SCENARIOS: [&str; 2] = ["sync_config_unavailable", "sync_config_not_object"];
-
-fn v3_sync_expectation(sc: &mut Value) {
-    let expect = sc["expect"].as_object_mut().unwrap();
-    expect.remove("config_after");
-    let requests = expect
-        .get_mut("bridge_requests")
-        .and_then(Value::as_array_mut)
-        .unwrap();
-    requests.retain(|r| r["path"] != REMOVED_BOT_CONFIG_PATH);
-    for r in requests {
-        if let Some(status) = r["json"]["status"].as_object_mut() {
-            for field in REMOVED_STATUS_FIELDS {
-                status.remove(field);
-            }
-        }
-    }
-}
-
-/// 冻结的 Python 夹具，换成 3.0 的期望（夹具本身不改）：
-/// - `feedback_*` 场景是旧版「先向网关取 5 道题、再弹出 5 个下拉框，提交 `answers`」的流程；`/反馈` 在 3.0 改成
-///   一段文字（docs/v3-deviations.md #52），这些场景整组不再适用，在这里滤掉。新流程见 `tests/feedback_text.rs`；
-/// - `/help` 的命令清单里 `/反馈` 的说明换了，期望里按 [`v3_help_copy`] 的规则换掉再比；
-/// - 心跳场景按 [`v3_sync_expectation`] 去掉拉配置和 AI 字段（docs/v3-deviations.md #54）。
-fn scenarios() -> Vec<Value> {
-    gate_golden::load(env!("CARGO_MANIFEST_DIR"), "discord_flows")
-        .into_iter()
-        .map(|c| c.raw)
-        .filter(|sc| {
-            let name = sc["name"].as_str().unwrap_or_default();
-            !name.starts_with("feedback_") && !REMOVED_SYNC_SCENARIOS.contains(&name)
-        })
-        .map(|mut sc| {
-            v3_help_copy(&mut sc);
-            if sc.get("ready_at").is_some() {
-                v3_sync_expectation(&mut sc);
-            }
-            sc
-        })
-        .collect()
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn commands_and_modals_replay_like_discordpy() {
+#[tokio::test]
+async fn register_hands_the_key_only_to_the_member() {
     let server = MockServer::start().await;
-    let mut failures = Vec::new();
-    let mut count = 0;
-    for sc in scenarios().into_iter().filter(|s| s.get("steps").is_some()) {
-        let name = sc["name"].as_str().unwrap().to_owned();
-        let app = naimei(&server, secret_for(&sc["cfg"]));
-        // 占位符 → 本次 Rust 生成的真实 custom_id（弹窗每次随机）
-        let mut real_ids: HashMap<String, String> = HashMap::new();
-        for (i, step) in sc["steps"].as_array().unwrap().iter().enumerate() {
-            count += 1;
-            server.reset(&step["bridge"], &step["discord"]);
-            let mut interaction = step["interaction"].clone();
-            deep_replace(&mut interaction, &real_ids);
-            let it: Interaction = serde_json::from_value(interaction).unwrap();
-            app.handle_interaction(it).await;
+    let app = naimei(&server);
+    server.reset(
+        &json!({"/self-register/issue": {"status": 200, "json": {"key": "nai-x", "message": "🦉 欢迎！`nai-x`"}}}),
+        &Value::Null,
+    );
+    app.handle_interaction(slash(1, "register", register_options(None)))
+        .await;
 
-            let discord = server.discord_log();
-            let fresh = modal_placeholders(&discord);
-            for (real, ph) in &fresh {
-                real_ids.insert(ph.clone(), real.clone());
-            }
-            let actual_discord = normalize_discord(discord, &fresh);
-            let actual_bridge = normalize_bridge(server.bridge_log());
-            let label = format!("[{name}] 第 {} 步", i + 1);
-            compare(
-                &format!("{label} 桥接请求"),
-                &actual_bridge,
-                &strip_timeout(&step["expect"]["bridge_requests"]),
-                &mut failures,
-            );
-            let expected_discord: Vec<Value> =
-                step["expect"]["discord_calls"].as_array().unwrap().clone();
-            compare(
-                &format!("{label} Discord 请求"),
-                &actual_discord,
-                &expected_discord,
-                &mut failures,
-            );
-        }
+    let bridge = server.bridge_log();
+    assert_eq!(bridge.len(), 1, "{bridge:?}");
+    assert_eq!(bridge[0]["method"], "POST");
+    assert_eq!(bridge[0]["path"], "/self-register/issue");
+    assert_eq!(bridge[0]["authorization"], format!("Bearer {SECRET}"));
+    assert_eq!(bridge[0]["content_type"], "application/json");
+    assert_eq!(
+        bridge[0]["json"].to_string(),
+        json!({"discord_id": MEMBER, "guild_id": GUILD, "name": "alice", "username": "alice",
+               "global_name": "Alice", "avatar": "a1b2c3", "invite_key": ""})
+        .to_string(),
+        "键和顺序都固定"
+    );
+    assert_eq!(expect_deferred_reply(&server, 1), "🦉 欢迎！`nai-x`");
+}
+
+#[tokio::test]
+async fn register_trims_and_truncates_the_invite_key() {
+    let server = MockServer::start().await;
+    let app = naimei(&server);
+    server.reset(
+        &json!({"/self-register/issue": {"status": 200, "json": {"message": "绑定好了"}}}),
+        &Value::Null,
+    );
+    app.handle_interaction(slash(
+        2,
+        "register",
+        register_options(Some(&format!("  nai-{}  ", "k".repeat(100)))),
+    ))
+    .await;
+    let sent = server.bridge_log()[0]["json"]["invite_key"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(sent.chars().count(), 80);
+    assert!(sent.starts_with("nai-k"), "{sent}");
+    assert_eq!(expect_deferred_reply(&server, 2), "绑定好了");
+}
+
+#[tokio::test]
+async fn register_replies_follow_the_gateways_answer() {
+    let server = MockServer::start().await;
+    let app = naimei(&server);
+    let cases: Vec<(Value, &str)> = vec![
+        // 网关说不行：原因原样给成员
+        (
+            json!({"status": 403, "json": {"detail": "Discord 账号创建满 7 天后才能领 Key，请稍后再来。"}}),
+            "Discord 账号创建满 7 天后才能领 Key，请稍后再来。",
+        ),
+        (json!({"status": 403, "json": {}}), REGISTER_NOT_ELIGIBLE),
+        // detail 不是文字（请求格式校验的错误列表）：不把内部结构给成员看
+        (
+            json!({"status": 403, "json": {"detail": [{"msg": "x"}]}}),
+            REGISTER_NOT_ELIGIBLE,
+        ),
+        // 其他情况：领 Key 暂不可用
+        (
+            json!({"status": 401, "json": {"detail": "未授权"}}),
+            REGISTER_UNAVAILABLE,
+        ),
+        (json!({"status": 500, "json": {}}), REGISTER_UNAVAILABLE),
+        (
+            json!({"status": 503, "json": {"detail": "x"}}),
+            REGISTER_UNAVAILABLE,
+        ),
+        (
+            json!({"status": 200, "text": "不是 JSON"}),
+            REGISTER_UNAVAILABLE,
+        ),
+        (json!({"error": "connect"}), REGISTER_UNAVAILABLE),
+    ];
+    for (i, (spec, want)) in cases.into_iter().enumerate() {
+        let n = 10 + i as u32;
+        server.reset(&json!({"/self-register/issue": spec}), &Value::Null);
+        app.handle_interaction(slash(n, "register", register_options(None)))
+            .await;
+        assert_eq!(expect_deferred_reply(&server, n), want, "第 {i} 种情况");
     }
-    // 夹具共 108 步，滤掉 `feedback_*` 的 32 步（见 `scenarios`）后剩 76
-    assert!(count > 70, "场景数量异常：{count}");
-    assert!(
-        failures.is_empty(),
-        "{} 处不一致：\n{}",
-        failures.len(),
-        failures.join("\n")
+}
+
+#[tokio::test]
+async fn register_in_another_server_is_refused_without_calling_the_gateway() {
+    let server = MockServer::start().await;
+    let app = naimei(&server);
+    server.reset(&Value::Null, &Value::Null);
+    app.handle_interaction(in_guild(
+        3,
+        "register",
+        register_options(None),
+        "900000000000000777",
+    ))
+    .await;
+    assert!(bridge_paths(&server).is_empty());
+    let calls = server.discord_log();
+    assert_eq!(calls.len(), 1, "{calls:?}");
+    assert_eq!(calls[0]["path"], callback_path(3));
+    // 直接回复（类型 4），只有本人可见
+    assert_eq!(
+        calls[0]["json"],
+        json!({"type": 4, "data": {"tts": false, "content": REGISTER_WRONG_GUILD, "flags": 64}})
     );
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn mentions_replay_like_discordpy() {
-    let server = MockServer::start().await;
-    let mut failures = Vec::new();
-    let mut count = 0;
-    for sc in scenarios()
-        .into_iter()
-        .filter(|s| s.get("events").is_some())
-    {
-        let name = sc["name"].as_str().unwrap().to_owned();
-        let app = naimei(&server, Some(SECRET)); // 每个场景一份全新的限流表
-        for (i, ev) in sc["events"].as_array().unwrap().iter().enumerate() {
-            count += 1;
-            server.reset(&Value::Null, &ev["discord"]);
-            let msg: MessageCreate = serde_json::from_value(ev["message"].clone()).unwrap();
-            app.handle_message_at(msg, ev["mono"].as_f64().unwrap())
-                .await;
-            let actual = normalize_discord(server.discord_log(), &HashMap::new());
-            let expected = ev["expect"]["discord_calls"].as_array().unwrap().clone();
-            compare(
-                &format!("[{name}] 第 {} 条消息", i + 1),
-                &actual,
-                &expected,
-                &mut failures,
-            );
-        }
-    }
-    assert!(count >= 10, "场景数量异常：{count}");
-    assert!(
-        failures.is_empty(),
-        "{} 处不一致：\n{}",
-        failures.len(),
-        failures.join("\n")
-    );
+// ------------------------------------------------------------------ /quota
+
+fn quota_body() -> Value {
+    json!({
+        "enabled": true, "expires_at": null, "daily_images": 95, "images": 12, "legacy": 10,
+        "anlas": 8, "daily_anlas": 50, "daily_v5": 3, "v5": 1, "image_model_scope": "all",
+        "reset_hour": 7, "quiet_now": false, "quiet_window": "", "quiet_cap": 20,
+        "features": [{"id": "image", "label": "文生图", "on": true}, {"id": "vibe", "label": "Vibe", "on": true},
+                     {"id": "upscale", "label": "放大", "on": false}],
+    })
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn sync_loop_iteration_replays_like_discordpy() {
-    let server = MockServer::start().await;
-    let mut failures = Vec::new();
-    let mut count = 0;
-    for sc in scenarios()
-        .into_iter()
-        .filter(|s| s.get("ready_at").is_some())
-    {
-        count += 1;
-        let name = sc["name"].as_str().unwrap().to_owned();
-        let app = naimei(&server, Some(SECRET));
-        // 夹具里服务器可能不在缓存里（guild_name 为 null）
-        if sc["guild_name"].is_null() {
-            app.remove_guild(GUILD);
-        }
-        app.set_latency(Some(Duration::from_secs_f64(
-            sc["latency_s"].as_f64().unwrap(),
-        )));
-        server.reset(&sc["bridge"], &Value::Null);
-        app.sync_once(sc["ready_at"].as_f64().unwrap())
-            .await
-            .unwrap();
+fn info_body(cooldown: i64) -> Value {
+    json!({"open": true, "notice": "", "upstream": {"image_cooldown_seconds": cooldown}})
+}
 
-        compare(
-            &format!("[{name}] 桥接请求"),
-            &normalize_bridge(server.bridge_log()),
-            &strip_timeout(&sc["expect"]["bridge_requests"]),
-            &mut failures,
+#[tokio::test]
+async fn quota_shows_todays_numbers_without_a_service_status_line() {
+    let server = MockServer::start().await;
+    let app = naimei(&server);
+    server.reset(
+        &json!({
+            "/self-register/quota": {"status": 200, "json": quota_body()},
+            "/self-register/info": {"status": 200, "json": info_body(0)},
+        }),
+        &Value::Null,
+    );
+    app.handle_interaction(slash(4, "quota", json!([]))).await;
+
+    let bridge = server.bridge_log();
+    assert_eq!(
+        bridge_paths(&server),
+        ["/self-register/quota", "/self-register/info"]
+    );
+    // 请求体只有「谁、哪个服务器」，没有管理员相关的 actor_id
+    for call in &bridge {
+        assert_eq!(
+            call["json"],
+            json!({"discord_id": MEMBER, "guild_id": GUILD})
         );
-        assert!(
-            server.discord_log().is_empty(),
-            "[{name}] 同步循环不应该调用 Discord"
-        );
+        assert_eq!(call["authorization"], format!("Bearer {SECRET}"));
     }
-    // 夹具共 5 个心跳场景，滤掉 `REMOVED_SYNC_SCENARIOS` 的 2 个后剩 3
-    assert_eq!(count, 3, "场景数量异常：{count}");
-    assert!(
-        failures.is_empty(),
-        "{} 处不一致：\n{}",
-        failures.len(),
-        failures.join("\n")
+    let text = expect_deferred_reply(&server, 4);
+    assert_eq!(
+        text,
+        "今日 V4.5：10 / 95（每天 7 点重置）\n\
+         今日 V5：1 / 3\n\
+         今日 Anlas：8 / 50\n\
+         可用模型：含 V5\n\
+         已开通功能：文生图、Vibe\n\
+         未开通：放大"
+    );
+    assert!(!text.contains("服务状态"), "{text}");
+}
+
+#[tokio::test]
+async fn quota_in_quiet_hours_says_pause_or_slow_down_by_the_cap() {
+    let server = MockServer::start().await;
+    let app = naimei(&server);
+    for (n, cap, want) in [
+        (5, 0, "🌙 安静时段（3:00–7:00）暂停出图，到点自动恢复"),
+        (6, 20, "🌙 安静时段（3:00–7:00）出图会放慢，到点自动恢复"),
+    ] {
+        let mut body = quota_body();
+        body["quiet_now"] = json!(true);
+        body["quiet_window"] = json!("3:00–7:00");
+        body["quiet_cap"] = json!(cap);
+        server.reset(
+            &json!({
+                "/self-register/quota": {"status": 200, "json": body},
+                "/self-register/info": {"status": 200, "json": info_body(0)},
+            }),
+            &Value::Null,
+        );
+        app.handle_interaction(slash(n, "quota", json!([]))).await;
+        let text = expect_deferred_reply(&server, n);
+        assert!(text.contains(want), "cap={cap}：{text}");
+    }
+}
+
+#[tokio::test]
+async fn quota_mentions_a_cooldown_and_survives_an_unavailable_info() {
+    let server = MockServer::start().await;
+    let app = naimei(&server);
+    server.reset(
+        &json!({
+            "/self-register/quota": {"status": 200, "json": quota_body()},
+            "/self-register/info": {"status": 200, "json": info_body(33)},
+        }),
+        &Value::Null,
+    );
+    app.handle_interaction(slash(7, "quota", json!([]))).await;
+    assert!(expect_deferred_reply(&server, 7).ends_with("⏳ 上游限流冷却中，约 33 秒后恢复生图"));
+    // /info 连不上：额度照样显示，只是没有冷却那一行
+    server.reset(
+        &json!({
+            "/self-register/quota": {"status": 200, "json": quota_body()},
+            "/self-register/info": {"error": "connect"},
+        }),
+        &Value::Null,
+    );
+    app.handle_interaction(slash(8, "quota", json!([]))).await;
+    let text = expect_deferred_reply(&server, 8);
+    assert!(text.starts_with("今日 V4.5：10 / 95"), "{text}");
+    assert!(!text.contains("冷却"), "{text}");
+}
+
+#[tokio::test]
+async fn quota_relays_the_gateways_refusal_and_unusable_numbers_get_the_generic_error() {
+    let server = MockServer::start().await;
+    let app = naimei(&server);
+    // 还没领 Key
+    server.reset(
+        &json!({"/self-register/quota": {"status": 404, "json": {"detail": "你还没有领取 Key，请先使用 /register。"}}}),
+        &Value::Null,
+    );
+    app.handle_interaction(slash(9, "quota", json!([]))).await;
+    assert_eq!(
+        expect_deferred_reply(&server, 9),
+        "你还没有领取 Key，请先使用 /register。"
+    );
+    assert_eq!(bridge_paths(&server), ["/self-register/quota"]);
+    // 网关连不上
+    server.reset(
+        &json!({"/self-register/quota": {"error": "connect"}}),
+        &Value::Null,
+    );
+    app.handle_interaction(slash(10, "quota", json!([]))).await;
+    assert_eq!(expect_deferred_reply(&server, 10), BACKEND_UNAVAILABLE);
+    // 请求格式校验的错误：固定文案
+    server.reset(
+        &json!({"/self-register/quota": {"status": 422, "json": {"detail": [{"msg": "x"}]}}}),
+        &Value::Null,
+    );
+    app.handle_interaction(slash(11, "quota", json!([]))).await;
+    assert_eq!(expect_deferred_reply(&server, 11), BACKEND_FAILED);
+    // 额度数据缺字段：回「出了点问题」，也不再去问 /info
+    let mut body = quota_body();
+    body.as_object_mut().unwrap().remove("daily_images");
+    server.reset(
+        &json!({"/self-register/quota": {"status": 200, "json": body}}),
+        &Value::Null,
+    );
+    app.handle_interaction(slash(12, "quota", json!([]))).await;
+    assert_eq!(expect_deferred_reply(&server, 12), GENERIC_ERROR);
+    assert_eq!(bridge_paths(&server), ["/self-register/quota"]);
+}
+
+// ------------------------------------------------------------------ /resetkey /help
+
+#[tokio::test]
+async fn resetkey_shows_the_new_key_once() {
+    let server = MockServer::start().await;
+    let app = naimei(&server);
+    server.reset(
+        &json!({"/self-register/resetkey": {"status": 200, "json": {"key": "nai-new"}}}),
+        &Value::Null,
+    );
+    app.handle_interaction(slash(13, "resetkey", json!([])))
+        .await;
+    assert_eq!(
+        server.bridge_log()[0]["json"],
+        json!({"discord_id": MEMBER, "guild_id": GUILD})
+    );
+    assert_eq!(
+        expect_deferred_reply(&server, 13),
+        "新的 Key（只有你能看到这条消息，请妥善保存）：\n`nai-new`\n旧 Key 已失效。"
+    );
+    // 还没领 Key
+    server.reset(
+        &json!({"/self-register/resetkey": {"status": 404, "json": {"detail": "你还没有领取 Key，请先使用 /register。"}}}),
+        &Value::Null,
+    );
+    app.handle_interaction(slash(14, "resetkey", json!([])))
+        .await;
+    assert_eq!(
+        expect_deferred_reply(&server, 14),
+        "你还没有领取 Key，请先使用 /register。"
     );
 }
 
-/// 夹具记录了 Python 的 httpx 超时：命令类 8 秒、/register 12 秒、配置 / 上报 8 秒。
-#[test]
-fn golden_timeouts_match_constants() {
-    let mut seen_issue = false;
-    let mut seen_other = false;
-    let check = |calls: &Value| {
-        for c in calls.as_array().unwrap() {
-            let secs = c["timeout"].as_f64().unwrap();
-            if c["path"] == "/self-register/issue" {
-                assert_eq!(secs, REGISTER_TIMEOUT.as_secs_f64());
-            } else {
-                assert_eq!(secs, COMMAND_TIMEOUT.as_secs_f64(), "{c}");
-            }
-        }
+#[tokio::test]
+async fn help_lists_the_member_commands_and_the_site_without_a_trailing_slash() {
+    let server = MockServer::start().await;
+    let app = naimei(&server);
+    let base = format!(
+        "{HELP_COMMANDS}\n客户端接口地址填 `{SITE}`（不加 /v1），Key 填 `nai-` 开头的整串。详细说明：{SITE}"
+    );
+    server.reset(
+        &json!({"/self-register/info": {"status": 200, "json": {"open": true, "notice": ""}}}),
+        &Value::Null,
+    );
+    app.handle_interaction(slash(15, "help", json!([]))).await;
+    assert_eq!(expect_deferred_reply(&server, 15), base);
+    // 领 Key 关着、有公告
+    server.reset(
+        &json!({"/self-register/info": {"status": 200, "json": {"open": false, "notice": "今晚维护"}}}),
+        &Value::Null,
+    );
+    app.handle_interaction(slash(16, "help", json!([]))).await;
+    assert_eq!(
+        expect_deferred_reply(&server, 16),
+        format!("{base}\n⚠ 领 Key 当前已关闭，开放时间看站长公告。\n📢 今晚维护")
+    );
+    // 网关没回：只有前两行
+    server.reset(
+        &json!({"/self-register/info": {"error": "connect"}}),
+        &Value::Null,
+    );
+    app.handle_interaction(slash(17, "help", json!([]))).await;
+    assert_eq!(expect_deferred_reply(&server, 17), base);
+}
+
+// ------------------------------------------------------------------ 不认识的命令 / Discord 出错
+
+#[tokio::test]
+async fn removed_and_unknown_commands_get_the_generic_error_and_never_reach_the_gateway() {
+    let server = MockServer::start().await;
+    let app = naimei(&server);
+    // 旧的管理员命令（服务器里的旧注册会在下次启动同步时被覆盖掉；还没同步前点到也是这个结果）
+    for (i, name) in ["open", "limit", "ban", "unban", "slots", "revoke", "nope"]
+        .into_iter()
+        .enumerate()
+    {
+        let n = 20 + i as u32;
+        server.reset(&Value::Null, &Value::Null);
+        app.handle_interaction(slash(n, name, json!([]))).await;
+        assert!(bridge_paths(&server).is_empty(), "/{name}");
+        let calls = server.discord_log();
+        assert_eq!(calls.len(), 1, "/{name}：{calls:?}");
+        assert_eq!(calls[0]["path"], callback_path(n));
+        assert_eq!(
+            calls[0]["json"],
+            json!({"type": 4, "data": {"tts": false, "content": GENERIC_ERROR, "flags": 64}}),
+            "/{name}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn discord_refusing_the_acknowledgement_still_tries_to_tell_the_member() {
+    let server = MockServer::start().await;
+    let app = naimei(&server);
+    // 确认被 Discord 拒绝（比如超过 3 秒）：没有 followup 可用，改用直接回复告诉成员出错了
+    server.reset(
+        &json!({"/self-register/issue": {"status": 200, "json": {"message": "x"}}}),
+        &json!({"callback": {"status": 404, "json": {"message": "Unknown interaction", "code": 10062}}}),
+    );
+    app.handle_interaction(slash(30, "register", register_options(None)))
+        .await;
+    let calls = server.discord_log();
+    assert_eq!(calls.len(), 2, "{calls:?}");
+    assert_eq!(calls[0]["json"]["type"], 5);
+    assert_eq!(calls[1]["json"]["type"], 4);
+    assert_eq!(calls[1]["json"]["data"]["content"], GENERIC_ERROR);
+    assert!(bridge_paths(&server).is_empty(), "确认失败就不去领 Key");
+}
+
+#[tokio::test]
+async fn a_failed_followup_is_reported_once_more_as_a_followup() {
+    let server = MockServer::start().await;
+    let app = naimei(&server);
+    server.reset(
+        &json!({"/self-register/resetkey": {"status": 200, "json": {"key": "nai-new"}}}),
+        &json!({"followup": {"status": 500, "json": {"message": "boom"}}}),
+    );
+    app.handle_interaction(slash(31, "resetkey", json!([])))
+        .await;
+    let calls = server.discord_log();
+    // 确认 + 跟进（失败）+ 再发一条「出了点问题」的跟进（也失败，只打日志）
+    assert_eq!(calls.len(), 3, "{calls:?}");
+    assert!(
+        calls[1]["json"]["content"]
+            .as_str()
+            .unwrap()
+            .contains("nai-new")
+    );
+    assert_eq!(calls[2]["json"], ephemeral(GENERIC_ERROR));
+}
+
+// ------------------------------------------------------------------ 心跳 / 启动
+
+#[tokio::test]
+async fn heartbeat_reports_account_server_latency_and_start_time() {
+    let server = MockServer::start().await;
+    let app = naimei(&server);
+    app.set_latency(Some(Duration::from_millis(42)));
+    server.reset(
+        &json!({"/self-register/bot/report": {"status": 200, "json": {"ok": true}}}),
+        &Value::Null,
+    );
+    assert!(app.sync_once(1_759_999_000.5).await);
+    let bridge = server.bridge_log();
+    assert_eq!(bridge.len(), 1, "{bridge:?}");
+    assert_eq!(bridge[0]["method"], "POST");
+    assert_eq!(bridge[0]["path"], "/self-register/bot/report");
+    assert_eq!(bridge[0]["authorization"], format!("Bearer {SECRET}"));
+    assert_eq!(
+        bridge[0]["json"].to_string(),
+        json!({"status": {"user": "naimei", "guild": "测试服", "latency_ms": 42, "ready_at": 1_759_999_000.5}})
+            .to_string(),
+        "只有在线状态，没有旧版的 AI 评论计数"
+    );
+    assert!(server.discord_log().is_empty(), "心跳不调用 Discord");
+    // 服务器不在缓存里：guild 报空串；延迟还没有数据按 0 报
+    let fresh = naimei(&server);
+    fresh.remove_guild(GUILD);
+    server.reset(
+        &json!({"/self-register/bot/report": {"status": 200, "json": {"ok": true}}}),
+        &Value::Null,
+    );
+    assert!(fresh.sync_once(1.0).await);
+    assert_eq!(
+        server.bridge_log()[0]["json"]["status"]["guild"],
+        "",
+        "{:?}",
+        server.bridge_log()
+    );
+    assert_eq!(server.bridge_log()[0]["json"]["status"]["latency_ms"], 0);
+}
+
+#[tokio::test]
+async fn heartbeat_failures_do_not_break_anything() {
+    let server = MockServer::start().await;
+    let app = naimei(&server);
+    for spec in [
+        json!({"error": "connect"}),
+        json!({"status": 500, "json": {"detail": "x"}}),
+        json!({"status": 200, "text": "不是 JSON"}),
+    ] {
+        server.reset(&json!({"/self-register/bot/report": spec}), &Value::Null);
+        assert!(!app.sync_once(1.0).await);
+    }
+}
+
+#[tokio::test]
+async fn ready_syncs_the_commands_then_starts_the_heartbeat_once() {
+    let server = MockServer::start().await;
+    let app = naimei(&server);
+    server.reset(
+        &json!({"/self-register/bot/report": {"status": 200, "json": {"ok": true}}}),
+        &Value::Null,
+    );
+    let ready = || ReadyInfo {
+        user: User {
+            id: BOT_ID.into(),
+            username: "naimei".into(),
+            discriminator: Some("0".into()),
+            ..User::default()
+        },
+        application_id: APP.into(),
     };
-    for sc in scenarios() {
-        for step in sc["steps"].as_array().cloned().unwrap_or_default() {
-            check(&step["expect"]["bridge_requests"]);
-            for c in step["expect"]["bridge_requests"].as_array().unwrap() {
-                if c["path"] == "/self-register/issue" {
-                    seen_issue = true;
-                } else {
-                    seen_other = true;
-                }
-            }
-        }
-        if sc.get("ready_at").is_some() {
-            check(&sc["expect"]["bridge_requests"]);
-        }
+    app.clone().on_ready(ready()).await;
+    assert!(app.is_ready());
+    // 断线重连会再来一次 READY：命令再同步一次，心跳循环只有一个
+    app.clone().on_ready(ready()).await;
+    let puts: Vec<_> = server
+        .discord_log()
+        .into_iter()
+        .filter(|c| c["method"] == "PUT")
+        .collect();
+    assert_eq!(puts.len(), 2);
+    for put in &puts {
+        assert_eq!(
+            put["path"],
+            format!("/applications/{APP}/guilds/{GUILD}/commands")
+        );
+        assert_eq!(put["json"].as_array().unwrap().len(), 5);
     }
-    assert!(seen_issue && seen_other);
+    // 心跳循环的第一轮马上就发
+    for _ in 0..50 {
+        if !server.bridge_log().is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(bridge_paths(&server), ["/self-register/bot/report"]);
 }
