@@ -105,7 +105,7 @@ async fn settle<H: Hooks>(
     }
     // 出图后静默只对真正发往上游的请求生效
     if send_started {
-        inner.scheduler.after_request(token);
+        inner.scheduler.after_request(token, &inner.hooks);
     }
 }
 

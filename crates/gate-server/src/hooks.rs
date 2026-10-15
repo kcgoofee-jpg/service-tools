@@ -73,6 +73,10 @@ impl Hooks for GateHooks {
         self.guard.jitter()
     }
 
+    fn post_jitter(&self) -> (f64, f64) {
+        self.guard.post_jitter()
+    }
+
     fn upstream_v5_counter<'a>(
         &'a self,
         token_id: &'a str,

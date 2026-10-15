@@ -21,6 +21,8 @@ struct Inner {
     events: Mutex<Vec<String>>,
     starts: AtomicUsize,
     block: Mutex<Option<(String, String)>>,
+    /// 出图后静默 (最少, 最多)；默认 0（不静默）。
+    post: Mutex<(f64, f64)>,
 }
 
 impl Hooks for TestHooks {
@@ -52,6 +54,9 @@ impl Hooks for TestHooks {
     }
     fn jitter(&self) -> f64 {
         0.0
+    }
+    fn post_jitter(&self) -> (f64, f64) {
+        *self.0.post.lock().unwrap()
     }
     fn upstream_v5_counter<'a>(
         &'a self,
@@ -89,8 +94,6 @@ fn config(url: &str, interval: f64) -> Config {
     Config {
         image_host: url.into(),
         proxy: None,
-        post_jitter_min: 1.0,
-        post_jitter_max: 3.0,
         single_slot_enforced: true,
         image_min_interval: interval,
     }
@@ -336,6 +339,50 @@ async fn image_interval_is_enforced_between_requests() {
         "三张图至少隔两个间隔：{:?}",
         t0.elapsed()
     );
+}
+
+/// 出图后静默取自账号保护（Hooks::post_jitter）：第一张要 0.6 秒才出完，静默 0.6 秒，
+/// 第二张最早在 1.2 秒开始；不静默时出完就能发（间隔 0.6 秒早已过去）。
+#[tokio::test]
+async fn post_silence_comes_from_guard() {
+    for (post, slow) in [((0.6, 0.6), true), ((0.0, 0.0), false)] {
+        let up = MockUpstream::start().await;
+        up.push(
+            "/ai/generate-image",
+            Reply::Chunks {
+                status: 200,
+                content_type: "binary/octet-stream".into(),
+                chunks: vec![(
+                    Duration::from_millis(600),
+                    Bytes::from(gate_testkit::zip_of_pngs(1)),
+                )],
+            },
+        );
+        let hooks = TestHooks::default();
+        *hooks.0.post.lock().unwrap() = post;
+        let c = NaiClient::new(config(&up.url(), 0.6), hooks, vec![(T1.into(), 0, false)]).unwrap();
+        let body = image_body(1);
+        let t0 = Instant::now();
+        for _ in 0..2 {
+            c.request(
+                image_opts(&up.url(), &body, 1),
+                &Callbacks::default(),
+                None,
+                &NoObserver,
+            )
+            .await
+            .unwrap();
+        }
+        let elapsed = t0.elapsed();
+        if slow {
+            assert!(
+                elapsed >= Duration::from_millis(1150),
+                "静默 0.6 秒：{elapsed:?}"
+            );
+        } else {
+            assert!(elapsed < Duration::from_millis(1100), "不静默：{elapsed:?}");
+        }
+    }
 }
 
 #[tokio::test]

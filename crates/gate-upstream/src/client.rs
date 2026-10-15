@@ -26,8 +26,6 @@ pub use crate::pool::{Token, TokenFields};
 pub struct Config {
     pub image_host: String,
     pub proxy: Option<String>,
-    pub post_jitter_min: f64,
-    pub post_jitter_max: f64,
     pub single_slot_enforced: bool,
     pub image_min_interval: f64,
 }
@@ -131,10 +129,7 @@ impl<H: Hooks> NaiClient<H> {
     ) -> Result<Self, wreq::Error> {
         let http = Http::new(cfg.proxy.as_deref())?;
         let pool = Pool::new(tokens, cfg.single_slot_enforced);
-        let scheduler = Scheduler::new(
-            cfg.image_min_interval,
-            (cfg.post_jitter_min, cfg.post_jitter_max),
-        );
+        let scheduler = Scheduler::new(cfg.image_min_interval);
         Ok(Self {
             inner: Arc::new(Inner {
                 cfg,

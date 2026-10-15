@@ -30,8 +30,6 @@ pub async fn setup(extra: &[(&str, &str)]) -> Env {
         ("NAI_TOKENS", "pst-synthetic-upstream-token"),
         ("NAI_IMAGE_HOST", &mock.url()),
         ("IMAGE_MIN_INTERVAL", "0"),
-        ("POST_REQUEST_JITTER_MIN", "0"),
-        ("POST_REQUEST_JITTER_MAX", "0"),
         ("QUEUE_TIMEOUT", "5"),
         ("SECRET_KEY", "test-secret-key-test-secret-key-0123456789"),
         ("ADMIN_PASSWORD", ADMIN_PASSWORD),

@@ -3,7 +3,8 @@
 //! - 开始间隔：同一把 Token 两次开始生成至少隔 `image_min_interval`（后台运行期限制）+ 开始抖动
 //!   （账号保护 `interval_jitter`，均匀随机 0～N 秒，经 [`Hooks::jitter`]）；
 //! - 出图后静默：出图结束（成功或失败，只要真的发往了上游）后，下一张最早 = max(原定, 现在 + 静默)，
-//!   静默在 [下限, 上限] 里均匀随机，上限不超过开始间隔；间隔 ≤ 0.5 秒（测试环境）时不静默；
+//!   静默在 [最少, 最多]（账号保护 `post_jitter_min` / `post_jitter_max`，经 [`Hooks::post_jitter`]）里均匀随机，
+//!   最多不超过开始间隔；间隔 ≤ 0.5 秒（测试环境）时不静默；
 //! - 等槽位：先占这把 Token 的出图并发槽，再等间隔到点，整体受排队超时约束。
 //!
 //! 时钟是单调时钟（客户端启动以来的秒），[`crate::pool::TokenFields::image_next_at`] 用的就是它。
@@ -19,15 +20,13 @@ pub(crate) struct Scheduler {
     base: tokio::time::Instant,
     /// 账号出图间隔（秒）。这把锁同时串行化所有 `image_next_at` 的读改写。
     interval: Mutex<f64>,
-    post_jitter: (f64, f64),
 }
 
 impl Scheduler {
-    pub(crate) fn new(interval: f64, post_jitter: (f64, f64)) -> Self {
+    pub(crate) fn new(interval: f64) -> Self {
         Self {
             base: tokio::time::Instant::now(),
             interval: Mutex::new(interval.max(0.0)),
-            post_jitter,
         }
     }
 
@@ -95,9 +94,9 @@ impl Scheduler {
 
     /// 出图后静默（拟人化：消除「上一张一结束下一张立刻开始」的贴脸节奏）。
     /// 调用方只对真正发往上游的请求调用。
-    pub(crate) fn after_request(&self, token: &Token) {
+    pub(crate) fn after_request(&self, token: &Token, hooks: &dyn Hooks) {
         let interval = *self.interval.lock().expect("scheduler");
-        let (min, max) = self.post_jitter;
+        let (min, max) = hooks.post_jitter();
         let jmin = min.max(0.0);
         let jmax = max.max(jmin);
         if interval > 0.5 && jmax > 0.0 {

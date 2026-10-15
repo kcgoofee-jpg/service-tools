@@ -530,7 +530,7 @@ async fn runtime_limits_validate_apply_and_persist() {
 
 // ------------------------------------------------------------------ 账号保护
 
-const GUARD_FIELDS: &str = r#""fields":{"account_daily_cap":{"default":1000,"min":0,"max":20000,"label":"每个上游账号每天最多出图张数"},"daily_burst":{"default":150,"min":0,"max":20000,"label":"每日上限按时段放行：每天重置时（默认 7 点）先放出这么多张，之后每小时补「每日上限 ÷ 24」张，没用完的留到后面；0 = 不分时段（整天先到先得）"},"account_hourly_cap":{"default":150,"min":0,"max":240,"label":"每个上游账号每小时最多出图张数（自动调整：上游 429 减半；前一天顶到过上限且没有 429 才 +10，范围 100～160）"},"quiet_start":{"default":0,"min":0,"max":23,"label":"安静时段开始（北京时间，整点）；与结束相同 = 不启用（2026-10-10 起不启用：夜里不限速）"},"quiet_end":{"default":0,"min":0,"max":23,"label":"安静时段结束（北京时间，整点；与开始相同表示不设安静时段）"},"quiet_hourly_cap":{"default":20,"min":0,"max":240,"label":"安静时段每小时最多出图张数；0 = 完全暂停出图（2026-10-13 站长：3-7 点停用）"},"interval_jitter":{"default":5,"min":0,"max":30,"label":"两次出图间隔额外随机增加 0～N 秒"},"key_image_queue":{"default":1,"min":0,"max":3,"label":"每把 Key 在生成中的那张之外，最多再排几张"},"queue_per_account":{"default":5,"min":0,"max":100,"label":"每个上游账号全站最多同时排几张图"}}"#;
+const GUARD_FIELDS: &str = r#""fields":{"account_daily_cap":{"default":1000,"min":0,"max":20000,"label":"每个上游账号每天最多出图张数"},"daily_burst":{"default":150,"min":0,"max":20000,"label":"每日上限按时段放行：每天重置时（默认 7 点）先放出这么多张，之后每小时补「每日上限 ÷ 24」张，没用完的留到后面；0 = 不分时段（整天先到先得）"},"account_hourly_cap":{"default":150,"min":0,"max":240,"label":"每个上游账号每小时最多出图张数（自动调整：上游 429 减半；前一天顶到过上限且没有 429 才 +10，范围 100～160）"},"quiet_start":{"default":0,"min":0,"max":23,"label":"安静时段开始（北京时间，整点）；与结束相同 = 不启用（2026-10-10 起不启用：夜里不限速）"},"quiet_end":{"default":0,"min":0,"max":23,"label":"安静时段结束（北京时间，整点；与开始相同表示不设安静时段）"},"quiet_hourly_cap":{"default":20,"min":0,"max":240,"label":"安静时段每小时最多出图张数；0 = 完全暂停出图（2026-10-13 站长：3-7 点停用）"},"interval_jitter":{"default":5,"min":0,"max":30,"label":"两次出图间隔额外随机增加 0～N 秒"},"post_jitter_min":{"default":1,"min":0,"max":30,"label":"出图结束后至少静默几秒才开始下一张（实际静默在最少～最多之间均匀随机，不超过账号出图间隔；与出图间隔取较晚者）"},"post_jitter_max":{"default":3,"min":0,"max":30,"label":"出图结束后最多静默几秒（小于最少时按最少；两项都为 0 = 出图后不静默）"},"key_image_queue":{"default":1,"min":0,"max":3,"label":"每把 Key 在生成中的那张之外，最多再排几张"},"queue_per_account":{"default":5,"min":0,"max":100,"label":"每个上游账号全站最多同时排几张图"}}"#;
 
 fn guard_json(values: &str, quiet_now: bool, cap: i64, accounts: &str, queued: i64) -> String {
     format!(
@@ -542,7 +542,7 @@ fn guard_json(values: &str, quiet_now: bool, cap: i64, accounts: &str, queued: i
 async fn guard_get_put() {
     let e = setup(&[]).await;
     let api = Api::login(&e).await;
-    let defaults = r#"{"account_daily_cap":1000,"daily_burst":150,"account_hourly_cap":150,"quiet_start":0,"quiet_end":0,"quiet_hourly_cap":20,"interval_jitter":5,"key_image_queue":1,"queue_per_account":5}"#;
+    let defaults = r#"{"account_daily_cap":1000,"daily_burst":150,"account_hourly_cap":150,"quiet_start":0,"quiet_end":0,"quiet_hourly_cap":20,"interval_jitter":5,"post_jitter_min":1,"post_jitter_max":3,"key_image_queue":1,"queue_per_account":5}"#;
     // 节约模式折算的 today_units 已删除（docs/v3-deviations.md #67）
     let acct0 = r#"[{"position":1,"usable":true,"today":0,"this_hour":0}]"#;
     assert_eq!(
@@ -551,7 +551,7 @@ async fn guard_get_put() {
     );
 
     let before = settings(&e).await;
-    let after_cap = r#"{"account_daily_cap":1000,"daily_burst":150,"account_hourly_cap":120,"quiet_start":0,"quiet_end":0,"quiet_hourly_cap":20,"interval_jitter":5,"key_image_queue":1,"queue_per_account":5}"#;
+    let after_cap = r#"{"account_daily_cap":1000,"daily_burst":150,"account_hourly_cap":120,"quiet_start":0,"quiet_end":0,"quiet_hourly_cap":20,"interval_jitter":5,"post_jitter_min":1,"post_jitter_max":3,"key_image_queue":1,"queue_per_account":5}"#;
     assert_eq!(
         api.text("PUT", "/guard", Some(json!({"account_hourly_cap": 120})))
             .await,
@@ -607,6 +607,48 @@ async fn guard_get_put() {
         && r.2 == "账号保护与排队"
         && r.3 == r#"{"account_hourly_cap":120}"#
         && r.4));
+}
+
+/// 出图后静默（docs/v3-deviations.md #87）：后台可调，0～30 秒，保存后上游客户端立即按新值静默。
+#[tokio::test]
+async fn guard_post_jitter_is_adjustable() {
+    let e = setup(&[]).await;
+    let api = Api::login(&e).await;
+    assert_eq!(
+        e.state.guard.post_jitter(),
+        (1.0, 3.0),
+        "默认与原来的环境变量一致"
+    );
+    let before = settings(&e).await;
+    api.json(
+        "PUT",
+        "/guard",
+        Some(json!({"post_jitter_min": 2, "post_jitter_max": 6})),
+    )
+    .await;
+    assert_eq!(e.state.guard.post_jitter(), (2.0, 6.0));
+    assert_eq!(
+        changed(&before, &settings(&e).await),
+        map(&[
+            ("guard_post_jitter_min", "2"),
+            ("guard_post_jitter_max", "6")
+        ])
+    );
+    api.fails(
+        "PUT",
+        "/guard",
+        Some(json!({"post_jitter_max": 31})),
+        422,
+        "出图结束后最多静默几秒（小于最少时按最少；两项都为 0 = 出图后不静默） 必须在 0～30 之间",
+    )
+    .await;
+    // 重启后从库里读回
+    e.state.guard.with(|g| {
+        g.values.insert("post_jitter_min".into(), 1);
+        g.values.insert("post_jitter_max".into(), 3);
+    });
+    e.state.guard.load().await.unwrap();
+    assert_eq!(e.state.guard.post_jitter(), (2.0, 6.0));
 }
 
 #[tokio::test]

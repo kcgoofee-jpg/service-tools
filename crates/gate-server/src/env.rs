@@ -120,8 +120,6 @@ pub struct EnvConfig {
     pub nai_token_allow_anlas: Vec<bool>,
     pub image_host: String,
     pub upstream_proxy: String,
-    pub post_request_jitter_min: f64,
-    pub post_request_jitter_max: f64,
     pub single_image_slot_enforced: bool,
     // 并发与限速
     pub global_concurrency: i64,
@@ -283,8 +281,6 @@ impl EnvConfig {
             nai_tokens,
             image_host: r.str("NAI_IMAGE_HOST", "https://image.novelai.net"),
             upstream_proxy: r.trimmed("UPSTREAM_PROXY"),
-            post_request_jitter_min: r.float("POST_REQUEST_JITTER_MIN", 1.0),
-            post_request_jitter_max: r.float("POST_REQUEST_JITTER_MAX", 3.0),
             single_image_slot_enforced: r.bool("SINGLE_IMAGE_SLOT_ENFORCED", false),
             global_concurrency: r.int("GLOBAL_CONCURRENCY", 1),
             queue_timeout: r.int("QUEUE_TIMEOUT", 90),

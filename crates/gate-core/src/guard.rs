@@ -40,6 +40,9 @@
 //!
 //! 3.0 删除的（docs/v3-deviations.md #64）：10 分钟突发窗口（每 10 分钟 ≤ 每小时上限 ÷ 4，`burst_cap`）。
 //! 账号出图间隔 20 秒 + 随机 0～5 秒时，10 分钟最多出 30 张，永远到不了 40 张的窗口上限。
+//!
+//! 3.0 新增的（docs/v3-deviations.md #87）：出图后静默 `post_jitter_min` / `post_jitter_max`，与开始抖动
+//! `interval_jitter` 并列，原来是环境变量 `POST_REQUEST_JITTER_MIN/MAX`。怎么用见 gate-upstream 的 `scheduler.rs`。
 
 use crate::clock::Clock;
 use crate::params::Params;
@@ -79,7 +82,7 @@ const fn field(name: &'static str, default: i64, min: i64, max: i64, label: &'st
 }
 
 /// 所有设置（存 `site_settings` 的键是 `guard_<名称>`）；0 表示关闭该项。
-pub const FIELDS: [Field; 9] = [
+pub const FIELDS: [Field; 11] = [
     field(
         "account_daily_cap",
         1000,
@@ -128,6 +131,20 @@ pub const FIELDS: [Field; 9] = [
         0,
         30,
         "两次出图间隔额外随机增加 0～N 秒",
+    ),
+    field(
+        "post_jitter_min",
+        1,
+        0,
+        30,
+        "出图结束后至少静默几秒才开始下一张（实际静默在最少～最多之间均匀随机，不超过账号出图间隔；与出图间隔取较晚者）",
+    ),
+    field(
+        "post_jitter_max",
+        3,
+        0,
+        30,
+        "出图结束后最多静默几秒（小于最少时按最少；两项都为 0 = 出图后不静默）",
     ),
     field(
         "key_image_queue",
@@ -618,6 +635,11 @@ impl GuardCore {
         } else {
             0.0
         }
+    }
+
+    /// 出图后静默的 (最少, 最多) 秒数（原样给出；`最多 < 最少` 等夹取由调度器处理）。
+    pub fn post_jitter(&self) -> (i64, i64) {
+        (self.v("post_jitter_min"), self.v("post_jitter_max"))
     }
 
     /// 全站熔断：在 `seconds` 秒内，所有上游账号都拒接新的出图任务。到点自动恢复。

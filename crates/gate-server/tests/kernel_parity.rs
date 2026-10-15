@@ -1012,6 +1012,16 @@ mod v3 {
                             .and_then(Value::as_object_mut)
                         {
                             g.shift_remove("base_daily_images");
+                            // 出图后静默进了账号保护的设置（#87）：场景里不改，是默认值，排在 interval_jitter 后面
+                            let old = std::mem::take(g);
+                            for (k, v) in old {
+                                let after_jitter = k == "interval_jitter";
+                                g.insert(k, v);
+                                if after_jitter {
+                                    g.insert("post_jitter_min".into(), json!(1));
+                                    g.insert("post_jitter_max".into(), json!(3));
+                                }
+                            }
                         }
                     }
                     // 分配模块的面板参数「V5 每人范围 3～30 张」换成新公式的说明（#63）
@@ -1272,8 +1282,8 @@ async fn run_case(case: &Value) -> Result<(), String> {
             int("key_inactivity_delete_days"),
         ),
         // 夹具 env 里的 global_daily_v5：3.0 没有这个环境变量（全站 V5 归动态额度管，docs/v3-deviations.md #70），不再传
-        ("POST_REQUEST_JITTER_MIN", num("post_jitter_min")),
-        ("POST_REQUEST_JITTER_MAX", num("post_jitter_max")),
+        // 夹具 env 里的 post_jitter_min / max：出图后静默改成账号保护的设置（docs/v3-deviations.md #87），
+        // 没有环境变量了；内核场景不出图，用不到它们
         (
             "SECRET_KEY",
             "test-secret-key-test-secret-key-0123456789".into(),

@@ -98,10 +98,11 @@ async fn outbound_headers_item(state: &AppState) -> Value {
         }
     }
     evidence.push("HTTP/2：由 TLS ALPN 协商（与 Chrome 一致）".to_string());
+    let (lo, hi) = state.guard.post_jitter();
     evidence.push(format!(
         "请求后随机间隔：{}~{} 秒；连续 3 次 403 冷却 5 分钟",
-        pyc::float_repr(state.env.post_request_jitter_min),
-        pyc::float_repr(state.env.post_request_jitter_max)
+        pyc::float_repr(lo),
+        pyc::float_repr(hi)
     ));
     item(
         "outbound_headers",

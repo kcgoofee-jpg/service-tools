@@ -131,9 +131,8 @@ fn gateway_env(
         ("ADMIN_COOKIE_SECURE", "0".into()),
         ("IMAGE_MIN_INTERVAL", "0".into()),
         ("TZ", "Asia/Shanghai".into()),
-        // 本地调试用的额外项：假上游是明文 HTTP/1.1，不需要抖动；反复跑端到端不要被登录限流挡住
-        ("POST_REQUEST_JITTER_MIN", "0".into()),
-        ("POST_REQUEST_JITTER_MAX", "0".into()),
+        // 本地调试用的额外项：反复跑端到端不要被登录限流挡住
+        // （出图间隔为 0 时调度器不做出图后静默，不用另外关）
         ("LOGIN_MAX_ATTEMPTS", "100".into()),
     ]
     .into_iter()

@@ -29,6 +29,8 @@ pub trait Hooks: Send + Sync + 'static {
     fn record_start(&self, token_id: &str, images: i64);
     /// 账号保护：本次出图间隔的随机抖动（秒）。
     fn jitter(&self) -> f64;
+    /// 账号保护：出图后静默的 (最少, 最多) 秒数（`guard_post_jitter_min` / `_max`）。
+    fn post_jitter(&self) -> (f64, f64);
 
     fn upstream_v5_counter<'a>(
         &'a self,

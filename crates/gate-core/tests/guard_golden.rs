@@ -15,6 +15,10 @@
 //! docs/v3-deviations.md #64：10 分钟突发窗口删除（常量 `WINDOW_10M` / `BURST_DIVISOR`，`burst_cap` /
 //! `count_10m` / `burst_blocked` / `minutes_until_free_10m`）。轨迹里这几步同样只重放副作用；
 //! `token_block_reason` 旧版因突发窗口给出的 `burst_cap` 拒绝，3.0 放行（期望一侧换成 None）。
+//!
+//! docs/v3-deviations.md #87：3.0 新增设置 `post_jitter_min` / `post_jitter_max`（出图后静默，原来是环境变量），
+//! 排在 `interval_jitter` 后面。夹具里没有它们，也没有改它们的步骤：设置表、`values`、`describe`、轨迹状态的 `v`
+//! 在期望一侧按默认值补上（[`ADDED`]）；`save` 的写库内容只含请求体里的字段，不受影响。
 
 use gate_core::guard::{
     self, AdaptPlan, FIELDS, GuardCore, GuardError, parse_setting_float, stamps_from_rows,
@@ -36,11 +40,59 @@ const REMOVED_FIELD: &str = "base_daily_images";
 /// 它的说明（旧版校验失败的消息以它开头）。
 const REMOVED_LABEL: &str = "V4.5 每人每天保底张数";
 
-/// 期望一侧：去掉 `values` 里已删除的字段。
+/// 3.0 新增的设置（docs/v3-deviations.md #87）：名称、默认、最小、最大、说明。
+const ADDED: [(&str, i64, i64, i64, &str); 2] = [
+    (
+        "post_jitter_min",
+        1,
+        0,
+        30,
+        "出图结束后至少静默几秒才开始下一张（实际静默在最少～最多之间均匀随机，不超过账号出图间隔；与出图间隔取较晚者）",
+    ),
+    (
+        "post_jitter_max",
+        3,
+        0,
+        30,
+        "出图结束后最多静默几秒（小于最少时按最少；两项都为 0 = 出图后不静默）",
+    ),
+];
+/// 新增设置排在它后面。
+const ADDED_AFTER: &str = "interval_jitter";
+
+/// 在 `ADDED_AFTER` 后面插入新增设置（`entry` 给出每一项的值）。
+fn with_added(
+    m: Map<String, Value>,
+    entry: impl Fn(&(&str, i64, i64, i64, &str)) -> Value,
+) -> Map<String, Value> {
+    let mut out = Map::new();
+    for (k, v) in m {
+        let after = k == ADDED_AFTER;
+        out.insert(k, v);
+        if after {
+            for a in &ADDED {
+                out.insert(a.0.to_string(), entry(a));
+            }
+        }
+    }
+    out
+}
+
+/// 期望一侧：`values` 去掉已删除的字段、补上新增字段的默认值。
 fn without_removed(v: &Value) -> Value {
     let mut m = obj(v);
     m.shift_remove(REMOVED_FIELD);
-    Value::Object(m)
+    Value::Object(with_added(m, |a| json!(a.1)))
+}
+
+/// 期望一侧：`describe()` 的 `fields` 去掉已删除的字段、补上新增字段的说明。
+fn fields_without_removed(v: &Value) -> Value {
+    let mut m = obj(v);
+    m.shift_remove(REMOVED_FIELD);
+    Value::Object(with_added(
+        m,
+        |a| json!({"default": a.1, "min": a.2, "max": a.3, "label": a.4}),
+    ))
 }
 
 /// 期望一侧：写库内容里去掉已删除字段的键。
@@ -56,28 +108,35 @@ fn writes_without_removed(v: &Value) -> Value {
     )
 }
 
-/// 期望一侧：`describe()` 去掉已删除的字段。
+/// 期望一侧：`describe()` 去掉已删除的字段、补上新增的字段。
 fn describe_without_removed(v: &Value) -> Value {
     let mut m = obj(v);
-    for k in ["values", "fields"] {
-        if let Some(x) = m.get(k) {
-            let x = without_removed(x);
-            m.insert(k.into(), x);
-        }
+    if let Some(x) = m.get("values") {
+        let x = without_removed(x);
+        m.insert("values".into(), x);
+    }
+    if let Some(x) = m.get("fields") {
+        let x = fields_without_removed(x);
+        m.insert("fields".into(), x);
     }
     Value::Object(m)
 }
 
-/// 期望一侧：轨迹状态里的 `v`（按旧版 FIELDS 顺序，已删除的 `base_daily_images` 在最后）。
+/// 期望一侧：轨迹状态里的 `v`（按旧版 FIELDS 顺序，已删除的 `base_daily_images` 在最后；
+/// 新增字段按默认值插在 `interval_jitter` 后面）。
 fn state_without_removed(v: &Value) -> Value {
     let mut m = obj(v);
     if let Some(Value::Array(vals)) = m.get_mut("v") {
         assert_eq!(
             vals.len(),
-            FIELDS.len() + 1,
-            "夹具里的 v 应带着已删除的字段"
+            FIELDS.len() - ADDED.len() + 1,
+            "夹具里的 v 应带着已删除的字段、没有新增的字段"
         );
         vals.pop();
+        let at = FIELDS.iter().position(|f| f.name == ADDED_AFTER).unwrap() + 1;
+        for (i, a) in ADDED.iter().enumerate() {
+            vals.insert(at + i, json!(a.1));
+        }
     }
     Value::Object(m)
 }
@@ -168,6 +227,10 @@ fn constants_golden() {
                 }
                 if let Some(Value::Array(fs)) = want.get_mut("FIELDS") {
                     fs.retain(|f| f[0] != REMOVED_FIELD);
+                    let at = fs.iter().position(|f| f[0] == ADDED_AFTER).unwrap() + 1;
+                    for (i, a) in ADDED.iter().enumerate() {
+                        fs.insert(at + i, json!([a.0, a.1, a.2, a.3, a.4]));
+                    }
                 }
                 assert_eq_py(
                     &c,
