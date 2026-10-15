@@ -383,11 +383,11 @@ async fn startup_wires_the_registration_service_into_the_kernel() {
     e.state
         .kernel
         .set_official_api(Some("http://127.0.0.1:9/never".into()));
-    assert!(e.state.kernel.registrar().is_none() && e.state.kernel.dm().is_none());
+    assert!(e.state.kernel.registrar().is_none());
     // 领 Key 开着，「领 Key」模块才会跑校验
     e.state.db.set_setting("register_open", "1").await.unwrap();
     jobs::startup(&e.state).await.unwrap();
-    assert!(e.state.kernel.registrar().is_some() && e.state.kernel.dm().is_some());
+    assert!(e.state.kernel.registrar().is_some());
     // 内核的第一轮 tick 读到了注册服务：「已领人数 ≤ 名额」有了数字，不再是没有注册服务时的空校验
     let start = Instant::now();
     loop {

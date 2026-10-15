@@ -297,74 +297,6 @@ async fn full_key_json(state: &AppState, row: &Value, key_id: i64) -> Result<Val
     Ok(key_json(row, &c, generated, None))
 }
 
-/// 后台对 Discord 成员做了会影响使用的操作时，机器人私信本人（`?notify=0` / `body.notify=false` 可关闭）。
-/// 私信失败绝不能让后台操作本身失败。
-async fn notify_member(state: &AppState, key_id: i64, text: &str) {
-    let Some(reg) = state.registration.clone() else {
-        return;
-    };
-    let Ok(Some(discord_id)) = state.db.registered_discord_for_key(key_id).await else {
-        return;
-    };
-    let sent = reg
-        .send_dm(&discord_id, &format!("🦉 猫头鹰公益站通知：{text}"))
-        .await;
-    let blocked = if sent {
-        String::new()
-    } else {
-        reg.last_dm_block()
-    };
-    // 操作日志里绝不能出现明文 Key
-    let summary = pyc::take_chars(&mask_keys(text), 80).to_string();
-    let (detail, ok) = if sent {
-        (format!("已私信：{summary}"), true)
-    } else if !blocked.is_empty() {
-        (format!("未私信（{blocked}）：{summary}"), true)
-    } else {
-        ("私信失败（对方可能关闭了私信）".to_string(), false)
-    };
-    log_action(
-        &state.db,
-        "系统",
-        "私信成员",
-        &format!("Key #{key_id}"),
-        &detail,
-        ok,
-        state.now(),
-    )
-    .await;
-}
-
-/// `re.sub(r"nai-[A-Za-z0-9_\-]+", "nai-***", text)`
-fn mask_keys(text: &str) -> String {
-    let b = text.as_bytes();
-    let mut out = String::with_capacity(text.len());
-    let mut i = 0;
-    let mut last = 0;
-    while i < b.len() {
-        if b[i..].starts_with(b"nai-") {
-            let run = b[i + 4..]
-                .iter()
-                .take_while(|c| c.is_ascii_alphanumeric() || **c == b'_' || **c == b'-')
-                .count();
-            if run > 0 {
-                out.push_str(&text[last..i]);
-                out.push_str("nai-***");
-                i += 4 + run;
-                last = i;
-                continue;
-            }
-        }
-        i += 1;
-    }
-    out.push_str(&text[last..]);
-    out
-}
-
-fn notify_enabled(cx: &Ctx) -> bool {
-    cx.query("notify").unwrap_or("1") != "0"
-}
-
 // ----------------------------------------------------------------------------- Key 列表 / 新建
 
 async fn list_keys(State(state): State<AppState>, req: Request) -> R {
@@ -598,14 +530,6 @@ async fn regenerate_key(State(state): State<AppState>, req: Request) -> R {
     if !cx.state.db.rotate_key_token(key_id, &token).await? {
         return Err(http(404, NO_KEY));
     }
-    if notify_enabled(&cx) {
-        notify_member(
-            &cx.state,
-            key_id,
-            &format!("站长为你重置了 Key，旧 Key 已失效。新的 Key（请妥善保存）：`{token}`"),
-        )
-        .await;
-    }
     let mut resp = ok_json(&json!({"token": token}));
     resp.headers_mut().insert(
         "cache-control",
@@ -616,86 +540,6 @@ async fn regenerate_key(State(state): State<AppState>, req: Request) -> R {
 
 /// 从「仅 V4.5」开到 V5 时给一个默认日额度，和早期成员一致。
 const QUICK_V5_DAILY: i64 = 15;
-
-/// 旧版 `_describe_changes`：对成员可见的改动说明（私信用）。
-fn describe_changes(before: &Value, fields: &Map<String, Value>, now: f64) -> Vec<String> {
-    let mut out = Vec::new();
-    if let Some(v) = fields.get("enabled") {
-        let new = pyval::truthy(v);
-        if jflag(before, "enabled") != new {
-            out.push(format!(
-                "你的 Key 已被站长{}",
-                if new {
-                    "恢复，可以继续使用"
-                } else {
-                    "暂停，暂时无法使用（有疑问请到 🛠️｜问题反馈）"
-                }
-            ));
-        }
-    }
-    for (name, label) in [
-        ("daily_images", "每日图片"),
-        ("daily_v5", "每日 V5"),
-        ("daily_anlas", "每日 Anlas"),
-    ] {
-        if let Some(new) = fields.get(name) {
-            let old = before.get(name).unwrap_or(&Value::Null);
-            if !py_eq(old, new) {
-                let show = |v: &Value| {
-                    if pyval::truthy(v) {
-                        pyext::py_str(v)
-                    } else {
-                        "不限".to_string()
-                    }
-                };
-                out.push(format!("{label}额度：{} → {}", show(old), show(new)));
-            }
-        }
-    }
-    if let Some(v) = fields.get("allow_anlas") {
-        let new = pyval::truthy(v);
-        if jflag(before, "allow_anlas") != new {
-            out.push(format!(
-                "已为你{} Anlas（付费规格）",
-                if new { "开通" } else { "关闭" }
-            ));
-        }
-    }
-    if let Some(v) = fields.get("image_model_scope")
-        && !py_eq(before.get("image_model_scope").unwrap_or(&Value::Null), v)
-    {
-        out.push(format!(
-            "可用模型：{}",
-            if v.as_str() == Some("all") {
-                "含 V5"
-            } else {
-                "仅 V4.5 及以下"
-            }
-        ));
-    }
-    let old_exp = before.get("expires_at").and_then(pyval::number_like);
-    let in_fields = fields.contains_key("expires_at");
-    let new_exp = if in_fields {
-        fields.get("expires_at").and_then(pyval::number_like)
-    } else {
-        old_exp
-    };
-    // 编辑框每次都按「剩余天数」重算到期时间，相差不到 1 天视为没改
-    // 旧版条件：`"expires_at" in fields and (old is None) != (new is None) or (old and new and abs(old - new) > 86400)`
-    let changed = (in_fields && old_exp.is_none() != new_exp.is_none())
-        || matches!((old_exp, new_exp), (Some(o), Some(n)) if o != 0.0 && n != 0.0 && (o - n).abs() > 86400.0);
-    if changed {
-        let tail = match fields.get("expires_at").and_then(pyval::number_like) {
-            Some(e) if e != 0.0 => {
-                let days = pyc::round0((e - now) / 86400.0).max(0);
-                format!("，约 {days} 天后到期")
-            }
-            _ => "为长期有效".to_string(),
-        };
-        out.push(format!("Key 有效期已调整{tail}"));
-    }
-    out
-}
 
 /// Python 的 `a == b`（数字按数值比较，bool 当 0/1）。
 fn py_eq(a: &Value, b: &Value) -> bool {
@@ -911,15 +755,6 @@ async fn patch_key(State(state): State<AppState>, req: Request) -> R {
             }
         }
     }
-    let changes = describe_changes(&before, &fields, st.now());
-    if !changes.is_empty() && body.get("notify") != Some(&Value::Bool(false)) {
-        notify_member(
-            &st,
-            key_id,
-            &format!("站长调整了你的 Key：\n• {}", changes.join("\n• ")),
-        )
-        .await;
-    }
     let row = load_key(&st, key_id).await?.unwrap_or(Value::Null);
     Ok(ok_json(
         &json!({"key": full_key_json(&st, &row, key_id).await?}),
@@ -975,9 +810,6 @@ async fn reset_daily_image_quota(State(state): State<AppState>, req: Request) ->
     };
     st.db.reset_daily_image_quota(key_id, &st.day()).await?;
     let key = full_key_json(&st, &row, key_id).await?;
-    if notify_enabled(&cx) {
-        notify_member(&st, key_id, "站长已为你重置了今天的额度，可以继续使用。").await;
-    }
     Ok(ok_json(&json!({"ok": true, "key": key})))
 }
 
@@ -1092,21 +924,6 @@ async fn delete_key(State(state): State<AppState>, req: Request) -> R {
         None => None,
     };
     if let (Some(reg), Some(discord_id)) = (registrar, discord_id) {
-        if notify_enabled(&cx) {
-            notify_member(
-                &st,
-                key_id,
-                &format!(
-                    "你的 Key 已被站长{}",
-                    if ban {
-                        "删除，并且这个 Discord 账号不能再领取。"
-                    } else {
-                        "删除。如需继续使用，可以在任意频道重新 /register。"
-                    }
-                ),
-            )
-            .await;
-        }
         let reason = cx
             .query("reason")
             .unwrap_or("站长手动删除并封禁")
@@ -1194,9 +1011,9 @@ async fn delete_ban(State(state): State<AppState>, req: Request) -> R {
 
 // ----------------------------------------------------------------------------- 奖励
 
-/// 奖励一位 Discord 用户（站长手动触发，先做成接口，以后机器人夸人也走这里）：
-/// `{"discord_id", "username"?, "global_name"?, "reason", "coupon_days": 7, "reply": {"channel_id", "message_id", "text"}?}`
-/// 没有 Key → 直接发一把（不受名额限制）并私信 Key；然后发一张重置券（note = reason）；有 reply 就让奶妹回复那条消息。
+/// 奖励一位 Discord 用户（站长手动触发）：`{"discord_id", "username"?, "global_name"?, "reason", "coupon_days": 7}`
+/// 没有 Key → 直接发一把（不受名额限制），新 Key 放在响应的 `key` 里，由站长手动转交（机器人不私信成员，
+/// docs/v3-deviations.md #76）；然后发一张重置券（note = reason）。旧版的 `reply`（让奶妹回复某条消息）已删除，传了会被忽略。
 async fn gift_member(State(state): State<AppState>, req: Request) -> R {
     let mut cx = Ctx::new(state, req).await?;
     cx.admin().await?;
@@ -1217,13 +1034,9 @@ async fn gift_member(State(state): State<AppState>, req: Request) -> R {
         global_name: pstr(&body, "global_name"),
         avatar: String::new(),
     };
-    let (is_new, key_id, key, message) = match reg.gift(&user).await {
-        Ok(Gift::Existing { key_id }) => (false, key_id, String::new(), String::new()),
-        Ok(Gift::New {
-            key_id,
-            key,
-            message,
-        }) => (true, key_id, key, message),
+    let (is_new, key_id, key) = match reg.gift(&user).await {
+        Ok(Gift::Existing { key_id }) => (false, key_id, String::new()),
+        Ok(Gift::New { key_id, key }) => (true, key_id, key),
         Err(RegErr::Denied(msg)) => return Err(http(409, msg)),
         Err(RegErr::Internal(msg)) => return Err(internal(msg)),
     };
@@ -1258,56 +1071,17 @@ async fn gift_member(State(state): State<AppState>, req: Request) -> R {
                 })?;
             out.insert("max_users".into(), json!(active));
         }
-        let extra = format!(
-            "{}{}",
-            if reason.is_empty() {
-                String::new()
-            } else {
-                format!("\n\n🎁 这把 Key 是奶妹送你的（{reason}）")
-            },
-            if days_on {
-                "，还附带一张重置券，网页登录开放后在首页登录即可使用、7 天内有效～"
-            } else {
-                ""
-            }
-        );
-        let sent = reg.send_dm(&user.id, &format!("{message}{extra}")).await;
-        out.insert("dm_sent".into(), json!(sent));
-        if !sent {
-            let block = reg.last_dm_block();
-            out.insert(
-                "dm_block".into(),
-                json!(if block.is_empty() {
-                    "对方关闭了私信".to_string()
-                } else {
-                    block
-                }),
-            );
-            out.insert("key".into(), json!(key)); // 私信没发出去：交给站长手动转交
-        }
+        out.insert("key".into(), json!(key)); // 机器人不私信：交给站长手动转交
     }
-    if let Some(rp) = body.get("reply").and_then(Value::as_object) {
-        let part = |k: &str| rp.get(k).filter(|v| pyval::truthy(v)).map(pyext::py_str);
-        if let (Some(ch), Some(msg), Some(text)) =
-            (part("channel_id"), part("message_id"), part("text"))
-        {
-            let replied = reg.reply_in_channel(&ch, &msg, &text).await;
-            out.insert("replied".into(), json!(replied));
-        }
-    }
-    let sent = out.get("dm_sent") == Some(&json!(true));
-    let replied = out.get("replied") == Some(&json!(true));
     log_action(
         &st.db,
         "后台",
         "奖励成员",
         &format!("Discord:{}", user.id),
         &format!(
-            "{}重置券 {} 天 · {reason}{}{}",
+            "{}重置券 {} 天 · {reason}",
             if is_new { "新发 Key · " } else { "" },
             pyext::py_str(&days),
-            if sent { " · 已私信" } else { "" },
-            if replied { " · 已回复" } else { "" },
         ),
         true,
         st.now(),

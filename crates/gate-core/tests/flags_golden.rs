@@ -198,21 +198,27 @@ const DOC_FIXES: [(&str, &str); 1] = [(
     "网页 Discord 登录暂停（Discord 回调修复 / 审核期间）。网页只有 Discord 登录，暂停期间成员只能在 Discord 里用 /quota 看额度",
 )];
 
-/// 3.0 删掉的设置（docs/v3-deviations.md #49：成员自助导出原图）。冻结夹具里还有它的用例，登记表里已经没有，
-/// 逐个用例跳过；`all_keys` / `facts_table` 在期望值一侧去掉它。
-const REMOVED_KEY: &str = "member_image_download";
+/// 3.0 删掉的设置：`member_image_download`（成员自助导出原图，docs/v3-deviations.md #49）、
+/// `dm_enabled`（成员私信总闸门，机器人不再私信成员，docs/v3-deviations.md #76）。冻结夹具里还有它们的用例，
+/// 登记表里已经没有，逐个用例跳过；`all_keys` / `facts_table` 在期望值一侧去掉它们。
+const REMOVED_KEYS: [&str; 2] = ["member_image_download", "dm_enabled"];
 
 /// 夹具用例的 Spec 引用的是不是已删除的设置。
 fn removed_spec(c: &Case) -> bool {
-    c.raw["spec"]["ref"].as_str() == Some(REMOVED_KEY)
+    c.raw["spec"]["ref"]
+        .as_str()
+        .is_some_and(|k| REMOVED_KEYS.contains(&k))
 }
 
 /// 期望值一侧去掉已删除设置的 `facts_table` 行。
 fn drop_removed_row(table: &str) -> String {
-    let prefix = format!("| `{REMOVED_KEY}` |");
     let rows: Vec<&str> = table
         .split('\n')
-        .filter(|l| !l.starts_with(&prefix))
+        .filter(|l| {
+            !REMOVED_KEYS
+                .iter()
+                .any(|k| l.starts_with(&format!("| `{k}` |")))
+        })
         .collect();
     rows.join("\n")
 }
@@ -232,7 +238,7 @@ fn site_registry_golden() {
         match c.raw["fn"].as_str().unwrap() {
             "spec" => {
                 let key = c.out()["key"].as_str().unwrap();
-                if key == REMOVED_KEY {
+                if REMOVED_KEYS.contains(&key) {
                     continue;
                 }
                 let s = ALL.iter().find(|s| s.key == key).expect("缺少这个键");
@@ -244,7 +250,7 @@ fn site_registry_golden() {
                 let mut want = c.out().clone();
                 want.as_array_mut()
                     .unwrap()
-                    .retain(|k| k.as_str() != Some(REMOVED_KEY));
+                    .retain(|k| !k.as_str().is_some_and(|k| REMOVED_KEYS.contains(&k)));
                 assert_eq_py(&c, &Value::Array(keys), &want);
             }
             "facts_table" => {

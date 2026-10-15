@@ -73,28 +73,15 @@ fn capture(state: &AppState, source: &str, e: &KernelError) {
 /// 启动序列（在 `AppState::build` 之后调用）：读回内核运行记录 → 把注册服务接进内核 → 拉起所有循环 →
 /// 「服务已启动」提醒（冷却 60 秒）。
 ///
-/// 注册服务配齐（`state.registration`）时，内核的 registrar / 私信钩子自动接上；没配齐就是旧版的 `registrar is None`。
+/// 注册服务配齐（`state.registration`）时，内核的 registrar 自动接上；没配齐就是旧版的 `registrar is None`。
 pub async fn startup(state: &AppState) -> Result<(), KernelError> {
     state.kernel.load(state).await?;
-    if let Some(svc) = &state.registration {
-        if state.kernel.registrar().is_none() {
-            state
-                .kernel
-                .set_registrar(Some(Arc::new(ServiceRegistrar(svc.clone()))));
-        }
-        if state.kernel.dm().is_none() {
-            // 旧版 `kernel.extra["dm"]`：按 Key 找到领取人，发「🦉 猫头鹰公益站通知：…」（当前没有模块用它）
-            let svc = svc.clone();
-            state.kernel.set_dm(Some(Arc::new(move |key_id, text| {
-                let svc = svc.clone();
-                Box::pin(async move {
-                    if let Ok(Some(did)) = svc.registration_for_key(key_id).await {
-                        svc.send_dm(&did, &format!("🦉 猫头鹰公益站通知：{text}"))
-                            .await;
-                    }
-                })
-            })));
-        }
+    if let Some(svc) = &state.registration
+        && state.kernel.registrar().is_none()
+    {
+        state
+            .kernel
+            .set_registrar(Some(Arc::new(ServiceRegistrar(svc.clone()))));
     }
     spawn_all(state);
     state.alerter.notify(

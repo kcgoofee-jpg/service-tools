@@ -256,6 +256,68 @@ fn drop_member_field(text: &str, field: &str) -> String {
     v.to_string()
 }
 
+/// 3.0 删了成员私信出口（docs/v3-deviations.md #76）：冻结夹具里 reg 场景发给 Discord 的请求全是私信 / 回复消息，
+/// 期望一侧把这些请求去掉（新版一个都不发）。
+fn drop_dm_calls(calls: &Value) -> Value {
+    let kept: Vec<Value> = calls
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|c| {
+            let path = c[1].as_str().unwrap_or("");
+            path != "/users/@me/channels" && !path.ends_with("/messages")
+        })
+        .collect();
+    Value::Array(kept)
+}
+
+/// 「奖励成员」的响应：旧版新发 Key 时带 `dm_sent`，私信没发出去才带 `dm_block` / `key`，传了 `reply` 才带 `replied`；
+/// 3.0 不私信，新发 Key 一律带回 `key`（放在最后），上面三个字段都没有（docs/v3-deviations.md #76）。
+fn v3_gift_text(text: &str) -> String {
+    let mut v: Value = serde_json::from_str(text).expect("旧版奖励响应是 JSON");
+    if let Some(o) = v.as_object_mut() {
+        let key = o.shift_remove("key");
+        for k in ["dm_sent", "dm_block", "replied"] {
+            o.shift_remove(k);
+        }
+        if o.get("new_key") == Some(&json!(true)) {
+            o.insert("key".into(), key.unwrap_or_else(|| json!("nai-<rand>")));
+        }
+    }
+    v.to_string()
+}
+
+/// 种子里自带的一条历史「私信成员」记录（旧版留下的老数据，库里原样保留、后台照常显示）。
+const SEED_DM_DETAIL: &str = "已私信：你好";
+
+/// 期望一侧的操作日志：去掉旧版跑步骤时新写的「私信成员」记录（种子里的历史行保留；行号顺着往前补）、
+/// 「奖励成员」备注里的「已私信」「已回复」。
+fn v3_admin_actions(rows: &Value) -> Value {
+    let mut out = Vec::new();
+    let mut removed = 0;
+    for r in rows.as_array().cloned().unwrap_or_default() {
+        if r["action"] == "私信成员" && r["detail"] != SEED_DM_DETAIL {
+            removed += 1;
+            continue;
+        }
+        let mut r = r;
+        let o = r.as_object_mut().expect("操作日志每行是对象");
+        if let Some(id) = o.get("id").and_then(Value::as_i64) {
+            o.insert("id".into(), json!(id - removed));
+        }
+        if o.get("action") == Some(&json!("奖励成员")) {
+            let detail = o["detail"].as_str().unwrap_or("").to_string();
+            o.insert(
+                "detail".into(),
+                json!(detail.replace(" · 已私信", "").replace(" · 已回复", "")),
+            );
+        }
+        out.push(r);
+    }
+    Value::Array(out)
+}
+
 fn first_diff(a: &str, b: &str) -> String {
     let n = a.chars().zip(b.chars()).take_while(|(x, y)| x == y).count();
     let cut = |s: &str| -> String { s.chars().skip(n.saturating_sub(40)).take(120).collect() };
@@ -359,7 +421,6 @@ async fn run_variant(lines: &[Value], variant: &str, diffs: &mut Vec<String>) ->
             continue;
         }
         if let Some(d) = &discord {
-            d.set_closed(l["registrar"]["dm"] == "closed");
             d.clear();
         }
         let (status, headers, body) = send(&state, l, &cookie).await;
@@ -403,7 +464,10 @@ async fn run_variant(lines: &[Value], variant: &str, diffs: &mut Vec<String>) ->
             let is_logs_list = l["path"]
                 .as_str()
                 .is_some_and(|p| p == "/admin/api/logs" || p.starts_with("/admin/api/logs?"));
-            let want = if l["path"] == "/admin/api/members" {
+            let is_gift = l["path"] == "/admin/api/gift" && l["status"] == 200;
+            let want = if is_gift {
+                v3_gift_text(want)
+            } else if l["path"] == "/admin/api/members" {
                 drop_deleted_member_fields(want)
             } else if is_logs_list {
                 drop_legacy_log_client(want)
@@ -422,7 +486,7 @@ async fn run_variant(lines: &[Value], variant: &str, diffs: &mut Vec<String>) ->
             } else {
                 (want, got)
             };
-            let got = if l["path"] == "/admin/api/members" || is_logs_list {
+            let got = if l["path"] == "/admin/api/members" || is_logs_list || is_gift {
                 // 与上面同样经 serde 重新序列化，只比结构、键顺序和数值类型
                 serde_json::from_str::<Value>(&got).map_or(got, |v| v.to_string())
             } else if is_errors_list {
@@ -451,9 +515,8 @@ async fn run_variant(lines: &[Value], variant: &str, diffs: &mut Vec<String>) ->
         if let Some(d) = &discord {
             let got = Value::Array(d.calls());
             let got: Value = serde_json::from_str(&norm_text(&got.to_string())).unwrap();
-            // 私信里的欢迎语在 3.0 改过几句（docs/v3-deviations.md #48）
-            let want: Value =
-                serde_json::from_str(&common::v3_welcome(&l["calls"].to_string())).unwrap();
+            // 旧版的 Discord 请求全是私信 / 回复消息，3.0 一个都不发（docs/v3-deviations.md #76）
+            let want = drop_dm_calls(&l["calls"]);
             if got != want {
                 bad(
                     "发给 Discord 的请求",
@@ -480,7 +543,12 @@ fn compare_snap(name: &str, want: &Value, got: &Value, diffs: &mut Vec<String>) 
             continue;
         }
         // 按序列化文本比：键顺序（列顺序）和数字类型（整数 / 浮点）都要一致
-        let (w, g) = (want[t].to_string(), got[t].to_string());
+        let want_rows = if t == "admin_actions" {
+            v3_admin_actions(&want[t])
+        } else {
+            want[t].clone()
+        };
+        let (w, g) = (want_rows.to_string(), got[t].to_string());
         if w != g {
             diffs.push(format!("[{name}] 表 {t} 内容不同\n{}", first_diff(&w, &g)));
         }

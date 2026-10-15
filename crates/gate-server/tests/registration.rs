@@ -34,9 +34,6 @@ struct Seen {
 }
 
 impl Seen {
-    fn json(&self) -> Value {
-        serde_json::from_slice(&self.body).unwrap_or(Value::Null)
-    }
     fn form(&self) -> Vec<(String, String)> {
         String::from_utf8_lossy(&self.body)
             .split('&')
@@ -176,9 +173,6 @@ impl Discord {
             .iter()
             .map(|s| format!("{} {}", s.method, s.path))
             .collect()
-    }
-    fn reset(&self) {
-        self.state.seen.lock().unwrap().clear();
     }
 }
 
@@ -1003,9 +997,6 @@ async fn unreachable_discord_never_mints_when_a_role_is_required() {
             .unwrap()
             .is_none()
     );
-    // 私信 / 身份组失败都只返回 false，不抛错
-    e.state.db.set_setting("dm_enabled", "1").await.unwrap();
-    assert!(!svc(&e).send_dm(MEMBER, "hi").await);
 }
 
 #[tokio::test]
@@ -1113,15 +1104,10 @@ async fn gift_issues_even_when_closed_and_is_idempotent() {
         avatar: String::new(),
     };
     let first = svc(&e).gift(&u).await.unwrap();
-    let Gift::New {
-        key_id,
-        key,
-        message,
-    } = first
-    else {
+    let Gift::New { key_id, key } = first else {
         panic!("应当新发");
     };
-    assert!(message.contains(&key));
+    assert!(key.starts_with("nai-"));
     assert_eq!(svc(&e).gift(&u).await.unwrap(), Gift::Existing { key_id });
     let bad = svc(&e)
         .gift(&DiscordUser {
@@ -1849,66 +1835,34 @@ async fn background_jobs_do_not_panic_and_report_through_the_service() {
     );
 }
 
-// ------------------------------------------------------------------ 私信总闸门
+// ------------------------------------------------------------------ 机器人不私信成员
 
 #[tokio::test]
-async fn dm_kill_switch_and_rate_limits() {
+async fn the_gateway_never_opens_a_dm_channel() {
+    // 领 Key / 换 Key / 奖励 / 封禁 / 撤销全部走一遍：假 Discord 上不能出现私信相关的请求
+    // （docs/v3-deviations.md #76：Discord 应用曾被标记，680009，成员私信出口整个删除）
     let (e, d) = setup_reg(&[]).await;
-    // 默认关：什么都不发
-    assert!(!svc(&e).send_dm(MEMBER, "hi").await);
-    assert_eq!(svc(&e).last_dm_block(), "私信总开关已关闭");
-    assert!(d.seen().is_empty());
-    // 打开后：先开私信频道，再发消息；正文截断到 1900 字，不 @ 任何人
-    e.state.db.set_setting("dm_enabled", "1").await.unwrap();
-    let long = "长".repeat(2000);
-    assert!(svc(&e).send_dm(MEMBER, &long).await);
-    assert_eq!(svc(&e).last_dm_block(), "");
+    open_registration(&e).await;
+    assert_eq!(issue(&e, MEMBER).await.0, 200);
+    assert_eq!(
+        bridge(&e, "/self-register/resetkey", who(MEMBER, MEMBER))
+            .await
+            .0,
+        200
+    );
+    let u = DiscordUser {
+        id: "900000000000000150".into(),
+        ..Default::default()
+    };
+    svc(&e).gift(&u).await.unwrap();
+    svc(&e).ban(&u.id, "", "").await.unwrap();
+    assert!(svc(&e).revoke(MEMBER, true).await.unwrap());
     let seen = d.seen();
-    assert_eq!(seen.len(), 2);
-    assert_eq!(
-        (seen[0].method.as_str(), seen[0].path.as_str()),
-        ("POST", "/users/@me/channels")
+    assert!(
+        seen.iter()
+            .all(|s| s.path != "/users/@me/channels" && !s.path.ends_with("/messages")),
+        "{seen:?}"
     );
-    assert_eq!(seen[0].json(), json!({"recipient_id": MEMBER}));
-    assert_eq!(seen[0].auth, "Bot fake-bot-token");
-    assert!(seen[0].ctype.starts_with("application/json"));
-    assert_eq!(seen[1].path, "/channels/dm-1/messages");
-    assert_eq!(
-        seen[1].json()["content"].as_str().unwrap().chars().count(),
-        1900
-    );
-    assert_eq!(seen[1].json()["allowed_mentions"], json!({"parse": []}));
-    // 10 分钟最多 3 条
-    assert!(svc(&e).send_dm(MEMBER, "2").await);
-    assert!(svc(&e).send_dm(MEMBER, "3").await);
-    d.reset();
-    assert!(!svc(&e).send_dm(MEMBER, "4").await);
-    assert_eq!(svc(&e).last_dm_block(), "10 分钟内已发 3 条私信，达到上限");
-    assert!(d.seen().is_empty(), "被拦下就一个请求都不发");
-    // 关掉后立刻生效
-    e.state.db.set_setting("dm_enabled", "0").await.unwrap();
-    assert_eq!(
-        svc(&e).dm_block_reason(e.state.now()).await.unwrap(),
-        "私信总开关已关闭"
-    );
-}
-
-#[tokio::test]
-async fn dm_failures_return_false() {
-    let (e, d) = setup_reg(&[]).await;
-    e.state.db.set_setting("dm_enabled", "1").await.unwrap();
-    // 对方关了私信：开频道成功、发消息 403
-    d.script(
-        "POST",
-        "/channels/dm-1/messages",
-        403,
-        json!({"code": 50007}),
-    );
-    assert!(!svc(&e).send_dm(MEMBER, "hi").await);
-    assert_eq!(svc(&e).last_dm_block(), "");
-    d.clear_scripts();
-    d.script("POST", "/users/@me/channels", 400, json!({}));
-    assert!(!svc(&e).send_dm(MEMBER, "hi").await);
 }
 
 // ------------------------------------------------------------------ 网页登录
@@ -2489,7 +2443,6 @@ async fn discord_base_comes_from_the_environment() {
     ])
     .await;
     open_registration(&e).await;
-    e.state.db.set_setting("dm_enabled", "1").await.unwrap();
     d.script(
         "GET",
         &format!("/guilds/{GUILD}/members/{MEMBER}"),
@@ -2497,10 +2450,9 @@ async fn discord_base_comes_from_the_environment() {
         json!({"roles": ["900000000000000077"]}),
     );
     assert_eq!(issue(&e, MEMBER).await.0, 200);
-    assert!(svc(&e).send_dm(MEMBER, "hi").await);
     assert!(svc(&e).revoke(MEMBER, true).await.unwrap());
     let calls = d.calls();
-    assert!(calls.len() >= 4, "{calls:?}");
+    assert!(calls.len() >= 3, "{calls:?}");
     assert!(d.seen().iter().all(|s| s.auth == "Bot fake-bot-token"));
 }
 

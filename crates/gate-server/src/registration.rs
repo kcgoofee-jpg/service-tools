@@ -5,9 +5,9 @@
 //!
 //! - 服务器 ID / 身份组 / 站点地址全部来自环境变量（`EnvConfig::registration`），这里不写死任何 ID。
 //! - Discord REST 的基地址来自 `DISCORD_API_BASE`（默认官方 v10），测试里指向本机假服务。
-//! - 私信只有 [`RegistrationService::send_dm`] 一个出口，经过私信总闸门（`dm_enabled`，默认关）和限速。
-//! - 后台循环（维护 / 每日清空）不在这里起：见文件末尾的 [`registrar_jobs`] / [`reset_delay_secs`] /
-//!   [`scheduled_reset`] / [`registration_reset_loop`]，由任务调度方安排。
+//! - 机器人不私信成员：发 Key 的结果只在 /register 的临时回复里给本人看，后台「重新生成 Key」「奖励成员」
+//!   把新 Key 展示给站长手动转交（Discord 应用曾被标记，错误码 680009，docs/v3-deviations.md #76）。
+//! - 后台循环不在这里起：见文件末尾的 [`registrar_jobs`]，由任务调度方安排。
 
 use crate::action_log::log_action;
 use crate::env::{EnvConfig, RegistrationEnv};
@@ -22,14 +22,9 @@ use gate_db::repo::registration::{NewRegistration, RegistrationProfile};
 use gate_db::{Db, DbError};
 use reqwest::Method;
 use serde_json::{Value, json};
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Duration;
-
-/// 开启时也限速：10 分钟最多 3 条、24 小时最多 20 条。
-pub const DM_BURST: usize = 3;
-pub const DM_WINDOW: f64 = 600.0;
-pub const DM_DAILY: usize = 20;
 
 /// Discord 要求机器人带可识别的 User-Agent（空的 / 默认的会被 Cloudflare 拦）。
 const USER_AGENT: &str = concat!("DiscordBot (nai-gate, ", env!("CARGO_PKG_VERSION"), ")");
@@ -220,14 +215,8 @@ pub struct Provisioned {
 /// `gift` 的结果。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Gift {
-    Existing {
-        key_id: i64,
-    },
-    New {
-        key_id: i64,
-        key: String,
-        message: String,
-    },
+    Existing { key_id: i64 },
+    New { key_id: i64, key: String },
 }
 
 /// 网页登录换到的身份。
@@ -270,10 +259,6 @@ pub struct RegistrationService {
     http: reqwest::Client,
     /// 与 `issue_direct` / `gift` / `ban` 共用：否则在发 Key 进行中（身份组核验等网络等待）封禁，仍会发出有效 Key。
     lock: tokio::sync::Mutex<()>,
-    /// 最近 24 小时成功发出的私信时间（进程内）。
-    dm_sent: Mutex<VecDeque<f64>>,
-    /// 最近一次被闸门拦下的原因，供调用方写日志。
-    last_dm_block: Mutex<String>,
 }
 
 impl RegistrationService {
@@ -294,8 +279,6 @@ impl RegistrationService {
             api_base: env.discord_api_base.trim_end_matches('/').to_string(),
             http,
             lock: tokio::sync::Mutex::new(()),
-            dm_sent: Mutex::new(VecDeque::new()),
-            last_dm_block: Mutex::new(String::new()),
         })
     }
 
@@ -1024,30 +1007,7 @@ impl RegistrationService {
         Ok(Gift::New {
             key_id,
             key: res.key,
-            message: res.message,
         })
-    }
-
-    /// 奶妹回复某条消息（站长在后台点了才发；不会自己找人回复）。
-    pub async fn reply_in_channel(&self, channel_id: &str, message_id: &str, text: &str) -> bool {
-        let (Ok(channel), Ok(message)) =
-            (pyext::py_int_str(channel_id), pyext::py_int_str(message_id))
-        else {
-            return false;
-        };
-        let body = json!({
-            "content": take_chars(text, 1900),
-            "message_reference": {"message_id": message.to_string(), "fail_if_not_exists": false},
-            "allowed_mentions": {"parse": [], "replied_user": true},
-        });
-        self.discord(
-            Method::POST,
-            &format!("/channels/{channel}/messages"),
-            &self.bot_auth(),
-            Some(&body),
-        )
-        .await
-        .is_ok()
     }
 
     /// 唯一发 Key 的地方：建 api_keys 行、写 discord_registrations、按成员名改 Key 名、
@@ -1158,69 +1118,6 @@ impl RegistrationService {
             &opened,
         );
         Ok(Provisioned { key, message })
-    }
-
-    // ---- 私信 ----
-
-    /// 私信能不能发：返回空串表示可以，否则返回原因（总开关关闭 / 超过限速）。
-    pub async fn dm_block_reason(&self, now: f64) -> Result<String, DbError> {
-        if !self.flag(&site_flags::DM_ENABLED).await? {
-            return Ok("私信总开关已关闭".into());
-        }
-        let mut sent = self.dm_sent.lock().expect("dm");
-        while sent.front().is_some_and(|t| *t < now - 86400.0) {
-            sent.pop_front();
-        }
-        if sent.len() >= DM_DAILY {
-            return Ok(format!("24 小时内已发 {DM_DAILY} 条私信，达到上限"));
-        }
-        if sent.iter().filter(|t| **t > now - DM_WINDOW).count() >= DM_BURST {
-            return Ok(format!("10 分钟内已发 {DM_BURST} 条私信，达到上限"));
-        }
-        Ok(String::new())
-    }
-
-    /// 最近一次私信被闸门拦下的原因（没被拦为空串）。
-    pub fn last_dm_block(&self) -> String {
-        self.last_dm_block.lock().expect("dm").clone()
-    }
-
-    /// 机器人私信成员（唯一出口，经过总闸门和限速）；被拦下或对方关闭私信都返回 false，不报错。
-    /// 被闸门拦下时原因写在 [`Self::last_dm_block`]。
-    pub async fn send_dm(&self, discord_id: &str, text: &str) -> bool {
-        // 读不到开关就当作关着（Discord 应用被风控过，宁可少发）
-        let reason = self
-            .dm_block_reason(now())
-            .await
-            .unwrap_or_else(|_| "私信总开关读取失败".into());
-        *self.last_dm_block.lock().expect("dm") = reason.clone();
-        if !reason.is_empty() {
-            return false;
-        }
-        self.dm_sent.lock().expect("dm").push_back(now());
-        let auth = self.bot_auth();
-        let Ok(channel) = self
-            .discord(
-                Method::POST,
-                "/users/@me/channels",
-                &auth,
-                Some(&json!({"recipient_id": discord_id})),
-            )
-            .await
-        else {
-            return false;
-        };
-        let Some(id) = channel.get("id").map(pyext::py_str) else {
-            return false;
-        };
-        self.discord(
-            Method::POST,
-            &format!("/channels/{id}/messages"),
-            &auth,
-            Some(&json!({"content": take_chars(text, 1900), "allowed_mentions": {"parse": []}})),
-        )
-        .await
-        .is_ok()
     }
 }
 
