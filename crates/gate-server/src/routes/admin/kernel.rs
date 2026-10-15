@@ -31,11 +31,7 @@ pub fn router() -> Router<AppState> {
         )
         .route("/admin/api/autopilot", get(autopilot_get))
         .route("/admin/api/modules", get(modules_get))
-        // 旧版 FastAPI：`PUT /modules/run` 会落到 `PUT /modules/{name}`（name="run"）→ 404「没有这个模块」
-        .route(
-            "/admin/api/modules/run",
-            post(modules_run_all).put(modules_put_run),
-        )
+        .route("/admin/api/modules/run", post(modules_run_all))
         .route("/admin/api/modules/{name}", put(modules_put))
 }
 
@@ -172,10 +168,6 @@ async fn modules_put(
     Ok(ok_json(
         &json!({"ok": true, "modules": state.kernel.snapshot(&state).await?}),
     ))
-}
-
-async fn modules_put_run(_s: AdminSession) -> Result<Response, ApiError> {
-    Err(HttpError::new(404, "没有这个模块").into())
 }
 
 /// 手动立即执行一轮模块任务与交叉校验。

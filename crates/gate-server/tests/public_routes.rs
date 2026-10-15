@@ -500,57 +500,17 @@ async fn public_live_me_for_logged_in_member_only() {
     assert_eq!(off["me"], Value::Null);
 }
 
-// ------------------------------------------------------------------ /v1/live/me
-
+/// `/v1/live/me` 已删除（docs/v3-deviations.md #103）：首页一直用 `/public/live` 里的 `me`。
 #[tokio::test]
-async fn live_me_is_passive_and_quiet_on_bad_keys() {
+async fn live_me_route_is_gone() {
     let e = setup(&[]).await;
-    let (status, headers, v) = get_json(
+    let (status, _, v) = get_json(
         &e.state,
         "/v1/live/me",
         &[("authorization", &format!("Bearer {TOKEN}"))],
     )
     .await;
-    assert_eq!(status, 200);
-    assert_eq!(headers["cache-control"], "no-store");
-    assert_eq!(v, json!({"mine": [], "waiting": 0, "running": 0}));
-
-    let now = e.state.now();
-    e.state.guard.with(|g| g.admit_image(1, 1, now));
-    let (_, _, v) = get_json(
-        &e.state,
-        "/v1/live/me",
-        &[("authorization", &format!("Bearer {TOKEN}"))],
-    )
-    .await;
-    assert_eq!(
-        v,
-        json!({"mine": [{"state": "waiting", "position": 1, "eta": 15}], "waiting": 1, "running": 0})
-    );
-
-    let (status, headers, v) = get_json(
-        &e.state,
-        "/v1/live/me",
-        &[("authorization", "Bearer nai-nope")],
-    )
-    .await;
-    assert_eq!(status, 401);
-    assert_eq!(headers["cache-control"], "no-store");
-    // 不带「猫头鹰公益站提醒」前缀：这是给首页脚本用的，不是给 NovelAI 客户端看的
-    assert_eq!(v, json!({"mine": null, "error": "无效的 API Key"}));
-    let (status, _, v) = get_json(&e.state, "/v1/live/me", &[]).await;
-    assert_eq!(status, 401);
-    assert_eq!(v, json!({"mine": null, "error": "缺少 API Key"}));
-
-    // 不写用量日志（passive）
-    settle().await;
-    let rows = e
-        .state
-        .db
-        .list_logs(50, 0, &LogFilter::default())
-        .await
-        .unwrap();
-    assert!(rows.is_empty(), "{rows:?}");
+    assert_eq!((status.as_u16(), v), (404, json!({"detail": "Not Found"})));
 }
 
 // ------------------------------------------------------------------ /public/status

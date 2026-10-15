@@ -523,11 +523,12 @@ async fn modules_put_errors() {
         .json("PUT", "/modules/nope", Some(json!({"enabled": true})))
         .await;
     assert_eq!((status, v), (404, json!({"detail": "没有这个模块"})));
-    // 旧版 FastAPI：`PUT /modules/run` 落到 `/modules/{name}`，name="run"
+    // 旧版 FastAPI 的 `PUT /modules/run` 落到 `/modules/{name}`（name="run"）回 404「没有这个模块」；
+    // 3.0 不再复刻，就是这个路径不接受 PUT（docs/v3-deviations.md #103）
     let (status, v) = api
         .json("PUT", "/modules/run", Some(json!({"enabled": true})))
         .await;
-    assert_eq!((status, v), (404, json!({"detail": "没有这个模块"})));
+    assert_eq!((status, v), (405, json!({"detail": "Method Not Allowed"})));
     // enabled 必须是布尔
     for body in [
         json!({}),
