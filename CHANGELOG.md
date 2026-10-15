@@ -75,7 +75,7 @@
     - CORS、HEAD、405 改用框架的标准行为。
     - 刻意构造的输入（非 UTF-8 公告、解析不了的 Origin、Discord 返回非 JSON、功能名写成列表）不再导致 500。
 13. **运维。**
-    - 部署：CI 构建镜像，服务器只加载；`deploy/v3/cutover.sh` 一条命令切换，健康检查或冒烟失败自动回滚；CI 不再推 GHCR。网关内存从约 250 MB 降到约 40 MB。
+    - 部署：CI 构建镜像，服务器只加载；`deploy/v3/cutover.sh` 一条命令切换，健康检查或冒烟失败自动回滚；CI 不再推 GHCR。网关常驻内存约 50 MB（2.x 约 90 MB）。
     - 配置收成两层：环境变量只放密钥和基础设施，运行时参数在后台设置或代码常量。私密参数文件 `data/private_params.json` 不再读。
     - 删掉的环境变量（`.env` 里留着不报错、不读）：新 Key 与自助领取的默认值（`DEFAULT_*`、`REGISTER_*`）、`DISCORD_ROLE_ID`、`AUDIT_*`、时区 / 服务日 / 排队 / 防爆破类数字、免费档钳制（`SAFE_CLAMP`、`MAX_PIXELS`、`MAX_STEPS`）与 `ALLOW_IMG2IMG`、令牌池的 `NAI_TOKEN`、`NAI_TOKEN_V5_DAILY_LIMITS`、`SINGLE_IMAGE_SLOT_ENFORCED`、文本相关变量、`ADMIN_DISCORD_IDS`、`WARDEN_BOT_TOKEN`。`NAI_TOKEN_ALLOW_ANLAS` 保留。删之前先确认后台已经有对应的值。
     - `nai-ops` 只留 `patrol` / `snapshot` / `ro-sanitize` / `smoke`。巡检只查宿主机层面的事（容器、健康检查、内存、磁盘、上游 429、桥接密钥），自己出错退出码 3；冒烟的站点地址必填。
