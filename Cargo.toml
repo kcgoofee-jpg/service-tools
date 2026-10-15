@@ -29,8 +29,11 @@ tower-http = { version = "0.7", features = ["trace", "request-id", "limit", "tim
 http = "1"
 http-body-util = "0.1"
 multer = "=3.1.0"
-wreq = { version = "=6.0.0-rc.31", features = ["json", "stream", "gzip", "deflate", "socks"] }
-wreq-util = "=3.0.0-rc.14"
+# 上游指纹：wreq 2026-08-22 起冻结 6.0.0-rc 线，改走 0.x 稳定版号；精确锁版本，升级要重跑指纹测试
+# （gate-upstream/tests/headers_wire.rs）。解压四种都开：Chrome 的 Accept-Encoding 带 br / zstd。
+# wreq-util 的 emulation-compression 让 emulation 自己给出 Accept-Encoding（与 UA 同一个 profile）。
+wreq = { version = "=0.16.1", features = ["json", "stream", "gzip", "deflate", "brotli", "zstd", "socks"] }
+wreq-util = { version = "=0.2.0", features = ["emulation-compression"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rusqlite = { version = "0.40", features = ["bundled", "backup"] }
