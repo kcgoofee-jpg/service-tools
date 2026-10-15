@@ -854,6 +854,28 @@ fn brief(case: &Case) -> Case {
     }
 }
 
+/// `record_success` 的这一条：旧版会刷新 `last_image_at`、3.0 不刷新（只认 `image` / `image_stream`，
+/// docs/v3-deviations.md #65）。返回那把 Key 的 id。
+fn no_longer_refreshes_last_image(case: &Case) -> Option<i64> {
+    if case.get("method").and_then(Value::as_str) != Some("record_success") {
+        return None;
+    }
+    let kind = case.arg(2).as_str().unwrap_or("");
+    let old =
+        kind.starts_with("image") || matches!(kind, "upscale" | "augment-image" | "vibe_encode");
+    let new = matches!(kind, "image" | "image_stream");
+    (old && !new).then(|| case.arg(0).as_i64().unwrap_or(0))
+}
+
+/// 某把 Key 在表快照里的 `last_image_at`。
+fn last_image_at(tables: &Value, key_id: i64) -> Option<Value> {
+    tables["api_keys"]
+        .as_array()?
+        .iter()
+        .find(|r| r["id"] == key_id)
+        .map(|r| r["last_image_at"].clone())
+}
+
 async fn run_case(case: &Case) {
     // 「每把 Key 最近一次请求的客户端」整个方法已删除（docs/v3-deviations.md #50）
     if case.get("method").and_then(Value::as_str) == Some("latest_member_clients") {
@@ -864,6 +886,11 @@ async fn run_case(case: &Case) {
     db.set_rule_version(case.get("rule_version").unwrap().as_str().unwrap());
     let extra = seed(&db, case).await;
     let brief = brief(case);
+    // 3.0 不再刷新的 last_image_at：期望一侧换回调用前的值（#65）
+    let kept_last_image = match no_longer_refreshes_last_image(case) {
+        Some(kid) => Some((kid, last_image_at(&dump_tables(&db).await, kid))),
+        None => None,
+    };
 
     let out = call(&db, case).await;
     match (case.err(), out) {
@@ -888,6 +915,13 @@ async fn run_case(case: &Case) {
     blank_usage_client(&mut tables);
     let mut want_tables = case.get("tables_after").unwrap().clone();
     blank_usage_client(&mut want_tables);
+    if let Some((kid, before)) = kept_last_image
+        && let Some(row) = want_tables["api_keys"]
+            .as_array_mut()
+            .and_then(|rows| rows.iter_mut().find(|r| r["id"] == kid))
+    {
+        row["last_image_at"] = before.unwrap_or(Value::Null);
+    }
     assert_eq_py(&brief, &tables, &want_tables);
     let (files, dirs) = snap_files(db.image_dir(), &extra);
     assert_eq_py(&brief, &files, case.get("files_after").unwrap());
