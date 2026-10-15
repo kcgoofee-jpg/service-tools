@@ -28,7 +28,7 @@ async fn clock(at: f64) -> tokio::sync::MutexGuard<'static, ()> {
 }
 
 async fn setup_recycle() -> Env {
-    setup(&[("KEY_INACTIVITY_DELETE_DAYS", "3"), ("TZ", "Asia/Shanghai")]).await
+    setup(&[("KEY_INACTIVITY_DELETE_DAYS", "3")]).await
 }
 
 /// 建一把成员 Key，返回库里的主键。`last_image` 为 None 表示从没出过图。
@@ -90,11 +90,8 @@ async fn healthy_days(env: &Env, from: i64, to: i64, per_day: i64) {
 
 async fn recycle_actions(env: &Env) -> Vec<Value> {
     settle().await;
-    env.state
-        .db
-        .list_admin_actions(50, 0)
+    common::admin_actions(&env.state.db, 50)
         .await
-        .unwrap()
         .into_iter()
         .filter(|r| r["action"] == "闲置回收 Key")
         .collect()

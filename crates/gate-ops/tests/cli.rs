@@ -19,7 +19,6 @@ fn nai(dir: &Path) -> Command {
         .env("DATA_DIR", dir.join("data"))
         // 巡检：健康检查地址、状态目录都指向沙盒
         .env("NAI_GATE_HEALTH", "http://127.0.0.1:1/healthz")
-        .env("NAI_GATE_QUEUE", "http://127.0.0.1:1/queue-status")
         .env("PATROL_STATE_DIR", dir.join("state"))
         .env("NAI_GATE_ENV", dir.join("missing.env"));
     c

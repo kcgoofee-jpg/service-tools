@@ -116,7 +116,7 @@ async fn alerts_test(State(state): State<AppState>, _s: AdminSession) -> ApiResu
     if !state.alerter.configured() {
         return Err(HttpError::new(
             409,
-            "尚未配置告警渠道（ALERT_USER_ID / ALERT_CHANNEL_ID / ALERT_WEBHOOK_URL）",
+            "尚未配置告警私信（DISCORD_BOT_TOKEN 与 ALERT_USER_ID）",
         )
         .into());
     }

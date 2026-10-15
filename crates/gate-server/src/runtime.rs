@@ -237,6 +237,11 @@ struct TagState {
     latest: HashMap<i64, u64>,
 }
 
+/// 标签补全同时打向 NovelAI 的全站并发数（单账号建议保持 1，太高会触发 429 甚至风控）。
+/// 出图不受它影响：出图由每把上游 Token 的出图槽位和最小间隔控制。
+/// 原来是环境变量 `GLOBAL_CONCURRENCY`（旧说明写成了「全站并发」，其实一直只管标签补全），现在是常量（docs/v3-deviations.md #95）。
+pub const TAG_CONCURRENCY: i64 = 1;
+
 /// 排队结果：放行 / 全站排队已满 / 被同一 Key 更新的查询取代。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TagAdmit {
@@ -246,7 +251,7 @@ pub enum TagAdmit {
 }
 
 impl TagQueue {
-    /// `global_concurrency` 取当前设置。被取消（超时 / 断开）时排队计数照样归还。
+    /// `global_concurrency` 传 [`TAG_CONCURRENCY`]。被取消（超时 / 断开）时排队计数照样归还。
     /// 同一把 Key 两次补全至少隔 [`TAG_MIN_INTERVAL`] 秒（旧版取它与每 Key 出图间隔的较小者；
     /// 每 Key 出图间隔已删除，docs/v3-deviations.md #64）。
     pub async fn wait(&self, key_id: i64, global_concurrency: i64) -> TagAdmit {
@@ -321,41 +326,19 @@ impl TagQueue {
     }
 }
 
-/// 最近 10 分钟上游调用结果（判断「上游不稳定」并告警）。
+/// 最近 10 分钟上游调用结果（状态页判断「上游不稳定」）。
 #[derive(Default)]
 pub struct UpstreamHealth {
     events: Mutex<VecDeque<(f64, bool)>>,
-    degraded: Mutex<bool>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum HealthChange {
-    Degraded,
-    Recovered,
 }
 
 impl UpstreamHealth {
-    /// 记一次结果；状态翻转时返回变化（调用方发告警）。
-    pub fn record(&self, ok: bool, now: f64) -> Option<HealthChange> {
-        {
-            let mut e = self.events.lock().expect("health");
-            e.push_back((now, ok));
-            while e.len() > 40 {
-                e.pop_front();
-            }
-        }
-        let status = self.status(now).0;
-        let mut d = self.degraded.lock().expect("health");
-        match status {
-            "degraded" if !*d => {
-                *d = true;
-                Some(HealthChange::Degraded)
-            }
-            "ok" if *d => {
-                *d = false;
-                Some(HealthChange::Recovered)
-            }
-            _ => None,
+    /// 记一次结果（只留最近 40 次）。
+    pub fn record(&self, ok: bool, now: f64) {
+        let mut e = self.events.lock().expect("health");
+        e.push_back((now, ok));
+        while e.len() > 40 {
+            e.pop_front();
         }
     }
 

@@ -37,8 +37,6 @@ use crate::sse::{SseDecoder, encode_sse};
 pub const MAX_EVENT_BYTES: u64 = 32 * 1024 * 1024;
 /// 单条流上限。
 pub const MAX_STREAM_BYTES: u64 = 128 * 1024 * 1024;
-/// `ImageStreamProtocolError` 的文案（不含任何上游数据）。
-pub const SAFE_ERROR: &str = "上游图片事件流格式无效或超过大小限制";
 /// 上游 error 事件原话进日志时的截断长度。
 pub const ERROR_DETAIL_MAX_CHARS: usize = 120;
 
@@ -50,15 +48,6 @@ pub enum WireFormat {
 }
 
 impl WireFormat {
-    /// 与旧版一致：只有恰好等于 `"msgpack"` 才走 msgpack，其余（包括拼错的）都走 SSE。
-    pub fn from_name_lenient(name: &str) -> Self {
-        if name == "msgpack" {
-            WireFormat::Msgpack
-        } else {
-            WireFormat::Sse
-        }
-    }
-
     /// `STREAM_MEDIA_TYPES[wire_format]`
     pub fn media_type(self) -> &'static str {
         match self {

@@ -29,13 +29,8 @@ pub async fn setup(extra: &[(&str, &str)]) -> Env {
         ("DATA_DIR", dir.path().to_str().unwrap()),
         ("NAI_TOKENS", "pst-synthetic-upstream-token"),
         ("NAI_IMAGE_HOST", &mock.url()),
-        ("IMAGE_MIN_INTERVAL", "0"),
-        ("POST_REQUEST_JITTER_MIN", "0"),
-        ("POST_REQUEST_JITTER_MAX", "0"),
-        ("QUEUE_TIMEOUT", "5"),
         ("SECRET_KEY", "test-secret-key-test-secret-key-0123456789"),
         ("ADMIN_PASSWORD", ADMIN_PASSWORD),
-        ("UPSTREAM_HTTP2", "0"),
     ]
     .iter()
     .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -43,7 +38,10 @@ pub async fn setup(extra: &[(&str, &str)]) -> Env {
     for (k, v) in extra {
         vars.insert(k.to_string(), v.to_string());
     }
-    let env = EnvConfig::load(&vars);
+    let mut env = EnvConfig::load(&vars);
+    // 这两项是代码常量（不读环境变量），测试里直接改：没有出图间隔，排队 5 秒就算超时
+    env.image_min_interval = 0.0;
+    env.queue_timeout = 5;
     let state = AppState::build(env, Assets::new(None)).await.unwrap();
     let key: NewKey = serde_json::from_value(json!({
         "name": "测试成员", "token": TOKEN, "daily_images": 100, "daily_v5": 10,
@@ -115,4 +113,40 @@ impl<'a> Call<'a> {
 /// 后台任务（记账 / 操作日志）写完。
 pub async fn settle() {
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+}
+
+/// 测试里直接查库：一条只读 SELECT，取全部行（每行一个 JSON 对象，列名为键）。
+pub async fn query(db: &gate_db::Db, sql: &str) -> Vec<Value> {
+    let sql = sql.to_string();
+    db.read(move |c| {
+        let mut stmt = c.prepare(&sql)?;
+        stmt.query_map([], gate_db::value::row_json)?.collect()
+    })
+    .await
+    .unwrap()
+}
+
+/// 后台操作记录，最新的在前，最多 `limit` 条。
+pub async fn admin_actions(db: &gate_db::Db, limit: i64) -> Vec<Value> {
+    query(
+        db,
+        &format!("SELECT * FROM admin_actions ORDER BY id DESC LIMIT {limit}"),
+    )
+    .await
+}
+
+/// 给某把 Key 某一天的计数器直接加上 V5 张数与 Anlas（准备「已经用掉一些额度」的场景）。
+pub async fn add_usage(db: &gate_db::Db, key_id: i64, day: &str, v5: i64, anlas: f64) {
+    let day = day.to_string();
+    db.write(move |tx| {
+        tx.execute(
+            "INSERT INTO counters (key_id, day, requests, v5, anlas) VALUES (?, ?, 1, ?, ?) \
+             ON CONFLICT(key_id, day) DO UPDATE SET requests = requests + 1, \
+             v5 = v5 + excluded.v5, anlas = anlas + excluded.anlas",
+            (key_id, &day, v5, anlas),
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
 }

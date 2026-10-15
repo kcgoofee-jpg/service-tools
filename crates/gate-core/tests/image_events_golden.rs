@@ -12,14 +12,22 @@ use sha2::{Digest, Sha256};
 
 const M: &str = env!("CARGO_MANIFEST_DIR");
 
+/// 夹具里的线上格式名：与旧版一致，只有恰好等于 `"msgpack"` 才走 msgpack，其余（包括拼错的）都走 SSE。
+fn wire_of(c: &gate_golden::Case) -> WireFormat {
+    if c.get("wire").and_then(Value::as_str).unwrap() == "msgpack" {
+        WireFormat::Msgpack
+    } else {
+        WireFormat::Sse
+    }
+}
+
 #[test]
 fn encode_image_event_golden() {
     let (mut ok, mut err) = (0, 0);
     for c in load(M, "image_events/encode") {
         match c.get("fn").and_then(Value::as_str).unwrap() {
             "encode_image_event" => {
-                let wire =
-                    WireFormat::from_name_lenient(c.get("wire").and_then(Value::as_str).unwrap());
+                let wire = wire_of(&c);
                 let got = encode_image_event(&c.raw["payload"], wire);
                 if c.get("ok").and_then(Value::as_bool).unwrap() {
                     ok += 1;
@@ -47,8 +55,7 @@ fn encode_image_event_golden() {
                     "str" => json!({"event_type": "big", "v": "x".repeat(size)}),
                     _ => json!({"event_type": "big", "v": vec![Value::Null; size]}),
                 };
-                let wire =
-                    WireFormat::from_name_lenient(c.get("wire").and_then(Value::as_str).unwrap());
+                let wire = wire_of(&c);
                 let bytes = encode_image_event(&payload, wire).unwrap();
                 assert_eq!(
                     bytes.len() as u64,
@@ -162,7 +169,7 @@ fn tracker_golden() {
             other => panic!("未知函数 {other}"),
         }
         let expected = c.get("expected").and_then(Value::as_i64).unwrap();
-        let wire = WireFormat::from_name_lenient(c.get("wire").and_then(Value::as_str).unwrap());
+        let wire = wire_of(&c);
         let max_event = c.get("max_event").and_then(Value::as_u64).unwrap();
         let max_stream = c.get("max_stream").and_then(Value::as_u64).unwrap();
         let mut t = ImageEventTracker::with_limits(expected, wire, max_event, max_stream).unwrap();
@@ -245,12 +252,8 @@ fn constants_golden() {
         u("max_stream_bytes")
     );
     assert_eq!(
-        gate_core::image_events::SAFE_ERROR,
-        c.get("safe_error").and_then(Value::as_str).unwrap()
-    );
-    assert_eq!(
         gate_core::image_events::ImageStreamProtocolError.to_string(),
-        gate_core::image_events::SAFE_ERROR
+        c.get("safe_error").and_then(Value::as_str).unwrap()
     );
     assert_eq!(
         gate_core::json_body::MAX_JSON_DEPTH as u64,

@@ -141,7 +141,7 @@ fn replay(c: &Case) -> usize {
                 );
                 let _ = wall;
                 let mut calls = 0;
-                let mut alerts = Vec::new();
+                let mut low = false;
                 let mut writes = Vec::new();
                 let out = match core.check_cache(token, mono, threshold) {
                     Begin::Unavailable => {
@@ -166,9 +166,7 @@ fn replay(c: &Case) -> usize {
                         };
                         let r =
                             core.finish_resolve(token, &fetched, wall_after, mono_after, threshold);
-                        if let Some(a) = r.low_alert {
-                            alerts.push(json!(["v5_low", a.message, a.cooldown_secs]));
-                        }
+                        low = r.low;
                         if let Some(secs) = r.note_period {
                             core.load_periods(kv.get(PERIOD_KEY).map(String::as_str));
                             let text = core.note_period(token, secs, wall_after).unwrap();
@@ -191,7 +189,14 @@ fn replay(c: &Case) -> usize {
                     step["http_calls"].as_i64().unwrap(),
                     "{ctx}：HTTP 调用次数"
                 );
-                assert_eq_py(c, &Value::Array(alerts), &step["alerts"]);
+                // 「额度偏低」不再发告警，只写一行日志（docs/v3-deviations.md #102）：旧版这一步发了
+                // v5_low 告警 ⇔ 3.0 的 `low` 为真；告警文案与冷却不再比
+                let alerted = step["alerts"].as_array().unwrap();
+                assert!(
+                    alerted.iter().all(|a| a[0] == "v5_low"),
+                    "{ctx}：{alerted:?}"
+                );
+                assert_eq!(low, !alerted.is_empty(), "{ctx}：额度偏低的判定");
                 assert_eq_py(c, &row_json(&core, token), &step["row"]);
                 assert_eq_py(c, &Value::Array(writes), &step["writes"]);
             }

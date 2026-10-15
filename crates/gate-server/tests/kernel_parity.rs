@@ -518,30 +518,36 @@ mod v3 {
         autopilot_hours: Vec<String>,
     }
 
+    /// 一条按服务日过滤的聚合查询（只有一行），列名为键。
+    async fn row_of_day(db: &gate_db::Db, sql: &'static str, day: &str) -> Value {
+        let day = day.to_string();
+        db.read(move |c| c.query_row(sql, [&day], gate_db::value::row_json))
+            .await
+            .unwrap()
+    }
+
     /// 这些服务日里，旧版的复盘会按账号层面「`units` / `images`」折算 `used`（`units < images`）的，
     /// 以及 3.0 应得的实际张数（不含测试号、站长号的成员计数之和）。测试自己写 SQL 算，不用被测代码。
     pub async fn raw_used_days(db: &gate_db::Db, days: &[String]) -> HashMap<String, i64> {
         let mut out = HashMap::new();
         for day in days {
-            let up = db
-                .execute_fetchall_compat(
-                    "SELECT COALESCE(SUM(images),0) AS i, COALESCE(SUM(COALESCE(units, images)),0) AS u \
-                     FROM upstream_token_counters WHERE day=?",
-                    &[json!(day)],
-                )
-                .await
-                .unwrap();
-            let (i, u) = (up[0]["i"].as_f64().unwrap(), up[0]["u"].as_f64().unwrap());
+            let up = row_of_day(
+                db,
+                "SELECT COALESCE(SUM(images),0) AS i, COALESCE(SUM(COALESCE(units, images)),0) AS u \
+                 FROM upstream_token_counters WHERE day=?",
+                day,
+            )
+            .await;
+            let (i, u) = (up["i"].as_f64().unwrap(), up["u"].as_f64().unwrap());
             if i != 0.0 && u < i {
-                let used = db
-                    .execute_fetchall_compat(
-                        "SELECT COALESCE(SUM(c.images),0) AS n FROM counters c JOIN api_keys k ON k.id=c.key_id \
-                         WHERE c.day=? AND k.is_test=0 AND k.is_admin=0",
-                        &[json!(day)],
-                    )
-                    .await
-                    .unwrap();
-                out.insert(day.clone(), used[0]["n"].as_i64().unwrap());
+                let used = row_of_day(
+                    db,
+                    "SELECT COALESCE(SUM(c.images),0) AS n FROM counters c JOIN api_keys k ON k.id=c.key_id \
+                     WHERE c.day=? AND k.is_test=0 AND k.is_admin=0",
+                    day,
+                )
+                .await;
+                out.insert(day.clone(), used["n"].as_i64().unwrap());
             }
         }
         out
@@ -562,7 +568,12 @@ mod v3 {
     const DROPPED_SETTINGS: [&str; 2] = ["guard_base_daily_images", "quota_base_now"];
 
     /// 整个场景测的是 3.0 已经删掉的规则，没有可比的东西。
-    pub const REMOVED_SCENARIOS: [(&str, &str); 9] = [
+    pub const REMOVED_SCENARIOS: [(&str, &str); 10] = [
+        (
+            "v19_private_params",
+            "测的就是私密参数 allocation.min_coverage_hours 把昨天数据覆盖的下限改成 10 小时：\
+             私密参数文件已取消，下限固定为 20 小时（docs/v3-deviations.md #91）",
+        ),
         (
             "k23_enforce_slots_via_tick",
             "测的就是内核 tick 里「名额 +5」生效（名额 12 → 17）：规则已删除（docs/v3-deviations.md #68）",
@@ -1012,6 +1023,20 @@ mod v3 {
                             .and_then(Value::as_object_mut)
                         {
                             g.shift_remove("base_daily_images");
+                            // 出图后静默进了账号保护的设置（#87）：场景里不改，是默认值，排在 interval_jitter 后面
+                            let old = std::mem::take(g);
+                            for (k, v) in old {
+                                let after_jitter = k == "interval_jitter";
+                                g.insert(k, v);
+                                if after_jitter {
+                                    g.insert("post_jitter_min".into(), json!(1));
+                                    g.insert("post_jitter_max".into(), json!(3));
+                                }
+                            }
+                            // 每小时上限自动调整的下限 / 上限 / 步长（原来是私密参数，docs/v3-deviations.md #91）
+                            g.insert("hourly_min".into(), json!(100));
+                            g.insert("hourly_max".into(), json!(160));
+                            g.insert("hourly_step".into(), json!(10));
                         }
                     }
                     // 分配模块的面板参数「V5 每人范围 3～30 张」换成新公式的说明（#63）
@@ -1022,6 +1047,12 @@ mod v3 {
                                 m["question"] = json!("全站熔断、单个 Key 限流");
                                 let params = m["params"].as_array_mut().unwrap();
                                 assert_eq!(params.pop().unwrap()["name"], "名额");
+                            }
+                            // 新领的 Key 的有效天数：旧版是环境变量，3.0 读后台「领 Key」的设置（没设过 = 0，不过期）
+                            if m["name"] == "registration" {
+                                let p = &mut m["params"][0];
+                                assert_eq!(p["name"], "Key 有效天数");
+                                p["value"] = json!(0);
                             }
                             if m["name"] == "allocation" {
                                 let p = &mut m["params"][3];
@@ -1201,6 +1232,9 @@ fn drop_check_bugs(diff: &mut Value) {
 // 回放
 // ---------------------------------------------------------------------------
 
+/// 站长告警私信发到的频道：假上游同时扮演 Discord，建私信频道时回这个 id。
+const OWNER_DM: &str = "/channels/900000000000000030/messages";
+
 async fn settle(state: &AppState, mock: &MockUpstream) -> Vec<String> {
     // 记 Bug 的后台任务写完；告警是 fire-and-forget 的 HTTP，等请求数稳定
     for _ in 0..1000 {
@@ -1211,14 +1245,14 @@ async fn settle(state: &AppState, mock: &MockUpstream) -> Vec<String> {
     }
     let mut last = usize::MAX;
     for _ in 0..200 {
-        let n = mock.requests_to("/alert-hook").len();
+        let n = mock.requests_to(OWNER_DM).len();
         if n == last {
             break;
         }
         last = n;
         tokio::time::sleep(std::time::Duration::from_millis(15)).await;
     }
-    mock.requests_to("/alert-hook")
+    mock.requests_to(OWNER_DM)
         .iter()
         .map(|r| {
             r.json()
@@ -1247,44 +1281,43 @@ async fn run_case(case: &Value) -> Result<(), String> {
     gate_server::time::freeze(Some(first_at));
 
     let mock = MockUpstream::start().await;
+    mock.push(
+        "/users/@me/channels",
+        gate_testkit::Reply::json(200, &json!({"id": "900000000000000030"})),
+    );
     let dir = tempfile::tempdir().unwrap();
-    if let Some(p) = case["private_params"].as_object() {
-        std::fs::write(
-            dir.path().join("private_params.json"),
-            serde_json::to_vec(p).unwrap(),
-        )
-        .unwrap();
-    }
-    let num = |k: &str| gate_core::pyc::float_repr(env[k].as_f64().unwrap());
     let int = |k: &str| env[k].as_i64().unwrap().to_string();
     let vars: HashMap<String, String> = [
         ("DATA_DIR", dir.path().to_str().unwrap().to_string()),
         ("NAI_TOKENS", tokens.join(",")),
         ("NAI_IMAGE_HOST", mock.url()),
-        ("ALERT_WEBHOOK_URL", format!("{}/alert-hook", mock.url())),
-        ("TZ", "Asia/Shanghai".into()),
-        ("DAY_RESET_HOUR", "7".into()),
-        ("IMAGE_MIN_INTERVAL", num("image_min_interval")),
+        // 告警私信站长（旧版走 Webhook；3.0 只剩私信，docs/v3-deviations.md #102）
+        ("DISCORD_BOT_TOKEN", "synthetic-bot".into()),
+        ("DISCORD_API_BASE", mock.url()),
+        ("ALERT_USER_ID", "900000000000000031".into()),
         // 夹具 env 里的 key_image_min_interval：3.0 没有每 Key 出图间隔（docs/v3-deviations.md #64），不再传
-        ("DEFAULT_KEY_EXPIRES_DAYS", int("default_expires_days")),
+        // 夹具 env 里的 default_expires_days：3.0 没有这个环境变量（新 Key 的有效天数是后台「领 Key」的设置，
+        // docs/v3-deviations.md #93 #97），「领 Key」模块面板上那一项的期望在 v3::Expect 里改写
         (
             "KEY_INACTIVITY_DELETE_DAYS",
             int("key_inactivity_delete_days"),
         ),
         // 夹具 env 里的 global_daily_v5：3.0 没有这个环境变量（全站 V5 归动态额度管，docs/v3-deviations.md #70），不再传
-        ("POST_REQUEST_JITTER_MIN", num("post_jitter_min")),
-        ("POST_REQUEST_JITTER_MAX", num("post_jitter_max")),
+        // 夹具 env 里的 post_jitter_min / max：出图后静默改成账号保护的设置（docs/v3-deviations.md #87），
+        // 没有环境变量了；内核场景不出图，用不到它们
         (
             "SECRET_KEY",
             "test-secret-key-test-secret-key-0123456789".into(),
         ),
         ("ADMIN_PASSWORD", "dev-admin-password-123".into()),
-        ("UPSTREAM_HTTP2", "0".into()),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))
     .collect();
-    let state = AppState::build(EnvConfig::load(&vars), Assets::new(None))
+    let mut env_config = EnvConfig::load(&vars);
+    // 每个上游账号的出图间隔是代码常量（docs/v3-deviations.md #95），场景里直接改
+    env_config.image_min_interval = env["image_min_interval"].as_f64().unwrap();
+    let state = AppState::build(env_config, Assets::new(None))
         .await
         .map_err(|e| format!("{name}: 建网关失败 {e}"))?;
     state
@@ -1684,11 +1717,14 @@ async fn kernel_replays_match_python() {
     );
 }
 
-/// 告警正文「⚠ **猫头鹰公益站告警**（kind）…」里的 kind 是否还会私信。
+/// 告警正文「⚠ **猫头鹰公益站告警**（kind）…」里的 kind 是否还会私信（只有重大事故，见 `alerts.rs`）。
 fn alert_pages(text: &str) -> bool {
     let kind = text
         .split_once('（')
         .and_then(|(_, rest)| rest.split_once('）'))
         .map_or("", |(k, _)| k);
-    gate_server::alerts::pages(kind)
+    matches!(
+        kind,
+        "upstream_401" | "upstream_403_cooldown" | "upstream_token_changed" | "disk_low" | "test"
+    )
 }

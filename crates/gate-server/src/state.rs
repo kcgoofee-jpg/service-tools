@@ -8,7 +8,6 @@ use crate::env::EnvConfig;
 use crate::guard::Guard;
 use crate::hooks::GateHooks;
 use crate::middleware::StatusStats;
-use crate::params::ParamsStore;
 use crate::registration::{MemberWeb, RegistrationService};
 use crate::runtime::{
     AuthGuard, ImageCooldown, KeyPauses, SlidingWindow, TagQueue, UpstreamHealth,
@@ -34,7 +33,7 @@ pub const RUNTIME_LIMIT_BOUNDS: [(&str, i64, i64); 3] = [
     ("image_429_cooldown_seconds", 60, 3600),
 ];
 
-/// 运行期限制的当前值（启动时 env，之后可被后台覆盖）。
+/// 运行期限制的当前值（启动时是 [`crate::env`] 里的代码常量，之后可被后台覆盖）。
 #[derive(Debug, Clone, Copy)]
 pub struct RuntimeLimits {
     pub queue_timeout: f64,
@@ -68,7 +67,6 @@ pub struct Inner {
     pub assets: Assets,
     pub status_stats: StatusStats,
     pub version: &'static str,
-    pub params: Arc<ParamsStore>,
     pub alerter: Arc<Alerter>,
     pub announcer: Arc<Alerter>,
     pub bugs: Arc<Bugs>,
@@ -86,7 +84,7 @@ pub struct Inner {
     /// V5 官方免费额度缓存（只有真实出图会刷新）。
     pub allowance: crate::allowance::ServerAllowance,
     pub health: UpstreamHealth,
-    /// 标签补全等非出图请求的全站并发（旧版 GLOBAL_CONCURRENCY；文本接口已删，docs/v3-deviations.md #81）。
+    /// 标签补全的全站并发（容量是常量 [`crate::runtime::TAG_CONCURRENCY`]；文本接口已删，docs/v3-deviations.md #81）。
     /// 每把 Key 的信号量（`KEY_CONCURRENCY`）已删除：出图由排队管、标签补全由补全队列管（docs/v3-deviations.md #64）。
     pub global_sem: Arc<tokio::sync::Semaphore>,
     pub global_waiting: AtomicI64,
@@ -103,8 +101,6 @@ pub struct Inner {
     pub shutdown: CancellationToken,
     /// 近 1 分钟的请求结果（首页实时图）。
     pub live_events: Mutex<std::collections::VecDeque<(f64, String)>>,
-    /// 最近 30 分钟上游 5xx：(时间, key_id)。只有不止一把 Key 遇到才算上游故障（见 `note_upstream_5xx`）。
-    pub recent_5xx: Mutex<std::collections::VecDeque<(f64, i64)>>,
     /// 实时看板快照（`/public/live` 与 SSE 共用）、`/public/status` 缓存、前端报错限流。
     pub live: crate::live::Hub,
     /// Discord 自助领 Key（`env.registration` 配齐才有；否则 `/self-register/*` 回 503）。
@@ -145,21 +141,19 @@ impl AppState {
         std::fs::create_dir_all(&env.data_dir)?;
         let now = crate::time::now();
         let db = Db::open(env.db_path(), now, gate_core::reasons::BACKFILL)?;
-        db.set_rule_version(VERSION);
-        let clock = Clock::new(&env.tz, env.day_reset_hour);
-        let params = Arc::new(ParamsStore::new(env.private_params_path()));
+        let clock = Clock::service();
         let alerter = Arc::new(Alerter::owner(&env));
         let announcer = Arc::new(Alerter::announcer(&env));
         let tasks = TaskTracker::new();
-        let bugs = Arc::new(Bugs::new(db.clone(), alerter.clone(), tasks.clone()));
+        let bugs = Arc::new(Bugs::new(db.clone(), tasks.clone()));
         let guard = Arc::new(Guard::new(
             db.clone(),
-            &env.tz,
-            env.day_reset_hour,
-            params.clone(),
+            gate_core::clock::TZ,
+            gate_core::clock::DAY_RESET_HOUR,
         ));
 
-        // 上游 Token：后台接管过就以 upstream_tokens.json 为准，否则用 NAI_TOKENS
+        // 上游 Token：后台接管过就以 upstream_tokens.json 为准，否则用 NAI_TOKENS。
+        // V5 日限额、启停、出图并发都在后台按 Token 设（存库，见 startup 的 apply_saved）
         let managed = gate_upstream::token_store::load(&env.upstream_tokens_path());
         let tokens: Vec<(String, i64, bool)> = match &managed {
             Some(entries) => entries
@@ -173,7 +167,7 @@ impl AppState {
                 .map(|(i, t)| {
                     (
                         t.clone(),
-                        env.nai_token_v5_daily_limits.get(i).copied().unwrap_or(0),
+                        0,
                         env.nai_token_allow_anlas.get(i).copied().unwrap_or(true),
                     )
                 })
@@ -184,11 +178,6 @@ impl AppState {
             UpConfig {
                 image_host: env.image_host.clone(),
                 proxy: Some(env.upstream_proxy.clone()).filter(|s| !s.is_empty()),
-                custom_user_agent: Some(env.upstream_user_agent.clone()).filter(|s| !s.is_empty()),
-                http2: env.upstream_http2,
-                post_jitter_min: env.post_request_jitter_min,
-                post_jitter_max: env.post_request_jitter_max,
-                single_slot_enforced: env.single_image_slot_enforced,
                 image_min_interval: env.image_min_interval,
             },
             hooks,
@@ -200,15 +189,14 @@ impl AppState {
             image_429_cooldown_seconds: env.image_429_cooldown_seconds,
         };
         let secret_key = resolve_secret(&env)?;
-        let global = env.global_concurrency.max(1) as usize;
-        let allowance = crate::allowance::ServerAllowance::new(db.clone(), alerter.clone());
+        let tag_slots = crate::runtime::TAG_CONCURRENCY as usize;
+        let allowance = crate::allowance::ServerAllowance::new(db.clone());
         let registration = RegistrationService::from_env(&env, db.clone()).map(Arc::new);
         let state = Self(Arc::new(Inner {
             clock,
             assets,
             status_stats: StatusStats::default(),
             version: VERSION,
-            params,
             alerter,
             announcer,
             bugs,
@@ -224,7 +212,7 @@ impl AppState {
             ops: crate::ops::Shared::default(),
             allowance,
             health: UpstreamHealth::default(),
-            global_sem: Arc::new(tokio::sync::Semaphore::new(global)),
+            global_sem: Arc::new(tokio::sync::Semaphore::new(tag_slots)),
             global_waiting: AtomicI64::new(0),
             global_active: AtomicI64::new(0),
             budget: tokio::sync::Mutex::new(Budget::default()),
@@ -234,7 +222,6 @@ impl AppState {
             tasks,
             shutdown: CancellationToken::new(),
             live_events: Mutex::new(std::collections::VecDeque::new()),
-            recent_5xx: Mutex::new(std::collections::VecDeque::new()),
             live: crate::live::Hub::new(),
             registration,
             member_web: MemberWeb::default(),
@@ -315,7 +302,7 @@ impl AppState {
         Ok(())
     }
 
-    /// 后台保存过的运行期限制在每次重启后优先于 .env（越界值忽略）。
+    /// 后台保存过的运行期限制在每次重启后优先于代码常量（越界值忽略）。
     pub async fn load_runtime_limits(&self) -> anyhow::Result<()> {
         let mut values = Vec::new();
         for (name, lo, hi) in RUNTIME_LIMIT_BOUNDS {
@@ -375,7 +362,7 @@ impl AppState {
         }
     }
 
-    /// 上游 429：暂停全站图片请求（写库 + AIMD + 告警），返回剩余冷却秒数。
+    /// 上游 429：暂停全站图片请求（写库 + AIMD + 写一行日志），返回剩余冷却秒数。
     pub async fn block_image_generation(&self, retry_after: f64) -> i64 {
         let now = self.now();
         let until = self.cooldown.block(retry_after, now);
@@ -392,51 +379,24 @@ impl AppState {
         }
         let remaining = ((until - now) as i64).max(1);
         match self.guard.on_upstream_429(now).await {
-            Ok(Some((old, new))) => self.alerter.notify(
-                "guard_hourly_down",
-                &format!("上游限流：每小时出图上限自动从 {old} 降到 {new}，之后连续一天没有限流会每天 +10。"),
-                0.0,
+            Ok(Some((old, new))) => tracing::info!(
+                "上游限流：每小时出图上限自动从 {old} 降到 {new}，之后连续一天没有限流会每天 +10"
             ),
             Ok(None) => {}
             Err(e) => {
-                self.bugs.capture(crate::bugs::Report { source: "guard_429", error: Some(("GuardIoError", &e.to_string())), ..Default::default() });
+                self.bugs.capture(crate::bugs::Report {
+                    source: "guard_429",
+                    error: Some(("GuardIoError", &e.to_string())),
+                    ..Default::default()
+                });
             }
         }
-        self.alerter.notify(
-            "upstream_429",
-            &format!("NovelAI 对图片请求返回 429（限流），全站生图已暂停 {remaining} 秒。如果频繁出现，请降低成员人数或调大图片间隔。"),
-            1800.0,
-        );
+        tracing::warn!("NovelAI 对图片请求返回 429（限流），全站生图暂停 {remaining} 秒");
         remaining
     }
 
-    /// 记一次上游 5xx；最近 30 分钟内至少 2 把不同的 Key 遇到时返回 true（该告警站长了）。
-    /// 旧版每个 500 都告警：一位成员反复提交上游处理不了的请求（2026-10-14 夜，V5 + 超长负面提示词）
-    /// 就会每半小时私信站长一次「上游可能故障」，而同时段其他成员一切正常。
-    pub fn note_upstream_5xx(&self, key_id: i64) -> bool {
-        let now = self.now();
-        let mut q = self.recent_5xx.lock().expect("5xx");
-        q.push_back((now, key_id));
-        while q.front().is_some_and(|(t, _)| now - t > 1800.0) {
-            q.pop_front();
-        }
-        let first = q.front().map(|(_, k)| *k);
-        q.iter().any(|(_, k)| Some(*k) != first)
-    }
-
-    /// 记一次上游调用结果；状态翻转时告警。
+    /// 记一次上游调用结果（状态页的「上游」状态按最近 10 分钟算）。
     pub fn record_upstream(&self, ok: bool) {
-        match self.health.record(ok, self.now()) {
-            Some(crate::runtime::HealthChange::Degraded) => self.alerter.notify(
-                "upstream_degraded",
-                "NovelAI 上游近 10 分钟失败率偏高（上游可能在故障），成员的生图会受影响。",
-                1800.0,
-            ),
-            Some(crate::runtime::HealthChange::Recovered) => {
-                self.alerter
-                    .notify("upstream_recovered", "NovelAI 上游已恢复正常。", 0.0)
-            }
-            None => {}
-        }
+        self.health.record(ok, self.now());
     }
 }

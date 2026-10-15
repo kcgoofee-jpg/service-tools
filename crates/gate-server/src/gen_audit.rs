@@ -16,9 +16,7 @@ pub async fn run(
     body: &serde_json::Value,
     content: Option<bytes::Bytes>,
 ) {
-    let Ok((want_prompts, want_images, _days)) =
-        crate::audit::audit_flags(&state.db, &state.env).await
-    else {
+    let Ok((want_prompts, want_images, _days)) = crate::audit::audit_flags(&state.db).await else {
         return;
     };
     if !(want_prompts || want_images) {

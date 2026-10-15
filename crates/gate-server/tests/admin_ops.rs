@@ -99,11 +99,8 @@ impl<'a> Api<'a> {
 
 /// `site_settings` 全部行。
 async fn settings(e: &Env) -> BTreeMap<String, String> {
-    e.state
-        .db
-        .execute_fetchall_compat("SELECT key, value FROM site_settings", &[])
+    common::query(&e.state.db, "SELECT key, value FROM site_settings")
         .await
-        .unwrap()
         .into_iter()
         .map(|r| {
             (
@@ -135,7 +132,7 @@ fn map(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
 
 /// 操作日志（旧→新）：(操作者, 操作, 对象, 详情, 成功?)。
 async fn actions(e: &Env) -> Vec<(String, String, String, String, bool)> {
-    let mut rows = e.state.db.list_admin_actions(200, 0).await.unwrap();
+    let mut rows = common::admin_actions(&e.state.db, 200).await;
     rows.reverse();
     rows.iter()
         .map(|r| {
@@ -186,8 +183,6 @@ const ENDPOINTS: &[(&str, &str)] = &[
     ("GET", "/guard"),
     ("PUT", "/guard"),
     ("GET", "/discord-bot"),
-    ("GET", "/home/join"),
-    ("POST", "/home/join"),
     ("GET", "/reconciliation"),
     ("POST", "/reconciliation"),
 ];
@@ -241,7 +236,7 @@ async fn every_endpoint_needs_a_session_and_same_origin_writes() {
 
 // ------------------------------------------------------------------ 预算
 
-const SETTINGS_DEFAULT: &str = r#"{"global_monthly_anlas":10000.0,"global_daily_v5":150,"member_daily_anlas":50,"v5_alert_threshold":20}"#;
+const SETTINGS_DEFAULT: &str = r#"{"global_monthly_anlas":10000.0,"global_daily_v5":150,"global_daily_anlas":200,"member_daily_anlas":50,"v5_alert_threshold":20}"#;
 
 #[tokio::test]
 async fn settings_get_put_and_stored_strings() {
@@ -280,11 +275,12 @@ async fn settings_get_put_and_stored_strings() {
     assert_eq!(s, 200);
     assert_eq!(
         t,
-        r#"{"ok":true,"global_monthly_anlas":10000.0,"global_daily_v5":150,"member_daily_anlas":50,"v5_alert_threshold":20}"#
+        r#"{"ok":true,"global_monthly_anlas":10000.0,"global_daily_v5":150,"global_daily_anlas":200,"member_daily_anlas":50,"v5_alert_threshold":20}"#
     );
     assert_eq!(
         changed(&before, &settings(&e).await),
         map(&[
+            ("global_daily_anlas", "200"),
             ("global_daily_v5", "150"),
             ("global_monthly_anlas", "10000.0"),
             ("member_daily_anlas", "50"),
@@ -297,40 +293,40 @@ async fn settings_get_put_and_stored_strings() {
     let ok_cases: Vec<(Value, &str, [&str; 4])> = vec![
         (
             json!({"global_monthly_anlas": 5000, "global_daily_v5": 200, "member_daily_anlas": 40, "v5_alert_threshold": 30}),
-            r#"{"ok":true,"global_monthly_anlas":5000.0,"global_daily_v5":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
+            r#"{"ok":true,"global_monthly_anlas":5000.0,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
             ["5000.0", "200", "40", "30"],
         ),
         // 字符串数字也收（与旧版 float("1e3") 一致）
         (
             json!({"global_monthly_anlas": "1e3"}),
-            r#"{"ok":true,"global_monthly_anlas":1000.0,"global_daily_v5":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
+            r#"{"ok":true,"global_monthly_anlas":1000.0,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
             ["1000.0", "200", "40", "30"],
         ),
         // 0 被夹到下限：库里是整数 "0"，响应仍是请求值的浮点写法（旧版怪癖）
         (
             json!({"global_monthly_anlas": 0}),
-            r#"{"ok":true,"global_monthly_anlas":0.0,"global_daily_v5":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
+            r#"{"ok":true,"global_monthly_anlas":0.0,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
             ["0", "200", "40", "30"],
         ),
         (
             json!({"global_monthly_anlas": 1000000}),
-            r#"{"ok":true,"global_monthly_anlas":1000000.0,"global_daily_v5":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
+            r#"{"ok":true,"global_monthly_anlas":1000000.0,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
             ["1000000", "200", "40", "30"],
         ),
         (
             json!({"global_monthly_anlas": 12.5}),
-            r#"{"ok":true,"global_monthly_anlas":12.5,"global_daily_v5":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
+            r#"{"ok":true,"global_monthly_anlas":12.5,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
             ["12.5", "200", "40", "30"],
         ),
         (
             json!({"global_daily_v5": "150"}),
-            r#"{"ok":true,"global_monthly_anlas":12.5,"global_daily_v5":150,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
+            r#"{"ok":true,"global_monthly_anlas":12.5,"global_daily_v5":150,"global_daily_anlas":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
             ["12.5", "150", "40", "30"],
         ),
         // 12.0 作为整数字段：存 "12"
         (
             json!({"global_monthly_anlas": 7.0, "global_daily_v5": 12.0}),
-            r#"{"ok":true,"global_monthly_anlas":7.0,"global_daily_v5":12,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
+            r#"{"ok":true,"global_monthly_anlas":7.0,"global_daily_v5":12,"global_daily_anlas":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
             ["7.0", "12", "40", "30"],
         ),
     ];
@@ -373,15 +369,15 @@ async fn settings_get_put_and_stored_strings() {
         ),
         (
             json!({"v5_alert_threshold": 0}),
-            "V5 告警阈值必须为 1～100 的整数百分比",
+            "V5 余量低提示线必须为 1～100 的整数百分比",
         ),
         (
             json!({"v5_alert_threshold": 20.0}),
-            "V5 告警阈值必须为 1～100 的整数百分比",
+            "V5 余量低提示线必须为 1～100 的整数百分比",
         ),
         (
             json!({"v5_alert_threshold": "30"}),
-            "V5 告警阈值必须为 1～100 的整数百分比",
+            "V5 余量低提示线必须为 1～100 的整数百分比",
         ),
         (
             json!({"global_monthly_anlas": null}),
@@ -394,6 +390,22 @@ async fn settings_get_put_and_stored_strings() {
         (
             json!({"member_daily_anlas": 100001}),
             "member_daily_anlas 必须在 0～100000 之间",
+        ),
+        (
+            json!({"global_daily_anlas": 100001}),
+            "global_daily_anlas 必须在 0～100000 之间",
+        ),
+        (
+            json!({"global_daily_anlas": -1}),
+            "global_daily_anlas 必须在 0～100000 之间",
+        ),
+        (
+            json!({"global_daily_anlas": 1.5}),
+            "global_daily_anlas 必须是整数",
+        ),
+        (
+            json!({"global_daily_anlas": null}),
+            "global_daily_anlas 不能为空",
         ),
         (
             json!({"global_daily_v5": [1]}),
@@ -415,6 +427,53 @@ async fn settings_get_put_and_stored_strings() {
     assert!(rows.iter().any(|r| r.1 == "修改预算"
         && r.3 == r#"{"global_monthly_anlas":5000,"global_daily_v5":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#
         && r.4));
+}
+
+#[tokio::test]
+async fn global_daily_anlas_pool_is_editable() {
+    // Vibe 用的全站每日 Anlas 池（docs/v3-deviations.md #92：以前后台没有写入口，默认值取环境变量）
+    let e = setup(&[]).await;
+    let api = Api::login(&e).await;
+    assert_eq!(
+        api.json("GET", "/settings", None).await.1["global_daily_anlas"],
+        200
+    );
+    for (body, shown, stored) in [
+        (json!({"global_daily_anlas": 350}), 350, "350"),
+        (json!({"global_daily_anlas": "120"}), 120, "120"),
+        // 0 = 不开放 Vibe；12.0 作为整数字段存 "12"
+        (json!({"global_daily_anlas": 0}), 0, "0"),
+        (json!({"global_daily_anlas": 12.0}), 12, "12"),
+        (json!({"global_daily_anlas": 100000}), 100000, "100000"),
+    ] {
+        let (s, v) = api.json("PUT", "/settings", Some(body.clone())).await;
+        assert_eq!(
+            (s, &v["global_daily_anlas"]),
+            (200, &json!(shown)),
+            "{body}"
+        );
+        assert_eq!(settings(&e).await["global_daily_anlas"], stored, "{body}");
+        assert_eq!(
+            api.json("GET", "/settings", None).await.1["global_daily_anlas"],
+            shown
+        );
+    }
+    // 不带这个字段的保存不会把它改掉
+    api.json("PUT", "/settings", Some(json!({"member_daily_anlas": 60})))
+        .await;
+    assert_eq!(settings(&e).await["global_daily_anlas"], "100000");
+    // 准入真的读这个设置：池子是 0 时没有 Anlas 权限的成员用不了 Vibe（见 admission）
+    assert_eq!(
+        gate_core::site_flags::get_from_raw(
+            &gate_core::site_flags::GLOBAL_DAILY_ANLAS,
+            settings(&e)
+                .await
+                .get("global_daily_anlas")
+                .map(String::as_str),
+            None
+        ),
+        json!(100000)
+    );
 }
 
 // ------------------------------------------------------------------ 排队与冷却
@@ -530,7 +589,7 @@ async fn runtime_limits_validate_apply_and_persist() {
 
 // ------------------------------------------------------------------ 账号保护
 
-const GUARD_FIELDS: &str = r#""fields":{"account_daily_cap":{"default":1000,"min":0,"max":20000,"label":"每个上游账号每天最多出图张数"},"daily_burst":{"default":150,"min":0,"max":20000,"label":"每日上限按时段放行：每天重置时（默认 7 点）先放出这么多张，之后每小时补「每日上限 ÷ 24」张，没用完的留到后面；0 = 不分时段（整天先到先得）"},"account_hourly_cap":{"default":150,"min":0,"max":240,"label":"每个上游账号每小时最多出图张数（自动调整：上游 429 减半；前一天顶到过上限且没有 429 才 +10，范围 100～160）"},"quiet_start":{"default":0,"min":0,"max":23,"label":"安静时段开始（北京时间，整点）；与结束相同 = 不启用（2026-10-10 起不启用：夜里不限速）"},"quiet_end":{"default":0,"min":0,"max":23,"label":"安静时段结束（北京时间，整点；与开始相同表示不设安静时段）"},"quiet_hourly_cap":{"default":20,"min":0,"max":240,"label":"安静时段每小时最多出图张数；0 = 完全暂停出图（2026-10-13 站长：3-7 点停用）"},"interval_jitter":{"default":5,"min":0,"max":30,"label":"两次出图间隔额外随机增加 0～N 秒"},"key_image_queue":{"default":1,"min":0,"max":3,"label":"每把 Key 在生成中的那张之外，最多再排几张"},"queue_per_account":{"default":5,"min":0,"max":100,"label":"每个上游账号全站最多同时排几张图"}}"#;
+const GUARD_FIELDS: &str = r#""fields":{"account_daily_cap":{"default":1000,"min":0,"max":20000,"label":"每个上游账号每天最多出图张数"},"daily_burst":{"default":150,"min":0,"max":20000,"label":"每日上限按时段放行：每天重置时（默认 7 点）先放出这么多张，之后每小时补「每日上限 ÷ 24」张，没用完的留到后面；0 = 不分时段（整天先到先得）"},"account_hourly_cap":{"default":150,"min":0,"max":240,"label":"每个上游账号每小时最多出图张数（自动调整：上游 429 减半；前一天顶到过上限且没有 429 才上调一步；下限、上限、步长另有设置）"},"quiet_start":{"default":0,"min":0,"max":23,"label":"安静时段开始（北京时间，整点）；与结束相同 = 不启用（2026-10-10 起不启用：夜里不限速）"},"quiet_end":{"default":0,"min":0,"max":23,"label":"安静时段结束（北京时间，整点；与开始相同表示不设安静时段）"},"quiet_hourly_cap":{"default":20,"min":0,"max":240,"label":"安静时段每小时最多出图张数；0 = 完全暂停出图（2026-10-13 站长：3-7 点停用）"},"interval_jitter":{"default":5,"min":0,"max":30,"label":"两次出图间隔额外随机增加 0～N 秒"},"post_jitter_min":{"default":1,"min":0,"max":30,"label":"出图结束后至少静默几秒才开始下一张（实际静默在最少～最多之间均匀随机，不超过账号出图间隔；与出图间隔取较晚者）"},"post_jitter_max":{"default":3,"min":0,"max":30,"label":"出图结束后最多静默几秒（小于最少时按最少；两项都为 0 = 出图后不静默）"},"key_image_queue":{"default":1,"min":0,"max":3,"label":"每把 Key 在生成中的那张之外，最多再排几张"},"queue_per_account":{"default":5,"min":0,"max":100,"label":"每个上游账号全站最多同时排几张图"},"hourly_min":{"default":100,"min":0,"max":240,"label":"每小时上限自动调整的下限（上游 429 减半后不会低于它）"},"hourly_max":{"default":160,"min":0,"max":240,"label":"每小时上限自动调整的上限（平稳一天后自动上调，最高到这里）"},"hourly_step":{"default":10,"min":0,"max":100,"label":"每小时上限平稳一天后自动上调的步长；0 = 不自动上调"}}"#;
 
 fn guard_json(values: &str, quiet_now: bool, cap: i64, accounts: &str, queued: i64) -> String {
     format!(
@@ -542,7 +601,7 @@ fn guard_json(values: &str, quiet_now: bool, cap: i64, accounts: &str, queued: i
 async fn guard_get_put() {
     let e = setup(&[]).await;
     let api = Api::login(&e).await;
-    let defaults = r#"{"account_daily_cap":1000,"daily_burst":150,"account_hourly_cap":150,"quiet_start":0,"quiet_end":0,"quiet_hourly_cap":20,"interval_jitter":5,"key_image_queue":1,"queue_per_account":5}"#;
+    let defaults = r#"{"account_daily_cap":1000,"daily_burst":150,"account_hourly_cap":150,"quiet_start":0,"quiet_end":0,"quiet_hourly_cap":20,"interval_jitter":5,"post_jitter_min":1,"post_jitter_max":3,"key_image_queue":1,"queue_per_account":5,"hourly_min":100,"hourly_max":160,"hourly_step":10}"#;
     // 节约模式折算的 today_units 已删除（docs/v3-deviations.md #67）
     let acct0 = r#"[{"position":1,"usable":true,"today":0,"this_hour":0}]"#;
     assert_eq!(
@@ -551,7 +610,7 @@ async fn guard_get_put() {
     );
 
     let before = settings(&e).await;
-    let after_cap = r#"{"account_daily_cap":1000,"daily_burst":150,"account_hourly_cap":120,"quiet_start":0,"quiet_end":0,"quiet_hourly_cap":20,"interval_jitter":5,"key_image_queue":1,"queue_per_account":5}"#;
+    let after_cap = r#"{"account_daily_cap":1000,"daily_burst":150,"account_hourly_cap":120,"quiet_start":0,"quiet_end":0,"quiet_hourly_cap":20,"interval_jitter":5,"post_jitter_min":1,"post_jitter_max":3,"key_image_queue":1,"queue_per_account":5,"hourly_min":100,"hourly_max":160,"hourly_step":10}"#;
     assert_eq!(
         api.text("PUT", "/guard", Some(json!({"account_hourly_cap": 120})))
             .await,
@@ -574,7 +633,7 @@ async fn guard_get_put() {
     );
     assert_eq!(e.state.guard.with(|g| g.values["quiet_start"]), 3);
 
-    let label_cap = "每个上游账号每小时最多出图张数（自动调整：上游 429 减半；前一天顶到过上限且没有 429 才 +10，范围 100～160）";
+    let label_cap = "每个上游账号每小时最多出图张数（自动调整：上游 429 减半；前一天顶到过上限且没有 429 才上调一步；下限、上限、步长另有设置）";
     let frozen = settings(&e).await;
     for (body, detail) in [
         (
@@ -607,6 +666,112 @@ async fn guard_get_put() {
         && r.2 == "账号保护与排队"
         && r.3 == r#"{"account_hourly_cap":120}"#
         && r.4));
+}
+
+/// 出图后静默（docs/v3-deviations.md #87）：后台可调，0～30 秒，保存后上游客户端立即按新值静默。
+#[tokio::test]
+async fn guard_post_jitter_is_adjustable() {
+    let e = setup(&[]).await;
+    let api = Api::login(&e).await;
+    assert_eq!(
+        e.state.guard.post_jitter(),
+        (1.0, 3.0),
+        "默认与原来的环境变量一致"
+    );
+    let before = settings(&e).await;
+    api.json(
+        "PUT",
+        "/guard",
+        Some(json!({"post_jitter_min": 2, "post_jitter_max": 6})),
+    )
+    .await;
+    assert_eq!(e.state.guard.post_jitter(), (2.0, 6.0));
+    assert_eq!(
+        changed(&before, &settings(&e).await),
+        map(&[
+            ("guard_post_jitter_min", "2"),
+            ("guard_post_jitter_max", "6")
+        ])
+    );
+    api.fails(
+        "PUT",
+        "/guard",
+        Some(json!({"post_jitter_max": 31})),
+        422,
+        "出图结束后最多静默几秒（小于最少时按最少；两项都为 0 = 出图后不静默） 必须在 0～30 之间",
+    )
+    .await;
+    // 重启后从库里读回
+    e.state.guard.with(|g| {
+        g.values.insert("post_jitter_min".into(), 1);
+        g.values.insert("post_jitter_max".into(), 3);
+    });
+    e.state.guard.load().await.unwrap();
+    assert_eq!(e.state.guard.post_jitter(), (2.0, 6.0));
+}
+
+#[tokio::test]
+async fn guard_hourly_adjust_bounds_are_settings() {
+    // 每小时上限自动调整的下限 / 上限 / 步长：以前是私密参数文件 private_params.json 的 capacity.hourly_*，
+    // 现在和别的保护字段一样在后台改、存 site_settings（docs/v3-deviations.md #91）
+    let e = setup(&[]).await;
+    let api = Api::login(&e).await;
+    let v = api.get("/guard").await;
+    assert_eq!(
+        (
+            &v["values"]["hourly_min"],
+            &v["values"]["hourly_max"],
+            &v["values"]["hourly_step"]
+        ),
+        (&json!(100), &json!(160), &json!(10))
+    );
+    let before = settings(&e).await;
+    let (s, v) = api
+        .json(
+            "PUT",
+            "/guard",
+            Some(json!({"hourly_min": 90, "hourly_max": 200, "hourly_step": 20})),
+        )
+        .await;
+    assert_eq!(s, 200);
+    assert_eq!(
+        (
+            &v["values"]["hourly_min"],
+            &v["values"]["hourly_max"],
+            &v["values"]["hourly_step"]
+        ),
+        (&json!(90), &json!(200), &json!(20))
+    );
+    assert_eq!(
+        changed(&before, &settings(&e).await),
+        map(&[
+            ("guard_hourly_min", "90"),
+            ("guard_hourly_max", "200"),
+            ("guard_hourly_step", "20"),
+        ])
+    );
+    // 上游 429：150 减半是 75，被下限 90 托住
+    let change = e.state.guard.on_upstream_429(e.state.now()).await.unwrap();
+    assert_eq!(change, Some((150, 90)));
+    // 下限不能高于上限（只改一边也按现值比）；范围越界照旧 422；什么都没写
+    let frozen = settings(&e).await;
+    api.fails(
+        "PUT",
+        "/guard",
+        Some(json!({"hourly_min": 230})),
+        422,
+        "每小时上限自动调整的下限不能高于上限",
+    )
+    .await;
+    api.fails(
+        "PUT",
+        "/guard",
+        Some(json!({"hourly_step": 101})),
+        422,
+        "每小时上限平稳一天后自动上调的步长；0 = 不自动上调 必须在 0～100 之间",
+    )
+    .await;
+    assert_eq!(settings(&e).await, frozen);
 }
 
 #[tokio::test]
@@ -715,7 +880,8 @@ async fn discord_bot_status_only() {
 
 fn ops_fixed(v: &Value) -> Value {
     json!({
-        "registration": v["registration"], "features": v["features"], "audit": v["audit"],
+        "registration": v["registration"], "features": v["features"], "new_key": v["new_key"],
+        "audit": v["audit"],
     })
 }
 
@@ -728,7 +894,7 @@ async fn ops_snapshot_defaults() {
         ops_fixed(&v),
         json!({
             "registration": {"configured": false, "open": false, "max_users": 0, "features": null, "daily_images": 30,
-                // 新 Key 默认不过期（REGISTER_EXPIRES_DAYS 默认 0，docs/v3-deviations.md #70）
+                // 新 Key 默认不过期（docs/v3-deviations.md #70）
                 "daily_v5": 0, "image_scope": "legacy", "expires_days": 0, "role_guild": "", "role_id": "", "role_note": "",
                 "active": 0},
             "features": {
@@ -737,6 +903,8 @@ async fn ops_snapshot_defaults() {
                     "tags": "标签补全"},
                 "new_key": ["image"],
             },
+            // 后台「新建 Key」弹窗里没有数据库设置的默认值（docs/v3-deviations.md #94）
+            "new_key": {"rpm": 10, "daily_anlas": 0.0, "monthly_anlas": 2500.0},
             "audit": {"prompts": false, "thumbs": false, "retention_days": 7, "image_cap_mb": 8192,
                 "image_bytes": 0, "image_keep_hours": 24, "announce_configured": false},
         })
@@ -747,7 +915,10 @@ async fn ops_snapshot_defaults() {
     );
     // 键顺序
     let keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
-    assert_eq!(keys, ["registration", "features", "audit", "upstream"]);
+    assert_eq!(
+        keys,
+        ["registration", "features", "new_key", "audit", "upstream"]
+    );
     let reg_keys: Vec<&str> = v["registration"]
         .as_object()
         .unwrap()
@@ -993,7 +1164,7 @@ async fn ops_registration_put() {
 }
 
 #[tokio::test]
-async fn ops_registration_uses_env_defaults_when_configured() {
+async fn ops_registration_defaults_are_constants_not_env() {
     let secret = "x".repeat(32);
     let e = setup(&[
         ("DISCORD_CLIENT_ID", "1"),
@@ -1002,8 +1173,9 @@ async fn ops_registration_uses_env_defaults_when_configured() {
         ("REGISTRATION_BRIDGE_SECRET", &secret),
         ("DISCORD_GUILD_ID", "900000000000000001"),
         ("SITE_URL", "https://owl.example"),
+        // 这些环境变量 3.0 已删除（每日张数 / 模型范围归动态额度管，docs/v3-deviations.md #70；
+        // 名额 / 有效期 / 功能只在后台「领 Key」里设，#93）：设了也不读
         ("REGISTER_MAX_USERS", "12"),
-        // 这三个环境变量 3.0 已删除（归动态额度管，docs/v3-deviations.md #70）：设了也不读
         ("REGISTER_DAILY_IMAGES", "40"),
         ("REGISTER_DAILY_V5", "5"),
         ("REGISTER_IMAGE_SCOPE", "all"),
@@ -1043,11 +1215,11 @@ async fn ops_registration_uses_env_defaults_when_configured() {
     let v = api.get("/ops").await;
     assert_eq!(
         v["registration"],
-        json!({"configured": true, "open": false, "max_users": 12, "features": ["image", "vibe"], "daily_images": 30,
-               "daily_v5": 0, "image_scope": "legacy", "expires_days": 14, "role_guild": "", "role_id": "", "role_note": "",
+        json!({"configured": true, "open": false, "max_users": 10, "features": ["image"], "daily_images": 30,
+               "daily_v5": 0, "image_scope": "legacy", "expires_days": 0, "role_guild": "", "role_id": "", "role_note": "",
                "active": 2})
     );
-    // 站长在后台改过的值优先于 .env
+    // 站长在后台改过的值优先于 defaults 里的常量
     api.json("PUT", "/ops/registration", Some(json!({"max_users": 3})))
         .await;
     let v = api.get("/ops").await;
@@ -1204,68 +1376,40 @@ async fn ops_audit_put() {
     );
 }
 
-// ------------------------------------------------------------------ 首页加入按钮
+// ------------------------------------------------------------------ 首页加入按钮（已删除）
 
 #[tokio::test]
-async fn home_join() {
+async fn home_join_switch_is_gone() {
+    // 首页「加入 Discord」按钮跟着领 Key 开关（registration.open），不再有独立开关（docs/v3-deviations.md #92）
     let e = setup(&[]).await;
     let api = Api::login(&e).await;
-    assert_eq!(
-        api.text("GET", "/home/join", None).await,
-        (200, r#"{"open":true}"#.into())
-    );
-    assert_eq!(
-        api.text("POST", "/home/join", Some(json!({"open": false})))
-            .await,
-        (200, r#"{"ok":true,"open":false}"#.into())
-    );
-    assert_eq!(settings(&e).await["home_join_open"], "0");
-    assert_eq!(
-        api.text("GET", "/home/join", None).await,
-        (200, r#"{"open":false}"#.into())
-    );
-    // 缺省 = 开放；显式 0 / null = 关闭
-    assert_eq!(
-        api.json("POST", "/home/join", Some(json!({}))).await.1["open"],
-        true
-    );
-    assert_eq!(settings(&e).await["home_join_open"], "1");
-    assert_eq!(
-        api.json("POST", "/home/join", Some(json!({"open": 0})))
-            .await
-            .1["open"],
-        false
-    );
-    // 没有请求体 → 400
-    let (s, _, t) = api.raw("POST", "/home/join", None, &[]).await;
-    assert_eq!(
-        (s, t.as_str()),
-        (400, r#"{"detail":"请求体不是合法 JSON"}"#)
-    );
-
-    // 接口自己记一条（更具体），中间件只在失败时记「修改首页加入按钮」
-    let rows = actions(&e).await;
-    let join: Vec<(&str, &str, bool)> = rows
-        .iter()
-        .filter(|r| r.1.starts_with("首页加入按钮") || r.1 == "修改首页加入按钮")
-        .map(|r| (r.1.as_str(), r.3.as_str(), r.4))
-        .collect();
-    assert_eq!(
-        join,
-        vec![
-            ("首页加入按钮关闭（置灰「关闭注册」）", "", true),
-            ("首页加入按钮开放", "", true),
-            ("首页加入按钮关闭（置灰「关闭注册」）", "", true),
-            (
-                "修改首页加入按钮",
-                "失败（400）：请求体不是合法 JSON",
-                false
-            ),
-        ]
-    );
+    for method in ["GET", "POST"] {
+        let (s, _, _) = api
+            .raw(method, "/home/join", Some(json!({"open": false})), &[])
+            .await;
+        assert!(matches!(s, 404 | 405), "{method} {s}");
+    }
+    assert!(!settings(&e).await.contains_key("home_join_open"));
 }
 
 // ------------------------------------------------------------------ 公告与告警
+
+/// 站长告警私信发到的频道（假 Discord 建私信频道时回这个 id）。
+const OWNER_DM: &str = "/channels/900000000000000030/messages";
+
+/// 告警私信接到本地假 Discord：机器人 Token + 站长 ID，建私信频道回固定 id。
+fn owner_dm(hook: &MockUpstream) -> Vec<(&'static str, &'static str)> {
+    hook.push(
+        "/users/@me/channels",
+        Reply::json(200, &json!({"id": "900000000000000030"})),
+    );
+    let base: &'static str = Box::leak(hook.url().into_boxed_str());
+    vec![
+        ("DISCORD_BOT_TOKEN", "synthetic-bot"),
+        ("DISCORD_API_BASE", base),
+        ("ALERT_USER_ID", "900000000000000031"),
+    ]
+}
 
 #[tokio::test]
 async fn announcement_file_roundtrip() {
@@ -1377,19 +1521,19 @@ async fn alerts_test_unconfigured_then_throttled() {
         "/alerts/test",
         None,
         409,
-        "尚未配置告警渠道（ALERT_USER_ID / ALERT_CHANNEL_ID / ALERT_WEBHOOK_URL）",
+        "尚未配置告警私信（DISCORD_BOT_TOKEN 与 ALERT_USER_ID）",
     )
     .await;
-    // 配了 Webhook（指向本地假服务）：发一条，10 秒内再发被节流
+    // 配了私信（Discord 指向本地假服务）：发一条，10 秒内再发被节流
     let hook = MockUpstream::start().await;
-    let e = setup(&[("ALERT_WEBHOOK_URL", &format!("{}/hook", hook.url()))]).await;
+    let e = setup(&owner_dm(&hook)).await;
     let api = Api::login(&e).await;
     assert_eq!(
         api.text("POST", "/alerts/test", None).await,
         (200, r#"{"ok":true}"#.into())
     );
     settle().await;
-    let sent = hook.requests_to("/hook");
+    let sent = hook.requests_to(OWNER_DM);
     assert_eq!(sent.len(), 1);
     assert_eq!(
         sent[0].json(),
@@ -1404,7 +1548,7 @@ async fn alerts_test_unconfigured_then_throttled() {
         "{t}"
     );
     settle().await;
-    assert_eq!(hook.requests_to("/hook").len(), 1, "被节流的请求不会再发");
+    assert_eq!(hook.requests_to(OWNER_DM).len(), 1, "被节流的请求不会再发");
     // 操作日志里是「发送测试告警」
     let rows = actions(&e).await;
     assert_eq!(
@@ -1571,7 +1715,7 @@ async fn upstream_token_settings_endpoints() {
 #[tokio::test]
 async fn upstream_token_add_replace_remove() {
     let hook = MockUpstream::start().await;
-    let e = setup(&[("ALERT_WEBHOOK_URL", &format!("{}/hook", hook.url()))]).await;
+    let e = setup(&owner_dm(&hook)).await;
     let api = Api::login(&e).await;
     let first = e.state.nai.tokens().await[0].token_id.clone();
     let file = e.state.env.upstream_tokens_path();
@@ -1692,7 +1836,7 @@ async fn upstream_token_add_replace_remove() {
     // 站长私信：变更提醒
     settle().await;
     let alerts: Vec<String> = hook
-        .requests_to("/hook")
+        .requests_to(OWNER_DM)
         .iter()
         .map(|r| r.json()["content"].as_str().unwrap().to_string())
         .collect();
@@ -2593,6 +2737,7 @@ async fn status_codes_distribution() {
 
 #[tokio::test]
 async fn server_status_reports_alerts_audit_protection_disk() {
+    // 防爆破的几个数是代码常量（原来是环境变量，docs/v3-deviations.md #95）：环境里设了也不读
     let e = setup(&[("AUTH_FAIL_MAX", "7"), ("LOGIN_MAX_ATTEMPTS", "9")]).await;
     let api = Api::login(&e).await;
     let v = api.get("/status").await;
@@ -2610,7 +2755,7 @@ async fn server_status_reports_alerts_audit_protection_disk() {
     );
     assert_eq!(
         v["protection"],
-        json!({"auth_fail_max": 7, "auth_fail_window": 600, "auth_block_seconds": 900, "login_max_attempts": 9})
+        json!({"auth_fail_max": 20, "auth_fail_window": 600, "auth_block_seconds": 900, "login_max_attempts": 5})
     );
     let (free, total) = (
         v["disk"]["free_mb"].as_i64().unwrap(),

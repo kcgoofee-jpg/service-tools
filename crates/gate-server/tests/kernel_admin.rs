@@ -178,7 +178,7 @@ async fn quota_algo_put_saves_and_recomputes() {
     );
     // 后台操作日志：谁改了什么
     settle().await;
-    let rows = e.state.db.list_admin_actions(10, 0).await.unwrap();
+    let rows = common::admin_actions(&e.state.db, 10).await;
     assert!(
         rows.iter().any(|r| r["action"] == "修改动态额度参数"
             && r["target"] == "动态额度参数"
@@ -421,7 +421,7 @@ async fn modules_list_toggle_and_run() {
 
     // 操作日志：「模块 容量」这种对象名
     settle().await;
-    let rows = e.state.db.list_admin_actions(20, 0).await.unwrap();
+    let rows = common::admin_actions(&e.state.db, 20).await;
     assert!(
         rows.iter()
             .any(|r| r["action"] == "启用 / 关闭模块" && r["target"] == "模块 分配"),
@@ -523,11 +523,12 @@ async fn modules_put_errors() {
         .json("PUT", "/modules/nope", Some(json!({"enabled": true})))
         .await;
     assert_eq!((status, v), (404, json!({"detail": "没有这个模块"})));
-    // 旧版 FastAPI：`PUT /modules/run` 落到 `/modules/{name}`，name="run"
+    // 旧版 FastAPI 的 `PUT /modules/run` 落到 `/modules/{name}`（name="run"）回 404「没有这个模块」；
+    // 3.0 不再复刻，就是这个路径不接受 PUT（docs/v3-deviations.md #103）
     let (status, v) = api
         .json("PUT", "/modules/run", Some(json!({"enabled": true})))
         .await;
-    assert_eq!((status, v), (404, json!({"detail": "没有这个模块"})));
+    assert_eq!((status, v), (405, json!({"detail": "Method Not Allowed"})));
     // enabled 必须是布尔
     for body in [
         json!({}),
@@ -548,7 +549,7 @@ async fn modules_put_errors() {
 }
 
 #[tokio::test]
-async fn service_registrar_reads_settings_and_env_defaults() {
+async fn service_registrar_reads_settings_and_constant_defaults() {
     use gate_server::kernel::{KernelRegistrar, ServiceRegistrar};
     let e = setup(&[
         ("DISCORD_CLIENT_ID", "100000000"),
@@ -560,12 +561,13 @@ async fn service_registrar_reads_settings_and_env_defaults() {
         ),
         ("DISCORD_GUILD_ID", "9000000000000000099"),
         ("SITE_URL", "https://owl.example"),
+        // 环境变量 REGISTER_MAX_USERS 已删除（docs/v3-deviations.md #93）：设了也不读
         ("REGISTER_MAX_USERS", "20"),
     ])
     .await;
     let reg = ServiceRegistrar(e.state.registration.clone().expect("注册服务配齐了"));
     let s = reg.settings().await.unwrap();
-    assert_eq!(s.max_users, 20, "没有后台设置时用环境默认值");
+    assert_eq!(s.max_users, 10, "没有后台设置时用 defaults 里的常量");
     assert_eq!(reg.count_active().await.unwrap(), 0);
     // 后台保存的优先
     e.state

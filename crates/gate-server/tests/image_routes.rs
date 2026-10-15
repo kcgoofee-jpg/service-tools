@@ -315,12 +315,7 @@ async fn usage_log_never_records_a_client() {
     let rows = logs(&e.state).await;
     assert_eq!(rows.len(), 1);
     assert!(rows[0].get("client").is_none(), "{}", rows[0]);
-    let stored = e
-        .state
-        .db
-        .execute_fetchall_compat("SELECT client FROM usage_log", &[])
-        .await
-        .unwrap();
+    let stored = common::query(&e.state.db, "SELECT client FROM usage_log").await;
     assert_eq!(stored, [json!({"client": ""})]);
 }
 
@@ -644,7 +639,10 @@ async fn v1_alias_and_root_post_route_to_generate() {
 
 #[tokio::test]
 async fn generation_audit_records_prompt_and_image() {
-    let e = setup(&[("AUDIT_PROMPTS", "1"), ("AUDIT_THUMBS", "1")]).await;
+    // 记录开关只来自后台设置（环境变量 AUDIT_PROMPTS / AUDIT_THUMBS 已删除，docs/v3-deviations.md #93）
+    let e = setup(&[]).await;
+    e.state.db.set_setting("audit_prompts", "1").await.unwrap();
+    e.state.db.set_setting("audit_thumbs", "1").await.unwrap();
     let (status, _, _) = call(
         &e.state,
         "POST",
@@ -655,17 +653,13 @@ async fn generation_audit_records_prompt_and_image() {
     .await;
     assert_eq!(status, 200);
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    let (_, total) = e.state.db.list_audit(10, 0, Some(1)).await.unwrap();
-    assert_eq!(total, 1);
+    let rows = common::query(
+        &e.state.db,
+        "SELECT COUNT(*) AS n FROM generation_audit WHERE key_id=1",
+    )
+    .await;
+    assert_eq!(rows[0]["n"], 1);
     assert!(e.state.db.audit_image_bytes().await.unwrap() > 0);
-}
-
-#[tokio::test]
-async fn single_key_upstream_500s_do_not_page_owner() {
-    let e = setup(&[]).await;
-    assert!(!e.state.note_upstream_5xx(1));
-    assert!(!e.state.note_upstream_5xx(1));
-    assert!(e.state.note_upstream_5xx(2));
 }
 
 #[tokio::test]

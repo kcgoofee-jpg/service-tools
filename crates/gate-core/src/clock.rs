@@ -1,9 +1,14 @@
-//! 服务日：每天 `DAY_RESET_HOUR`（默认 7）点切换，时区 Asia/Shanghai。
+//! 服务日：每天 [`DAY_RESET_HOUR`]（7）点切换，时区 [`TZ`]（Asia/Shanghai）。两个都是代码常量，不读环境变量。
 //!
 //! 与 Python 版 `state.day / day_start / month`、`quota_algo` 里的 `time.mktime(strptime(day))`
 //! 逐位一致；时间戳一律是 Unix 秒（f64），由调用方传入，这里不读时钟。
 
 use jiff::{Timestamp, tz::TimeZone};
+
+/// 服务日的时区（北京时间）。
+pub const TZ: &str = "Asia/Shanghai";
+/// 服务日从几点开始（每日额度在这个点重置）。
+pub const DAY_RESET_HOUR: i64 = 7;
 
 #[derive(Debug, Clone)]
 pub struct Clock {
@@ -12,6 +17,11 @@ pub struct Clock {
 }
 
 impl Clock {
+    /// 线上用的服务日：[`TZ`] + [`DAY_RESET_HOUR`]。
+    pub fn service() -> Self {
+        Self::new(TZ, DAY_RESET_HOUR)
+    }
+
     /// `tz` 是 IANA 名（如 "Asia/Shanghai"）；未知名字回落到 UTC（Python 的 ZoneInfo 会抛异常，
     /// 但配置层已保证这里拿到的是合法值）。`reset_hour` 夹在 0..=23。
     pub fn new(tz: &str, reset_hour: i64) -> Self {
@@ -47,14 +57,6 @@ impl Clock {
         self.zoned(ts - (self.reset_hour * 3600) as f64)
             .strftime("%Y-%m-%d")
             .to_string()
-    }
-
-    /// Python 的 `ts or time.time()`：`None` 与 `0.0` 都表示「现在」。
-    pub fn or_now(ts: Option<f64>, now: f64) -> f64 {
-        match ts {
-            Some(t) if t != 0.0 => t,
-            _ => now,
-        }
     }
 
     /// `state.day_start(ts)`：该时刻所在服务日的起点时间戳。

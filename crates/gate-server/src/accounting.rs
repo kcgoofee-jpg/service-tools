@@ -114,7 +114,6 @@ impl AppState {
                             dur_ms: t.dur_ms,
                             up_status: i64::from(t.up_status),
                             rid: t.rid,
-                            src: t.src,
                         },
                         now,
                     )
@@ -138,7 +137,6 @@ impl AppState {
                             dur_ms: t.dur_ms,
                             up_status: i64::from(t.up_status),
                             rid: t.rid,
-                            src: t.src,
                             reason: e.reason,
                         },
                         now,

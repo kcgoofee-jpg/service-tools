@@ -50,6 +50,8 @@ zip = { workspace = true, features = ["deflate"] }
 base64.workspace = true
 reqwest.workspace = true
 rustix = { version = "1", default-features = false, features = ["std", "fs"] }
+# 只给 nai-gate 二进制当全局分配器用（src/main.rs）
+mimalloc.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
@@ -57,6 +59,7 @@ gate-testkit = { path = "../gate-testkit" }
 gate-golden = { path = "../gate-golden" }
 tempfile = "3"
 flate2 = "1"
+rmpv.workspace = true
 
 [lints]
 workspace = true

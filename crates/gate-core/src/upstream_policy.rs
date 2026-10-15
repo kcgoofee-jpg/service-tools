@@ -1,4 +1,4 @@
-//! 上游响应策略：Retry-After 解析、403 双义判别、状态码分类（移植自 `app/upstream_policy.py`）。
+//! 上游响应策略：Retry-After 解析与钳制、403 双义判别（移植自 `app/upstream_policy.py`）。
 //!
 //! 纯函数模块：不做任何标记 / 记账 / 抛错。429 / 403 / 401 的后续动作按通道各不相同
 //! （图片 / 图片流两处的消息、冷却与熔断策略都在调用点），这里只提供统一的无副作用判定。
@@ -6,7 +6,6 @@
 
 use crate::pyc;
 use crate::pyext::{PyErr, PyResult, py_int_str};
-use serde_json::Value;
 
 pub const RETRY_AFTER_MIN: f64 = 5.0;
 pub const RETRY_AFTER_MAX: f64 = 3600.0;
@@ -18,21 +17,6 @@ pub fn clamp_retry_after_f64(seconds: f64) -> f64 {
         return 20.0;
     }
     seconds.clamp(RETRY_AFTER_MIN, RETRY_AFTER_MAX)
-}
-
-/// `clamp_retry_after(value: Any)`：先 `float(value)`（TypeError / ValueError 一律回 20 秒），再钳制。
-pub fn clamp_retry_after(value: &Value) -> f64 {
-    let seconds = match value {
-        Value::Bool(b) => f64::from(u8::from(*b)),
-        Value::Number(n) => n.as_f64().unwrap_or(f64::NAN),
-        Value::String(s) => match pyc::parse_float(s) {
-            Some(f) => f,
-            None => return 20.0,
-        },
-        // None / list / dict：float() 抛 TypeError
-        _ => return 20.0,
-    };
-    clamp_retry_after_f64(seconds)
 }
 
 // ----------------------------------------------------------------------------- HTTP 日期（复刻 email.utils.parsedate_to_datetime）
@@ -362,7 +346,7 @@ pub fn parse_retry_after(header: Option<&str>, now: f64) -> PyResult<f64> {
     Ok(20.0)
 }
 
-// ----------------------------------------------------------------------------- 403 双义判别与分类
+// ----------------------------------------------------------------------------- 403 双义判别
 
 /// NovelAI 用 403 表示两类完全不同的东西：账号 / 风控被拒与「模型不存在」。
 /// 后者纯粹是成员填错模型，不能报「账号被隔离」，更不能污染账号健康度。
@@ -378,85 +362,19 @@ pub fn is_model_level_403(body_text: &str) -> bool {
     MODEL_403_MARKERS.iter().any(|m| low.contains(m))
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum VerdictKind {
-    RateLimited,
-    ForbiddenModel,
-    ForbiddenAccount,
-    Unauthorized,
-    Other,
-}
-
-impl VerdictKind {
-    /// 与旧版 `Verdict.kind` 的字符串一致。
-    pub fn as_str(self) -> &'static str {
-        match self {
-            VerdictKind::RateLimited => "rate_limited",
-            VerdictKind::ForbiddenModel => "forbidden_model",
-            VerdictKind::ForbiddenAccount => "forbidden_account",
-            VerdictKind::Unauthorized => "unauthorized",
-            VerdictKind::Other => "other",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Verdict {
-    pub kind: VerdictKind,
-    /// 仅 429 有意义（已钳制 5..3600）；其余类别为 0.0。
-    pub retry_after: f64,
-}
-
-/// 状态码 +（可选）Retry-After 头 +（仅 403 时）已窥探的响应体 → 统一判据。
-///
-/// `peek` 只在调用点确定要窥探时才传入（图片 403 会窥探 300 字节判「模型不存在」；
-/// 其余通道按政策不读上游错误体）。消息与后续动作留在调用点。
-pub fn classify_upstream(
-    status: i64,
-    retry_after_header: Option<&str>,
-    peek: &str,
-    now: f64,
-) -> PyResult<Verdict> {
-    Ok(match status {
-        429 => Verdict {
-            kind: VerdictKind::RateLimited,
-            retry_after: parse_retry_after(retry_after_header, now)?,
-        },
-        403 => Verdict {
-            kind: if is_model_level_403(peek) {
-                VerdictKind::ForbiddenModel
-            } else {
-                VerdictKind::ForbiddenAccount
-            },
-            retry_after: 0.0,
-        },
-        401 => Verdict {
-            kind: VerdictKind::Unauthorized,
-            retry_after: 0.0,
-        },
-        _ => Verdict {
-            kind: VerdictKind::Other,
-            retry_after: 0.0,
-        },
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
 
     // 2026-10-21 07:28:00 UTC
     const T: f64 = 1_792_567_680.0;
 
     #[test]
-    fn clamp_bounds_and_junk_default() {
-        assert_eq!(clamp_retry_after(&json!("junk")), 20.0);
-        assert_eq!(clamp_retry_after(&Value::Null), 20.0);
-        assert_eq!(clamp_retry_after(&json!(0)), 5.0);
-        assert_eq!(clamp_retry_after(&json!(-3)), 5.0);
-        assert_eq!(clamp_retry_after(&json!(1_000_000_000)), 3600.0);
-        assert_eq!(clamp_retry_after(&json!(30)), 30.0);
+    fn clamp_bounds_and_nan_default() {
+        assert_eq!(clamp_retry_after_f64(0.0), 5.0);
+        assert_eq!(clamp_retry_after_f64(-3.0), 5.0);
+        assert_eq!(clamp_retry_after_f64(1e9), 3600.0);
+        assert_eq!(clamp_retry_after_f64(30.0), 30.0);
         assert_eq!(clamp_retry_after_f64(f64::INFINITY), 3600.0);
         assert_eq!(clamp_retry_after_f64(f64::NAN), 20.0);
     }
@@ -501,26 +419,5 @@ mod tests {
             parse_retry_after(Some("30 Feb 2026 00:00:00 GMT"), T),
             Ok(20.0)
         );
-    }
-
-    #[test]
-    fn classify_kinds() {
-        let v = classify_upstream(429, Some("30"), "", T).unwrap();
-        assert_eq!((v.kind, v.retry_after), (VerdictKind::RateLimited, 30.0));
-        let marker = r#"{"statusCode":403,"message":"model 'nai-x' doesn't exist"}"#;
-        assert_eq!(
-            classify_upstream(403, None, marker, T).unwrap().kind,
-            VerdictKind::ForbiddenModel
-        );
-        assert_eq!(
-            classify_upstream(403, None, "", T).unwrap().kind,
-            VerdictKind::ForbiddenAccount
-        );
-        assert_eq!(
-            classify_upstream(401, None, "", T).unwrap().kind.as_str(),
-            "unauthorized"
-        );
-        let other = classify_upstream(500, None, "", T).unwrap();
-        assert_eq!((other.kind.as_str(), other.retry_after), ("other", 0.0));
     }
 }

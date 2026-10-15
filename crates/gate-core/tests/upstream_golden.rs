@@ -63,17 +63,22 @@ fn meta_matches_python() {
     }
 }
 
+/// 只剩浮点入口 `clamp_retry_after_f64`：任意 JSON 值的入口 `clamp_retry_after` 没有生产调用方，已删除
+/// （docs/v3-deviations.md #101），夹具里参数不是数字（字符串、None、bool、list、dict）的用例跳过。
 #[test]
 fn clamp_retry_after_golden() {
+    let mut n = 0;
     for c in load(M, "upstream/clamp_retry_after") {
         let arg = c.arg(0);
         // 非有限浮点在夹具里是 {"$f": ...}
-        let got = match as_f64(arg).filter(|_| !arg.is_number()) {
-            Some(x) => up::clamp_retry_after_f64(x),
-            None => up::clamp_retry_after(arg),
-        };
-        assert_eq_py_ordered(&c, &f(got), c.out());
+        if !(arg.is_number() || arg.get("$f").is_some()) {
+            continue;
+        }
+        let x = as_f64(arg).unwrap();
+        assert_eq_py_ordered(&c, &f(up::clamp_retry_after_f64(x)), c.out());
+        n += 1;
     }
+    assert!(n > 300, "数字用例太少：{n}");
 }
 
 #[test]
@@ -89,30 +94,6 @@ fn is_model_level_403_golden() {
     for c in load(M, "upstream/is_model_level_403") {
         let body = c.arg(0).as_str().unwrap_or("");
         assert_eq_py_ordered(&c, &json!(up::is_model_level_403(body)), c.out());
-    }
-}
-
-#[test]
-fn classify_upstream_golden() {
-    for c in load(M, "upstream/classify_upstream") {
-        let status = c.arg(0).as_i64().unwrap();
-        // 位置参数或关键字参数都可能给出 retry_after_header / peek
-        let header = c
-            .args()
-            .get(1)
-            .or_else(|| c.kwarg("retry_after_header"))
-            .and_then(Value::as_str);
-        let peek = c
-            .args()
-            .get(2)
-            .or_else(|| c.kwarg("peek"))
-            .and_then(Value::as_str)
-            .unwrap_or("");
-        let got = up::classify_upstream(status, header, peek, NOW).map(|v| {
-            let kind: &str = v.kind.as_str();
-            json!([kind, f(v.retry_after)])
-        });
-        check(&c, got);
     }
 }
 

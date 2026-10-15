@@ -31,7 +31,6 @@ struct Inner {
     model: String,
     key_id: Option<i64>,
     key_name: String,
-    src: String,
     /// 第一次发往上游时调用一次（实时图把这张图从「排队」移到「生成中」）。
     on_sent: Option<Box<dyn FnOnce() + Send>>,
 }
@@ -43,7 +42,6 @@ pub struct Timing {
     pub dur_ms: i64,
     pub up_status: u16,
     pub rid: String,
-    pub src: String,
 }
 
 impl Default for ReqCtx {
@@ -64,7 +62,6 @@ impl ReqCtx {
             model: String::new(),
             key_id: None,
             key_name: String::new(),
-            src: String::new(),
             on_sent: None,
         })))
     }
@@ -157,7 +154,6 @@ impl ReqCtx {
                 dur_ms: dur.as_millis() as i64,
                 up_status: i.up_status,
                 rid: i.rid.clone(),
-                src: i.src.clone(),
             }
         })
     }

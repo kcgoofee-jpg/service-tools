@@ -263,21 +263,13 @@ fn retry_delay(header: &str, now: f64) -> i64 {
     }
 }
 
-/// 这把 Token 用的浏览器指纹序号（令牌池按序号轮流分配；删除 / 重排后位置会变，指纹序号不变）。
-fn profile_index(state: &AppState, token: &Token) -> usize {
-    let ua = Some(state.env.upstream_user_agent.as_str()).filter(|s| !s.is_empty());
-    (0..3)
-        .find(|i| gate_upstream::headers::profile_for(*i, ua) == token.profile)
-        .unwrap_or(0)
-}
-
 async fn query(state: &AppState, token: &Token) -> Result<Value, RunError> {
     let url = format!("{}/user/subscription", state.nai.image_host());
     let fetched = tokio::time::timeout(
         ACCOUNT_TIMEOUT,
         state.nai.get_json_with(
             &token.token,
-            profile_index(state, token),
+            token.profile_index(),
             &url,
             ACCOUNT_TIMEOUT,
             MAX_BODY,

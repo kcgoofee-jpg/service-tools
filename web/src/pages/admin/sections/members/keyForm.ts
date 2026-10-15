@@ -1,7 +1,8 @@
 /**
  * 新建 / 编辑 Key 的表单模型：默认值、从已有 Key 还原、校验并拼出请求体（纯函数，单测覆盖）。
  * 规则与后端一致：数值不能为空 / 为负 / 带小数（整数字段）；0 表示不限；开通 Anlas 时每日 / 每月 Anlas 上限不能都是 0。
- * 每分钟请求数、有效天数默认留空 = 不发给后端（新建的 Key 用服务端默认值：不设到期），不再带硬编码的默认值。
+ * 新建时的默认值全部来自服务端（/admin/api/ops）：每日 V4.5 / V5 张数和有效天数是后台「领 Key」的设置，
+ * Anlas 上限、每分钟请求数是服务端常量；这里不另写一套。每分钟请求数、有效天数默认留空 = 不发给后端（用服务端默认值）。
  */
 import type { KeyRow, OpsSnapshot, Role } from "./types";
 import { parseNum } from "./validate";
@@ -26,23 +27,29 @@ export type KeyForm = {
 
 export type FormErrors = Partial<Record<keyof KeyForm, string>>;
 
-/** 新建：额度默认跟「新成员默认额度」对齐（从 /ops 读），缺失时用常量；每分钟请求数和有效天数留空 */
+/**
+ * 新建：额度默认取服务端给的（`ops.registration` / `ops.new_key`）；没取到（接口失败）时留空，由人填，不用前端自己的数字。
+ * 每分钟请求数和有效天数留空 = 用服务端默认。
+ */
 export function createDefaults(ops: OpsSnapshot | null): KeyForm {
   const reg = ops?.registration;
-  const pick = (v: number | undefined | null, d: number) => String(v ?? d);
+  const nk = ops?.new_key;
+  const text = (v: number | undefined | null) => (v == null ? "" : String(v));
+  // 默认功能为 null = 站长设成了「全部已开放功能」
+  const allFeats = ops != null && ops.features.new_key === null;
   return {
     name: "",
     role: "regular",
     quota: "manual",
     scope: "legacy",
-    daily_images: pick(reg?.daily_images, 100),
-    daily_v5: pick(reg?.daily_v5, 50),
-    daily_anlas: "100",
-    monthly_anlas: "2500",
+    daily_images: text(reg?.daily_images),
+    daily_v5: text(reg?.daily_v5),
+    daily_anlas: text(nk?.daily_anlas),
+    monthly_anlas: text(nk?.monthly_anlas),
     allow_anlas: false,
     exclude_global_v5: false,
-    featMode: "custom",
-    feats: ops?.features.new_key ?? ["image"],
+    featMode: allFeats ? "all" : "custom",
+    feats: ops?.features.new_key ?? [],
     rpm: "",
     expires: "",
     allow_img2img: false,

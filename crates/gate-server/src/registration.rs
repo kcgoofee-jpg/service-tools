@@ -11,6 +11,7 @@
 //!   每日清空自助注册（旧的 `REGISTER_RESET_AT`）已删除（docs/v3-deviations.md #77）。
 
 use crate::action_log::log_action;
+use crate::defaults;
 use crate::env::{EnvConfig, RegistrationEnv};
 use crate::key::Key;
 use crate::ops::{self, Registration};
@@ -283,7 +284,7 @@ impl Reply {
 
 pub struct RegistrationService {
     db: Db,
-    /// 只用来读环境默认的记录开关（`audit_disclosure`）。
+    /// 进程配置：Discord API 地址、闲置回收天数。
     env: EnvConfig,
     cfg: RegistrationEnv,
     api_base: String,
@@ -327,7 +328,7 @@ impl RegistrationService {
         &self.cfg.site_url
     }
     pub fn idle_days(&self) -> i64 {
-        self.cfg.idle_days
+        self.env.key_inactivity_delete_days
     }
     pub fn member_role_id(&self) -> &str {
         &self.cfg.member_role_id
@@ -346,7 +347,7 @@ impl RegistrationService {
 
     /// 生效的注册设置（和后台共用 `ops::registration_settings_for`，不另写一份）。
     pub async fn settings(&self) -> Result<Registration, DbError> {
-        ops::registration_settings_for(&self.db, Some(&self.cfg)).await
+        ops::registration_settings_for(&self.db, true).await
     }
 
     pub async fn registration_for_key(&self, key_id: i64) -> Result<Option<String>, DbError> {
@@ -783,8 +784,9 @@ impl RegistrationService {
         } else {
             cfg.role_guild.clone()
         };
+        // 身份组门槛只来自后台「领 Key」（register_role_guild / register_role_id）；没配 = 不限定
         let role_id = if cfg.role_guild.is_empty() {
-            self.cfg.role_id.clone()
+            String::new()
         } else {
             cfg.role_id.clone()
         };
@@ -925,16 +927,16 @@ impl RegistrationService {
         if guild_id != self.cfg.guild_id || !is_decimal(user_id) {
             return denied("请在指定服务器使用 /register。");
         }
-        if self.cfg.min_account_days != 0 {
+        if defaults::REGISTER_MIN_ACCOUNT_DAYS != 0 {
             // Discord 雪花 ID 里带创建时间
             let created_ms = pyext::py_int_str(user_id)
                 .map(|id| ((id >> 22) + 1_420_070_400_000) as f64)
                 .unwrap_or(f64::MAX);
             let age_days = (now() * 1000.0 - created_ms) / 86_400_000.0;
-            if age_days < self.cfg.min_account_days as f64 {
+            if age_days < defaults::REGISTER_MIN_ACCOUNT_DAYS as f64 {
                 return denied(format!(
                     "Discord 账号创建满 {} 天后才能领 Key，请稍后再来。",
-                    self.cfg.min_account_days
+                    defaults::REGISTER_MIN_ACCOUNT_DAYS
                 ));
             }
         }
@@ -956,18 +958,7 @@ impl RegistrationService {
         }
         let cfg = self.check_capacity().await?;
         // 身份组门槛（后台「领 Key」可配，可跨服）：用机器人 Token 查，不需要用户 OAuth
-        let role_guild = if !cfg.role_guild.is_empty() {
-            cfg.role_guild.clone()
-        } else if !self.cfg.role_id.is_empty() {
-            self.cfg.guild_id.clone()
-        } else {
-            String::new()
-        };
-        let role_id = if !cfg.role_guild.is_empty() {
-            cfg.role_id.clone()
-        } else {
-            self.cfg.role_id.clone()
-        };
+        let (role_guild, role_id) = (cfg.role_guild.clone(), cfg.role_id.clone());
         if !role_guild.is_empty() && !role_id.is_empty() {
             let note = if cfg.role_note.is_empty() {
                 "指定身份组"
@@ -1065,7 +1056,7 @@ impl RegistrationService {
                     daily_v5: cfg.daily_v5,
                     monthly_anlas: 0.0,
                     daily_text_tokens: 0,
-                    rpm: self.cfg.key_rpm,
+                    rpm: defaults::REGISTER_KEY_RPM,
                     allow_anlas: false,
                     allow_img2img: false,
                     exclude_global_v5: false,
@@ -1110,7 +1101,7 @@ impl RegistrationService {
         if !self.cfg.member_role_id.is_empty() {
             self.set_role(user_id, true).await;
         }
-        let notice = crate::audit::audit_disclosure(&self.db, &self.env).await?;
+        let notice = crate::audit::audit_disclosure(&self.db).await?;
         let opened = match &cfg.features {
             Some(list) => list
                 .iter()
@@ -1130,8 +1121,8 @@ impl RegistrationService {
             daily_images: cfg.daily_images,
             v5: cfg.image_scope == "all",
             daily_v5: cfg.daily_v5,
-            reset_hour: self.env.day_reset_hour.clamp(0, 23),
-            idle_days: self.cfg.idle_days,
+            reset_hour: gate_core::clock::DAY_RESET_HOUR,
+            idle_days: self.env.key_inactivity_delete_days,
             notice: &notice,
             opened: &opened,
         });

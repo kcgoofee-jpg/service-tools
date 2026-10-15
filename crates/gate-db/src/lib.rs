@@ -17,7 +17,7 @@ pub mod value;
 
 use rusqlite::{Connection, OpenFlags, Transaction, TransactionBehavior};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::oneshot;
 
@@ -50,11 +50,8 @@ struct Inner {
     path: PathBuf,
     /// 审计原图目录：`<库所在目录>/audit_images`（旧版 `Database.image_dir`）。
     image_dir: PathBuf,
-    /// 写进 usage_log.ver 的网关版本（旧版模块级 `RULE_VERSION`，启动时由 main 设置）。
-    rule_version: RwLock<String>,
     writer: std::sync::mpsc::SyncSender<Job>,
     readers: Mutex<Vec<Connection>>,
-    reader_count: usize,
     /// 测试 / 对拍用：开启后按发生顺序记下每一次对 `site_settings` 的写入（见 [`SettingWrite`]）。
     setting_log: Mutex<Option<Vec<SettingWrite>>>,
 }
@@ -122,9 +119,7 @@ impl Db {
             inner: Arc::new(Inner {
                 path,
                 image_dir,
-                rule_version: RwLock::new(String::new()),
                 writer: tx,
-                reader_count: pool.len(),
                 readers: Mutex::new(pool),
                 setting_log: Mutex::new(None),
             }),
@@ -138,15 +133,6 @@ impl Db {
     /// 审计原图目录（与库放在一起）。
     pub fn image_dir(&self) -> &Path {
         &self.inner.image_dir
-    }
-
-    /// 设置写入 usage_log.ver 的网关版本（旧版启动时 `database.RULE_VERSION = ...`）。
-    pub fn set_rule_version(&self, version: impl Into<String>) {
-        *self.inner.rule_version.write().expect("版本锁") = version.into();
-    }
-
-    pub fn rule_version(&self) -> String {
-        self.inner.rule_version.read().expect("版本锁").clone()
     }
 
     /// 在写线程上执行一个事务；闭包返回 Err 或 panic 时整个事务回滚。
@@ -253,11 +239,6 @@ impl Db {
         })
         .await
         .map_err(|_| DbError::ReaderPanicked)?
-    }
-
-    /// 读连接数量（测试与诊断用）。
-    pub fn reader_count(&self) -> usize {
-        self.inner.reader_count
     }
 }
 

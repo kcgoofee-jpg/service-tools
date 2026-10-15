@@ -1,4 +1,4 @@
-//! Bug 追踪的纯逻辑（`app/errors.py`）：错误特征码、事件字段的截断规则、「新 bug / 复发」私信文案。
+//! Bug 追踪的纯逻辑（`app/errors.py`）：错误特征码、事件字段的截断规则。3.0 不再私信「新 bug / 复发」（docs/v3-deviations.md #102）。
 //!
 //! 不移植的部分：
 //! - `Tracker` 的 I/O（`_store_locked` 的 SQL、`list` / `resolve` / `purge` 等）。表是 `error_events`
@@ -20,8 +20,6 @@ pub const LEVELS: [&str; 2] = ["error", "warn"];
 pub const DETAIL_MAX: usize = 4000;
 /// 同一个 bug 的完整堆栈多久只打印一次（秒）。
 pub const PRINT_STACK_INTERVAL: f64 = 600.0;
-/// 同一个 bug 的私信冷却（秒）。
-pub const NOTIFY_COOLDOWN: u32 = 3600;
 
 // ---------------------------------------------------------------- SHA-1
 
@@ -252,63 +250,6 @@ pub fn build_event(c: &Capture<'_>, now: f64) -> Captured {
     }
 }
 
-// ---------------------------------------------------------------- 入库后的私信
-
-/// 写库时按已有记录判断的状态。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StoreState {
-    /// 第一次出现。
-    New,
-    /// 站长标记「已处理」后又出现（复发）。
-    Regressed,
-    /// 已有未处理的同类记录：只累加计数，不打扰。
-    Known,
-}
-
-/// `existing`：`SELECT count, resolved_at FROM error_events WHERE sig=?` 的结果里的 `resolved_at`
-/// （外层 `None` = 没有这条记录；内层 `None` = `resolved_at` 为 NULL）。
-pub fn store_state(existing: Option<Option<f64>>) -> StoreState {
-    match existing {
-        None => StoreState::New,
-        Some(Some(_)) => StoreState::Regressed,
-        Some(None) => StoreState::Known,
-    }
-}
-
-/// 要私信站长的通知（`notify(key, text, cooldown_secs)`）。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Notice {
-    pub key: String,
-    pub text: String,
-    pub cooldown_secs: u32,
-}
-
-/// 新 bug / 复发才通知，且只通知 `error` 级别。
-pub fn notice_for(state: StoreState, e: &ErrorEvent) -> Option<Notice> {
-    if state == StoreState::Known || e.level != "error" {
-        return None;
-    }
-    let head = if state == StoreState::New {
-        "🐞 新 bug"
-    } else {
-        "🐞 bug 复发"
-    };
-    let place = if e.rid.is_empty() {
-        String::new()
-    } else {
-        format!(" · 请求 {}", e.rid)
-    };
-    Some(Notice {
-        key: format!("bug_{}", e.sig),
-        text: format!(
-            "{head}（{}）：{}{place}。详情见后台「Bug 追踪」。",
-            e.source,
-            pyc::take_chars(&e.title, 200)
-        ),
-        cooldown_secs: NOTIFY_COOLDOWN,
-    })
-}
-
 // ---------------------------------------------------------------- 自动处理（3.0 新增，见 docs/v3-deviations.md #45）
 
 /// 注意级（warn）的 Bug 多久没再出现就自动关闭（秒）：24 小时。
@@ -353,10 +294,6 @@ impl AutoReason {
             AutoReason::StaleWarn => "stale_warn",
             AutoReason::StaleError => "stale_error",
         }
-    }
-
-    pub fn from_code(code: &str) -> Option<AutoReason> {
-        Self::ALL.into_iter().find(|r| r.code() == code)
     }
 }
 
@@ -653,15 +590,6 @@ mod tests {
     }
 
     #[test]
-    fn auto_reason_codes_roundtrip() {
-        for r in AutoReason::ALL {
-            assert_eq!(AutoReason::from_code(r.code()), Some(r));
-        }
-        assert_eq!(AutoReason::from_code("manual"), None);
-        assert_eq!(AutoReason::from_code(""), None);
-    }
-
-    #[test]
     fn sha1_known_vectors() {
         assert_eq!(sha1_hex(b""), "da39a3ee5e6b4b0d3255bfef95601890afd80709");
         assert_eq!(sha1_hex(b"abc"), "a9993e364706816aba3e25717850c26c9cd0d89d");
@@ -683,7 +611,7 @@ mod tests {
     }
 
     #[test]
-    fn notice_texts() {
+    fn unknown_level_counts_as_error() {
         let c = Capture {
             source: "background",
             exc: None,
@@ -696,11 +624,5 @@ mod tests {
         };
         let got = build_event(&c, 100.0);
         assert_eq!(got.event.level, "error");
-        let n = notice_for(StoreState::New, &got.event).unwrap();
-        assert!(
-            n.text
-                .starts_with("🐞 新 bug（background）：维护循环失败 3 次 · 请求 abcd1234。")
-        );
-        assert!(notice_for(StoreState::Known, &got.event).is_none());
     }
 }

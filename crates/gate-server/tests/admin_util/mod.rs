@@ -141,11 +141,8 @@ impl Admin {
     /// 操作日志（新→旧）里 (操作名, 对象, 详情, 是否成功)。写日志是后台任务，先等一下。
     pub async fn actions(&self) -> Vec<(String, String, String, bool)> {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        self.state
-            .db
-            .list_admin_actions(200, 0)
+        crate::common::admin_actions(&self.state.db, 200)
             .await
-            .unwrap()
             .iter()
             .map(|r| {
                 (

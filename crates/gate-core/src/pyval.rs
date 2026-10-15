@@ -67,11 +67,6 @@ pub fn pop(m: &mut Map<String, Value>, key: &str) -> Option<Value> {
     m.shift_remove(key)
 }
 
-/// `d.setdefault(key, default)`：已存在则返回现值，不改位置。
-pub fn setdefault<'a>(m: &'a mut Map<String, Value>, key: &str, default: Value) -> &'a mut Value {
-    m.entry(key.to_string()).or_insert(default)
-}
-
 /// `str(v)` 对 JSON 标量（用于日志 / 拼接文案）：int → "3"，float → Python repr，bool → "True"。
 pub fn py_str(v: &Value) -> String {
     match v {

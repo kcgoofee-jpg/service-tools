@@ -1,10 +1,9 @@
 //! V5 官方免费额度缓存的 IO 层（旧版 `app/allowance.py` 的 `AllowanceCache`）。判定逻辑在
 //! `gate_core::allowance::AllowanceCore`（golden 对拍过）；这里负责按账号串行、读阈值、请求订阅接口、
-//! 回写恢复周期读数、发「额度偏低」告警。
+//! 回写恢复周期读数；额度偏低时写一行日志（后台「上游」页另有「低」标记）。
 //!
 //! 只有真实的出图请求会刷新缓存（订阅接口本身不消耗额度，但频繁查询像机器人）。
 
-use crate::alerts::Alerter;
 use gate_core::allowance::{self as core, AllowanceCore, Begin, Fetched};
 use gate_db::Db;
 use gate_upstream::client::{Allowance, BoxFuture, Hooks, NaiClient, Token};
@@ -15,7 +14,6 @@ use std::time::Duration;
 
 pub struct ServerAllowance {
     db: Db,
-    alerter: Arc<Alerter>,
     core: Mutex<AllowanceCore>,
     locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     /// 单调时钟起点：缓存新鲜度按单调时钟算（旧版 `time.monotonic()`）。
@@ -32,10 +30,9 @@ pub async fn read_alert_threshold(db: &Db) -> Result<i64, gate_db::DbError> {
 }
 
 impl ServerAllowance {
-    pub fn new(db: Db, alerter: Arc<Alerter>) -> Self {
+    pub fn new(db: Db) -> Self {
         Self {
             db,
-            alerter,
             core: Mutex::new(AllowanceCore::new()),
             locks: Mutex::new(HashMap::new()),
             epoch: std::time::Instant::now(),
@@ -100,7 +97,7 @@ impl ServerAllowance {
             Begin::Cached => return Ok(false),
             Begin::Fetch => {}
         }
-        // 与生图同一套浏览器请求头；旧版固定用第 0 套浏览器特征，原样保留
+        // 与这把 Token 生图时同一个浏览器指纹（旧版固定用第 0 套，docs/v3-deviations.md #86）
         let url = format!(
             "{}/user/subscription",
             nai.image_host().trim_end_matches('/')
@@ -109,7 +106,7 @@ impl ServerAllowance {
             Duration::from_secs(8),
             nai.get_json_with(
                 &token.token,
-                0,
+                token.profile_index(),
                 &url,
                 Duration::from_secs(8),
                 core::MAX_BODY,
@@ -148,13 +145,8 @@ impl ServerAllowance {
         if let Some(seconds) = resolved.note_period {
             self.note_period(&token.token_id, seconds).await;
         }
-        if let Some(alert) = &resolved.low_alert {
-            tracing::warn!(
-                account = %token.token_id,
-                "V5 low allowance"
-            );
-            self.alerter
-                .notify("v5_low", &alert.message, alert.cooldown_secs as f64);
+        if resolved.low {
+            tracing::warn!(account = %token.token_id, "V5 low allowance");
         }
         resolved.result.map_err(|()| unavailable())
     }

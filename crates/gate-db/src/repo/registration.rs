@@ -284,20 +284,6 @@ impl Db {
         .await
     }
 
-    /// 每日清空的范围：Key 缺失或启用中、且不带「邀请」标签的在册成员（被停用的成员 / 邀请 Key 豁免）。
-    pub async fn reset_all_candidates(&self) -> Result<Vec<String>> {
-        self.read(|c| {
-            let mut stmt = c.prepare(
-                "SELECT r.discord_id FROM discord_registrations r LEFT JOIN api_keys k ON k.id=r.key_id \
-                 WHERE (k.id IS NULL OR k.enabled=1) \
-                   AND NOT EXISTS (SELECT 1 FROM key_tags t WHERE t.key_id=r.key_id AND t.tag=?)",
-            )?;
-            stmt.query_map([INVITE_TAG], |r| value::text_or(r, 0, "None"))?
-                .collect()
-        })
-        .await
-    }
-
     // ------------------------------------------------------------------ 邀请 Key / 发 Key
 
     /// 站长发的邀请 Key（带「邀请」标签）还没绑定 Discord 账号。

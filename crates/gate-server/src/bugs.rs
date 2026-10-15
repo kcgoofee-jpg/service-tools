@@ -1,26 +1,24 @@
 //! Bug 追踪：把所有「不该发生」的错误按特征归并记下来（旧版 `app/errors.py` 的 Tracker）。
 //!
 //! 来源：接口未捕获的错误（500）、上游 5xx、后台任务失败、记账写入失败、成员在图片返回前断开、网页脚本报错。
-//! 同一个 bug 只占一行（count 累加）；新出现或复发时私信站长一次。不记录 Key、提示词或 IP。
+//! 同一个 bug 只占一行（count 累加），每次都写一行日志；不私信站长（后台「Bug 追踪」能看）。不记录 Key、提示词或 IP。
 //! 永远不会让调用方出错或阻塞：入库在后台任务里做。
 //!
 //! 3.0 起不再记「不是本站缺陷」的噪音（浏览器网络失败、上游故障、非本站脚本），已记下的由
 //! [`Bugs::auto_triage`] 定期自动关闭；注意级 24 小时、错误级 7 天没再出现的也一并关闭，再出现按「复发」重新打开
 //! （docs/v3-deviations.md #45）。
 
-use crate::alerts::Alerter;
 use gate_core::errors::{
-    AutoReason, Capture, ExcInfo, OpenBug, StoreState, TRIAGE_INTERVAL, auto_resolve_reason,
-    build_event, notice_for, should_print_stack,
+    AutoReason, Capture, ExcInfo, OpenBug, TRIAGE_INTERVAL, auto_resolve_reason, build_event,
+    should_print_stack,
 };
 use gate_db::Db;
-use gate_db::repo::errors::{AutoResolve, ErrorRow, Stored};
+use gate_db::repo::errors::{AutoResolve, ErrorRow};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 pub struct Bugs {
     db: Db,
-    alerter: Arc<Alerter>,
     printed: Mutex<HashMap<String, f64>>,
     recent: Mutex<Vec<gate_core::errors::ErrorEvent>>,
     /// 同一个特征码的读-改-写串行（旧版用一把全局锁）。
@@ -48,10 +46,9 @@ pub struct Report<'a> {
 }
 
 impl Bugs {
-    pub fn new(db: Db, alerter: Arc<Alerter>, tasks: tokio_util::task::TaskTracker) -> Self {
+    pub fn new(db: Db, tasks: tokio_util::task::TaskTracker) -> Self {
         Self {
             db,
-            alerter,
             printed: Mutex::new(HashMap::new()),
             recent: Mutex::new(Vec::new()),
             store_lock: Arc::new(tokio::sync::Mutex::new(())),
@@ -163,7 +160,6 @@ impl Bugs {
         }
         let e = c.event.clone();
         let db = self.db.clone();
-        let alerter = self.alerter.clone();
         let lock = self.store_lock.clone();
         let pending = self.pending.clone();
         pending.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
@@ -188,18 +184,8 @@ impl Bugs {
                 rid: e.rid.clone(),
                 ts: e.ts,
             };
-            match db.store_error_event(&row).await {
-                Ok(stored) => {
-                    let state = match stored {
-                        Stored::New => StoreState::New,
-                        Stored::Regressed => StoreState::Regressed,
-                        Stored::Repeat => StoreState::Known,
-                    };
-                    if let Some(n) = notice_for(state, &e) {
-                        alerter.notify(&n.key, &n.text, f64::from(n.cooldown_secs));
-                    }
-                }
-                Err(_) => tracing::warn!(target: "bug", "store failed"),
+            if db.store_error_event(&row).await.is_err() {
+                tracing::warn!(target: "bug", "store failed");
             }
         });
         c.event.sig

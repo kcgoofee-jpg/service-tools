@@ -1,12 +1,16 @@
-//! 配置第一层：环境变量。启动时解析一次，之后只读。
+//! 环境变量：只放密钥和基础设施（地址、ID、网络、数据目录）。启动时解析一次，之后只读。
+//!
+//! 配置只有两层：环境变量（这里）和后台可改的数据库设置（`site_settings`，没设过时用代码里的常量）。
+//! 运行时可调的参数不再有环境变量（docs/v3-deviations.md #91～#95），也不再有私密参数文件 `private_params.json`；
+//! 没有后台入口、只是代码常量的几个数（排队超时、登录限流……）在下面的 `pub const` 里，
+//! [`EnvConfig`] 里对应的字段只是方便测试和 `cargo xtask dev` 覆盖，生产不读环境变量。
 //!
 //! 解析规则逐个复刻旧版（app/config.py、registration.py、ops.py、status_page.py 里散落的 `os.getenv`）：
 //! - 布尔：`1/true/yes/on/y`（不区分大小写、去空白）为真，其余为假；未设置用默认值；
 //!   例外 `ADMIN_COOKIE_SECURE`：只有 `0/false/no/off` 为假（默认安全）。
 //! - 整数 / 浮点：空串或解析失败都用默认值（`int(os.environ.get(name, "").strip() or default)`）。
-//! - 每 Token 列表（`NAI_TOKEN_V5_DAILY_LIMITS` 等）补齐 / 截断到 Token 个数。
-//!
-//! 第二层（后台可改、存 site_settings）与第三层（private_params.json）见 `settings.rs`。
+//! - 每 Token 列表（`NAI_TOKEN_ALLOW_ANLAS`）补齐 / 截断到 Token 个数。
+//! - 3.0 删掉的上游相关变量（[`REMOVED_UPSTREAM_VARS`]）不再读取；还留在 `.env` 里时启动日志提醒一句。
 
 use gate_core::pyc;
 use std::collections::HashMap;
@@ -36,6 +40,45 @@ fn truthy(v: &str) -> bool {
         "1" | "true" | "yes" | "on" | "y"
     )
 }
+
+// ---- 代码常量（原来是环境变量，现在不读环境了）----
+
+/// 一张图在某个排队环节最多等多久（秒）。后台「额度与保护 → 图片排队与冷却」改过的值（`runtime_queue_timeout`）优先。
+pub const QUEUE_TIMEOUT: i64 = 90;
+/// 每个上游账号两次发图的最小间隔（秒）。后台改过的值（`runtime_image_min_interval`）优先。
+pub const IMAGE_MIN_INTERVAL: f64 = 15.0;
+/// 上游 429 后全站暂停出图的最短冷却（秒）。后台改过的值（`runtime_image_429_cooldown_seconds`）优先。
+pub const IMAGE_429_COOLDOWN_SECONDS: f64 = 60.0;
+/// 单 IP 在窗口内使用无效 Key 的次数上限，超过则临时拦截。
+pub const AUTH_FAIL_MAX: i64 = 20;
+pub const AUTH_FAIL_WINDOW: i64 = 600;
+pub const AUTH_BLOCK_SECONDS: i64 = 900;
+/// 后台登录：每 IP 窗口内最多尝试次数。
+pub const LOGIN_MAX_ATTEMPTS: i64 = 5;
+pub const LOGIN_WINDOW_SECONDS: i64 = 300;
+
+/// 3.0 删掉的上游相关环境变量与替代做法（docs/v3-deviations.md #86 #87 #88）。
+pub const REMOVED_UPSTREAM_VARS: [(&str, &str); 7] = [
+    ("NAI_TOKEN", "改用 NAI_TOKENS（只有一把也用这个名字）"),
+    (
+        "NAI_TOKEN_V5_DAILY_LIMITS",
+        "在后台「上游令牌池」按 Token 设 V5 日限额",
+    ),
+    (
+        "SINGLE_IMAGE_SLOT_ENFORCED",
+        "在后台「上游令牌池」按 Token 设出图并发（1～4）",
+    ),
+    ("UPSTREAM_USER_AGENT", "浏览器指纹不可配置"),
+    ("UPSTREAM_HTTP2", "HTTP/2 由 TLS ALPN 协商"),
+    (
+        "POST_REQUEST_JITTER_MIN",
+        "在后台「额度与保护」设出图后静默",
+    ),
+    (
+        "POST_REQUEST_JITTER_MAX",
+        "在后台「额度与保护」设出图后静默",
+    ),
+];
 
 struct Reader<'a>(&'a dyn EnvSource);
 
@@ -80,6 +123,7 @@ impl Reader<'_> {
 }
 
 /// 自助领取 Key（Discord 机器人桥接）的配置；任一必填项缺失则为 None（旧版 `configured_service`）。
+/// 领 Key 的名额、有效期、功能、身份组限定都是数据库设置（见 `ops::registration_settings`），不在这里。
 #[derive(Debug, Clone)]
 pub struct RegistrationEnv {
     pub client_id: String,
@@ -87,18 +131,9 @@ pub struct RegistrationEnv {
     pub bot_token: String,
     pub bridge_secret: String,
     pub guild_id: String,
-    pub role_id: String,
     /// 以 `/` 结尾。
     pub site_url: String,
-    /// `REGISTER_EXPIRES_DAYS`：新领的 Key 几天后过期，0 = 不过期（默认，站长 10-15）。
-    /// 每日张数 / V5 / 模型范围归动态额度管，没有环境变量（见 `ops::algo_owned`）。
-    pub key_expires_days: i64,
-    pub key_rpm: i64,
-    pub max_users: i64,
-    pub key_features: String,
-    pub min_account_days: i64,
     pub member_role_id: String,
-    pub idle_days: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -108,25 +143,17 @@ pub struct EnvConfig {
     pub admin_password: String,
     pub admin_cookie_secure: bool,
     pub secret_key: String,
-    pub tz: String,
-    pub day_reset_hour: i64,
     pub cors_origins: Vec<String>,
     pub admin_allowed_origins: Vec<String>,
     /// 信任哪些直连对端带来的 X-Forwarded-For（uvicorn 的 FORWARDED_ALLOW_IPS，默认只信任本机）。
     pub forwarded_allow_ips: Vec<String>,
     // 上游
     pub nai_tokens: Vec<String>,
-    pub nai_token_v5_daily_limits: Vec<i64>,
+    /// 只在没有 `upstream_tokens.json`（后台没接管过令牌池）时用：每把 Token 能不能花 Anlas，默认允许。
     pub nai_token_allow_anlas: Vec<bool>,
     pub image_host: String,
     pub upstream_proxy: String,
-    pub upstream_user_agent: String,
-    pub upstream_http2: bool,
-    pub post_request_jitter_min: f64,
-    pub post_request_jitter_max: f64,
-    pub single_image_slot_enforced: bool,
-    // 并发与限速
-    pub global_concurrency: i64,
+    // 以下 8 个是代码常量（见文件开头的 `pub const`），不读环境变量；字段只为让测试和 `cargo xtask dev` 能改
     pub queue_timeout: i64,
     pub image_min_interval: f64,
     pub image_429_cooldown_seconds: f64,
@@ -135,28 +162,19 @@ pub struct EnvConfig {
     pub auth_block_seconds: i64,
     pub login_max_attempts: i64,
     pub login_window_seconds: i64,
+    /// 连续这么多天没成功出过图的 Key 自动回收（0 = 关）。只在这里解析一次，机器人、后台、内核共用。
     pub key_inactivity_delete_days: i64,
     // Discord / 告警 / 公告
     pub discord_bot_token: String,
     pub site_url: String,
     pub alert_user_id: String,
-    pub alert_channel_id: String,
-    pub alert_webhook_url: String,
     pub announce_channel_id: String,
     pub discord_invite_url: String,
     pub discord_guild_id: String,
     /// Discord REST 基地址（测试指向本地假服务）。
     pub discord_api_base: String,
     // 记录
-    pub audit_prompts: bool,
-    pub audit_thumbs: bool,
-    pub audit_retention_days: i64,
     pub usage_log_retention_days: i64,
-    // 免费规格
-    pub safe_clamp: bool,
-    pub max_pixels: i64,
-    pub max_steps: i64,
-    pub allow_img2img: bool,
     // 全站预算
     pub global_monthly_anlas: f64,
     pub global_daily_anlas: i64,
@@ -178,11 +196,12 @@ impl EnvConfig {
 
     pub fn load(src: &dyn EnvSource) -> Self {
         let r = Reader(src);
-        let raw_tokens = src
-            .get("NAI_TOKENS")
-            .filter(|s| !s.is_empty())
-            .or_else(|| src.get("NAI_TOKEN"))
-            .unwrap_or_default();
+        for (name, instead) in REMOVED_UPSTREAM_VARS {
+            if src.get(name).is_some() {
+                tracing::warn!("环境变量 {name} 已删除、不再读取：{instead}");
+            }
+        }
+        let raw_tokens = src.get("NAI_TOKENS").unwrap_or_default();
         let nai_tokens: Vec<String> = raw_tokens
             .replace('\n', ",")
             .split(',')
@@ -190,16 +209,6 @@ impl EnvConfig {
             .filter(|t| !t.is_empty())
             .collect();
         let n = nai_tokens.len();
-        let per_token_ints = |name: &str, default: i64| -> Vec<i64> {
-            let mut v: Vec<i64> = r
-                .str(name, "")
-                .split(',')
-                .map(|item| pyc::parse_int(item).map(|x| x.max(0)).unwrap_or(default))
-                .collect();
-            v.resize(v.len().max(n), default);
-            v.truncate(n);
-            v
-        };
         let per_token_bools = |name: &str, default: bool| -> Vec<bool> {
             let mut v: Vec<bool> = r
                 .str(name, "")
@@ -250,18 +259,8 @@ impl EnvConfig {
                 bot_token: src.get("DISCORD_BOT_TOKEN")?,
                 bridge_secret: secret,
                 guild_id: src.get("DISCORD_GUILD_ID")?.trim().to_string(),
-                role_id: r.trimmed("DISCORD_ROLE_ID"),
                 site_url: format!("{}/", src.get("SITE_URL")?.trim_end_matches('/')),
-                key_expires_days: r.nonneg("REGISTER_EXPIRES_DAYS", 0),
-                key_rpm: r.nonneg("REGISTER_RPM", 5).max(1),
-                max_users: r.nonneg("REGISTER_MAX_USERS", 10),
-                key_features: {
-                    let f = r.str("REGISTER_FEATURES", "image");
-                    f.trim().to_string()
-                },
-                min_account_days: r.nonneg("REGISTER_MIN_ACCOUNT_DAYS", 7),
                 member_role_id: r.trimmed("DISCORD_MEMBER_ROLE_ID"),
-                idle_days: r.nonneg("KEY_INACTIVITY_DELETE_DAYS", 3),
             })
         })();
 
@@ -276,47 +275,29 @@ impl EnvConfig {
                 "0" | "false" | "no" | "off"
             ),
             secret_key: r.str("SECRET_KEY", ""),
-            tz: r.str("TZ", "Asia/Shanghai"),
-            day_reset_hour: r.int("DAY_RESET_HOUR", 7),
             cors_origins: split_list("CORS_ORIGINS", "*"),
             admin_allowed_origins: split_list("ADMIN_ALLOWED_ORIGINS", ""),
-            nai_token_v5_daily_limits: per_token_ints("NAI_TOKEN_V5_DAILY_LIMITS", 0),
             nai_token_allow_anlas: per_token_bools("NAI_TOKEN_ALLOW_ANLAS", true),
             nai_tokens,
             image_host: r.str("NAI_IMAGE_HOST", "https://image.novelai.net"),
             upstream_proxy: r.trimmed("UPSTREAM_PROXY"),
-            upstream_user_agent: r.trimmed("UPSTREAM_USER_AGENT"),
-            upstream_http2: r.bool("UPSTREAM_HTTP2", true),
-            post_request_jitter_min: r.float("POST_REQUEST_JITTER_MIN", 1.0),
-            post_request_jitter_max: r.float("POST_REQUEST_JITTER_MAX", 3.0),
-            single_image_slot_enforced: r.bool("SINGLE_IMAGE_SLOT_ENFORCED", false),
-            global_concurrency: r.int("GLOBAL_CONCURRENCY", 1),
-            queue_timeout: r.int("QUEUE_TIMEOUT", 90),
-            image_min_interval: r.float("IMAGE_MIN_INTERVAL", 15.0),
-            image_429_cooldown_seconds: r.float("IMAGE_429_COOLDOWN_SECONDS", 60.0),
-            auth_fail_max: r.int("AUTH_FAIL_MAX", 20),
-            auth_fail_window: r.int("AUTH_FAIL_WINDOW", 600),
-            auth_block_seconds: r.int("AUTH_BLOCK_SECONDS", 900),
-            login_max_attempts: r.int("LOGIN_MAX_ATTEMPTS", 5),
-            login_window_seconds: r.int("LOGIN_WINDOW_SECONDS", 300),
-            key_inactivity_delete_days: r.int("KEY_INACTIVITY_DELETE_DAYS", 3),
+            queue_timeout: QUEUE_TIMEOUT,
+            image_min_interval: IMAGE_MIN_INTERVAL,
+            image_429_cooldown_seconds: IMAGE_429_COOLDOWN_SECONDS,
+            auth_fail_max: AUTH_FAIL_MAX,
+            auth_fail_window: AUTH_FAIL_WINDOW,
+            auth_block_seconds: AUTH_BLOCK_SECONDS,
+            login_max_attempts: LOGIN_MAX_ATTEMPTS,
+            login_window_seconds: LOGIN_WINDOW_SECONDS,
+            key_inactivity_delete_days: r.nonneg("KEY_INACTIVITY_DELETE_DAYS", 3),
             discord_bot_token: r.str("DISCORD_BOT_TOKEN", ""),
             site_url: r.str("SITE_URL", ""),
             alert_user_id: r.str("ALERT_USER_ID", ""),
-            alert_channel_id: r.str("ALERT_CHANNEL_ID", ""),
-            alert_webhook_url: r.str("ALERT_WEBHOOK_URL", ""),
             announce_channel_id: r.str("ANNOUNCE_CHANNEL_ID", ""),
             discord_invite_url: r.str("DISCORD_INVITE_URL", ""),
             discord_guild_id: r.str("DISCORD_GUILD_ID", ""),
             discord_api_base: r.str("DISCORD_API_BASE", "https://discord.com/api/v10"),
-            audit_prompts: r.bool("AUDIT_PROMPTS", false),
-            audit_thumbs: r.bool("AUDIT_THUMBS", false),
-            audit_retention_days: r.int("AUDIT_RETENTION_DAYS", 7),
             usage_log_retention_days: r.int("USAGE_LOG_RETENTION_DAYS", 0),
-            safe_clamp: r.bool("SAFE_CLAMP", true),
-            max_pixels: r.int("MAX_PIXELS", 1024 * 1024),
-            max_steps: r.int("MAX_STEPS", 28),
-            allow_img2img: r.bool("ALLOW_IMG2IMG", false),
             global_monthly_anlas: r.float("GLOBAL_MONTHLY_ANLAS", 10000.0),
             global_daily_anlas: r.int("GLOBAL_DAILY_ANLAS", 200),
             default_daily_images: r.int("DEFAULT_DAILY_IMAGES", 100),
@@ -331,15 +312,6 @@ impl EnvConfig {
         }
     }
 
-    /// `site_flags.get(db, spec, settings)` 用的 `settings` 视图：只有带 env 回退的两个全站 Anlas 预算
-    /// （全站 V5 归动态额度管，没有环境变量，见 `ops::algo_owned`）。
-    pub fn settings_view(&self) -> serde_json::Value {
-        serde_json::json!({
-            "global_daily_anlas": self.global_daily_anlas,
-            "global_monthly_anlas": self.global_monthly_anlas,
-        })
-    }
-
     pub fn db_path(&self) -> PathBuf {
         self.data_dir.join("nai_gate.db")
     }
@@ -348,9 +320,6 @@ impl EnvConfig {
     }
     pub fn upstream_tokens_path(&self) -> PathBuf {
         self.data_dir.join("upstream_tokens.json")
-    }
-    pub fn private_params_path(&self) -> PathBuf {
-        self.data_dir.join("private_params.json")
     }
 }
 
@@ -369,21 +338,72 @@ mod tests {
     fn parses_like_python() {
         let c = EnvConfig::load(&env(&[
             ("NAI_TOKENS", " pst-a ,\npst-b,,"),
-            ("NAI_TOKEN_V5_DAILY_LIMITS", "150,x,7,9"),
             ("NAI_TOKEN_ALLOW_ANLAS", "0"),
-            ("QUEUE_TIMEOUT", "  "),
-            ("IMAGE_MIN_INTERVAL", "abc"),
-            ("UPSTREAM_HTTP2", "Off"),
             ("ADMIN_COOKIE_SECURE", "nope"),
         ]));
         assert_eq!(c.nai_tokens, ["pst-a", "pst-b"]);
-        assert_eq!(c.nai_token_v5_daily_limits, [150, 0]);
         assert_eq!(c.nai_token_allow_anlas, [false, true]);
-        assert_eq!(c.queue_timeout, 90);
-        assert_eq!(c.image_min_interval, 15.0);
-        assert!(!c.upstream_http2);
         assert!(c.admin_cookie_secure, "只有 0/false/no/off 才关闭");
         assert!(c.registration.is_none());
+    }
+
+    /// 删掉的变量不再读：`NAI_TOKEN` 不再是 `NAI_TOKENS` 的别名（docs/v3-deviations.md #88）。
+    #[test]
+    fn removed_upstream_vars_are_ignored() {
+        let c = EnvConfig::load(&env(&[
+            ("NAI_TOKEN", "pst-only"),
+            ("NAI_TOKEN_V5_DAILY_LIMITS", "150"),
+            ("SINGLE_IMAGE_SLOT_ENFORCED", "1"),
+        ]));
+        assert!(c.nai_tokens.is_empty());
+        assert!(c.nai_token_allow_anlas.is_empty());
+    }
+
+    #[test]
+    fn code_constants_ignore_the_environment() {
+        // 这几个原来是环境变量，现在是代码常量：环境里设了也不读（docs/v3-deviations.md #93 #95）
+        let c = EnvConfig::load(&env(&[
+            ("QUEUE_TIMEOUT", "5"),
+            ("IMAGE_MIN_INTERVAL", "0"),
+            ("IMAGE_429_COOLDOWN_SECONDS", "1"),
+            ("AUTH_FAIL_MAX", "7"),
+            ("LOGIN_MAX_ATTEMPTS", "9"),
+            ("TZ", "UTC"),
+            ("DAY_RESET_HOUR", "3"),
+        ]));
+        assert_eq!(
+            (
+                c.queue_timeout,
+                c.image_min_interval,
+                c.image_429_cooldown_seconds
+            ),
+            (
+                QUEUE_TIMEOUT,
+                IMAGE_MIN_INTERVAL,
+                IMAGE_429_COOLDOWN_SECONDS
+            )
+        );
+        assert_eq!(
+            (c.auth_fail_max, c.login_max_attempts),
+            (AUTH_FAIL_MAX, LOGIN_MAX_ATTEMPTS)
+        );
+    }
+
+    #[test]
+    fn inactivity_days_parse_once() {
+        let days = |v: Option<&str>| {
+            let mut m = env(&[]);
+            if let Some(v) = v {
+                m.insert("KEY_INACTIVITY_DELETE_DAYS".into(), v.into());
+            }
+            EnvConfig::load(&m).key_inactivity_delete_days
+        };
+        assert_eq!(days(None), 3);
+        assert_eq!(days(Some(" 10 ")), 10);
+        assert_eq!(days(Some("0")), 0, "0 = 关闭回收");
+        assert_eq!(days(Some("-5")), 0, "负数按 0 处理");
+        assert_eq!(days(Some("abc")), 3, "读不懂用默认值");
+        assert_eq!(days(Some("")), 3);
     }
 
     #[test]
@@ -400,17 +420,13 @@ mod tests {
         assert!(EnvConfig::load(&short).registration.is_none());
         let mut ok = env(&base);
         ok.insert("REGISTRATION_BRIDGE_SECRET".into(), "a".repeat(32));
-        ok.insert("REGISTER_RPM".into(), "0".into());
+        ok.insert(
+            "DISCORD_MEMBER_ROLE_ID".into(),
+            " 900000000000000055 ".into(),
+        );
         let reg = EnvConfig::load(&ok).registration.unwrap();
         assert_eq!(reg.guild_id, "42");
         assert_eq!(reg.site_url, "https://x.test/");
-        assert_eq!(reg.key_rpm, 1);
-        // 新领的 Key 默认不过期（站长 10-15，docs/v3-deviations.md #70）
-        assert_eq!(reg.key_expires_days, 0);
-        ok.insert("REGISTER_EXPIRES_DAYS".into(), "30".into());
-        assert_eq!(
-            EnvConfig::load(&ok).registration.unwrap().key_expires_days,
-            30
-        );
+        assert_eq!(reg.member_role_id, "900000000000000055");
     }
 }

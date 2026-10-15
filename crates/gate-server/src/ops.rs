@@ -1,13 +1,13 @@
 //! 站长可在运行中调整的开关（旧版 `app/ops.py`）：自助领 Key（注册）、全局功能、生成记录。
 //!
-//! 所有值保存在 `site_settings`，优先于环境变量；机器人每次命令都实时读取，所以改了立刻生效。
+//! 所有值保存在 `site_settings`，没设过时用 [`crate::defaults`] 里的常量（没有环境变量）；机器人每次命令都实时读取，所以改了立刻生效。
 //! 校验失败的文案、存进库里的字符串（整数不带小数点、开关 "1" / "0"）都与旧版逐字一致——旧 Python 还能读这些行。
 //!
 //! 另外放几个后台接口共用的「按数据库区分的单例」（旧版是模块级全局变量）：
 //! 测试告警的 10 秒节流、运行期限制的写锁、Anlas 核对的互斥锁。
 
 use crate::audit::{audit_flags, audit_image_cap_mb, audit_image_keep_hours};
-use crate::env::RegistrationEnv;
+use crate::defaults;
 use crate::error::{ApiError, HttpError, InternalError};
 use crate::state::AppState;
 use gate_core::features::{self, FEATURES, GLOBAL_KEY};
@@ -122,7 +122,7 @@ pub async fn managed_error(db: &Db, names: &[&str]) -> Result<Option<String>, Db
 
 // ------------------------------------------------------------------ 注册设置
 
-/// 生效的注册设置：数据库里保存的优先，其次是服务启动时的环境默认值（旧版 `registration_settings`）。
+/// 生效的注册设置：数据库里保存的优先，其次是 [`crate::defaults`] 里的常量（旧版 `registration_settings`）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct Registration {
     pub configured: bool,
@@ -174,14 +174,12 @@ fn to_int(raw: Option<&str>, default: i64) -> i64 {
 }
 
 pub async fn registration_settings(state: &AppState) -> Result<Registration, DbError> {
-    registration_settings_for(&state.db, state.env.registration.as_ref()).await
+    registration_settings_for(&state.db, state.env.registration.is_some()).await
 }
 
-/// 同 [`registration_settings`]，但只要库和启动默认值（`RegistrationService` 里没有 `AppState`，用这个）。
-pub async fn registration_settings_for(
-    db: &Db,
-    defaults: Option<&RegistrationEnv>,
-) -> Result<Registration, DbError> {
+/// 同 [`registration_settings`]，但只要库和「注册服务有没有配齐」（`RegistrationService` 里没有 `AppState`，用这个）。
+/// 没配注册服务时名额不限、功能不限（没有人能自助领 Key，这些值只给后台看）。
+pub async fn registration_settings_for(db: &Db, configured: bool) -> Result<Registration, DbError> {
     let read = |name: &'static str| async move { db.get_setting(name).await };
     let open_raw = read("register_open").await?;
     let feats_raw = read("register_features").await?;
@@ -194,26 +192,33 @@ pub async fn registration_settings_for(
     .unwrap_or(false);
     let max_users = to_int(
         read("register_max_users").await?.as_deref(),
-        defaults.map_or(0, |d| d.max_users),
+        if configured {
+            defaults::REGISTER_MAX_USERS
+        } else {
+            0
+        },
     );
     let features = match feats_raw {
         Some(s) if s == "*" => None,
         Some(s) => features::parse_list(&Value::String(s)),
-        None => defaults.and_then(|d| features::parse_list(&Value::String(d.key_features.clone()))),
+        None if configured => {
+            features::parse_list(&Value::String(defaults::REGISTER_FEATURES.into()))
+        }
+        None => None,
     };
     let owned = algo_owned(db).await?;
-    // 没配注册服务时也按「不过期」（REGISTER_EXPIRES_DAYS 默认 0，站长 10-15）
+    // 默认不过期（站长 10-15）
     let expires_days = to_int(
         read("register_expires_days").await?.as_deref(),
-        defaults.map_or(0, |d| d.key_expires_days),
+        defaults::REGISTER_EXPIRES_DAYS,
     );
     // 限定身份组：只有在这个 Discord 服务器里拥有这个身份组的人能领 Key（可以是别的社区的服务器）。
-    // 都为空时沿用启动配置（DISCORD_ROLE_ID，本服务器）。
+    // 都为空 = 不限定（环境变量 DISCORD_ROLE_ID 已删除，身份组只在后台「领 Key」里设，docs/v3-deviations.md #93）。
     let role_guild = read("register_role_guild").await?.unwrap_or_default();
     let role_id = read("register_role_id").await?.unwrap_or_default();
     let role_note = read("register_role_note").await?.unwrap_or_default();
     Ok(Registration {
-        configured: defaults.is_some(),
+        configured,
         open,
         max_users,
         features,
@@ -438,7 +443,7 @@ pub async fn set_global_features(
 /// 保存记录开关与保留天数；返回生效后的值（机器人 `/ops audit` 把它连同提示语一起回给管理员）。
 pub async fn set_audit(state: &AppState, body: &Map<String, Value>) -> Result<Value, OpsError> {
     let db = &state.db;
-    let (mut prompts, mut thumbs, mut days) = audit_flags(db, &state.env).await?;
+    let (mut prompts, mut thumbs, mut days) = audit_flags(db).await?;
     let mut cap_mb = audit_image_cap_mb(db).await?;
     let mut keep_hours = audit_image_keep_hours(db).await?;
     // 旧版：int(...) 失败（ValueError / TypeError）统一回 422「参数无效」

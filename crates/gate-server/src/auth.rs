@@ -158,7 +158,7 @@ pub async fn authenticate(state: &AppState, parts: &Parts, passive: bool) -> Res
     Ok(key)
 }
 
-/// 记一次无效 Key；达到阈值时拦截该 IP 并告警。
+/// 记一次无效 Key；达到阈值时拦截该 IP 并写一行日志。
 pub fn record_auth_failure(state: &AppState, ip: &str, now: f64) {
     let e = &state.env;
     if state.auth_guard.record_failure(
@@ -168,28 +168,20 @@ pub fn record_auth_failure(state: &AppState, ip: &str, now: f64) {
         e.auth_block_seconds,
         now,
     ) {
-        state.alerter.notify(
-            "auth_flood",
-            &format!(
-                "有 IP 在 {} 秒内用无效 Key 反复请求 {} 次，已临时拦截 {} 分钟（IP 后两段：{}）。",
-                e.auth_fail_window.max(1),
-                e.auth_fail_max,
-                e.auth_block_seconds.div_euclid(60),
-                crate::runtime::mask_ip(ip)
-            ),
-            1800.0,
+        tracing::info!(
+            "有 IP 在 {} 秒内用无效 Key 反复请求 {} 次，已临时拦截 {} 分钟（IP 后两段：{}）",
+            e.auth_fail_window.max(1),
+            e.auth_fail_max,
+            e.auth_block_seconds.div_euclid(60),
+            crate::runtime::mask_ip(ip)
         );
     }
 }
 
-/// `site_flags.get(db, spec, settings)`。
+/// `site_flags.get(db, spec, settings)`：库里有就用库里的，没有就用登记表里的默认值（不再有环境变量回退）。
 pub async fn site_flag(state: &AppState, spec: &Spec) -> Result<Value, gate_db::DbError> {
     let raw = state.db.get_setting(spec.key).await?;
-    Ok(site_flags::get_from_raw(
-        spec,
-        raw.as_deref(),
-        Some(&state.env.settings_view()),
-    ))
+    Ok(site_flags::get_from_raw(spec, raw.as_deref(), None))
 }
 
 /// 数值型站点设置（旧版直接拿来和数字比较）。
@@ -203,13 +195,12 @@ pub async fn require_feature(state: &AppState, key: &Key, name: &str) -> Result<
     let global = state.db.get_setting(GLOBAL_KEY).await?;
     let vibe = if needs_vibe_site_flags(global.as_deref(), &key.0, name) {
         Some(VibeAnlas {
-            until: site_flag_f64(state, &site_flags::GLOBAL_DAILY_ANLAS_UNTIL).await?,
             daily_cap: site_flag_f64(state, &site_flags::GLOBAL_DAILY_ANLAS).await? as i64,
         })
     } else {
         None
     };
-    match check_decision(global.as_deref(), &key.0, name, state.now(), vibe) {
+    match check_decision(global.as_deref(), &key.0, name, vibe) {
         Ok(None) => Ok(()),
         Ok(Some(reason)) => Err(GateError::new(403, reason).into()),
         Err(e) => Err(InternalError(e.to_string()).into()),

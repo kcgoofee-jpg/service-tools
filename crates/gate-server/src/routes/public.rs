@@ -3,7 +3,7 @@
 //! - `/terms` `/privacy`：服务条款 / 隐私政策（Discord 开发者门户「APP 验证」要求配置这两个链接）；
 //! - `POST /member/survey`：成员问卷；
 //! - `/announcement`：站长公告（沙箱化嵌入首页）；
-//! - `/public/live`（JSON）、`/public/live/stream`（SSE，3.0 新增）、`/v1/live/me`、`/public/status`、`/queue-status`；
+//! - `/public/live`（JSON）、`/public/live/stream`（SSE，3.0 新增）、`/public/status`、`/queue-status`；
 //! - `POST /public/client-error`：网页脚本报错上报；
 //! - `/user/*`、`/ai/user/*`：给原生 NAI 客户端的虚拟订阅 / 数据 / 优先级 / 密钥库 / 账户信息；
 //! - `GET /admin/api/events`（3.0 新增）：后台 SSE（实时快照 + 角标数字）；
@@ -12,7 +12,7 @@
 //! `/healthz`、`/`、`/survey`、`/admin*`、`/_owl/*`、图标在 pages.rs。
 
 use crate::auth::{authenticate, client_ip, ctx_of, header_str};
-use crate::error::{ApiError, ApiResult, HttpError, InternalError, json_response, ok_json};
+use crate::error::{ApiError, ApiResult, HttpError, InternalError, ok_json};
 use crate::key::Key;
 use crate::live::{self, Snapshot, StreamKind, StreamSlot, wire_text};
 use crate::session::{self, ADMIN_COOKIE, AdminSession};
@@ -45,7 +45,6 @@ pub fn router() -> Router<AppState> {
         .route("/public/live", get(public_live))
         .route("/public/live/stream", get(public_live_stream))
         .route("/public/client-error", post(client_error))
-        .route("/v1/live/me", get(live_me))
         .route("/public/status", get(public_status))
         .route("/queue-status", get(queue_status))
         .route("/admin/api/events", get(admin_events));
@@ -507,19 +506,6 @@ async fn public_live_stream(State(state): State<AppState>, req: Request) -> Resp
         _slot: slot,
     };
     sse_response(futures::stream::unfold(conn, next_live), keepalive)
-}
-
-/// 需要 Key：这把 Key 的图现在排第几 / 是否在生成。不写用量日志。
-async fn live_me(State(state): State<AppState>, req: Request) -> ApiResult {
-    let (parts, _) = req.into_parts();
-    match authenticate(&state, &parts, true).await {
-        Ok(key) => Ok(no_store(ok_json(&live::mine(&state, key.id())))),
-        Err(ApiError::Gate(e)) => Ok(no_store(json_response(
-            e.status,
-            &json!({"mine": null, "error": e.message}),
-        ))),
-        Err(other) => Err(other),
-    }
 }
 
 /// 落地页使用的公开状态：不含任何密钥、成员信息或计数细节。缓存 8 秒。

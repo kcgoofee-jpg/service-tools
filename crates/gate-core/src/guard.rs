@@ -24,7 +24,10 @@
 //!   （`SELECT 1 FROM usage_log u LEFT JOIN api_keys k ON k.id=u.key_id WHERE u.ts>? AND COALESCE(k.is_test,0)=0
 //!   AND COALESCE(k.is_admin,0)=0 AND u.reason=? LIMIT 1` 参数 `(now-86400, "hourly_cap")`，以及 `SELECT MIN(ts) FROM usage_log`），
 //!   写 `guard_hourly_adapted_at` / `guard_account_hourly_cap`；
-//! - 私密参数 `P(...)`：用 [`crate::params::Params`] 传入。
+//!
+//! 每小时上限自动调整的下限 / 上限 / 步长（`hourly_min` / `hourly_max` / `hourly_step`）是后台可改的设置，
+//! 与其它字段一起存 `guard_<名称>`。2.x 里它们是私密参数文件 `private_params.json` 的 `capacity.hourly_*`，
+//! 3.0 取消了私密参数文件（docs/v3-deviations.md #91）；乘性减的系数是常量 [`HOURLY_DECREASE`]。
 //!
 //! 与旧版一致的怪癖（照抄，别「修」）：
 //! - `guard_429_cap_at` 写的是 `min(prev, old)` 这个**对象**：前值是 float，`old` 是 int，`min` 取到谁写谁的 `str`，
@@ -40,9 +43,11 @@
 //!
 //! 3.0 删除的（docs/v3-deviations.md #64）：10 分钟突发窗口（每 10 分钟 ≤ 每小时上限 ÷ 4，`burst_cap`）。
 //! 账号出图间隔 20 秒 + 随机 0～5 秒时，10 分钟最多出 30 张，永远到不了 40 张的窗口上限。
+//!
+//! 3.0 新增的（docs/v3-deviations.md #87）：出图后静默 `post_jitter_min` / `post_jitter_max`，与开始抖动
+//! `interval_jitter` 并列，原来是环境变量 `POST_REQUEST_JITTER_MIN/MAX`。怎么用见 gate-upstream 的 `scheduler.rs`。
 
 use crate::clock::Clock;
-use crate::params::Params;
 use crate::pyc;
 use crate::reasons::{self, Reason};
 use serde_json::{Map, Value};
@@ -51,10 +56,12 @@ use std::collections::{BTreeMap, VecDeque};
 pub const HOUR: i64 = 3600;
 /// 队列保留期（旧版的 3 小时上限已删，只剩这个）
 pub const WINDOW_3H: i64 = 3 * HOUR;
-/// 每小时上限的自动调整范围（加性增、乘性减）
+/// 每小时上限自动调整的默认范围与步长（加性增、乘性减）；后台「账号保护」里可改，这里是字段的默认值
 pub const HOURLY_MIN: i64 = 100;
 pub const HOURLY_MAX: i64 = 160;
 pub const HOURLY_STEP: i64 = 10;
+/// 上游 429 时每小时上限乘以这个系数（减半）。常量，不开放设置
+pub const HOURLY_DECREASE: f64 = 0.5;
 /// `_cap_marks` 的容量（`deque(maxlen=64)`）
 pub const CAP_MARKS_MAX: usize = 64;
 
@@ -79,7 +86,7 @@ const fn field(name: &'static str, default: i64, min: i64, max: i64, label: &'st
 }
 
 /// 所有设置（存 `site_settings` 的键是 `guard_<名称>`）；0 表示关闭该项。
-pub const FIELDS: [Field; 9] = [
+pub const FIELDS: [Field; 14] = [
     field(
         "account_daily_cap",
         1000,
@@ -99,7 +106,7 @@ pub const FIELDS: [Field; 9] = [
         150,
         0,
         240,
-        "每个上游账号每小时最多出图张数（自动调整：上游 429 减半；前一天顶到过上限且没有 429 才 +10，范围 100～160）",
+        "每个上游账号每小时最多出图张数（自动调整：上游 429 减半；前一天顶到过上限且没有 429 才上调一步；下限、上限、步长另有设置）",
     ),
     field(
         "quiet_start",
@@ -130,6 +137,20 @@ pub const FIELDS: [Field; 9] = [
         "两次出图间隔额外随机增加 0～N 秒",
     ),
     field(
+        "post_jitter_min",
+        1,
+        0,
+        30,
+        "出图结束后至少静默几秒才开始下一张（实际静默在最少～最多之间均匀随机，不超过账号出图间隔；与出图间隔取较晚者）",
+    ),
+    field(
+        "post_jitter_max",
+        3,
+        0,
+        30,
+        "出图结束后最多静默几秒（小于最少时按最少；两项都为 0 = 出图后不静默）",
+    ),
+    field(
         "key_image_queue",
         1,
         0,
@@ -142,6 +163,27 @@ pub const FIELDS: [Field; 9] = [
         0,
         100,
         "每个上游账号全站最多同时排几张图",
+    ),
+    field(
+        "hourly_min",
+        HOURLY_MIN,
+        0,
+        240,
+        "每小时上限自动调整的下限（上游 429 减半后不会低于它）",
+    ),
+    field(
+        "hourly_max",
+        HOURLY_MAX,
+        0,
+        240,
+        "每小时上限自动调整的上限（平稳一天后自动上调，最高到这里）",
+    ),
+    field(
+        "hourly_step",
+        HOURLY_STEP,
+        0,
+        100,
+        "每小时上限平稳一天后自动上调的步长；0 = 不自动上调",
     ),
 ];
 
@@ -242,10 +284,13 @@ pub struct GuardCore {
     /// (时间, 该时刻的每小时上限)：上限变过就记一笔。
     /// 别在构造时记初始值：构造发生在 load 之前，那时是字段默认值（150），会在重启后的第一个小时把上限抬成 150。
     pub cap_marks: VecDeque<(f64, i64)>,
+    /// 上游 429 时每小时上限乘的系数：常量 [`HOURLY_DECREASE`]，不开放设置；做成字段只为让对拍夹具里
+    /// 用过别的系数的轨迹（旧版私密参数 `capacity.hourly_decrease`）仍能重放。
+    pub hourly_decrease: f64,
 }
 
 impl GuardCore {
-    /// `Guard(db, tz, reset_hour)`（旧版默认 `reset_hour=0`，线上用 `DAY_RESET_HOUR`=7）。
+    /// `Guard(db, tz, reset_hour)`（旧版默认 `reset_hour=0`；线上用 [`crate::clock::TZ`] / [`crate::clock::DAY_RESET_HOUR`]）。
     pub fn new(tz: &str, reset_hour: i64) -> Self {
         let reset_hour = reset_hour.clamp(0, 23);
         Self {
@@ -262,18 +307,8 @@ impl GuardCore {
             breaker_until: 0.0,
             breaker_reason: String::new(),
             cap_marks: VecDeque::new(),
+            hourly_decrease: HOURLY_DECREASE,
         }
-    }
-
-    /// 构造并按库里的键值加载设置（见 [`load_settings`](Self::load_settings)）。
-    pub fn from_settings(
-        tz: &str,
-        reset_hour: i64,
-        stored: &BTreeMap<String, String>,
-    ) -> Result<Self, GuardError> {
-        let mut g = Self::new(tz, reset_hour);
-        g.load_settings(stored)?;
-        Ok(g)
     }
 
     fn v(&self, name: &str) -> i64 {
@@ -350,6 +385,24 @@ impl GuardCore {
         Ok(updates)
     }
 
+    /// 每小时上限自动调整的下限不能高于上限（`updates` 是 [`validate_save`](Self::validate_save) 的结果，
+    /// 没改的那一项用现值）。不满足时调整逻辑虽然不会出错，但「上限」会被下限顶掉，设置本身没有意义。
+    pub fn check_hourly_bounds(&self, updates: &[(String, i64)]) -> Result<(), GuardError> {
+        let pick = |name: &str| {
+            updates
+                .iter()
+                .rev()
+                .find(|(k, _)| k == name)
+                .map_or_else(|| self.v(name), |(_, v)| *v)
+        };
+        if pick("hourly_min") > pick("hourly_max") {
+            return Err(GuardError::Value(
+                "每小时上限自动调整的下限不能高于上限".into(),
+            ));
+        }
+        Ok(())
+    }
+
     /// `self.values.update(updates)`。
     pub fn apply_updates(&mut self, updates: &[(String, i64)]) {
         for (k, v) in updates {
@@ -361,6 +414,7 @@ impl GuardCore {
     /// 想保持旧版「先写库后改内存」的顺序时，改用 `validate_save` + 写库 + `apply_updates`。
     pub fn save(&mut self, body: &Map<String, Value>) -> Result<Saved, GuardError> {
         let updates = Self::validate_save(body)?;
+        self.check_hourly_bounds(&updates)?;
         let writes = updates
             .iter()
             .map(|(k, v)| (setting_key(k), v.to_string()))
@@ -501,12 +555,11 @@ impl GuardCore {
         &mut self,
         now: f64,
         prev_cap_at: f64,
-        p: &Params,
     ) -> Result<Upstream429, GuardError> {
         let old = self.v("account_hourly_cap");
-        let floor = p.int("capacity.hourly_min", HOURLY_MIN);
+        let floor = self.v("hourly_min");
         // min(old, …)：上限已经被手动调到下限以下时，429 只能维持或降低，绝不能反而把它抬回下限
-        let halved = py_int(old as f64 * p.float("capacity.hourly_decrease", 0.5))?;
+        let halved = py_int(old as f64 * self.hourly_decrease)?;
         let new = old.min(floor.max(halved));
         let mut writes = self.set_adaptive(new, now, Some(now));
         // 记下「挨限流时的上限」（只在真的降档时记：站长手动压过的低值不该污染这个天花板）。
@@ -558,7 +611,6 @@ impl GuardCore {
         has_hit: bool,
         first_ts: Option<f64>,
         seen_at: f64,
-        p: &Params,
     ) -> Result<Adapted, GuardError> {
         // float(first or now)：0 和 None 都当「没有」
         let first = first_ts.filter(|t| *t != 0.0).unwrap_or(now);
@@ -572,15 +624,11 @@ impl GuardCore {
             });
         }
         let old = self.v("account_hourly_cap");
-        let mut wanted = p
-            .int("capacity.hourly_max", HOURLY_MAX)
-            .min(old + p.int("capacity.hourly_step", HOURLY_STEP));
+        let mut wanted = self.v("hourly_max").min(old + self.v("hourly_step"));
         // 挨过 429 的话，加窗的天花板压到「当时上限的 80%」：AIMD 的乘性减是 /2，
         // 但加性增会一路加回原来的水平，于是每过一两天又撞同一个红线。
         if seen_at != 0.0 {
-            let ceiling = p
-                .int("capacity.hourly_min", HOURLY_MIN)
-                .max(py_int(seen_at * 0.8)?);
+            let ceiling = self.v("hourly_min").max(py_int(seen_at * 0.8)?);
             wanted = wanted.min(ceiling);
         }
         let new = old.max(wanted); // 加窗只升不降：天花板低于当前值时也不能反向降档
@@ -618,6 +666,11 @@ impl GuardCore {
         } else {
             0.0
         }
+    }
+
+    /// 出图后静默的 (最少, 最多) 秒数（原样给出；`最多 < 最少` 等夹取由调度器处理）。
+    pub fn post_jitter(&self) -> (i64, i64) {
+        (self.v("post_jitter_min"), self.v("post_jitter_max"))
     }
 
     /// 全站熔断：在 `seconds` 秒内，所有上游账号都拒接新的出图任务。到点自动恢复。
@@ -787,11 +840,6 @@ impl GuardCore {
         }
     }
 
-    /// 当前排队中（未开始生成）的 key_id，按到达先后。
-    pub fn waiting_keys(&self) -> Vec<i64> {
-        self.waiting_sorted().iter().map(|e| e.key).collect()
-    }
-
     fn waiting_sorted(&self) -> Vec<&Entry> {
         let mut w: Vec<&Entry> = self.entries.iter().filter(|e| !e.running).collect();
         w.sort_by(|a, b| a.since.total_cmp(&b.since)); // 稳定排序
@@ -942,14 +990,51 @@ mod tests {
     #[test]
     fn aimd_halves_and_remembers_cap() {
         let mut g = guard();
-        let p = Params::empty();
-        let r = g.on_upstream_429(NOON, 0.0, &p).unwrap();
+        let r = g.on_upstream_429(NOON, 0.0).unwrap();
         assert_eq!(r.change, Some((150, 100)));
         assert_eq!(g.v("account_hourly_cap"), 100);
         assert!(
             r.writes
                 .contains(&("guard_429_cap_at".into(), "150".into()))
         );
+    }
+
+    #[test]
+    fn hourly_bounds_come_from_settings() {
+        // 下限设成 120：150 减半是 75，被下限托住
+        let mut g = guard();
+        g.values.insert("hourly_min".into(), 120);
+        let r = g.on_upstream_429(NOON, 0.0).unwrap();
+        assert_eq!(r.change, Some((150, 120)));
+        // 上限 / 步长：从 120 平稳一天后 +25，但不超过上限 140；顶到过上限（has_hit）且数据满 24 小时才加
+        g.values.insert("hourly_max".into(), 140);
+        g.values.insert("hourly_step".into(), 25);
+        let a = g
+            .adapt_daily_finish(NOON + 90_000.0, true, Some(NOON - 100_000.0), 0.0)
+            .unwrap();
+        assert_eq!(a.change, Some((120, 140)));
+        // 步长 0 = 不自动上调
+        g.values.insert("hourly_step".into(), 0);
+        let a = g
+            .adapt_daily_finish(NOON + 200_000.0, true, Some(NOON - 100_000.0), 0.0)
+            .unwrap();
+        assert_eq!(a.change, None);
+    }
+
+    #[test]
+    fn save_rejects_inverted_hourly_bounds() {
+        let mut g = guard();
+        let body = serde_json::json!({"hourly_min": 170});
+        assert_eq!(
+            g.save(body.as_object().unwrap()),
+            Err(GuardError::Value(
+                "每小时上限自动调整的下限不能高于上限".into()
+            ))
+        );
+        assert_eq!(g.v("hourly_min"), HOURLY_MIN, "校验失败不改内存");
+        let body = serde_json::json!({"hourly_min": 170, "hourly_max": 200});
+        assert!(g.save(body.as_object().unwrap()).is_ok());
+        assert_eq!((g.v("hourly_min"), g.v("hourly_max")), (170, 200));
     }
 
     #[test]

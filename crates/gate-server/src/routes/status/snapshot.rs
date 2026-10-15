@@ -1,6 +1,6 @@
 //! 状态快照（旧版 `status_page.snapshot`）：每个组件 90 天的色条、可用率、当前状态，以及事件列表。
 //!
-//! 「天」按网关配置的时区（`TZ`，默认 Asia/Shanghai）划分，与旧版 `datetime.fromtimestamp` 的本地时间一致。
+//! 「天」按网关的时区（常量 Asia/Shanghai，见 `gate_core::clock::TZ`）划分，与旧版 `datetime.fromtimestamp` 的本地时间一致。
 //! 数值运算的顺序照抄旧版（浮点结果要逐位相同，`/status.json` 里的 `uptime` 会原样输出）。
 
 use gate_core::clock::Clock;

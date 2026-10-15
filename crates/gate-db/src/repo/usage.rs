@@ -28,7 +28,6 @@ pub struct Success {
     pub dur_ms: i64,
     pub up_status: i64,
     pub rid: String,
-    pub src: String,
 }
 
 /// 一条拒绝 / 失败日志（`add_log`）。
@@ -48,7 +47,6 @@ pub struct NewLog {
     pub dur_ms: i64,
     pub up_status: i64,
     pub rid: String,
-    pub src: String,
     pub reason: String,
 }
 
@@ -76,8 +74,6 @@ pub struct Milestone {
 
 /// `image_perf_rows`：(ts, model, status, images, wait_ms, dur_ms, up_status, detail)
 pub type ImagePerfRow = (f64, String, String, i64, i64, i64, i64, String);
-/// `shadow_rows`：(ts, key_id, key_name, status, images, wait_ms, dur_ms)
-pub type ShadowRow = (f64, Option<i64>, String, String, i64, i64, i64);
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ImageStability {
@@ -138,7 +134,6 @@ impl Db {
     /// 锁冲突由 `Db::write` 的 BUSY 重试兜住，可见结果相同。
     pub async fn record_success(&self, s: &Success, now: f64) -> Result<()> {
         let s = s.clone();
-        let ver = self.rule_version();
         self.write(move |tx| {
             tx.execute(
                 INSERT_LOG,
@@ -158,8 +153,6 @@ impl Db {
                     s.dur_ms.max(0),
                     s.up_status,
                     pyc::take_chars(&s.rid, 16),
-                    pyc::take_chars(&s.src, 40),
-                    ver,
                 ],
             )?;
             tx.execute(
@@ -187,7 +180,6 @@ impl Db {
 
     pub async fn add_log(&self, l: &NewLog, now: f64) -> Result<()> {
         let l = l.clone();
-        let ver = self.rule_version();
         self.write(move |tx| {
             tx.execute(
                 INSERT_REJECT,
@@ -207,8 +199,6 @@ impl Db {
                     l.dur_ms.max(0),
                     l.up_status,
                     pyc::take_chars(&l.rid, 16),
-                    pyc::take_chars(&l.src, 40),
-                    ver,
                     pyc::take_chars(&l.reason, 24),
                 ],
             )?;
@@ -399,31 +389,6 @@ impl Db {
                     value::i64_or(r, 5, 0)?,
                     value::i64_or(r, 6, 0)?,
                     value::text_or(r, 7, "None")?,
-                ))
-            })?
-            .collect()
-        })
-        .await
-    }
-
-    /// 调度影子模式回放用：出图请求的 (ts, key_id, key_name, status, images, wait_ms, dur_ms)，不含测试 Key。
-    pub async fn shadow_rows(&self, since: f64) -> Result<Vec<ShadowRow>> {
-        self.read(move |c| {
-            let mut stmt = c.prepare(&format!(
-                "SELECT ts, key_id, key_name, status, images, wait_ms, dur_ms FROM usage_log \
-                 WHERE ts>=? AND kind IN ('image','image_stream') AND status IN ('ok','error') \
-                   AND {NOT_TEST} \
-                 ORDER BY ts"
-            ))?;
-            stmt.query_map([since], |r| {
-                Ok((
-                    value::f64_or(r, 0, 0.0)?,
-                    value::i64_opt(r, 1)?,
-                    value::text_or(r, 2, "None")?,
-                    value::text_or(r, 3, "None")?,
-                    value::i64_or(r, 4, 0)?,
-                    value::i64_or(r, 5, 0)?,
-                    value::i64_or(r, 6, 0)?,
                 ))
             })?
             .collect()

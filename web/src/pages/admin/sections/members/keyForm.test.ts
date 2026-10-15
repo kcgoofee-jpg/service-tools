@@ -27,23 +27,50 @@ const key: KeyRow = {
   used: { images: 0, anlas: 0, v5: 0, requests: 0 },
 };
 
+/** 服务端 /admin/api/ops 给的默认值（前端不另写一套） */
+const OPS = {
+  registration: { daily_images: 30, daily_v5: 0, expires_days: 0 },
+  features: { labels: {}, new_key: ["image"] },
+  new_key: { rpm: 10, daily_anlas: 0, monthly_anlas: 2500 },
+} as unknown as OpsSnapshot;
+const defaults = () => createDefaults(OPS);
+
 describe("createDefaults", () => {
-  it("额度跟「新成员默认额度」对齐，缺失时用常量；每分钟请求数和有效天数留空", () => {
+  it("全部取服务端给的：领 Key 的设置、Anlas 默认、默认功能；每分钟请求数和有效天数留空", () => {
     const ops = {
-      registration: { daily_images: 150, daily_v5: 6, expires_days: 30, features: ["image"] },
+      registration: { daily_images: 150, daily_v5: 6, expires_days: 30 },
       features: { labels: {}, new_key: ["image", "tags"] },
+      new_key: { rpm: 10, daily_anlas: 0, monthly_anlas: 2500 },
     } as unknown as OpsSnapshot;
     const f = createDefaults(ops);
-    expect([f.daily_images, f.daily_v5, f.rpm, f.expires]).toEqual(["150", "6", "", ""]);
+    expect([f.daily_images, f.daily_v5, f.daily_anlas, f.monthly_anlas]).toEqual(["150", "6", "0", "2500"]);
+    expect([f.rpm, f.expires]).toEqual(["", ""]);
     expect(f.feats).toEqual(["image", "tags"]);
+    expect(f.featMode).toBe("custom");
+  });
+  it("默认功能是 null = 全部已开放功能", () => {
+    const f = createDefaults({ ...OPS, features: { labels: {}, new_key: null } } as unknown as OpsSnapshot);
+    expect([f.featMode, f.feats]).toEqual(["all", []]);
+  });
+  it("取不到服务端默认值时留空，不用前端自己的数字", () => {
     const d = createDefaults(null);
-    expect([d.daily_images, d.daily_v5, d.rpm, d.expires]).toEqual(["100", "50", "", ""]);
+    expect([d.daily_images, d.daily_v5, d.daily_anlas, d.monthly_anlas, d.rpm, d.expires]).toEqual([
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+    ]);
+    expect(d.feats).toEqual([]);
+    const r = buildBody(d);
+    expect(r.ok).toBe(false);
   });
 });
 
 describe("buildBody", () => {
   it("手动模式：默认值能通过，0 视为不限", () => {
-    const f = { ...createDefaults(null), name: " 张三 ", daily_images: "0", daily_v5: "0" };
+    const f = { ...defaults(), name: " 张三 ", daily_images: "0", daily_v5: "0" };
     const r = buildBody(f);
     expect(r.ok).toBe(true);
     if (r.ok) {
@@ -56,7 +83,7 @@ describe("buildBody", () => {
 
   it("空值、负数、小数、越界都被拒绝，并指出是哪个字段", () => {
     const f = {
-      ...createDefaults(null),
+      ...defaults(),
       daily_images: "",
       daily_v5: "-1",
       daily_anlas: "abc",
@@ -74,18 +101,18 @@ describe("buildBody", () => {
   });
 
   it("新建时不再带硬编码默认值：每分钟请求数、有效天数、文本额度都不发", () => {
-    const r = buildBody(createDefaults(null));
+    const r = buildBody(defaults());
     expect(r.ok).toBe(true);
     if (r.ok)
       for (const k of ["rpm", "expires_days", "daily_text_tokens"]) expect(r.body).not.toHaveProperty(k);
   });
   it("填了每分钟请求数 / 有效天数才发", () => {
-    const r = buildBody({ ...createDefaults(null), rpm: "20", expires: "0" });
+    const r = buildBody({ ...defaults(), rpm: "20", expires: "0" });
     expect(r.ok && [r.body.rpm, r.body.expires_days]).toEqual([20, 0]);
   });
 
   it("开通 Anlas 时日 / 月上限不能都是 0", () => {
-    const f = { ...createDefaults(null), allow_anlas: true, daily_anlas: "0", monthly_anlas: "0" };
+    const f = { ...defaults(), allow_anlas: true, daily_anlas: "0", monthly_anlas: "0" };
     const r = buildBody(f);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.errors.allow_anlas).toContain("至少要有一个大于 0");
@@ -93,14 +120,14 @@ describe("buildBody", () => {
   });
 
   it("功能：仅选中模式必须至少选一个；「全部」发 null", () => {
-    expect(buildBody({ ...createDefaults(null), feats: [] }).ok).toBe(false);
-    const r = buildBody({ ...createDefaults(null), featMode: "all" });
+    expect(buildBody({ ...defaults(), feats: [] }).ok).toBe(false);
+    const r = buildBody({ ...defaults(), featMode: "all" });
     expect(r.ok && r.body.features).toBe(null);
   });
 
   it("算法模式：不校验、不发额度字段", () => {
     const f = {
-      ...createDefaults(null),
+      ...defaults(),
       quota: "auto" as const,
       daily_images: "",
       daily_anlas: "x",

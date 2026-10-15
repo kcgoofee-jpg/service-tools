@@ -312,7 +312,6 @@ async fn public_live_shape_and_key_order() {
             "algo_notice",
             "key_inactivity_delete_days",
             "web_login",
-            "home_join_open",
             "audit_notice",
             "registration",
             "me"
@@ -375,8 +374,14 @@ async fn public_live_shape_and_key_order() {
     assert_eq!(v["discord_invite"], "https://discord.gg/abc");
     assert_eq!(v["has_announcement"], false);
     assert_eq!(v["key_inactivity_delete_days"], 3);
-    assert_eq!(v["web_login"], false, "默认网页登录暂停（fail-closed）");
-    assert_eq!(v["home_join_open"], true);
+    assert_eq!(
+        v["web_login"], true,
+        "网页登录常开（docs/v3-deviations.md #92）"
+    );
+    assert!(
+        v.get("home_join_open").is_none(),
+        "首页加入按钮跟着 registration.open"
+    );
     assert_eq!(v["audit_notice"], "");
     assert_eq!(
         v["registration"],
@@ -410,8 +415,6 @@ async fn public_live_reflects_site_settings_after_meta_cache() {
     let e = setup(&reg_env()).await;
     let long = "额".repeat(400);
     for (k, v) in [
-        ("web_login_paused", "0"),
-        ("home_join_open", "0"),
         ("algo_notice", long.as_str()),
         ("register_open", "1"),
         ("register_max_users", "3"),
@@ -421,7 +424,6 @@ async fn public_live_reflects_site_settings_after_meta_cache() {
     e.state.live.invalidate();
     let (_, _, v) = get_json(&e.state, "/public/live", &[]).await;
     assert_eq!(v["web_login"], true);
-    assert_eq!(v["home_join_open"], false);
     assert_eq!(v["algo_notice"].as_str().unwrap().chars().count(), 300);
     assert_eq!(
         v["registration"],
@@ -432,14 +434,23 @@ async fn public_live_reflects_site_settings_after_meta_cache() {
     // 30 秒子缓存：改了设置，不 invalidate 就还是旧值
     e.state
         .db
-        .set_setting("web_login_paused", "1")
+        .set_setting("algo_notice", "新说明")
         .await
         .unwrap();
     let (_, _, again) = get_json(&e.state, "/public/live", &[]).await;
-    assert_eq!(again["web_login"], true);
+    assert_eq!(again["algo_notice"].as_str().unwrap().chars().count(), 300);
     e.state.live.invalidate();
     let (_, _, fresh) = get_json(&e.state, "/public/live", &[]).await;
-    assert_eq!(fresh["web_login"], false);
+    assert_eq!(fresh["algo_notice"], "新说明");
+    // 登录开关已删除：库里残留 web_login_paused=1 也不影响
+    e.state
+        .db
+        .set_setting("web_login_paused", "1")
+        .await
+        .unwrap();
+    e.state.live.invalidate();
+    let (_, _, fresh) = get_json(&e.state, "/public/live", &[]).await;
+    assert_eq!(fresh["web_login"], true);
 }
 
 #[tokio::test]
@@ -500,57 +511,17 @@ async fn public_live_me_for_logged_in_member_only() {
     assert_eq!(off["me"], Value::Null);
 }
 
-// ------------------------------------------------------------------ /v1/live/me
-
+/// `/v1/live/me` 已删除（docs/v3-deviations.md #103）：首页一直用 `/public/live` 里的 `me`。
 #[tokio::test]
-async fn live_me_is_passive_and_quiet_on_bad_keys() {
+async fn live_me_route_is_gone() {
     let e = setup(&[]).await;
-    let (status, headers, v) = get_json(
+    let (status, _, v) = get_json(
         &e.state,
         "/v1/live/me",
         &[("authorization", &format!("Bearer {TOKEN}"))],
     )
     .await;
-    assert_eq!(status, 200);
-    assert_eq!(headers["cache-control"], "no-store");
-    assert_eq!(v, json!({"mine": [], "waiting": 0, "running": 0}));
-
-    let now = e.state.now();
-    e.state.guard.with(|g| g.admit_image(1, 1, now));
-    let (_, _, v) = get_json(
-        &e.state,
-        "/v1/live/me",
-        &[("authorization", &format!("Bearer {TOKEN}"))],
-    )
-    .await;
-    assert_eq!(
-        v,
-        json!({"mine": [{"state": "waiting", "position": 1, "eta": 15}], "waiting": 1, "running": 0})
-    );
-
-    let (status, headers, v) = get_json(
-        &e.state,
-        "/v1/live/me",
-        &[("authorization", "Bearer nai-nope")],
-    )
-    .await;
-    assert_eq!(status, 401);
-    assert_eq!(headers["cache-control"], "no-store");
-    // 不带「猫头鹰公益站提醒」前缀：这是给首页脚本用的，不是给 NovelAI 客户端看的
-    assert_eq!(v, json!({"mine": null, "error": "无效的 API Key"}));
-    let (status, _, v) = get_json(&e.state, "/v1/live/me", &[]).await;
-    assert_eq!(status, 401);
-    assert_eq!(v, json!({"mine": null, "error": "缺少 API Key"}));
-
-    // 不写用量日志（passive）
-    settle().await;
-    let rows = e
-        .state
-        .db
-        .list_logs(50, 0, &LogFilter::default())
-        .await
-        .unwrap();
-    assert!(rows.is_empty(), "{rows:?}");
+    assert_eq!((status.as_u16(), v), (404, json!({"detail": "Not Found"})));
 }
 
 // ------------------------------------------------------------------ /public/status
@@ -598,7 +569,7 @@ async fn public_status_exposes_only_safe_fields() {
     );
     assert_eq!(v["image_jobs"], 0);
     assert_eq!(v["stability"], json!({"ok": 0, "error": 0}));
-    assert_eq!(v["web_login"], false);
+    assert_eq!(v["web_login"], true);
     assert_eq!(v["has_announcement"], false);
     assert_eq!(v["key_inactivity_delete_days"], 3);
 
@@ -744,18 +715,7 @@ async fn user_compat_routes_require_key_and_keep_panel_schema() {
     }
 
     // 用掉的 V5 体现在 v5LeftToday 里
-    e.state
-        .db
-        .bump_counters(
-            1,
-            &e.state.day(),
-            &gate_db::repo::counters::CounterDelta {
-                v5: 3,
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
+    common::add_usage(&e.state.db, 1, &e.state.day(), 3, 0.0).await;
     let (_, body) = get("/user/subscription").await;
     assert_eq!(json_of(&body)["naiGate"]["v5LeftToday"], 7);
 
@@ -1371,13 +1331,11 @@ async fn setup_page(extra: &[(&str, &str)]) -> Page {
         ),
         ("NAI_TOKENS", "pst-synthetic-upstream-token".into()),
         ("NAI_IMAGE_HOST", mock.url()),
-        ("IMAGE_MIN_INTERVAL", "0".into()),
         (
             "SECRET_KEY",
             "test-secret-key-test-secret-key-0123456789".into(),
         ),
         ("ADMIN_PASSWORD", ADMIN_PASSWORD.into()),
-        ("UPSTREAM_HTTP2", "0".into()),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))
@@ -1385,7 +1343,9 @@ async fn setup_page(extra: &[(&str, &str)]) -> Page {
     for (k, v) in extra {
         vars.insert(k.to_string(), v.to_string());
     }
-    let state = AppState::build(EnvConfig::load(&vars), Assets::new(Some(static_dir)))
+    let mut env = EnvConfig::load(&vars);
+    env.image_min_interval = 0.0; // 代码常量，测试里直接改
+    let state = AppState::build(env, Assets::new(Some(static_dir)))
         .await
         .unwrap();
     let key: gate_db::repo::keys::NewKey = serde_json::from_value(json!({
@@ -1437,7 +1397,7 @@ async fn landing_boot_for_guest() {
     assert_eq!(boot["live"]["site"], "https://gate.example.top");
     assert_eq!(boot["live"]["quota"]["images_cap"], 1000);
     assert_eq!(boot["status"]["site"], "https://gate.example.top");
-    assert_eq!(boot["status"]["web_login"], false);
+    assert_eq!(boot["status"]["web_login"], true);
     assert_eq!(
         boot["status"]["registration"],
         json!({"open": false, "slots_left": 10})

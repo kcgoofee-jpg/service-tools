@@ -16,6 +16,10 @@ rmpv.workspace = true
 base64.workspace = true
 image.workspace = true
 zip.workspace = true
+# 按 Accept-Encoding 压缩响应（逐块 flush，流式回复照样一块一块到）：与 wreq-util 用的是同一版
+flate2 = "1"
+brotli = "8"
+zstd = "0.13"
 
 [lints]
 workspace = true

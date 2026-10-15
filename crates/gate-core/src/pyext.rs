@@ -9,7 +9,6 @@
 
 use crate::{pyc, pyval};
 use serde_json::{Map, Number, Value};
-use std::cmp::Ordering;
 use std::sync::OnceLock;
 
 pub type Obj = Map<String, Value>;
@@ -120,26 +119,6 @@ pub fn num_eq_int(v: Option<&Value>, lit: i128) -> bool {
         Some(Value::Bool(b)) => i128::from(*b) == lit,
         _ => false,
     }
-}
-
-/// Python 整数与浮点的精确比较（不经 f64 取整）。
-pub fn cmp_int_float(a: i128, b: f64) -> Option<Ordering> {
-    if b.is_nan() {
-        return None;
-    }
-    let lim = 2.0_f64.powi(127);
-    if b >= lim {
-        return Some(Ordering::Less);
-    }
-    if b <= -lim {
-        return Some(Ordering::Greater);
-    }
-    let fl = b.floor();
-    let bi = fl as i128;
-    Some(match a.cmp(&bi) {
-        Ordering::Equal if b > fl => Ordering::Less,
-        o => o,
-    })
 }
 
 // ----------------------------------------------------------------------------- 字符类（Python 3.12 / Unicode 15.0）
@@ -482,13 +461,5 @@ mod tests {
         assert_eq!(py_int(&json!(28.99)), Ok(28));
         assert_eq!(py_int(&json!(-0.5)), Ok(0));
         assert!(matches!(py_int(&json!([1])), Err(PyErr::Type(_))));
-    }
-
-    #[test]
-    fn int_float_compare_is_exact() {
-        assert_eq!(cmp_int_float(5, 5.5), Some(Ordering::Less));
-        assert_eq!(cmp_int_float(5, 5.0), Some(Ordering::Equal));
-        assert_eq!(cmp_int_float(-5, -5.5), Some(Ordering::Greater));
-        assert_eq!(cmp_int_float(1, 1e300), Some(Ordering::Less));
     }
 }

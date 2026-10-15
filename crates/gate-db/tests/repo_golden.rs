@@ -7,7 +7,6 @@ use base64::{Engine, engine::general_purpose::STANDARD as B64};
 use gate_core::{clock::Clock, pyc, pyval};
 use gate_db::repo::{
     audit::NewAudit,
-    counters::CounterDelta,
     discord::BanInfo,
     feedback::Survey,
     keys::NewKey,
@@ -250,15 +249,20 @@ fn set_mtime(p: &Path, secs: f64) {
 /// 3.0 新增、冻结的 2.x 夹具里没有的列（docs/v3-deviations.md #47）：比较前从 Rust 这一侧去掉。
 const RUST_ONLY_COLUMNS: [&str; 1] = ["disabled_reason"];
 
-/// 3.0 删除了客户端识别（docs/v3-deviations.md #50）：`usage_log.client` 列还在（2.x 能读），但不再写入、也不再从
-/// `list_logs` 读出。冻结夹具里旧版写进这一列的客户端名，两边都不比：整表内容里把这一列按空串比较。
+/// `usage_log` 里 3.0 不再写入的列，冻结夹具里旧版写的值两边都不比：整表内容里按空串比较。
+/// - `client`：客户端识别已删除（docs/v3-deviations.md #50），列还在（2.x 能读），也不再从 `list_logs` 读出；
+/// - `src`（来源网段）/ `ver`（网关版本）：只写不读，3.0 不再写（docs/v3-deviations.md #104）。
+const UNWRITTEN_USAGE_COLUMNS: [&str; 3] = ["client", "src", "ver"];
+
 fn blank_usage_client(tables: &mut Value) {
     let rows = tables.get_mut("usage_log").and_then(Value::as_array_mut);
     for row in rows.into_iter().flatten() {
-        if let Some(o) = row.as_object_mut()
-            && o.contains_key("client")
-        {
-            o.insert("client".into(), json!(""));
+        if let Some(o) = row.as_object_mut() {
+            for col in UNWRITTEN_USAGE_COLUMNS {
+                if o.contains_key(col) {
+                    o.insert(col.into(), json!(""));
+                }
+            }
         }
     }
 }
@@ -480,11 +484,6 @@ async fn call(db: &Db, c: &Case) -> Out {
             .await?;
             Value::Null
         }
-        "list_admin_actions" => json!(
-            db.list_admin_actions(int(a(0, "limit"), 30), int(a(1, "offset"), 0))
-                .await?
-        ),
-        "count_admin_actions" => json!(db.count_admin_actions().await?),
         "purge_admin_actions" => json!(db.purge_admin_actions(num(a(0, "older_than"), 0.0)).await?),
         // ---------------- discord
         "forget_registration_for_key" => {
@@ -543,17 +542,6 @@ async fn call(db: &Db, c: &Case) -> Out {
                     .await?
             )
         }
-        // ---------------- misc
-        "execute_fetchall_compat" => {
-            let args = a(1, "args")
-                .and_then(Value::as_array)
-                .cloned()
-                .unwrap_or_default();
-            json!(
-                db.execute_fetchall_compat(&s(a(0, "sql"), ""), &args)
-                    .await?
-            )
-        }
         // ---------------- keys
         "create_key" => {
             let nk: NewKey = serde_json::from_value(c.arg(0).clone())
@@ -584,32 +572,12 @@ async fn call(db: &Db, c: &Case) -> Out {
             db.touch_key(int(a(0, "key_id"), 0), now).await?;
             Value::Null
         }
-        "get_key_role" => {
-            let tags = match a(1, "tags") {
-                None | Some(Value::Null) => None,
-                Some(v) => Some(str_list(v)),
-            };
-            json!(db.get_key_role(c.arg(0), tags.as_deref()).await?)
-        }
         "set_key_role" => {
             db.set_key_role(int(a(0, "key_id"), 0), &s(a(1, "role"), ""), now)
                 .await?;
             Value::Null
         }
         // ---------------- counters
-        "bump_counters" => {
-            let d = CounterDelta {
-                images: int(a(2, "images"), 0),
-                anlas: num(a(3, "anlas"), 0.0),
-                text_tokens: int(a(4, "text_tokens"), 0),
-                requests: int(a(5, "requests"), 1),
-                v5: int(a(6, "v5"), 0),
-                legacy_free_images: int(a(7, "legacy_free_images"), 0),
-            };
-            db.bump_counters(int(a(0, "key_id"), 0), &s(a(1, "day"), ""), &d)
-                .await?;
-            Value::Null
-        }
         "get_counter" => js(&db
             .get_counter(int(a(0, "key_id"), 0), &s(a(1, "day"), ""))
             .await?),
@@ -648,7 +616,6 @@ async fn call(db: &Db, c: &Case) -> Out {
                 dur_ms: int(c.kwarg("dur_ms"), 0),
                 up_status: int(c.kwarg("up_status"), 0),
                 rid: s(c.kwarg("rid"), ""),
-                src: s(c.kwarg("src"), ""),
             };
             db.record_success(&sc, now).await?;
             Value::Null
@@ -669,7 +636,6 @@ async fn call(db: &Db, c: &Case) -> Out {
                 dur_ms: int(a(11, "dur_ms"), 0),
                 up_status: int(a(13, "up_status"), 0),
                 rid: s(a(14, "rid"), ""),
-                src: s(a(15, "src"), ""),
                 reason: s(a(16, "reason"), ""),
             };
             db.add_log(&l, now).await?;
@@ -714,21 +680,6 @@ async fn call(db: &Db, c: &Case) -> Out {
                     dur,
                     up,
                     detail
-                ]))
-                .collect::<Vec<_>>()
-        ),
-        "shadow_rows" => json!(
-            db.shadow_rows(num(a(0, "since"), 0.0))
-                .await?
-                .into_iter()
-                .map(|(ts, key_id, key_name, status, images, wait, dur)| json!([
-                    float(ts),
-                    key_id,
-                    key_name,
-                    status,
-                    images,
-                    wait,
-                    dur
                 ]))
                 .collect::<Vec<_>>()
         ),
@@ -787,16 +738,6 @@ async fn call(db: &Db, c: &Case) -> Out {
                 .collect();
             let (rows, total) = db
                 .list_audit_ids(int(a(0, "limit"), 0), int(a(1, "offset"), 0), &ids)
-                .await?;
-            json!([rows, total])
-        }
-        "list_audit" => {
-            let (rows, total) = db
-                .list_audit(
-                    int(a(0, "limit"), 0),
-                    int(a(1, "offset"), 0),
-                    opt_int(a(2, "key_id")),
-                )
                 .await?;
             json!([rows, total])
         }
@@ -878,14 +819,29 @@ fn last_image_at(tables: &Value, key_id: i64) -> Option<Value> {
         .map(|r| r["last_image_at"].clone())
 }
 
+/// 已删除的方法：冻结夹具里还有它们的用例，逐条跳过。
+/// - `latest_member_clients`：每把 Key 最近一次请求的客户端（docs/v3-deviations.md #50）；
+/// - 其余：没有生产调用方的死代码（docs/v3-deviations.md #101）。
+const REMOVED_METHODS: [&str; 7] = [
+    "latest_member_clients",
+    "shadow_rows",
+    "bump_counters",
+    "get_key_role",
+    "list_admin_actions",
+    "count_admin_actions",
+    "list_audit",
+];
+
 async fn run_case(case: &Case) {
-    // 「每把 Key 最近一次请求的客户端」整个方法已删除（docs/v3-deviations.md #50）
-    if case.get("method").and_then(Value::as_str) == Some("latest_member_clients") {
+    if case
+        .get("method")
+        .and_then(Value::as_str)
+        .is_some_and(|m| REMOVED_METHODS.contains(&m))
+    {
         return;
     }
     let dir = tempfile::tempdir().unwrap();
     let db = Db::open(dir.path().join("gate.db"), 0.0, &[]).unwrap();
-    db.set_rule_version(case.get("rule_version").unwrap().as_str().unwrap());
     let extra = seed(&db, case).await;
     let brief = brief(case);
     // 3.0 不再刷新的 last_image_at：期望一侧换回调用前的值（#65）
@@ -969,7 +925,6 @@ area_tests!(
     admin_actions,
     discord,
     feedback,
-    misc,
     keys,
     counters,
     usage,

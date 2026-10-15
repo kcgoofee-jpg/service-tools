@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 
 use gate_core::errors::{
-    self, Capture, ErrorEvent, ExcInfo, ExcKey, StoreState, build_event, normalize_title,
-    notice_for, should_print_stack, store_state,
+    self, Capture, ErrorEvent, ExcInfo, ExcKey, build_event, normalize_title, should_print_stack,
 };
 use gate_golden::{assert_eq_py, load};
 use serde_json::{Value, json};
@@ -115,47 +114,6 @@ fn capture_golden() {
     assert!(
         printed_stack > 100 && skipped_stack > 20 && truncated > 10,
         "{printed_stack} / {skipped_stack} / {truncated}"
-    );
-}
-
-#[test]
-fn notify_golden() {
-    let (mut new, mut regressed, mut known, mut muted) = (0, 0, 0, 0);
-    for c in load(M, "errors/notify") {
-        let existing = if c.raw["existing"].is_null() {
-            None
-        } else {
-            Some(c.raw["existing"]["resolved_at"].as_f64())
-        };
-        let state = store_state(existing);
-        let e = &c.raw["event"];
-        let event = ErrorEvent {
-            sig: e["sig"].as_str().unwrap().into(),
-            source: e["source"].as_str().unwrap().into(),
-            level: e["level"].as_str().unwrap().into(),
-            title: e["title"].as_str().unwrap().into(),
-            detail: e["detail"].as_str().unwrap().into(),
-            path: e["path"].as_str().unwrap().into(),
-            key_id: e["key_id"].as_i64(),
-            rid: e["rid"].as_str().unwrap().into(),
-            ts: e["ts"].as_f64().unwrap(),
-        };
-        let notice = notice_for(state, &event);
-        let got: Vec<Value> = notice
-            .iter()
-            .map(|n| json!([n.key, n.text, n.cooldown_secs]))
-            .collect();
-        assert_eq_py(&c, &Value::Array(got), &c.raw["calls"]);
-        match state {
-            StoreState::New => new += 1,
-            StoreState::Regressed => regressed += 1,
-            StoreState::Known => known += 1,
-        }
-        muted += usize::from(notice.is_none());
-    }
-    assert!(
-        new > 30 && regressed > 30 && known > 30 && muted > 30,
-        "{new}/{regressed}/{known}/{muted}"
     );
 }
 

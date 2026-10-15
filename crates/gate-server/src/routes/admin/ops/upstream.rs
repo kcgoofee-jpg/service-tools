@@ -125,10 +125,11 @@ async fn token_payload(
 }
 
 /// 向 NovelAI 查订阅信息确认 Token 有效（只读，不消耗额度）。返回订阅等级。
-async fn verify(state: &AppState, token: &str) -> Result<i64, ApiError> {
+/// `replacing`：替换时是旧 token_id（用那个位置的浏览器指纹），新增时为 None。
+async fn verify(state: &AppState, token: &str, replacing: Option<&str>) -> Result<i64, ApiError> {
     state
         .nai
-        .verify_token(token)
+        .verify_token(token, replacing)
         .await
         .map_err(|msg| HttpError::new(422, msg).into())
 }
@@ -139,7 +140,7 @@ async fn verify(state: &AppState, token: &str) -> Result<i64, ApiError> {
 async fn add_token(State(state): State<AppState>, _s: AdminSession, req: Request) -> ApiResult {
     let (parts, body) = req.into_parts();
     let (token, body) = token_payload(&parts, body).await?;
-    let tier = verify(&state, &token).await?;
+    let tier = verify(&state, &token, None).await?;
     let id = token_id(&token);
     let saved_v5 = state
         .db
@@ -182,7 +183,7 @@ async fn replace_token(
 ) -> ApiResult {
     let (parts, body) = req.into_parts();
     let (token, _) = token_payload(&parts, body).await?;
-    let tier = verify(&state, &token).await?;
+    let tier = verify(&state, &token, Some(&old_id)).await?;
     match state.nai.replace_token(&old_id, token).await {
         Ok((new, previous)) => {
             state
@@ -261,15 +262,10 @@ async fn set_image_concurrency(
     if !exists(&state, &id).await {
         return Err(HttpError::new(404, NOT_FOUND).into());
     }
-    // 库里存实际生效的并发（SINGLE_IMAGE_SLOT_ENFORCED 时恒为 1），响应回请求的值（与旧版一致）
-    let effective = if state.env.single_image_slot_enforced {
-        1
-    } else {
-        limit
-    };
+    // 后台设的就是实际生效的并发（SINGLE_IMAGE_SLOT_ENFORCED 已删除，docs/v3-deviations.md #88）
     state
         .db
-        .set_upstream_token_image_concurrency(&id, effective)
+        .set_upstream_token_image_concurrency(&id, limit)
         .await?;
     if state.nai.set_image_concurrency(&id, limit).await.is_none() {
         return Err(HttpError::new(404, NOT_FOUND).into());

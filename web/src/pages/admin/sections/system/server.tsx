@@ -101,7 +101,7 @@ export function AlertsCard() {
         <p class="small">
           {a.configured
             ? `已发送 ${a.sent} 条告警。`
-            : "在服务器的 .env 里设置 ALERT_USER_ID / ALERT_CHANNEL_ID / ALERT_WEBHOOK_URL 后可接收异常通知。"}
+            : "在服务器的 .env 里设置 DISCORD_BOT_TOKEN 和 ALERT_USER_ID 后，机器人会私信你。"}
         </p>
         <div class="actions">
           <Button disabled={!a.configured} onClick={() => setOpen(true)}>

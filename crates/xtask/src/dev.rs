@@ -17,7 +17,7 @@ use gate_server::env::EnvConfig;
 use gate_server::key::Key;
 use gate_server::session;
 use gate_server::web::Assets;
-use gate_server::{AppState, jobs, state::VERSION};
+use gate_server::{AppState, jobs};
 use gate_testkit::MockUpstream;
 use std::collections::HashMap;
 use std::future::IntoFuture;
@@ -129,13 +129,6 @@ fn gateway_env(
         ),
         ("ADMIN_ALLOWED_ORIGINS", args.origins.clone()),
         ("ADMIN_COOKIE_SECURE", "0".into()),
-        ("IMAGE_MIN_INTERVAL", "0".into()),
-        ("TZ", "Asia/Shanghai".into()),
-        // 本地调试用的额外项：假上游是明文 HTTP/1.1，不需要抖动；反复跑端到端不要被登录限流挡住
-        ("POST_REQUEST_JITTER_MIN", "0".into()),
-        ("POST_REQUEST_JITTER_MAX", "0".into()),
-        ("UPSTREAM_HTTP2", "0".into()),
-        ("LOGIN_MAX_ATTEMPTS", "100".into()),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))
@@ -164,14 +157,16 @@ async fn serve(args: Args) -> Result<()> {
     let dead = dead_local_port()?;
     std::fs::write(data.join("secret_key"), seed::SECRET)?;
 
-    let env = EnvConfig::load(&gateway_env(&args, &data, &mock, dead));
+    let mut env = EnvConfig::load(&gateway_env(&args, &data, &mock, dead));
+    // 这两项是代码常量，不读环境变量：假上游不需要出图间隔；反复跑端到端不要被登录限流挡住
+    env.image_min_interval = 0.0;
+    env.login_max_attempts = 100;
     let now = gate_server::time::now();
-    let clock = Clock::new(&env.tz, env.day_reset_hour);
+    let clock = Clock::service();
 
     // 先把数据写进库、关掉这个连接，再让网关像对着一份现成的库那样启动（启动时的回填、停机检测都按真实路径走）
     let seeded = {
         let db = Db::open(env.db_path(), now, gate_core::reasons::BACKFILL)?;
-        db.set_rule_version(VERSION);
         seed::seed(&db, &clock, now)
             .await
             .context("写入合成演示数据失败")?

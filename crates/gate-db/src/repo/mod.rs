@@ -26,7 +26,6 @@ pub mod feedback;
 pub mod guard;
 pub mod kernel;
 pub mod keys;
-pub mod misc;
 pub mod public;
 pub mod reconciliation;
 pub mod registration;
@@ -66,13 +65,14 @@ pub const IMAGE_SIZE: &str = "COALESCE(image_size, LENGTH(image), 0)";
 pub(crate) const LOG_COLUMNS: &str = "id, ts, key_id, key_name, kind, model, status, images, anlas, tokens, \
 unconfirmed_anlas, detail, reason, wait_ms, dur_ms, up_status, rid, src, ver";
 /// 成功记账写 usage_log（不带 reason 列，与旧版 `_INSERT_LOG` 一致）。
+/// `src`（来源网段）/ `ver`（网关版本）两列还在表里，3.0 不再写（取默认值 `''`）：docs/v3-deviations.md #104。
 pub(crate) const INSERT_LOG: &str = "INSERT INTO usage_log (ts, key_id, key_name, kind, model, status, \
-images, anlas, tokens, detail, unconfirmed_anlas, wait_ms, dur_ms, up_status, rid, src, ver) \
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+images, anlas, tokens, detail, unconfirmed_anlas, wait_ms, dur_ms, up_status, rid) \
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
 /// 拒绝 / 失败日志（带 reason 列，旧版 `_INSERT_REJECT`）。
 pub(crate) const INSERT_REJECT: &str = "INSERT INTO usage_log (ts, key_id, key_name, kind, model, status, \
-images, anlas, tokens, detail, unconfirmed_anlas, wait_ms, dur_ms, up_status, rid, src, ver, reason) \
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+images, anlas, tokens, detail, unconfirmed_anlas, wait_ms, dur_ms, up_status, rid, reason) \
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
 /// 计数器累加（旧版 `_UPSERT_COUNTERS`，列顺序：key_id, day, images, anlas, text_tokens, requests, v5, legacy_free_images）。
 pub(crate) const UPSERT_COUNTERS: &str = "INSERT INTO counters \
 (key_id, day, images, anlas, text_tokens, requests, v5, legacy_free_images) \

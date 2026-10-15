@@ -236,7 +236,7 @@ async fn info(State(state): State<AppState>, req: Request) -> ApiResult {
     let cfg = svc.settings().await?;
     Ok(no_store(ok_json(&json!({
         "open": cfg.open,
-        "notice": crate::audit::audit_disclosure(&state.db, &state.env).await?,
+        "notice": crate::audit::audit_disclosure(&state.db).await?,
         "upstream": {"image_cooldown_seconds": state.cooldown.remaining(state.now())},
     }))))
 }
