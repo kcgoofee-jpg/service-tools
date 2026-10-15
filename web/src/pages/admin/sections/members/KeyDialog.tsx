@@ -444,7 +444,7 @@ export function KeyDialog(props: Props) {
               />
               <span>
                 允许 img2img / 局部重绘
-                <small>还需服务器开启 ALLOW_IMG2IMG；会扣 Anlas 的请求还要允许消耗 Anlas</small>
+                <small>会扣 Anlas 的请求还要允许消耗 Anlas</small>
               </span>
             </label>
           </div>
