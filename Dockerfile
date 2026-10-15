@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.10
 # 猫头鹰公益站 3.0：一个镜像三个二进制（nai-gate 网关 / nai-bots 机器人 / nai-ops 运维）。
-# 由 GitHub Actions 构建并推到 GHCR；服务器（2 核）只 pull，不在本机编译。
+# 由 GitHub Actions 构建并导出为 tar 附件（owl-gate-image）；服务器（2 核）下载后 docker load，不 pull、不在本机编译。
 
 # ---------- 前端 ----------
 FROM node:24-bookworm-slim AS web
