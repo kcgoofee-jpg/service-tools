@@ -1,1 +1,0 @@
-{"standard_body":{"investigating":"我们正在调查此问题。","identified":"问题已定位，正在实施修复。","update":"我们正在继续处理此问题。","monitoring":"修复已上线，我们正在观察结果。","resolved":"此事件已解决。"},"components":["upstream","api","web","bot"],"shown":["upstream","api"],"impacts":["none","minor","major","critical"],"statuses":["investigating","identified","update","monitoring","resolved"]}

@@ -59,7 +59,7 @@ pub struct DiscordScript {
 pub async fn discord_mock(script: DiscordScript) -> (Mock, Log) {
     use axum::extract::{Path as AxPath, State};
     use axum::http::{HeaderMap, StatusCode};
-    use axum::routing::{patch, post};
+    use axum::routing::post;
     use axum::{Json, response::IntoResponse};
     use serde_json::{Value, json};
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -122,13 +122,6 @@ pub async fn discord_mock(script: DiscordScript) -> (Mock, Log) {
                 }
                 let n = st.seq.fetch_add(1, Ordering::SeqCst) + 1;
                 (StatusCode::OK, Json(json!({"id": format!("msg-{n}")}))).into_response()
-            }),
-        )
-        .route(
-            "/channels/{channel}/messages/{message}",
-            patch(|State(st): State<Arc<St>>, AxPath((channel, message)): AxPath<(String, String)>, headers: HeaderMap, Json(body): Json<Value>| async move {
-                record(&st, "PATCH", format!("/channels/{channel}/messages/{message}"), &headers, body);
-                (StatusCode::OK, Json(json!({"id": message}))).into_response()
             }),
         )
         .with_state(st);
