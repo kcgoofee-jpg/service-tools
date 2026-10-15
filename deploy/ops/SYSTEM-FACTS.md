@@ -13,7 +13,7 @@
 
 - 线上现有活跃成员 Key 170 把、Discord 领取记录 164 条（线，两个数口径不同，未做第二来源核对）；名额不限（线；后台设置 `register_max_users=0`，10-15 核对过库里有这一行。环境变量 `REGISTER_MAX_USERS` 已删除）。
 - 上游账号数：代码按令牌池大小计（`每日上限 × 账号数`）；线上快照没有直接给出账号数（V5 采样只见 1 个 Token），未核对。
-- 内核循环每 10 分钟、维护循环每 5 分钟，都带 ±20% 抖动（下限 30 秒）；巡检由宿主机定时器每 5 分钟跑一次（码 `jobs.rs`、`nai-patrol.timer`）。
+- 定时任务（§4）：动态额度、上游 V5 快照、每小时上限调整、全站熔断、单 Key 限流每 10 分钟，维护每 5 分钟，都带 ±20% 抖动（下限 30 秒）；闲置回收每小时。巡检由宿主机定时器每 5 分钟跑一次（码 `jobs.rs`、`nai-patrol.timer`）。
 
 ## 1. 账号保护（`guard_*` 与运行期限制）
 
@@ -36,11 +36,11 @@
 | 上游 429 后的全站冷却 `runtime_image_429_cooldown_seconds` | 60 秒（代码常量；后台可改，范围 60～3600） | 180 | 实际冷却 = max(此值, 上游 Retry-After)，Retry-After 先夹到 5～3600 秒。冷却期内所有图片请求回 429（`cooldown`）；冷却状态跨重启保留（`image_cooldown_until`，超过 1 小时的值视为无效） |
 | 上游连续 403（图片通道） | — | — | 连续 3 次 → 该 Token 冷却 5 → 15 → 45 → 60 分钟（`min(60, 5×3ⁿ)`），24 小时内没有 403 档位归零；私信站长 |
 | 无效 Key 防爆破 | 同一 IP（IPv6 按 /64）600 秒内 ≥ 20 次无效 Key → 拦截 900 秒（代码常量） | — | 只拦无效 Key；有效 Key 不受影响。后台登录另有一套：每 IP 300 秒内最多 5 次（代码常量） |
-| V5 官方额度查询 | 只在真实 V5 出图时刷新缓存 | 低提示线 20 | 缓存：剩 ≤ 2% 为 15 秒，低于「V5 余量低提示线」（`v5_alert_threshold`，默认 20）为 60 秒，其余 300 秒。内核每小时最多再主动读一次订阅信息做快照 |
+| V5 官方额度查询 | 只在真实 V5 出图时刷新缓存 | 低提示线 20 | 缓存：剩 ≤ 2% 为 15 秒，低于「V5 余量低提示线」（`v5_alert_threshold`，默认 20）为 60 秒，其余 300 秒。定时任务「上游 V5 快照」每小时最多再主动读一次订阅信息 |
 
 每把 Key 的限速只有上面两层：排队（同时生成 1 张 + 排队 1 张）和每分钟请求数。2.x 的「每把 Key 两张图至少隔 15 秒」（`KEY_IMAGE_MIN_INTERVAL` / `runtime_key_image_min_interval`）、每把 Key 一个信号量（`KEY_CONCURRENCY`）、「同一把 Key 同时在途 ≤ 4」和每个账号的「10 分钟突发窗口」（`burst_cap`）都已删除（`docs/v3-deviations.md` #64）。
 
-**每小时上限的自动调整**（AIMD，`guard.rs` + 容量模块）：
+**每小时上限的自动调整**（AIMD，`guard.rs` + 定时任务「每小时上限自动调整」）：
 
 - 上游返回 429：立即减半（系数 0.5 是代码常量；不低于下限 `guard_hourly_min`，默认 100；手动压到下限以下时只维持或降低），并记下降档前的上限，之后加窗的天花板 = max(下限, 80% × 该值)。
 - 每天上调一步（`guard_hourly_step`，默认 +10）：要求距上次调整和上次 429 都 ≥ 24 小时、过去 24 小时日志覆盖 ≥ 20 小时、且过去 24 小时有成员因 `hourly_cap` 被拒（上限真的顶到过）；不超过上限 `guard_hourly_max`（默认 160）；只升不降。第一次运行只开始计时。
@@ -49,11 +49,11 @@
 
 ## 2. 额度分配
 
-每把成员 Key 的 `quota_auto=1`（新建默认）时由算法管理：内核每个 tick 把「V4.5 每人上限 A」和「V5 每人额度」下发给所有这样的 Key，同时写新领 Key 用的默认值（`register_daily_images`、`register_daily_v5`、`register_image_scope=all`）、`global_daily_v5` 和首页文案 `algo_notice`。动态额度开着（`quota_auto_enabled` ≠ 0）时，这四项后台改不了（回 400「… 由动态额度管理：关闭动态额度后才能手动修改」）；没设过时的起点是 30 / 0 / `legacy` / 150（码，对应的环境变量已删除，`docs/v3-deviations.md` #70）。后台「模块」页「分配」的开关就是 `quota_auto_enabled`。后台手动设置额度的 Key（`quota_auto=-1`）不归算法管。
+每把成员 Key 的 `quota_auto=1`（新建默认）时由算法管理：定时任务「动态额度」每一轮把「V4.5 每人上限 A」和「V5 每人额度」下发给所有这样的 Key，同时写新领 Key 用的默认值（`register_daily_images`、`register_daily_v5`、`register_image_scope=all`）、`global_daily_v5` 和首页文案 `algo_notice`。动态额度开着（`quota_auto_enabled` ≠ 0）时，这四项后台改不了（回 400「… 由动态额度管理：关闭动态额度后才能手动修改」）；没设过时的起点是 30 / 0 / `legacy` / 150（码，对应的环境变量已删除，`docs/v3-deviations.md` #70）。开关就是 `quota_auto_enabled`（后台「额度与保护」页）。后台手动设置额度的 Key（`quota_auto=-1`）不归算法管。
 
 ### 2.1 V4.5 每人每日上限 A（`quota_ceiling`，线 95）
 
-每个服务日的第一个内核 tick（07:00 后约 0～12 分钟）看前一个服务日重算一次：
+每个服务日「动态额度」的第一轮（07:00 后约 0～12 分钟）看前一个服务日重算一次：
 
 1. **可分预算** = max(0, 账号数 × 每日上限 − 全站 V5 池)。线上若是 1 个账号即 1700 − 171 = 1529（算，账号数未核对）。
 2. **用量** = 昨天每位算法管理的成员用掉的 V4.5 免费图张数（只算用过的人）。
@@ -107,27 +107,30 @@
 
 站长在后台给某把 Key 发券；成员在首页使用后，重置**本人**今天已用的 V5 与 Anlas 计数（`daily_quota_offsets`），不含 V4.5，也不改变全站池。一张券只能用一次，有过期时间。
 
-## 3. 自动驾驶（每个内核 tick）
+## 3. 自动驾驶（两个定时任务，各每 10 分钟）
 
-两条规则一律执行。2.x 每条规则还有 `off` / `observe` / `enforce` 模式（设置 `autopilot_<规则>`），以及第三条规则「名额 +5」（`slots`），3.0 都已删除（`docs/v3-deviations.md` #68），库里残留的 `autopilot_slots` / `autopilot_breaker` / `autopilot_key_guard` / `autopilot_slots_at` 不再读。每小时留一条快照，保留 168 条（7 天）。
+两条规则一律执行。2.x 每条规则还有 `off` / `observe` / `enforce` 模式（设置 `autopilot_<规则>`），以及第三条规则「名额 +5」（`slots`），3.0 都已删除（`docs/v3-deviations.md` #68），库里残留的 `autopilot_slots` / `autopilot_breaker` / `autopilot_key_guard` / `autopilot_slots_at` 不再读。`autopilot_last` / `autopilot_history`（每小时快照）3.0 起不再写；判断结果看后台「系统 → 定时任务」里两个任务的摘要。
 
 | 规则 | 做什么 |
 |---|---|
 | `breaker` 熔断 | 最近 15 分钟图片请求里「上游失败」≥ 5 次且 ≥ 30%，且这些失败来自 ≥ 2 把不同的非测试 Key → 全站暂停出图 300 秒（`breaker`）。只算上游 5xx 和流中途断开；本地拦截、上游 429、4xx 不算；只看上次熔断结束之后的数据；失败只来自 1 把 Key（多半是这把 Key 的请求有问题）不熔断（`docs/v3-deviations.md` #58） |
 | `key_guard` 单 Key 限流 | 1 小时内同一把 Key 被拒 ≥ 60 次 → 暂停该 Key 1 小时（回 403，`key_paused`）。统计不含站点层面的拒绝（排队满、各类账号上限、熔断、冷却、`v5_exhausted`、`queue_timeout`、`site_quota`、`key_paused` 本身）。提示「{原因}，{到期时间} 自动恢复。」（2.x 留下的旧行原因为空，写「这把 Key 已被临时暂停，{到期时间} 自动恢复。」）。2.x 还有「换网段」「多客户端全天在用」两条规则，输入来自早已删除的防分享证据、恒为空，3.0 已删除（`docs/v3-deviations.md` #51）；数据库表 `share_state` 原样保留，现在只存每把 Key 的临时暂停 |
 
-## 4. 内核模块（6 个，每 10 分钟 tick + 交叉校验）
+## 4. 定时任务（7 个，码 `jobs.rs`、`jobs/`）
 
-每个模块的结论用另一个独立数据来源核对。校验没通过只在后台「模块」页和总览「N 个模块自检没通过」里显示，**不记 Bug**（模块自己抛异常、校验函数自己出错才记，见 `docs/v3-deviations.md` #44）。
+每件事一个循环，启动后立即跑第一轮，之后按周期再跑；一轮做完才响应关停。每轮的结果（时间、正常 / 出错、一句摘要、耗时）记进设置 `job_last`，后台「系统」页的「定时任务」卡片显示：超过 3 个周期没跑或上次出错时，「系统」的侧栏角标和总览「N 个定时任务上次出错或超时没运行」会提醒。任务出错或 panic 只算这一轮失败（记 Bug，来源 `job:<名字>`），循环照常继续。卡片里没有开关。
 
-| 模块 | 周期任务 | 校验 | 关掉的后果 |
+| 任务 | 周期 | 做什么 | 开关 |
 |---|---|---|---|
-| 观测 | — | 生成记录条数 ↔ 用量日志张数（差 ≤ max(2, 0.5%)，从本地 0 点算）；V5 恢复速度「接口 ↔ 实测」不是「对不上」 | 不再核对，日志照常记 |
-| 容量 | 每小时最多记一次上游订阅快照；每日 +10 加窗 | 上游 V5 消耗 ↔ 日志 V5 张数（每 1% 应在 7～28 张，需要 ≥ 6 小时数据且剩余 < 95%）；内存每小时计数 ≥ 日志 − 2；最近 60 分钟出图 ≤ 上限 × 1.05 + 2；没有可用上游账号则只有一条失败 | 不再自动调每小时上限，各项上限照常 |
-| 分配 | 额度重算（§2） | 算法管理的 Key 都已同步（额度与算法结果一致） | 开关就是 `quota_auto_enabled`：关 = 关掉动态额度，额度冻结在当前值，四项算法管着的设置恢复手改 |
-| 自动驾驶 | 见 §3 | 无 | 不再判定熔断与单 Key 限流（已生效的熔断 / 暂停照常到期） |
-| 风险检查 | — | 只读体检，不处罚：出站请求头、TLS 指纹（wreq 模拟 Chrome 149 / 148，与请求头同一个 profile）、代理 / 出口链路、上游风控信号（429 / 401 / 成功率与 7 天基线对比）、用量集中度（单把 Key 占全站 ≥ 50% 提示）、今日 V5 消耗（≥ 80% 注意，≥ 100% 风险） | 不再体检 |
-| 领 Key | — | 已领人数 ≤ 名额（名额 0 = 不限） | 开关就是 `register_open`：关 = 暂停领取，已领的和邀请 Key 绑定不受影响 |
+| `quota` 动态额度 | 10 分钟 ±20% | §2：服务日第一轮复盘昨天、定当天的 V5 方案；之后每轮把额度下发给算法管理的 Key。后台改动态额度参数、把 Key 交回算法时立即重算一次（同样记进 `job_last`） | `quota_auto_enabled`（「额度与保护」页）：关 = 不计算、不向上游查询，额度冻结在当前值，四项算法管着的设置恢复手改 |
+| `upstream_snapshot` 上游 V5 快照 | 10 分钟 ±20%，距上次满 1 小时才记 | 主动读一次订阅，写一行 `upstream_snapshots`（`fresh=1` 才拿来做安静时段测速）；读不到也记一行无读数的 | — |
+| `hourly_cap` 每小时上限自动调整 | 10 分钟 ±20% | §1 的 AIMD 加窗：平稳一天且顶到过上限 +10，24 小时最多一次，只升不降 | `guard_hourly_step=0` 不上调 |
+| `breaker` 全站熔断 | 10 分钟 ±20% | §3 | — |
+| `key_guard` 单 Key 限流 | 10 分钟 ±20% | §3 | — |
+| `maintenance` 维护 | 5 分钟 ±20% | 清过期记录、状态码统计落库、原图保存期与容量上限、自动关闭不用处理的 Bug、注册服务的身份组同步、磁盘自检、官方状态；每一步各自出错、各自记 Bug（来源 `maintenance:<步骤>`） | — |
+| `idle_recycle` 闲置回收 | 1 小时（不抖动） | §8.2 | `KEY_INACTIVITY_DELETE_DAYS=0` 关闭 |
+
+2.x / 3.0 早期的「内核模块」（观测、容量、分配、自动驾驶、风险检查、领 Key）连同交叉自检、开关（`module_<名字>`）、运行条和后台「模块」页一起删除。原来线上核对的恒等式改由测试守住：生成记录条数 = 成功出图张数 = 今日计数、内存每小时计数 = 本小时日志张数、算法管理的 Key 都已同步。出站指纹的只读体检（风险检查）没有替代。
 
 ## 5. 告警：谁私信站长，谁只记日志
 
@@ -251,13 +254,13 @@
 | `guard_*` | 12 个账号保护字段（9 个上限 / 节奏字段，加每小时上限自动调整的下限 / 上限 / 步长），见 §1 | 见 §1 |
 | `runtime_*` | `queue_timeout`、`image_min_interval`、`image_429_cooldown_seconds`，后台可调，重启后仍优先于代码常量 | 见 §1 |
 | `quota_*` | `quota_auto_enabled` 1、`quota_target_avg` 150、`quota_ceiling_max` 300、`quota_base_min_fair` 10（A 的下限，名字沿用旧版）、`quota_step` 25（码）；运行态 `quota_ceiling`、`quota_algo_day`、`quota_algo_last`、`quota_algo_history`、`quota_v5_day_plan` | 线上没有覆盖前五个；运行态见 §2 |
-| `autopilot_*` | `autopilot_breaker_until`、`autopilot_last`、`autopilot_history`（规则模式键已删除，见 §3） | 运行态 |
+| `autopilot_*` | `autopilot_breaker_until`（规则模式键、`autopilot_last`、`autopilot_history` 已不再读写，见 §3） | 运行态 |
 | `register_*` | `register_open`、`register_max_users`、`register_daily_images`、`register_daily_v5`、`register_image_scope`、`register_expires_days`、`register_features`、`register_role_guild` / `register_role_id` / `register_role_note` | 线 1 / 未设 / 95 / 3 / all / 0 / `image,vibe,tags` / 空 |
 | `audit_*` | `audit_prompts`、`audit_thumbs`、`audit_retention_days`（见 §7） | 线 1 / 1 / 0 |
 | `bot_*` | `bot_status`（机器人心跳，奶妹每分钟经桥接接口写一次：账号 / 服务器 / 网关延迟 / 启动时间 / `seen_at`；3 分钟没更新算离线，后台 Discord 页的「机器人状态」读它） | 随机器人上报 |
-| 其他 | `features_global`（JSON，缺省全开）、`v5_alert_threshold`（后台叫「V5 余量低提示线」，默认 20，范围 1～100；只决定官方余量缓存刷多勤和后台是否标「低」）、模块开关（`module_<名字>`，默认开；「领 Key」模块的开关就是 `register_open`，「分配」模块的开关就是 `quota_auto_enabled`） | 线 `v5_alert_threshold` = 20 |
+| 其他 | `features_global`（JSON，缺省全开）、`v5_alert_threshold`（后台叫「V5 余量低提示线」，默认 20，范围 1～100；只决定官方余量缓存刷多勤和后台是否标「低」）、`job_last`（定时任务每轮的结果，见 §4） | 线 `v5_alert_threshold` = 20 |
 
-线上库里还有一些代码已不再读取的残留键，看到不要当真：`anlas_pool_last`、`anlas_member_daily_cap`、`anlas_min_key_age_days`、`economy_mode`、`autopilot_economy`、`guard_daily_cap_fallback`、`guard_account_3h_cap`、`guard_account_10m_cap`、`ack_*`、`quota_shadow_*`、`guard_base_daily_images`、`quota_base` / `quota_base_min` / `quota_base_step` / `quota_base_now`、`quota_v5_min` / `quota_v5_max`、`runtime_key_image_min_interval`、`autopilot_slots` / `autopilot_breaker` / `autopilot_key_guard` / `autopilot_slots_at`、`module_allocation`（3.0 额度精简删掉的，见 `docs/v3-deviations.md` #61–#70），以及 `bot_gallery_*`（跑图分享设置）、`bot_events`（机器人最近动作）——后两者随功能一起删除，见 `docs/v3-deviations.md` #54。
+线上库里还有一些代码已不再读取的残留键，看到不要当真：`anlas_pool_last`、`anlas_member_daily_cap`、`anlas_min_key_age_days`、`economy_mode`、`autopilot_economy`、`guard_daily_cap_fallback`、`guard_account_3h_cap`、`guard_account_10m_cap`、`ack_*`、`quota_shadow_*`、`guard_base_daily_images`、`quota_base` / `quota_base_min` / `quota_base_step` / `quota_base_now`、`quota_v5_min` / `quota_v5_max`、`runtime_key_image_min_interval`、`autopilot_slots` / `autopilot_breaker` / `autopilot_key_guard` / `autopilot_slots_at`、`autopilot_last` / `autopilot_history`、`kernel_last`、`module_*`（内核模块改成定时任务后不再读写）、`module_allocation`（3.0 额度精简删掉的，见 `docs/v3-deviations.md` #61–#70），以及 `bot_gallery_*`（跑图分享设置）、`bot_events`（机器人最近动作）——后两者随功能一起删除，见 `docs/v3-deviations.md` #54。
 
 ## 10. 拒绝原因码（`usage_log.reason`，`reasons.rs`）
 
