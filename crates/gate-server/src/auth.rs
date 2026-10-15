@@ -1,5 +1,5 @@
 //! 成员接口的鉴权与准入前检查（旧版 `main.authenticate` / `require_feature` / `check_rpm` /
-//! `check_image_cooldown` / `limit_inflight`）。
+//! `check_image_cooldown`；`limit_inflight` 随文本接口删除，docs/v3-deviations.md #64）。
 
 use crate::error::{ApiError, GateError, InternalError};
 use crate::key::Key;
@@ -246,26 +246,6 @@ pub fn check_image_cooldown(state: &AppState) -> Result<(), GateError> {
         ));
     }
     Ok(())
-}
-
-/// 读请求体之前按 Authorization 限制同时进行中的请求数（单人并发堆积能拖垮 2 GB 机器）。
-pub fn limit_inflight(
-    state: &AppState,
-    headers: &HeaderMap,
-) -> Result<Option<crate::runtime::InflightPermit>, GateError> {
-    state
-        .inflight
-        .acquire(&header_str(headers, "authorization"))
-        .map_err(|_| {
-            GateError::with_code(
-                429,
-                format!(
-                    "同时进行中的请求过多（上限 {} 个），请等前面的请求完成",
-                    crate::runtime::MAX_INFLIGHT_PER_KEY
-                ),
-                reasons::KEY_RATE,
-            )
-        })
 }
 
 #[cfg(test)]

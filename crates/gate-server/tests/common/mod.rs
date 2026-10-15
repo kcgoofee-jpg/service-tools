@@ -29,7 +29,6 @@ pub async fn setup(extra: &[(&str, &str)]) -> Env {
         ("DATA_DIR", dir.path().to_str().unwrap()),
         ("NAI_TOKENS", "pst-synthetic-upstream-token"),
         ("NAI_IMAGE_HOST", &mock.url()),
-        ("KEY_IMAGE_MIN_INTERVAL", "0"),
         ("IMAGE_MIN_INTERVAL", "0"),
         ("POST_REQUEST_JITTER_MIN", "0"),
         ("POST_REQUEST_JITTER_MAX", "0"),

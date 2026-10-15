@@ -290,10 +290,14 @@ async fn burn_today_item(state: &AppState, now: f64) -> Value {
                 .and_then(pyval::number_like)
         })
         .map_or(0, |f| f.trunc() as i64);
+    // 没有额度算法的结果时用站点设置里的全站 V5（2.x 退回环境变量 GLOBAL_DAILY_V5，已删除，#70）
     let cap = if from_algo != 0 {
         from_algo
     } else {
-        state.env.global_daily_v5
+        match crate::ops::algo_owned(&state.db).await {
+            Ok(o) => o.global_daily_v5,
+            Err(e) => return item("burn_today", title, NA, &format!("读取失败：{e}"), vec![]),
+        }
     };
     let status = if cap > 0 {
         let ratio = total_v5 as f64 / cap as f64;

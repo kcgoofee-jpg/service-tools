@@ -108,7 +108,7 @@ export type DeriveOpts = {
   avgDurS?: number | null;
 };
 
-/** live 还没到时返回 null（页面显示骨架屏）。判断顺序与旧版一致：上游冷却 → 全站拦截 → 排队满 → 突发限速 → 小时上限 → 排队 → 空闲；自己的图优先显示。 */
+/** live 还没到时返回 null（页面显示骨架屏）。判断顺序：上游冷却 → 全站拦截 → 排队满 → 小时上限 → 排队 → 空闲；自己的图优先显示。 */
 export function deriveStatus(live: Live | null, opts: DeriveOpts = {}): StatusView | null {
   if (!live) return null;
   const nowMs = opts.nowMs ?? Date.now();
@@ -136,13 +136,6 @@ export function deriveStatus(live: Live | null, opts: DeriveOpts = {}): StatusVi
     out = blockedView(blocked.code ?? "", (blocked.text ?? "").trim(), live);
   } else if (queueCap > 0 && waiting >= queueCap) {
     out = view("warn", "排队已满", `全站最多同时排 ${queueCap} 张，请稍后再试`);
-  } else if (num(g.burst_wait) > 0) {
-    // 10 分钟分摊到点前必须说「限速中」，不能承诺「即发即画」：否则成员照着面板发请求拿到的是 429
-    out = view(
-      "warn",
-      "本时段已到限速",
-      `每 10 分钟 ${num(g.burst_cap) || "—"} 张，用来抹平突发、保护上游账号，约 ${num(g.burst_wait)} 分钟后可继续`,
-    );
   } else if (hourCap > 0 && hour >= hourCap) {
     out = view(
       "warn",
@@ -187,9 +180,8 @@ export type Usage = { used: number; cap: number };
 /** 全站今日用量：0 的上限 = 站长关掉了这个上限（显示「不限」），不要写死历史数字。 */
 export function dailyUsage(live: Live | null): { total: Usage; v5: Usage } {
   const q = live?.quota ?? {};
-  const used = q.units_today ?? q.images_today ?? 0;
   return {
-    total: { used: Math.round(num(used)), cap: num(q.images_cap) },
+    total: { used: num(q.images_today), cap: num(q.images_cap) },
     v5: { used: num(q.v5_today), cap: num(q.v5_cap) },
   };
 }

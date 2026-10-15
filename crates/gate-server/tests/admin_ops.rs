@@ -241,7 +241,7 @@ async fn every_endpoint_needs_a_session_and_same_origin_writes() {
 
 // ------------------------------------------------------------------ 预算
 
-const SETTINGS_DEFAULT: &str = r#"{"global_monthly_anlas":10000.0,"global_daily_v5":150,"member_daily_anlas":50,"v5_alert_threshold":20,"v5_capacity":{"need":0,"global":150,"short":false,"message":""}}"#;
+const SETTINGS_DEFAULT: &str = r#"{"global_monthly_anlas":10000.0,"global_daily_v5":150,"member_daily_anlas":50,"v5_alert_threshold":20}"#;
 
 #[tokio::test]
 async fn settings_get_put_and_stored_strings() {
@@ -252,13 +252,35 @@ async fn settings_get_put_and_stored_strings() {
         (200, SETTINGS_DEFAULT.to_string())
     );
 
+    // 动态额度开着（默认）：全站 V5 归算法管，带上它就 400、什么都不写（docs/v3-deviations.md #70）
+    let before = settings(&e).await;
+    assert_eq!(
+        api.text(
+            "PUT",
+            "/settings",
+            Some(json!({"global_daily_v5": 200, "member_daily_anlas": 40}))
+        )
+        .await,
+        (
+            400,
+            r#"{"detail":"global_daily_v5 由动态额度管理：关闭动态额度后才能手动修改"}"#.into()
+        )
+    );
+    assert_eq!(settings(&e).await, before);
+    // 以下是动态额度关着时手动改
+    e.state
+        .db
+        .set_setting("quota_auto_enabled", "0")
+        .await
+        .unwrap();
+
     // 空请求体：缺省字段保持原值，并且把现值（带类型的字符串）写回库
     let before = settings(&e).await;
     let (s, t) = api.text("PUT", "/settings", Some(json!({}))).await;
     assert_eq!(s, 200);
     assert_eq!(
         t,
-        r#"{"ok":true,"global_monthly_anlas":10000.0,"global_daily_v5":150,"member_daily_anlas":50,"v5_alert_threshold":20,"v5_capacity":{"need":0,"global":150,"short":false,"message":""}}"#
+        r#"{"ok":true,"global_monthly_anlas":10000.0,"global_daily_v5":150,"member_daily_anlas":50,"v5_alert_threshold":20}"#
     );
     assert_eq!(
         changed(&before, &settings(&e).await),
@@ -275,40 +297,40 @@ async fn settings_get_put_and_stored_strings() {
     let ok_cases: Vec<(Value, &str, [&str; 4])> = vec![
         (
             json!({"global_monthly_anlas": 5000, "global_daily_v5": 200, "member_daily_anlas": 40, "v5_alert_threshold": 30}),
-            r#"{"ok":true,"global_monthly_anlas":5000.0,"global_daily_v5":200,"member_daily_anlas":40,"v5_alert_threshold":30,"v5_capacity":{"need":0,"global":200,"short":false,"message":""}}"#,
+            r#"{"ok":true,"global_monthly_anlas":5000.0,"global_daily_v5":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
             ["5000.0", "200", "40", "30"],
         ),
         // 字符串数字也收（与旧版 float("1e3") 一致）
         (
             json!({"global_monthly_anlas": "1e3"}),
-            r#"{"ok":true,"global_monthly_anlas":1000.0,"global_daily_v5":200,"member_daily_anlas":40,"v5_alert_threshold":30,"v5_capacity":{"need":0,"global":200,"short":false,"message":""}}"#,
+            r#"{"ok":true,"global_monthly_anlas":1000.0,"global_daily_v5":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
             ["1000.0", "200", "40", "30"],
         ),
         // 0 被夹到下限：库里是整数 "0"，响应仍是请求值的浮点写法（旧版怪癖）
         (
             json!({"global_monthly_anlas": 0}),
-            r#"{"ok":true,"global_monthly_anlas":0.0,"global_daily_v5":200,"member_daily_anlas":40,"v5_alert_threshold":30,"v5_capacity":{"need":0,"global":200,"short":false,"message":""}}"#,
+            r#"{"ok":true,"global_monthly_anlas":0.0,"global_daily_v5":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
             ["0", "200", "40", "30"],
         ),
         (
             json!({"global_monthly_anlas": 1000000}),
-            r#"{"ok":true,"global_monthly_anlas":1000000.0,"global_daily_v5":200,"member_daily_anlas":40,"v5_alert_threshold":30,"v5_capacity":{"need":0,"global":200,"short":false,"message":""}}"#,
+            r#"{"ok":true,"global_monthly_anlas":1000000.0,"global_daily_v5":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
             ["1000000", "200", "40", "30"],
         ),
         (
             json!({"global_monthly_anlas": 12.5}),
-            r#"{"ok":true,"global_monthly_anlas":12.5,"global_daily_v5":200,"member_daily_anlas":40,"v5_alert_threshold":30,"v5_capacity":{"need":0,"global":200,"short":false,"message":""}}"#,
+            r#"{"ok":true,"global_monthly_anlas":12.5,"global_daily_v5":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
             ["12.5", "200", "40", "30"],
         ),
         (
             json!({"global_daily_v5": "150"}),
-            r#"{"ok":true,"global_monthly_anlas":12.5,"global_daily_v5":150,"member_daily_anlas":40,"v5_alert_threshold":30,"v5_capacity":{"need":0,"global":150,"short":false,"message":""}}"#,
+            r#"{"ok":true,"global_monthly_anlas":12.5,"global_daily_v5":150,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
             ["12.5", "150", "40", "30"],
         ),
         // 12.0 作为整数字段：存 "12"
         (
             json!({"global_monthly_anlas": 7.0, "global_daily_v5": 12.0}),
-            r#"{"ok":true,"global_monthly_anlas":7.0,"global_daily_v5":12,"member_daily_anlas":40,"v5_alert_threshold":30,"v5_capacity":{"need":0,"global":12,"short":false,"message":""}}"#,
+            r#"{"ok":true,"global_monthly_anlas":7.0,"global_daily_v5":12,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
             ["7.0", "12", "40", "30"],
         ),
     ];
@@ -401,11 +423,12 @@ async fn settings_get_put_and_stored_strings() {
 async fn runtime_limits_validate_apply_and_persist() {
     let e = setup(&[]).await;
     let api = Api::login(&e).await;
+    // 每 Key 出图间隔 key_image_min_interval 已删除（docs/v3-deviations.md #64）：只剩三项，传它算未知设置
     assert_eq!(
         api.text("GET", "/runtime-limits", None).await,
         (
             200,
-            r#"{"queue_timeout":5,"key_image_min_interval":0,"image_min_interval":0,"image_429_cooldown_seconds":60}"#.into()
+            r#"{"queue_timeout":5,"image_min_interval":0,"image_429_cooldown_seconds":60}"#.into()
         )
     );
     let before = settings(&e).await;
@@ -437,8 +460,8 @@ async fn runtime_limits_validate_apply_and_persist() {
             "image_429_cooldown_seconds 必须是 60～3600 的整数",
         ),
         (
-            json!({"key_image_min_interval": 121}),
-            "key_image_min_interval 必须是 15～120 的整数",
+            json!({"key_image_min_interval": 20}),
+            "包含未知或空的运行限制设置",
         ),
         (
             json!({"image_min_interval": 14}),
@@ -455,7 +478,8 @@ async fn runtime_limits_validate_apply_and_persist() {
     }
     assert_eq!(settings(&e).await, before);
 
-    let all = json!({"queue_timeout": 120, "key_image_min_interval": 25, "image_min_interval": 25, "image_429_cooldown_seconds": 90});
+    let all =
+        json!({"queue_timeout": 120, "image_min_interval": 25, "image_429_cooldown_seconds": 90});
     assert_eq!(
         api.text("PUT", "/runtime-limits", Some(all.clone())).await,
         (200, all.to_string())
@@ -464,27 +488,27 @@ async fn runtime_limits_validate_apply_and_persist() {
     assert_eq!(
         (
             l.queue_timeout,
-            l.key_image_min_interval,
             l.image_min_interval,
             l.image_429_cooldown_seconds
         ),
-        (120.0, 25.0, 25.0, 90.0)
+        (120.0, 25.0, 90.0)
     );
     assert_eq!(
         changed(&before, &settings(&e).await),
         map(&[
             ("runtime_queue_timeout", "120"),
-            ("runtime_key_image_min_interval", "25"),
             ("runtime_image_min_interval", "25"),
             ("runtime_image_429_cooldown_seconds", "90"),
         ])
     );
-    // 只改一项：响应仍是四项全量
+    // 只改一项：响应仍是三项全量
     assert_eq!(
-        api.text("PUT", "/runtime-limits", Some(json!({"queue_timeout": 20}))).await,
+        api.text("PUT", "/runtime-limits", Some(json!({"queue_timeout": 20})))
+            .await,
         (
             200,
-            r#"{"queue_timeout":20,"key_image_min_interval":25,"image_min_interval":25,"image_429_cooldown_seconds":90}"#.into()
+            r#"{"queue_timeout":20,"image_min_interval":25,"image_429_cooldown_seconds":90}"#
+                .into()
         )
     );
     assert_eq!(api.get("/runtime-limits").await["queue_timeout"], 20);
@@ -506,7 +530,7 @@ async fn runtime_limits_validate_apply_and_persist() {
 
 // ------------------------------------------------------------------ 账号保护
 
-const GUARD_FIELDS: &str = r#""fields":{"account_daily_cap":{"default":1000,"min":0,"max":20000,"label":"每个上游账号每天最多出图张数"},"daily_burst":{"default":150,"min":0,"max":20000,"label":"每日上限按时段放行：每天重置时（默认 7 点）先放出这么多张，之后每小时补「每日上限 ÷ 24」张，没用完的留到后面；0 = 不分时段（整天先到先得）"},"account_hourly_cap":{"default":150,"min":0,"max":240,"label":"每个上游账号每小时最多出图张数（自动调整：上游 429 减半；前一天顶到过上限且没有 429 才 +10，范围 100～160）"},"quiet_start":{"default":0,"min":0,"max":23,"label":"安静时段开始（北京时间，整点）；与结束相同 = 不启用（2026-10-10 起不启用：夜里不限速）"},"quiet_end":{"default":0,"min":0,"max":23,"label":"安静时段结束（北京时间，整点；与开始相同表示不设安静时段）"},"quiet_hourly_cap":{"default":20,"min":0,"max":240,"label":"安静时段每小时最多出图张数；0 = 完全暂停出图（2026-10-13 站长：3-7 点停用）"},"interval_jitter":{"default":5,"min":0,"max":30,"label":"两次出图间隔额外随机增加 0～N 秒"},"key_image_queue":{"default":1,"min":0,"max":3,"label":"每把 Key 在生成中的那张之外，最多再排几张"},"queue_per_account":{"default":5,"min":0,"max":100,"label":"每个上游账号全站最多同时排几张图"},"base_daily_images":{"default":100,"min":0,"max":100000,"label":"V4.5 每人每天保底张数；超过后只在全站空闲时放行，直到 Key 的每日上限"}}"#;
+const GUARD_FIELDS: &str = r#""fields":{"account_daily_cap":{"default":1000,"min":0,"max":20000,"label":"每个上游账号每天最多出图张数"},"daily_burst":{"default":150,"min":0,"max":20000,"label":"每日上限按时段放行：每天重置时（默认 7 点）先放出这么多张，之后每小时补「每日上限 ÷ 24」张，没用完的留到后面；0 = 不分时段（整天先到先得）"},"account_hourly_cap":{"default":150,"min":0,"max":240,"label":"每个上游账号每小时最多出图张数（自动调整：上游 429 减半；前一天顶到过上限且没有 429 才 +10，范围 100～160）"},"quiet_start":{"default":0,"min":0,"max":23,"label":"安静时段开始（北京时间，整点）；与结束相同 = 不启用（2026-10-10 起不启用：夜里不限速）"},"quiet_end":{"default":0,"min":0,"max":23,"label":"安静时段结束（北京时间，整点；与开始相同表示不设安静时段）"},"quiet_hourly_cap":{"default":20,"min":0,"max":240,"label":"安静时段每小时最多出图张数；0 = 完全暂停出图（2026-10-13 站长：3-7 点停用）"},"interval_jitter":{"default":5,"min":0,"max":30,"label":"两次出图间隔额外随机增加 0～N 秒"},"key_image_queue":{"default":1,"min":0,"max":3,"label":"每把 Key 在生成中的那张之外，最多再排几张"},"queue_per_account":{"default":5,"min":0,"max":100,"label":"每个上游账号全站最多同时排几张图"}}"#;
 
 fn guard_json(values: &str, quiet_now: bool, cap: i64, accounts: &str, queued: i64) -> String {
     format!(
@@ -518,15 +542,16 @@ fn guard_json(values: &str, quiet_now: bool, cap: i64, accounts: &str, queued: i
 async fn guard_get_put() {
     let e = setup(&[]).await;
     let api = Api::login(&e).await;
-    let defaults = r#"{"account_daily_cap":1000,"daily_burst":150,"account_hourly_cap":150,"quiet_start":0,"quiet_end":0,"quiet_hourly_cap":20,"interval_jitter":5,"key_image_queue":1,"queue_per_account":5,"base_daily_images":100}"#;
-    let acct0 = r#"[{"position":1,"usable":true,"today":0,"today_units":0.0,"this_hour":0}]"#;
+    let defaults = r#"{"account_daily_cap":1000,"daily_burst":150,"account_hourly_cap":150,"quiet_start":0,"quiet_end":0,"quiet_hourly_cap":20,"interval_jitter":5,"key_image_queue":1,"queue_per_account":5}"#;
+    // 节约模式折算的 today_units 已删除（docs/v3-deviations.md #67）
+    let acct0 = r#"[{"position":1,"usable":true,"today":0,"this_hour":0}]"#;
     assert_eq!(
         api.text("GET", "/guard", None).await,
         (200, guard_json(defaults, false, 150, acct0, 0))
     );
 
     let before = settings(&e).await;
-    let after_cap = r#"{"account_daily_cap":1000,"daily_burst":150,"account_hourly_cap":120,"quiet_start":0,"quiet_end":0,"quiet_hourly_cap":20,"interval_jitter":5,"key_image_queue":1,"queue_per_account":5,"base_daily_images":100}"#;
+    let after_cap = r#"{"account_daily_cap":1000,"daily_burst":150,"account_hourly_cap":120,"quiet_start":0,"quiet_end":0,"quiet_hourly_cap":20,"interval_jitter":5,"key_image_queue":1,"queue_per_account":5}"#;
     assert_eq!(
         api.text("PUT", "/guard", Some(json!({"account_hourly_cap": 120})))
             .await,
@@ -591,7 +616,7 @@ async fn guard_accounts_show_usage() {
     let id = e.state.nai.tokens().await[0].token_id.clone();
     e.state
         .db
-        .bump_upstream_image_counter(&id, &e.state.day(), 3, 1.0)
+        .bump_upstream_image_counter(&id, &e.state.day(), 3)
         .await
         .unwrap();
     e.state.guard.record_start(&id, 2, e.state.now());
@@ -599,7 +624,7 @@ async fn guard_accounts_show_usage() {
     let v = api.get("/guard").await;
     assert_eq!(
         v["accounts"],
-        json!([{"position": 1, "usable": true, "today": 3, "today_units": 3.0, "this_hour": 2}])
+        json!([{"position": 1, "usable": true, "today": 3, "this_hour": 2}])
     );
     assert_eq!(v["queued_images"], 2);
 }
@@ -703,8 +728,9 @@ async fn ops_snapshot_defaults() {
         ops_fixed(&v),
         json!({
             "registration": {"configured": false, "open": false, "max_users": 0, "features": null, "daily_images": 30,
-                "daily_v5": 0, "image_scope": "legacy", "expires_days": 30, "role_guild": "", "role_id": "", "role_note": "",
-                "active": 0, "v5_capacity": {"need": 0, "global": 150, "short": false, "message": ""}},
+                // 新 Key 默认不过期（REGISTER_EXPIRES_DAYS 默认 0，docs/v3-deviations.md #70）
+                "daily_v5": 0, "image_scope": "legacy", "expires_days": 0, "role_guild": "", "role_id": "", "role_note": "",
+                "active": 0},
             "features": {
                 "global": {"image": true, "upscale": true, "augment": true, "vibe": true, "tags": true},
                 "labels": {"image": "文生图", "upscale": "放大", "augment": "导演工具（线稿、上色等）", "vibe": "Vibe 编码",
@@ -743,7 +769,6 @@ async fn ops_snapshot_defaults() {
             "role_id",
             "role_note",
             "active",
-            "v5_capacity"
         ]
     );
 }
@@ -764,6 +789,29 @@ async fn ops_registration_put() {
         map(&[("register_open", "1")])
     );
 
+    // 动态额度开着（默认）：新 Key 的每日张数 / V5 / 模型范围归算法管，400、什么都不写（#70）
+    let before = settings(&e).await;
+    let (s, v) = api
+        .json(
+            "PUT",
+            "/ops/registration",
+            Some(json!({"max_users": 20, "daily_v5": 15, "image_scope": "all"})),
+        )
+        .await;
+    assert_eq!(
+        (s, v),
+        (
+            400,
+            json!({"detail": "daily_v5、image_scope 由动态额度管理：关闭动态额度后才能手动修改"})
+        )
+    );
+    assert_eq!(settings(&e).await, before);
+    e.state
+        .db
+        .set_setting("quota_auto_enabled", "0")
+        .await
+        .unwrap();
+
     let before = settings(&e).await;
     let (_, v) = api
         .json(
@@ -782,14 +830,10 @@ async fn ops_registration_put() {
             ("register_image_scope", "all"),
         ])
     );
-    // 名额 20 × 每人 V5 15 = 300 > 全站 V5 日限 150
-    assert_eq!(
-        reg(&v)["v5_capacity"],
-        json!({"need": 300, "global": 150, "short": true,
-               "message": "名额 20 × 每人 V5 15 = 300 张/天，超过全站 V5 日限 150：先用的人用满后，后面的人当天没有 V5。建议把全站 V5 调到 300，或降低每人 V5。"})
-    );
-    // 全站 V5 日限同步出现在预算接口里
-    assert_eq!(api.get("/settings").await["v5_capacity"]["short"], true);
+    // 名额 20 × 每人 V5 15 = 300 > 全站 V5 日限 150：不再有「超卖」提示（docs/v3-deviations.md #69），
+    // 注册设置和预算接口都不带 v5_capacity
+    assert!(reg(&v).get("v5_capacity").is_none());
+    assert!(api.get("/settings").await.get("v5_capacity").is_none());
 
     // 功能清单：列表 / null（全部）/ 空列表（一个都不开）
     let feats = |v: &Value| (reg(v)["features"].clone(), v["features"]["new_key"].clone());
@@ -959,6 +1003,7 @@ async fn ops_registration_uses_env_defaults_when_configured() {
         ("DISCORD_GUILD_ID", "900000000000000001"),
         ("SITE_URL", "https://owl.example"),
         ("REGISTER_MAX_USERS", "12"),
+        // 这三个环境变量 3.0 已删除（归动态额度管，docs/v3-deviations.md #70）：设了也不读
         ("REGISTER_DAILY_IMAGES", "40"),
         ("REGISTER_DAILY_V5", "5"),
         ("REGISTER_IMAGE_SCOPE", "all"),
@@ -998,10 +1043,9 @@ async fn ops_registration_uses_env_defaults_when_configured() {
     let v = api.get("/ops").await;
     assert_eq!(
         v["registration"],
-        json!({"configured": true, "open": false, "max_users": 12, "features": ["image", "vibe"], "daily_images": 40,
-               "daily_v5": 5, "image_scope": "all", "expires_days": 14, "role_guild": "", "role_id": "", "role_note": "",
-               "active": 2,
-               "v5_capacity": {"need": 60, "global": 150, "short": false, "message": ""}})
+        json!({"configured": true, "open": false, "max_users": 12, "features": ["image", "vibe"], "daily_images": 30,
+               "daily_v5": 0, "image_scope": "legacy", "expires_days": 14, "role_guild": "", "role_id": "", "role_note": "",
+               "active": 2})
     );
     // 站长在后台改过的值优先于 .env
     api.json("PUT", "/ops/registration", Some(json!({"max_users": 3})))
@@ -1012,7 +1056,7 @@ async fn ops_registration_uses_env_defaults_when_configured() {
             v["registration"]["max_users"].clone(),
             v["registration"]["daily_images"].clone()
         ),
-        (json!(3), json!(40))
+        (json!(3), json!(30))
     );
 }
 
@@ -1671,7 +1715,7 @@ async fn upstream_token_add_replace_remove() {
     .await;
     e.state
         .db
-        .bump_upstream_image_counter(&second, &e.state.day(), 2, 1.0)
+        .bump_upstream_image_counter(&second, &e.state.day(), 2)
         .await
         .unwrap();
     let (s, t) = api
@@ -2452,7 +2496,12 @@ async fn overview_reports_today_week_pool_and_feature_usage() {
         .map(|f| f["id"].as_str().unwrap())
         .collect();
     assert_eq!(ids, ["image", "upscale", "augment", "vibe", "tags"]);
-    // 全站预算改了，总览跟着变
+    // 全站预算改了（全站 V5 要先关掉动态额度才能手改，#70），总览跟着变
+    e.state
+        .db
+        .set_setting("quota_auto_enabled", "0")
+        .await
+        .unwrap();
     api.json(
         "PUT",
         "/settings",

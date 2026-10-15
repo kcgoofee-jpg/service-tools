@@ -1,5 +1,5 @@
 //! 账号保护与排队的纯逻辑（对应 `app/guard.py` 的 `Guard`）：每个上游账号的每日 / 每小时出图上限、
-//! 10 分钟突发窗口、上游 429 触发的 AIMD 调整、安静时段、请求间隔抖动、每把 Key 的排队数、全站排队上限。
+//! 上游 429 触发的 AIMD 调整、安静时段、请求间隔抖动、每把 Key 的排队数、全站排队上限。
 //!
 //! [`GuardCore`] 持有 Python `Guard` 的全部内存状态；所有依赖时间的方法都显式传 `now`（Unix 秒），
 //! 抖动用的随机数由调用方注入（`random.uniform(0, n)` = `0 + n * r`，r 为 [0,1) 的均匀随机数）。
@@ -14,8 +14,9 @@
 //!   写成功之后才 [`GuardCore::apply_updates`]（与旧版「先写库后改内存」同序）；`to_settings` 给出全部字段的当前串；
 //! - `seed_hour(db, token_ids)`：`SELECT ts, images FROM usage_log WHERE ts>now-10800 AND status='ok' AND kind LIKE 'image%'
 //!   AND images>0 ORDER BY ts`，行交给 [`stamps_from_rows`] + [`GuardCore::seed_hour`]；
-//! - `token_block_reason(db, token_id, day)` / `paced_headroom(db, ...)` 里的 `db.get_upstream_counter(token_id, day)`
-//!   （`upstream_token_counters` 表的 `units`，缺 `units` 用 `images`，没有记录是 0）：服务层取出 `used` 传进来
+//! - `token_block_reason(db, token_id, day)` 里的 `db.get_upstream_counter(token_id, day)`
+//!   （`upstream_token_counters` 表的 `images`，没有记录是 0；旧版用节约模式折算后的 `units`，
+//!   节约模式早已删除，docs/v3-deviations.md #67）：服务层取出 `used` 传进来
 //!   （旧版 `daily == 0` 或熔断 / 安静时段已经拦下时不会去读，多读一次没有可观察的差别）；
 //! - `on_upstream_429`：读 `guard_429_cap_at`，写 `guard_account_hourly_cap` / `guard_hourly_adapted_at` /
 //!   `guard_last_upstream_429` / `guard_429_cap_at`（方法返回要写的键值，旧版 `db is None` 时不写）；
@@ -31,8 +32,14 @@
 //! - 每小时上限的 `_cap_marks` 只在上限变化时记，最多 64 条；
 //! - `_window` 只从队首弹 3 小时前的时间戳，乱序追加的时间戳不会被整理。
 //!
-//! 已删除功能的残留不移植：3 小时上限（`WINDOW_3H` 只剩队列保留期）、10 分钟旋钮、每日熔断、空闲借用的
-//! 旧实现（`site_idle` 仍被首页和出图路由使用，保留）。
+//! 已删除功能的残留不移植：3 小时上限（`WINDOW_3H` 只剩队列保留期）、10 分钟旋钮、每日熔断。
+//!
+//! 3.0 删除的（docs/v3-deviations.md #61）：「V4.5 每人保底 + 全站空闲时借用到每日上限」整层——
+//! 设置 `base_daily_images`、`site_idle`、`paced_headroom`。额度是 PVP：每人只有一个上限，
+//! 全站按时段放行（`paced`）对所有人一视同仁。
+//!
+//! 3.0 删除的（docs/v3-deviations.md #64）：10 分钟突发窗口（每 10 分钟 ≤ 每小时上限 ÷ 4，`burst_cap`）。
+//! 账号出图间隔 20 秒 + 随机 0～5 秒时，10 分钟最多出 30 张，永远到不了 40 张的窗口上限。
 
 use crate::clock::Clock;
 use crate::params::Params;
@@ -44,16 +51,10 @@ use std::collections::{BTreeMap, VecDeque};
 pub const HOUR: i64 = 3600;
 /// 队列保留期（旧版的 3 小时上限已删，只剩这个）
 pub const WINDOW_3H: i64 = 3 * HOUR;
-/// 突发窗口：一小时的额度挤在十分钟里发完，上游看到的就是 6 倍速率
-pub const WINDOW_10M: i64 = 600;
-/// 每 10 分钟上限 = 每小时上限 ÷ 4
-pub const BURST_DIVISOR: i64 = 4;
 /// 每小时上限的自动调整范围（加性增、乘性减）
 pub const HOURLY_MIN: i64 = 100;
 pub const HOURLY_MAX: i64 = 160;
 pub const HOURLY_STEP: i64 = 10;
-/// 本小时用量低于上限的 60% 且没人排队，算「空闲」
-pub const IDLE_SHARE: f64 = 0.6;
 /// `_cap_marks` 的容量（`deque(maxlen=64)`）
 pub const CAP_MARKS_MAX: usize = 64;
 
@@ -78,7 +79,7 @@ const fn field(name: &'static str, default: i64, min: i64, max: i64, label: &'st
 }
 
 /// 所有设置（存 `site_settings` 的键是 `guard_<名称>`）；0 表示关闭该项。
-pub const FIELDS: [Field; 10] = [
+pub const FIELDS: [Field; 9] = [
     field(
         "account_daily_cap",
         1000,
@@ -142,17 +143,7 @@ pub const FIELDS: [Field; 10] = [
         100,
         "每个上游账号全站最多同时排几张图",
     ),
-    field(
-        "base_daily_images",
-        100,
-        0,
-        100000,
-        "V4.5 每人每天保底张数；超过后只在全站空闲时放行，直到 Key 的每日上限",
-    ),
 ];
-
-/// 保底张数字段（`site_flags::GUARD_BASE` 的默认值和范围以它为准）。
-pub const BASE_DAILY_IMAGES: Field = FIELDS[9];
 
 /// `site_settings` 里的键名。
 pub fn setting_key(name: &str) -> String {
@@ -491,53 +482,6 @@ impl GuardCore {
         self.window(token_id, now, HOUR).len() as i64
     }
 
-    pub fn count_10m(&mut self, token_id: &str, now: f64) -> i64 {
-        self.window(token_id, now, WINDOW_10M).len() as i64
-    }
-
-    /// 每 10 分钟最多出几张：每小时上限 ÷ 4（不减少总量，只抹平突发）。
-    pub fn burst_cap(&mut self, now: f64) -> i64 {
-        let cap = self.hourly_cap(now);
-        if cap != 0 {
-            ((cap as f64 / BURST_DIVISOR as f64).ceil() as i64).max(1)
-        } else {
-            0
-        }
-    }
-
-    /// 突发窗口是否被拦：0 = 放行；>0 = 还要等几分钟。放行判定和首页状态必须用它。
-    ///
-    /// 两档：① 真·突发：10 分钟内已出到 1.5 倍额度；② 小时额度快见底：剩余不足一个突发窗口。
-    pub fn burst_blocked(&mut self, token_id: &str, now: f64) -> i64 {
-        let burst = self.burst_cap(now);
-        if burst == 0 {
-            return 0;
-        }
-        let n10 = self.count_10m(token_id, now);
-        let cap = self.hourly_cap(now);
-        let left = if cap != 0 {
-            cap - self.hour_count(token_id, now)
-        } else {
-            burst + 1
-        };
-        let hard = (burst + 1).max((burst as f64 * 1.5).ceil() as i64);
-        if n10 >= hard || (n10 >= burst && left <= burst) {
-            return self.minutes_until_free_10m(token_id, now);
-        }
-        0
-    }
-
-    /// 到 10 分钟窗口降回上限以下要等多久（同 `minutes_until_free` 的口径）。
-    pub fn minutes_until_free_10m(&mut self, token_id: &str, now: f64) -> i64 {
-        let q = self.window(token_id, now, WINDOW_10M);
-        if q.is_empty() {
-            return 1;
-        }
-        let cap = self.burst_cap(now);
-        let idx = slide_index(q.len(), cap);
-        ((q[idx] + WINDOW_10M as f64 - now) / 60.0).ceil().max(1.0) as i64
-    }
-
     /// 到计数降回上限以下要等多久：超了 n 张就要等第 n+1 早的那张滑出 60 分钟窗口（不是最早那一张）。
     pub fn minutes_until_free(&mut self, token_id: &str, now: f64) -> i64 {
         let q = self.window(token_id, now, HOUR);
@@ -715,28 +659,8 @@ impl GuardCore {
         ((at - self.day_elapsed(now)) / 60.0).ceil().max(1.0) as i64
     }
 
-    /// 不分时段（`daily_burst` 或 `account_daily_cap` 为 0）时 `paced_headroom` 恒为无穷大、不用读库。
-    pub fn paced_headroom_enabled(&self) -> bool {
-        self.v("daily_burst") != 0 && self.v("account_daily_cap") != 0
-    }
-
-    /// 所有账号「按时段已放出、还没用掉」的张数之和；不分时段时返回无穷大。
-    /// `used` = 每个账号今天已用（`units`，缺则 `images`）。
-    pub fn paced_headroom(&self, used: &[f64], now: f64) -> f64 {
-        if !self.paced_headroom_enabled() {
-            return f64::INFINITY;
-        }
-        let allow = self.paced_allowance(now);
-        let mut total = 0.0;
-        for u in used {
-            let left = allow - u;
-            total += if left > 0.0 { left } else { 0.0 };
-        }
-        total
-    }
-
     /// 这个上游账号现在不能再接新的出图任务时，返回给成员看的原因。
-    /// `used` = 该账号今天已用（`upstream_token_counters` 的 `units`，缺则 `images`；节约模式 14 步的图算半张）。
+    /// `used` = 该账号今天已出的张数（`upstream_token_counters` 的 `images`）。
     pub fn token_block_reason(&mut self, token_id: &str, used: f64, now: f64) -> Option<Reason> {
         if self.breaker_until > now {
             let text = if self.breaker_reason.is_empty() {
@@ -763,7 +687,7 @@ impl GuardCore {
             if used >= daily as f64 {
                 return Some(Reason::new(
                     format!(
-                        "本站今天的出图总量已达上限（每个账号 {daily} 张/天，按算力折算，用来保护上游账号），明天 {} 点恢复",
+                        "本站今天的出图总量已达上限（每个账号 {daily} 张/天，用来保护上游账号），明天 {} 点恢复",
                         self.reset_hour
                     ),
                     reasons::DAILY_CAP,
@@ -797,18 +721,7 @@ impl GuardCore {
                 reasons::HOURLY_CAP,
             ));
         }
-        // 突发保护（2026-10-13 第一次被上游 429 之后加）：小时的额度可以被挤在十分钟里一口气发完，
-        // 上游看到的就是 6 倍速率 —— 那正是 429 的触发方式。
-        let blocked = self.burst_blocked(token_id, now);
-        if blocked != 0 {
-            return Some(Reason::new(
-                format!(
-                    "本时段出图已达上限（每 10 分钟 {} 张，用来抹平突发、保护上游账号），约 {blocked} 分钟后可继续",
-                    self.burst_cap(now)
-                ),
-                reasons::BURST_CAP,
-            ));
-        }
+        // 2.x 在这里还有「每 10 分钟 ≤ 每小时上限 ÷ 4」的突发窗口：账号出图间隔下永远到不了，已删除（#64）
         None
     }
 
@@ -853,6 +766,15 @@ impl GuardCore {
             running: false,
         });
         None
+    }
+
+    /// 轮到这把 Key 的这一张了吗：它是这把 Key 还在的条目里最早登记的（前面那张已出完或被取消）。
+    /// 每把 Key 同时只生成 1 张，排在后面的那张等它——取代旧版每把 Key 一个的信号量（docs/v3-deviations.md #64）。
+    pub fn key_turn(&self, key_id: i64, entry_id: i64) -> bool {
+        !self
+            .entries
+            .iter()
+            .any(|e| e.key == key_id && e.id < entry_id)
     }
 
     /// 这把 Key 的一张排队中的图开始发往上游；给了 `entry_id` 就标记那一张。
@@ -931,26 +853,6 @@ impl GuardCore {
         }
         Value::Object(out)
     }
-
-    // ---------- 保底与借用 ----------
-
-    /// 没有其他成员在排队，且本小时用量低于上限的 60%：允许超出保底继续用。
-    pub fn site_idle(&mut self, key_id: i64, token_ids: &[String], now: f64, p: &Params) -> bool {
-        if self
-            .image_inflight
-            .iter()
-            .any(|(k, n)| *k != key_id && *n > 0)
-        {
-            return false;
-        }
-        let cap = self.hourly_cap(now);
-        if cap == 0 || token_ids.is_empty() {
-            return true;
-        }
-        let used: i64 = token_ids.iter().map(|t| self.hour_count(t, now)).sum();
-        (used as f64)
-            < p.float("capacity.idle_share", IDLE_SHARE) * cap as f64 * token_ids.len() as f64
-    }
 }
 
 /// `max(0, min(len(q) - 1, len(q) - cap)) if cap else 0`
@@ -984,18 +886,57 @@ mod tests {
     }
 
     #[test]
-    fn burst_cap_is_quarter_of_hourly() {
-        let mut g = guard();
-        g.values.insert("account_hourly_cap".into(), 100);
-        assert_eq!(g.burst_cap(NOON), 25);
-    }
-
-    #[test]
     fn batch_requests_count_per_image() {
         let mut g = guard();
         g.record_start("t", NOON, 4);
-        assert_eq!(g.count_10m("t", NOON), 4);
         assert_eq!(g.hour_count("t", NOON), 4);
+    }
+
+    #[test]
+    fn no_burst_window_below_the_hourly_cap() {
+        // 10 分钟里出了 60 张（旧版的突发窗口 ⌈1.5 × 150 ÷ 4⌉ = 57 早就拦了），每小时上限 150 还没到：放行（#64）
+        let mut g = guard();
+        g.record_start("t", NOON - 300.0, 60);
+        assert_eq!(g.token_block_reason("t", 0.0, NOON), None);
+        // 到了每小时上限照样拦
+        g.record_start("t", NOON - 200.0, 90);
+        let r = g.token_block_reason("t", 0.0, NOON).unwrap();
+        assert_eq!(r.code(), reasons::HOURLY_CAP);
+    }
+
+    #[test]
+    fn daily_cap_counts_real_images() {
+        // 节约模式已删除（#67）：按实际张数比，文案不再写「按算力折算」
+        let mut g = guard();
+        g.values.insert("daily_burst".into(), 0); // 不分时段，只看每日上限
+        assert_eq!(g.token_block_reason("t", 999.0, NOON), None);
+        let r = g.token_block_reason("t", 1000.0, NOON).unwrap();
+        assert_eq!(r.code(), reasons::DAILY_CAP);
+        assert!(!r.text().contains("折算"), "{}", r.text());
+    }
+
+    #[test]
+    fn key_turn_is_first_come_first_served() {
+        let mut g = guard();
+        assert_eq!(g.admit_image(7, 1, NOON), None);
+        let first = g.entries.last().unwrap().id;
+        assert_eq!(g.admit_image(7, 1, NOON + 1.0), None);
+        let second = g.entries.last().unwrap().id;
+        assert_eq!(g.admit_image(8, 1, NOON + 2.0), None);
+        let other = g.entries.last().unwrap().id;
+        // 同一把 Key：先来的先生成，后来的等；别的 Key 不受影响
+        assert!(g.key_turn(7, first));
+        assert!(!g.key_turn(7, second));
+        assert!(g.key_turn(8, other));
+        // 第三张排不进来（同时生成 1 张 + 排队 1 张）
+        assert_eq!(
+            g.admit_image(7, 1, NOON + 3.0)
+                .map(|r| r.code().to_string()),
+            Some(reasons::KEY_BUSY.to_string())
+        );
+        // 前一张出完（或被取消）：轮到后一张
+        g.release_image(7, Some(first));
+        assert!(g.key_turn(7, second));
     }
 
     #[test]

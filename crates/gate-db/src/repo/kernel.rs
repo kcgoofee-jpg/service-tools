@@ -96,33 +96,24 @@ impl Db {
                 })?
                 .collect::<rusqlite::Result<_>>()?
             };
-            let (upstream_images, upstream_units) = c.query_row(
-                "SELECT COALESCE(SUM(images),0), COALESCE(SUM(COALESCE(units, images)),0) FROM upstream_token_counters WHERE day=?",
-                [&yday],
-                |r| Ok((value::i64_or(r, 0, 0)?, value::f64_or(r, 1, 0.0)?)),
-            )?;
-            // 只数成员（不含测试号、站长号）被拦的记录
+            // 只数成员（不含测试号、站长号）被拦的记录，按原因码数（不依赖中文文案）。
+            // 旧版每小时上限按 `detail LIKE '%出图量已达上限%'` 数，还数了「保底」文案；保底已删除，
+            // 改成按原因码（docs/v3-deviations.md #61）
             let member_rejects = "FROM usage_log u JOIN api_keys k ON k.id=u.key_id WHERE u.ts>=? AND u.ts<? \
-                                  AND u.status='rejected' AND k.is_test=0 AND k.is_admin=0 AND u.detail LIKE ?";
+                                  AND u.status='rejected' AND k.is_test=0 AND k.is_admin=0 AND u.reason=?";
             let hourly_block_hours: Vec<i64> = {
                 let mut stmt = c.prepare(&format!(
                     "SELECT DISTINCT CAST(u.ts/3600 AS INT) {member_rejects}"
                 ))?;
-                stmt.query_map(params![start, end, "%出图量已达上限%"], |r| {
-                    value::i64_or(r, 0, 0)
-                })?
+                stmt.query_map(
+                    params![start, end, gate_core::reasons::HOURLY_CAP],
+                    |r| value::i64_or(r, 0, 0),
+                )?
                 .collect::<rusqlite::Result<_>>()?
             };
-            let base_blocks = count_i64(
-                c,
-                &format!("SELECT COUNT(*) {member_rejects}"),
-                params![start, end, "%保底%其他人在排队%"],
-            )?;
-            // 按原因码数（不依赖中文文案）
             let paced_blocks = count_i64(
                 c,
-                "SELECT COUNT(*) FROM usage_log u JOIN api_keys k ON k.id=u.key_id \
-                 WHERE u.ts>=? AND u.ts<? AND u.status='rejected' AND k.is_test=0 AND k.is_admin=0 AND u.reason=?",
+                &format!("SELECT COUNT(*) {member_rejects}"),
                 params![start, end, gate_core::reasons::PACED],
             )?;
             let coverage_first_ts = c.query_row("SELECT MIN(ts) FROM usage_log", [], |r| {
@@ -151,10 +142,7 @@ impl Db {
             Ok(DailyInputs {
                 yesterday: YesterdayInputs {
                     counters,
-                    upstream_images,
-                    upstream_units,
                     hourly_block_hours,
-                    base_blocks,
                     paced_blocks,
                 },
                 coverage_first_ts,
@@ -193,7 +181,7 @@ impl Db {
         .await
     }
 
-    /// `_active_v5`：这些**自然日**里用过 V5 的成员数（不含测试 / 站长 Key）。
+    /// `_active_v5`：这些服务日里用过 V5 的成员数（不含测试 / 站长 Key）；日期见 `quota::active_v5_days`。
     pub async fn quota_active_v5(&self, days: &[String]) -> Result<i64> {
         let days = days.to_vec();
         self.read(move |c| {
@@ -243,26 +231,6 @@ impl Db {
     }
 
     // ------------------------------------------------------------------ 自动驾驶（autopilot.run）
-
-    /// 上一轮复盘那天里「排队满被拒」≥ `min_rejects` 次的小时数。
-    pub async fn autopilot_queue_hours(
-        &self,
-        start: f64,
-        end: f64,
-        min_rejects: i64,
-    ) -> Result<i64> {
-        self.read(move |c| {
-            let mut stmt = c.prepare(
-                "SELECT CAST(ts/3600 AS INT) h FROM usage_log WHERE ts>=? AND ts<? \
-                 AND reason='queue_full' GROUP BY h HAVING COUNT(*)>=?",
-            )?;
-            let n = stmt
-                .query_map(params![start, end, min_rejects], |_| Ok(()))?
-                .count();
-            Ok(n as i64)
-        })
-        .await
-    }
 
     /// 熔断统计：`since` 之后上游真正出错的次数与出图请求总数（没有行时 SUM 为 NULL），
     /// 以及这些失败来自多少把不同的非测试 Key（docs/v3-deviations.md #58）。

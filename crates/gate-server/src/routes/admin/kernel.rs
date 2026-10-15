@@ -113,15 +113,14 @@ async fn quota_algo_put(
 ) -> Result<Response, ApiError> {
     let (parts, body) = req.into_parts();
     let body = read_json_body(&parts.headers, body, BODY_LIMIT).await?;
-    // 极简模式（2026-10-11）：保底 = N，不再单独设保底（quota_base / quota_base_min / quota_base_step 已不用）
-    const BOUNDS: [(&str, i64, i64); 7] = [
+    // 极简模式（2026-10-11）：每人一个数 N；保底一层 3.0 已删除（docs/v3-deviations.md #61）。
+    // V5 每人上限由公式算出、没有可调的范围（`quota_v5_min` / `quota_v5_max` 已删除，#63）：传了也忽略
+    const BOUNDS: [(&str, i64, i64); 5] = [
         ("quota_auto_enabled", 0, 1),
         ("quota_target_avg", 10, 2000),
         ("quota_ceiling_max", 10, 5000),
         ("quota_base_min_fair", 1, 2000),
         ("quota_step", 1, 500),
-        ("quota_v5_min", 0, 500),
-        ("quota_v5_max", 1, 500),
     ];
     let mut updates: Vec<(String, String)> = Vec::new();
     for (k, v) in &body {
@@ -131,14 +130,11 @@ async fn quota_algo_put(
     }
     if !updates.is_empty() {
         state.db.set_settings_bulk(&updates).await?;
-        // 改了初始值时，同步当前值（否则要等明天的微调）；站长手动定今天的 N：上限和保底一起改，保持「每人一个数」
+        // 改了初始值时，同步当前值（否则要等明天的微调）：站长手动定今天的 N
         if let Some((_, n)) = updates.iter().find(|(k, _)| k == "quota_target_avg") {
             state
                 .db
-                .set_settings_bulk(&[
-                    ("quota_ceiling".to_string(), n.clone()),
-                    ("quota_base_now".to_string(), n.clone()),
-                ])
+                .set_settings_bulk(&[("quota_ceiling".to_string(), n.clone())])
                 .await?;
         }
     }

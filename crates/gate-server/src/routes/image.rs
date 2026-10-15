@@ -1,18 +1,16 @@
 //! 出图、流式出图、Vibe 编码、图片工具、标签补全（旧版 `app/routers/image_routes.py`）。
 //!
 //! 取消语义（与旧版一致）：
-//! - 排队阶段（出图间隔、并发槽、额度核对）客户端断开 = 直接取消，不记账；
-//! - 一旦开始上游操作，就在后台任务里跑完并记账（成员断开也不中断），额度预留 / 并发槽 / 在途名额
+//! - 排队阶段（排队、额度核对）客户端断开 = 直接取消，不记账；
+//! - 一旦开始上游操作，就在后台任务里跑完并记账（成员断开也不中断），额度预留 / 排队登记
 //!   随任务一起释放；流式请求在真正发往上游之前断开仍可取消（记一条「cancelled」）。
+//!
+//! 每把 Key 的限速只有排队与 RPM 两层：2.x 的 15 秒出图间隔、「同时在途 ≤ 4」对出图请求已删除
+//! （docs/v3-deviations.md #64）。
 
 use crate::accounting::Entry;
-use crate::admission::{
-    self, Est, acquire_slots, image_admission, refund_local_reject, reserve_image_budget,
-    wait_for_user_image_slot,
-};
-use crate::auth::{
-    authenticate, check_image_cooldown, check_rpm, ctx_of, limit_inflight, require_feature,
-};
+use crate::admission::{self, Est, acquire_slots, image_admission, reserve_image_budget};
+use crate::auth::{authenticate, check_image_cooldown, check_rpm, ctx_of, require_feature};
 use crate::body::{IMAGE_BODY_LIMIT, read_image_payload, read_json};
 use crate::error::{ApiError, GateError, InternalError, json_response, upstream_transport};
 use crate::key::Key;
@@ -240,22 +238,14 @@ fn pyerr_400(e: &gate_core::pyext::PyErr, msg: impl Into<String>) -> ApiError {
 // ------------------------------------------------------------------ 出图
 
 async fn generate_image(State(state): State<AppState>, req: Request) -> Response {
-    let permit = match limit_inflight(&state, req.headers()) {
-        Ok(p) => p,
-        Err(e) => return e.into_response(),
-    };
-    match generate(state, req, false, permit).await {
+    match generate(state, req, false).await {
         Ok(r) => r,
         Err(e) => e.into_response(),
     }
 }
 
 async fn generate_image_stream(State(state): State<AppState>, req: Request) -> Response {
-    let permit = match limit_inflight(&state, req.headers()) {
-        Ok(p) => p,
-        Err(e) => return e.into_response(),
-    };
-    match generate(state, req, true, permit).await {
+    match generate(state, req, true).await {
         Ok(r) => r,
         Err(e) => e.into_response(),
     }
@@ -273,12 +263,7 @@ struct Prepared {
     detail: String,
 }
 
-async fn generate(
-    state: AppState,
-    req: Request,
-    streaming: bool,
-    permit: Option<crate::runtime::InflightPermit>,
-) -> Result<Response, ApiError> {
+async fn generate(state: AppState, req: Request, streaming: bool) -> Result<Response, ApiError> {
     let (parts, body) = req.into_parts();
     let ctx = ctx_of(&parts);
     let key = authenticate(&state, &parts, false).await?;
@@ -288,11 +273,10 @@ async fn generate(
     let body = read_image_payload(&parts.headers, body, IMAGE_BODY_LIMIT).await?;
     let prep = prepare(&state, &ctx, key, body).await?;
     if streaming {
-        return stream(state, ctx, prep, permit).await;
+        return stream(state, ctx, prep).await;
     }
     let key = prep.key.clone();
-    let r = async {
-        wait_for_user_image_slot(&state, &key).await?;
+    async {
         let admission = image_admission(&state, &ctx, &key).await?;
         let slots = acquire_slots(&state, &key, true).await?;
         // 排队 / 预算等待之后再查一次冷却和额度
@@ -301,16 +285,12 @@ async fn generate(
             reserve_image_budget(&state, &key, &prep.est, prep.legacy_free_images).await?;
         let (s, c) = (state.clone(), ctx.clone());
         shielded(&state, &ctx, async move {
-            let _held = (admission, slots, permit);
+            let _held = (admission, slots);
             perform_generation(&s, &c, prep, Arc::new(reserved)).await
         })
         .await
     }
-    .await;
-    if let Err(ApiError::Gate(_)) = &r {
-        refund_local_reject(&state, &ctx, &key).await;
-    }
-    r
+    .await
 }
 
 /// 参数校验与整理（旧版 `_generate_image` 里到 `quota_image_check` 为止的部分）。
@@ -434,39 +414,12 @@ async fn prepare(
     if image_count < 1 {
         return Err(GateError::new(400, "一次生成张数必须是正整数").into());
     }
+    // 2.x 这里还有「V5 续杯」：`anlas_auto` 的 Key 当天个人 V5 用完后改用 Anlas 生成同规格 V5。
+    // Anlas 自动分配早已下线、没有 Key 再是 anlas_auto，3.0 删除（docs/v3-deviations.md #66；列保留）
     let mut est = Est::from_cost(
         policy::estimate_image_cost(&body, true, true)
             .map_err(|e| pyerr_400(&e, "图片参数无效，无法估算费用"))?,
     );
-    // V5 续杯：自动分配了 Anlas 的成员当天个人 V5 用完后改用 Anlas 生成同规格 V5。
-    // 只在账号 V5 额度真的用完（≤ 1%）时才走 Anlas，否则会悄悄多用全站共享的 V5 额度。
-    if est.v5 > 0
-        && gate_core::pyval::number_like(key.get("anlas_auto")) == Some(1.0)
-        && key.allow_anlas()
-        && key.daily_v5() > 0
-    {
-        let last = state.db.get_setting("quota_algo_last").await?;
-        let v5_left = last
-            .as_deref()
-            .filter(|s| !s.is_empty())
-            .and_then(|s| serde_json::from_str::<Value>(s).ok())
-            .and_then(|v| {
-                v.get("v5")
-                    .filter(|x| truthy(x))
-                    .and_then(|x| x.get("percent"))
-                    .cloned()
-            })
-            .and_then(|p| gate_core::pyval::number_like(&p));
-        if v5_left.is_some_and(|l| l <= 1.0)
-            && state.db.get_counter(key.id(), &state.day()).await?.v5 >= key.daily_v5()
-        {
-            est = Est::from_cost(
-                policy::estimate_image_cost(&body, true, false)
-                    .map_err(|e| pyerr_400(&e, "图片参数无效，无法估算费用"))?,
-            );
-            notes.push("今日 V5 已用完，使用自动分配的 Anlas 续杯".into());
-        }
-    }
     let legacy_free_images = if tier == "legacy"
         && policy::legacy_normal_free_eligible(&body).map_err(|e| InternalError(e.to_string()))?
     {
@@ -795,12 +748,7 @@ impl StreamSink {
     }
 }
 
-async fn stream(
-    state: AppState,
-    ctx: ReqCtx,
-    mut prep: Prepared,
-    permit: Option<crate::runtime::InflightPermit>,
-) -> Result<Response, ApiError> {
+async fn stream(state: AppState, ctx: ReqCtx, mut prep: Prepared) -> Result<Response, ApiError> {
     // 现有面板默认 SSE；Launcher 显式要 MessagePack
     let wire = normalize_wire_format(prep.body.get("parameters").and_then(|p| p.get("stream")))?;
     let wire_name = if wire == WireFormat::Msgpack {
@@ -827,7 +775,6 @@ async fn stream(
     };
     let (s, c, d) = (state.clone(), ctx.clone(), disconnect.clone());
     state.tasks.spawn(ctx.clone().scope(async move {
-        let _permit = permit; // 在途名额占到推流和结算结束
         run_stream(s, c, prep, sink, d).await;
     }));
     // 响应头发出之前客户端断开：通知后台任务（还没发往上游就取消）
@@ -879,7 +826,6 @@ async fn run_stream(
     let key = prep.key.clone();
     let model = prep.model.clone();
     let queued = async {
-        wait_for_user_image_slot(&state, &key).await?;
         let admission = image_admission(&state, &ctx, &key).await?;
         let slots = acquire_slots(&state, &key, true).await?;
         check_image_cooldown(&state)?;
@@ -910,7 +856,6 @@ async fn run_stream(
         Ok(()) => {}
         Err(ApiError::Gate(exc)) => {
             // 和非流式一样记「拒绝」：自动驾驶、AIMD、每日微调都靠这些记录感知拥挤
-            refund_local_reject(&state, &ctx, &key).await;
             state.record(
                 &ctx,
                 &key,
@@ -1237,11 +1182,7 @@ async fn augment(State(state): State<AppState>, req: Request) -> Response {
 }
 
 async fn image_tool(state: AppState, req: Request, operation: &'static str) -> Response {
-    let permit = match limit_inflight(&state, req.headers()) {
-        Ok(p) => p,
-        Err(e) => return e.into_response(),
-    };
-    match tool(state, req, operation, permit).await {
+    match tool(state, req, operation).await {
         Ok(r) => r,
         Err(e) => e.into_response(),
     }
@@ -1251,7 +1192,6 @@ async fn tool(
     state: AppState,
     req: Request,
     operation: &'static str,
-    permit: Option<crate::runtime::InflightPermit>,
 ) -> Result<Response, ApiError> {
     let (parts, body) = req.into_parts();
     let ctx = ctx_of(&parts);
@@ -1272,7 +1212,6 @@ async fn tool(
         return Err(GateError::new(403, "此 Key 或本站未开放图片处理权限（img2img）").into());
     }
     let body = read_image_payload(&parts.headers, body, IMAGE_BODY_LIMIT).await?;
-    wait_for_user_image_slot(&state, &key).await?;
     let admission = image_admission(&state, &ctx, &key).await?;
     let slots = acquire_slots(&state, &key, true).await?;
     check_image_cooldown(&state)?;
@@ -1295,7 +1234,7 @@ async fn tool(
     let reserved = reserve_image_budget(&state, &key, &est, 0).await?;
     let (s, c) = (state.clone(), ctx.clone());
     shielded(&state, &ctx, async move {
-        let _held = (admission, slots, reserved, permit);
+        let _held = (admission, slots, reserved);
         let state = s;
         let ctx = c;
         let mut billing_uncertain = false;
@@ -1395,22 +1334,14 @@ async fn tool(
 }
 
 async fn encode_vibe(State(state): State<AppState>, req: Request) -> Response {
-    let permit = match limit_inflight(&state, req.headers()) {
-        Ok(p) => p,
-        Err(e) => return e.into_response(),
-    };
-    match vibe(state, req, permit).await {
+    match vibe(state, req).await {
         Ok(r) => r,
         Err(e) => e.into_response(),
     }
 }
 
 /// V4 / V4.5 参考图编码：只有成功返回二进制结果才扣 2 Anlas。
-async fn vibe(
-    state: AppState,
-    req: Request,
-    permit: Option<crate::runtime::InflightPermit>,
-) -> Result<Response, ApiError> {
+async fn vibe(state: AppState, req: Request) -> Result<Response, ApiError> {
     let (parts, body) = req.into_parts();
     let ctx = ctx_of(&parts);
     let key = authenticate(&state, &parts, false).await?;
@@ -1448,14 +1379,13 @@ async fn vibe(
         let snapshot = state.budget.lock().await.clone();
         admission::quota_image_check(&state, &snapshot, &key, &est, 0, None).await?;
     }
-    wait_for_user_image_slot(&state, &key).await?;
     let admission = image_admission(&state, &ctx, &key).await?;
     let slots = acquire_slots(&state, &key, true).await?;
     check_image_cooldown(&state)?;
     let reserved = reserve_image_budget(&state, &key, &est, 0).await?;
     let (s, c) = (state.clone(), ctx.clone());
     shielded(&state, &ctx, async move {
-        let _held = (admission, slots, reserved, permit);
+        let _held = (admission, slots, reserved);
         let (state, ctx) = (s, c);
         let mut opts = RequestOpts::post(
             format!("{}/ai/encode-vibe", state.nai.image_host()),
@@ -1606,11 +1536,7 @@ async fn tags(state: AppState, req: Request) -> Result<Response, ApiError> {
     let run = async {
         let admitted = state
             .tags
-            .wait(
-                key.id(),
-                state.env.global_concurrency,
-                l.key_image_min_interval,
-            )
+            .wait(key.id(), state.env.global_concurrency)
             .await;
         match admitted {
             // 已被同一 Key 更新的补全查询取代：回空结果，不记拒绝

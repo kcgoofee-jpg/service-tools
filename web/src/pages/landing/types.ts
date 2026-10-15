@@ -12,7 +12,6 @@ export type Blocked = { code?: string; text?: string };
 export type Live = {
   quota?: {
     images_today?: number;
-    units_today?: number;
     images_cap?: number;
     v5_today?: number;
     v5_cap?: number;
@@ -22,8 +21,6 @@ export type Live = {
     hour?: number;
     hour_cap?: number;
     cooldown?: number;
-    burst_cap?: number;
-    burst_wait?: number;
     blocked?: Blocked | null;
   };
   rules?: {
@@ -49,7 +46,6 @@ export type Meta = {
   registration?: { open?: boolean };
   limits?: {
     key_image_queue?: number;
-    base_daily_images?: number;
     quiet_start?: number;
     quiet_end?: number;
     quiet?: boolean;

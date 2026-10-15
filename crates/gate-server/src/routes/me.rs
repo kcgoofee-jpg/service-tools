@@ -14,7 +14,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use gate_core::features::FEATURES;
 use gate_core::pyc;
-use gate_core::pyval::{self, truthy};
+
 use serde_json::{Value, json};
 
 pub fn router() -> Router<AppState> {
@@ -23,23 +23,6 @@ pub fn router() -> Router<AppState> {
 
 fn respond(r: ApiResult) -> Response {
     r.unwrap_or_else(IntoResponse::into_response)
-}
-
-/// `daily_base`：这把 Key 的每日保底张数；0 表示没有保底 / 借用之分（整天都按每日上限）。
-fn daily_base(state: &AppState, key: &Key) -> i64 {
-    let base = state
-        .guard
-        .with(|g| g.values.get("base_daily_images").copied().unwrap_or(0));
-    if key.is_admin()
-        || base == 0
-        || !truthy(key.get("daily_images"))
-        || base >= key.daily_images()
-        || key.manual()
-    {
-        0
-    } else {
-        base
-    }
 }
 
 /// `_feature_view`：该 Key 当前各项功能是否可用（已计入全局开关）。
@@ -73,8 +56,8 @@ async fn me(state: &AppState, parts: &Parts) -> ApiResult {
     // get_counter 对 ≤ 0 的 anlas 给整数 0；float(0) 之后仍是 0.0
     let anlas_today = if c.anlas > 0.0 { c.anlas } else { 0.0 };
     let anlas_month = state.db.month_anlas(key.id(), &state.month()).await?;
-    let anlas_auto = pyval::number_like(key.get("anlas_auto")) == Some(1.0) && key.allow_anlas();
     let features = feature_view(state, &key).await?;
+    // 3.0 去掉的字段（docs/v3-deviations.md #61 / #66）：`daily_images_base`（保底）、`anlas_auto`（V5 续杯）
     Ok(ok_json(&json!({
         "name": key.name(),
         "is_admin": key.is_admin(),
@@ -82,11 +65,9 @@ async fn me(state: &AppState, parts: &Parts) -> ApiResult {
         "today": {
             "images": c.images,
             "daily_images": key.get("daily_images"),
-            "daily_images_base": daily_base(state, &key),
             "legacy_free_images_today": c.legacy_free_images,
             "anlas_today": pyc::round(anlas_today, 2),
             "daily_anlas": key.get("daily_anlas"),
-            "anlas_auto": anlas_auto,
             "v5_today": c.v5,
             "daily_v5": key.get("daily_v5"),
             "image_model_scope": key.get("image_model_scope"),

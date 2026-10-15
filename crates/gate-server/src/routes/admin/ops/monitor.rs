@@ -1,7 +1,7 @@
 //! 监控类接口：成员接口状态码分布、总览、运行状态、上游表现、V5 官方额度。
 
 use super::{query_param, upstream, upstream_health};
-use crate::auth::{site_flag, site_flag_f64};
+use crate::auth::site_flag_f64;
 use crate::error::{ApiResult, InternalError, ok_json};
 use crate::session::AdminSession;
 use crate::state::AppState;
@@ -10,7 +10,7 @@ use axum::extract::State;
 use axum::http::Uri;
 use axum::routing::get;
 use gate_core::features::{FEATURES, KIND_FEATURE};
-use gate_core::site_flags::{GLOBAL_DAILY_V5, GLOBAL_MONTHLY_ANLAS};
+use gate_core::site_flags::GLOBAL_MONTHLY_ANLAS;
 use gate_core::{pyc, pyext, pyval};
 use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
@@ -227,7 +227,7 @@ async fn overview(State(state): State<AppState>, _s: AdminSession) -> ApiResult 
     );
     data.insert(
         "v5_limit".into(),
-        site_flag(&state, &GLOBAL_DAILY_V5).await?,
+        Value::from(crate::ops::algo_owned(&state.db).await?.global_daily_v5),
     );
     data.insert(
         "feature_usage".into(),

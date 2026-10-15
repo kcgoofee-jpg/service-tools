@@ -14,6 +14,8 @@ pub struct Guard {
     core: Mutex<GuardCore>,
     db: Db,
     params: Arc<ParamsStore>,
+    /// 有出图条目被移除（出完 / 被拒 / 取消）：叫醒同一把 Key 排在后面的那张（见 `admission::image_admission`）。
+    pub released: tokio::sync::Notify,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -36,7 +38,14 @@ impl Guard {
             core: Mutex::new(GuardCore::new(tz, reset_hour)),
             db,
             params,
+            released: tokio::sync::Notify::new(),
         }
+    }
+
+    /// 移除一个出图条目，并叫醒等着轮到自己的同 Key 请求。
+    pub fn release_image(&self, key_id: i64, entry_id: Option<i64>) {
+        self.with(|g| g.release_image(key_id, entry_id));
+        self.released.notify_waiters();
     }
 
     /// 只读 / 同步操作直接拿核心（不得跨 await）。
@@ -84,7 +93,7 @@ impl Guard {
         Ok(self.with(|c| c.seed_hour(token_ids, &stamps)))
     }
 
-    /// 这把上游 Token 现在能不能出图（每日 / 每小时 / 10 分钟突发 / 安静时段 / 熔断 / 按时段放行）。
+    /// 这把上游 Token 现在能不能出图（每日 / 每小时 / 安静时段 / 熔断 / 按时段放行）。
     pub async fn token_block_reason(
         &self,
         token_id: &str,
@@ -92,21 +101,7 @@ impl Guard {
         now: f64,
     ) -> Result<Option<Reason>, GuardIoError> {
         let c = self.db.get_upstream_counter(token_id, day).await?;
-        Ok(self.with(|g| g.token_block_reason(token_id, c.units, now)))
-    }
-
-    /// 所有可用账号的「按时段放行」余量之和。
-    pub async fn paced_headroom(
-        &self,
-        token_ids: &[String],
-        day: &str,
-        now: f64,
-    ) -> Result<f64, GuardIoError> {
-        let mut used = Vec::with_capacity(token_ids.len());
-        for t in token_ids {
-            used.push(self.db.get_upstream_counter(t, day).await?.units);
-        }
-        Ok(self.with(|g| g.paced_headroom(&used, now)))
+        Ok(self.with(|g| g.token_block_reason(token_id, c.images as f64, now)))
     }
 
     /// 上游 429：每小时上限减半（AIMD）。返回 (旧, 新)。

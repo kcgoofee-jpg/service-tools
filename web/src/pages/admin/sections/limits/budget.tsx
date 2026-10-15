@@ -56,7 +56,7 @@ export default function BudgetCard() {
               disabled={algoManaged}
               hint={
                 algoManaged
-                  ? `由「动态额度」每 10 分钟自动设置（现在 ${data.global_daily_v5} 张）；关闭动态额度后才能手动改`
+                  ? `由动态额度管理（每 10 分钟自动设置，现在 ${data.global_daily_v5} 张）；关闭动态额度后才能手动改`
                   : undefined
               }
             />

@@ -17,7 +17,7 @@ use gate_core::features::{self, FEATURES};
 use gate_core::pyc;
 use gate_core::pyval;
 use gate_core::reasons::Reason;
-use gate_core::site_flags::{ALGO_NOTICE, GLOBAL_DAILY_V5, HOME_JOIN_OPEN, WEB_LOGIN_PAUSED};
+use gate_core::site_flags::{ALGO_NOTICE, HOME_JOIN_OPEN, WEB_LOGIN_PAUSED};
 use serde_json::{Map, Value, json};
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -100,7 +100,6 @@ async fn slots_left(state: &AppState, cfg: &RegSettings) -> Result<Option<i64>, 
 /// 旧版 `live.build`：汇总数字（请求数、额度、排队数、账号保护、名额），不含 meta 与 me。键顺序照抄旧版。
 pub async fn build(state: &AppState, now: f64) -> Result<Map<String, Value>, InternalError> {
     struct Acct {
-        token_id: String,
         usable: bool,
         cooling: i64,
         next_in: f64,
@@ -110,14 +109,12 @@ pub async fn build(state: &AppState, now: f64) -> Result<Map<String, Value>, Int
     let day = state.day();
     let mono = state.nai.mono();
     let mut accounts: Vec<Acct> = Vec::with_capacity(pool.len());
-    let (mut images_today, mut units_today) = (0i64, 0f64);
+    let mut images_today = 0i64;
     for t in &pool {
         let c = state.db.get_upstream_counter(&t.token_id, &day).await?;
         images_today += c.images;
-        units_today += c.units; // 和每日上限比较用折算值（节约模式的图算半张）
         let f = t.fields();
         accounts.push(Acct {
-            token_id: t.token_id.clone(),
             usable: t.usable(now),
             cooling: if !f.disabled && f.admin_enabled {
                 ((f.blocked_until - now) as i64).max(0)
@@ -131,18 +128,9 @@ pub async fn build(state: &AppState, now: f64) -> Result<Map<String, Value>, Int
     let values = state.guard.with(|g| g.values.clone());
     let gv = |name: &str| values.get(name).copied().unwrap_or(0);
     let usable = (accounts.iter().filter(|a| a.usable).count() as i64).max(1);
-    let v5_cap = site_flag(state, &GLOBAL_DAILY_V5).await?;
-    // 突发窗口（10 分钟分摊）：首页状态行必须跟成员拿到的 429 说同一句话。
-    // 任一可用账号还有余量就是 0；全部到顶才报最早空出来的分钟数。与放行判定同一个函数（guard.burst_blocked）
-    let (hour_cap, quiet, burst_cap, burst_wait) = state.guard.with(|g| {
-        let wait = accounts
-            .iter()
-            .filter(|a| a.usable)
-            .map(|a| g.burst_blocked(&a.token_id, now))
-            .min()
-            .unwrap_or(0);
-        (g.hourly_cap(now), g.in_quiet(now), g.burst_cap(now), wait)
-    });
+    let v5_cap = crate::ops::algo_owned(&state.db).await?.global_daily_v5;
+    // 10 分钟突发窗口已删除（docs/v3-deviations.md #64）：`guard` 段不再有 `burst_cap` / `burst_wait`
+    let (hour_cap, quiet) = state.guard.with(|g| (g.hourly_cap(now), g.in_quiet(now)));
     let min_interval = {
         let v = state.limits().image_min_interval;
         if v == 0.0 { 15.0 } else { v } // `float(x or 15)`
@@ -182,19 +170,6 @@ pub async fn build(state: &AppState, now: f64) -> Result<Map<String, Value>, Int
         .filter(|t| t.usable(now))
         .map(|t| t.token_id.clone())
         .collect();
-    // 和出图检查同一个条件：没人排队 + 按时段放出的份额还剩半小时以上的量
-    let params = state.params.get();
-    let mut borrow_open = false;
-    if state
-        .guard
-        .with(|g| g.site_idle(-1, &token_ids, now, &params))
-    {
-        let reserve = gv("account_daily_cap") as f64 / 48.0 * token_ids.len() as f64;
-        borrow_open = match state.guard.paced_headroom(&token_ids, &day, now).await {
-            Ok(h) => h > reserve,
-            Err(_) => false,
-        };
-    }
     // 全站现在能不能出图：所有可用账号都被站点级规则拦下时，首页要说清原因（和成员拿到的 429 同一句话）
     let mut blocked = Value::Null;
     if !token_ids.is_empty() {
@@ -244,8 +219,7 @@ pub async fn build(state: &AppState, now: f64) -> Result<Map<String, Value>, Int
         "quota".into(),
         json!({
             "images_today": images_today,
-            // 没有上游账号时旧版是整数 0（`round(0, 1)`），有账号则是浮点
-            "units_today": if pool.is_empty() { json!(0) } else { pyval::float(pyc::round(units_today, 1)) },
+            // 节约模式的折算张数 `units_today` 已删除（docs/v3-deviations.md #67）：每日上限就按 images_today 比
             "images_cap": gv("account_daily_cap") * usable,
             "v5_today": state.db.day_v5_total(&day).await?,
             "v5_cap": v5_cap,
@@ -261,8 +235,6 @@ pub async fn build(state: &AppState, now: f64) -> Result<Map<String, Value>, Int
             // `min(..., default=0)`：没有可用账号时是整数 0
             "next_in": next_in.map_or(json!(0), pyval::float),
             "cooldown": state.cooldown.remaining(now),
-            "burst_cap": burst_cap,
-            "burst_wait": burst_wait,
             "blocked": blocked,
         }),
     );
@@ -285,16 +257,15 @@ pub async fn build(state: &AppState, now: f64) -> Result<Map<String, Value>, Int
     );
     body.insert(
         "rules".into(),
+        // 3.0 删掉的字段（docs/v3-deviations.md #61）：`base`（保底）、`borrow_open`（空闲借用）、
+        // `anlas`（早已下线的 Anlas 自动分配占位）
         json!({
-            "base": gv("base_daily_images"), "key_queue": gv("key_image_queue"),
+            "key_queue": gv("key_image_queue"),
             "queue_cap": gv("queue_per_account") * usable,
             "hourly_cap": gv("account_hourly_cap") * usable, "daily_cap": gv("account_daily_cap") * usable,
             "quiet_start": gv("quiet_start"), "quiet_end": gv("quiet_end"),
             "quiet_cap": gv("quiet_hourly_cap") * usable,
             "min_interval": min_interval, "jitter": gv("interval_jitter"),
-            "borrow_open": borrow_open,
-            // Anlas 自动分配已下线（2026-10-13），字段保留兼容旧前端
-            "anlas": {"per_member": 0, "members": 0, "enabled": false},
             "quota": quota, // 动态额度的当前结果（quota_algo）
         }),
     );
@@ -373,11 +344,11 @@ pub async fn has_announcement(state: &AppState) -> bool {
 
 // ------------------------------------------------------------------ /public/status
 
-/// 首页「使用须知」里的排队与保底规则；数值来自后台「账号保护与排队」。
+/// 首页「使用须知」里的排队规则；数值来自后台「账号保护与排队」（保底已删除，docs/v3-deviations.md #61）。
 fn public_limits(state: &AppState) -> Value {
     let v = state.guard.with(|g| g.values.clone());
     let get = |k: &str| v.get(k).copied().unwrap_or(0);
-    json!({"key_image_queue": get("key_image_queue"), "base_daily_images": get("base_daily_images"),
+    json!({"key_image_queue": get("key_image_queue"),
            "quiet_start": get("quiet_start"), "quiet_end": get("quiet_end"),
            "quiet": get("quiet_start") != get("quiet_end")})
 }
@@ -483,7 +454,7 @@ fn content_sig(body: &Map<String, Value>, admin: bool) -> u64 {
         {
             let g2: Map<String, Value> = g
                 .iter()
-                .filter(|(k, _)| !matches!(k.as_str(), "next_in" | "cooldown" | "burst_wait"))
+                .filter(|(k, _)| !matches!(k.as_str(), "next_in" | "cooldown"))
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect();
             m.insert(k.clone(), Value::Object(g2));

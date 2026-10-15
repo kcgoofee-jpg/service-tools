@@ -4,7 +4,7 @@ mod common;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use common::{TOKEN, setup};
-use gate_db::repo::usage::LogFilter;
+use gate_db::repo::usage::{LogFilter, Success};
 use gate_server::AppState;
 use gate_testkit::Reply;
 use http_body_util::BodyExt;
@@ -85,6 +85,209 @@ async fn generate_image_ok_records_usage() {
     assert!(detail.starts_with("832x1216/28step 免费"), "{detail}");
     let c = e.state.db.get_counter(1, &e.state.day()).await.unwrap();
     assert_eq!((c.images, c.legacy_free_images), (1, 1));
+}
+
+/// 每人只有每日上限：2.x 的每人注水（底仓 30 张、每小时补 4 张，一天最多约 126 张）已删除
+/// （docs/v3-deviations.md #62）。上限 200、今天已用 150 张的算法管理成员照样能出图，不会被 `paced` 拦下；
+/// 用满上限才是「今日 V4.5 免费图额度已用完」。
+#[tokio::test]
+async fn no_per_member_pacing_below_the_daily_cap() {
+    let e = setup(&[]).await;
+    e.state
+        .db
+        .write(|tx| {
+            tx.execute(
+                "UPDATE api_keys SET daily_images=200, quota_auto=1 WHERE id=1",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let used = |n: i64| Success {
+        key_id: 1,
+        kind: "image".into(),
+        model: "nai-diffusion-4-5-full".into(),
+        day: e.state.day(),
+        images: n,
+        legacy_free_images: n,
+        ..Default::default()
+    };
+    e.state
+        .db
+        .record_success(&used(150), e.state.now())
+        .await
+        .unwrap();
+    let (status, _, body) = call(
+        &e.state,
+        "POST",
+        "/ai/generate-image",
+        Some(TOKEN),
+        Some(image_body("nai-diffusion-4-5-full", 1)),
+    )
+    .await;
+    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
+    // 用满 200 张：个人额度用完（402），不是「出图速度过快」
+    e.state
+        .db
+        .record_success(&used(49), e.state.now())
+        .await
+        .unwrap();
+    let (status, _, body) = call(
+        &e.state,
+        "POST",
+        "/ai/generate-image",
+        Some(TOKEN),
+        Some(image_body("nai-diffusion-4-5-full", 1)),
+    )
+    .await;
+    assert_eq!(status, 402, "{}", String::from_utf8_lossy(&body));
+    let text = String::from_utf8_lossy(&body);
+    assert!(
+        text.contains("今日 V4.5 免费图额度已用完（200 张/天）"),
+        "{text}"
+    );
+    assert!(!text.contains("每小时自动恢复"), "{text}");
+}
+
+/// 每把 Key 的限速只剩排队与 RPM 两层（docs/v3-deviations.md #64）：
+/// - 同一把 Key 同时只生成 1 张：第二张排队、等第一张出完才发往上游（即使还有空着的上游账号）——
+///   这是排队本身做的，旧版靠每把 Key 一个的信号量；
+/// - 再多的并发请求是「上一张还没出完」（`key_busy`），不再有「同时进行中的请求过多」（`key_rate`）；
+/// - 前一张出完，下一张马上能发，没有 15 秒的每 Key 出图间隔。
+#[tokio::test]
+async fn one_image_per_key_at_a_time_without_per_key_interval() {
+    let e = setup(&[("NAI_TOKENS", "pst-synthetic-one,pst-synthetic-two")]).await;
+    // 账号级的随机抖动（0～5 秒）与这里无关，关掉免得计时不稳
+    e.state
+        .guard
+        .with(|g| g.values.insert("interval_jitter".into(), 0));
+    e.mock.push(
+        "/ai/generate-image",
+        Reply::Chunks {
+            status: 200,
+            content_type: "binary/octet-stream".into(),
+            chunks: vec![(
+                std::time::Duration::from_millis(600),
+                bytes::Bytes::from(gate_testkit::zip_of_pngs(1)),
+            )],
+        },
+    );
+    let spawn = |state: AppState| {
+        tokio::spawn(async move {
+            call(
+                &state,
+                "POST",
+                "/ai/generate-image",
+                Some(TOKEN),
+                Some(image_body("nai-diffusion-4-5-full", 1)),
+            )
+            .await
+        })
+    };
+    let first = spawn(e.state.clone());
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    let second = spawn(e.state.clone());
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    // 第一张在上游，第二张在排队：第二个上游账号空着也不发
+    assert_eq!(e.mock.requests_to("/ai/generate-image").len(), 1);
+    let view = e.state.guard.with(|g| g.queue_view(Some(1)));
+    assert_eq!(
+        (view["running"].as_i64(), view["waiting"].as_i64()),
+        (Some(1), Some(1))
+    );
+    // 第三、四张：排队满了（同时生成 1 张 + 排队 1 张）
+    for _ in 0..2 {
+        let (status, _, body) = call(
+            &e.state,
+            "POST",
+            "/ai/generate-image",
+            Some(TOKEN),
+            Some(image_body("nai-diffusion-4-5-full", 1)),
+        )
+        .await;
+        let text = String::from_utf8_lossy(&body).to_string();
+        assert_eq!(status, 429, "{text}");
+        assert!(text.contains("上一张图还没出完"), "{text}");
+    }
+    let (s1, _, _) = first.await.unwrap();
+    let (s2, _, _) = second.await.unwrap();
+    assert_eq!((s1, s2), (StatusCode::OK, StatusCode::OK));
+    assert_eq!(e.mock.requests_to("/ai/generate-image").len(), 2);
+    // 前一张出完，下一张立刻能发（没有每 Key 15 秒间隔）
+    let t0 = std::time::Instant::now();
+    let (status, _, _) = call(
+        &e.state,
+        "POST",
+        "/ai/generate-image",
+        Some(TOKEN),
+        Some(image_body("nai-diffusion-4-5-full", 1)),
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert!(
+        t0.elapsed() < std::time::Duration::from_secs(3),
+        "{:?}",
+        t0.elapsed()
+    );
+    let rows = logs(&e.state).await;
+    let reasons: Vec<&str> = rows
+        .iter()
+        .filter(|r| r["status"] == "rejected")
+        .map(|r| r["reason"].as_str().unwrap_or(""))
+        .collect();
+    assert_eq!(reasons, ["key_busy", "key_busy"], "{rows:?}");
+}
+
+/// 「V5 续杯」已删除（docs/v3-deviations.md #66）：旧版 `anlas_auto` 的 Key 当天个人 V5 用完、
+/// 账号 V5 也见底时会改用 Anlas 出同规格 V5；现在个人 V5 用完就是 402，不会悄悄花 Anlas。
+#[tokio::test]
+async fn no_v5_refill_with_anlas() {
+    let e = setup(&[]).await;
+    e.state
+        .db
+        .write(|tx| {
+            tx.execute(
+                "UPDATE api_keys SET anlas_auto=1, allow_anlas=1, daily_v5=1, image_model_scope='all' WHERE id=1",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    e.state
+        .db
+        .set_setting("quota_algo_last", r#"{"v5": {"percent": 0}}"#)
+        .await
+        .unwrap();
+    e.state
+        .db
+        .record_success(
+            &Success {
+                key_id: 1,
+                kind: "image".into(),
+                model: "nai-diffusion-5-full".into(),
+                day: e.state.day(),
+                images: 1,
+                v5: 1,
+                ..Default::default()
+            },
+            e.state.now(),
+        )
+        .await
+        .unwrap();
+    let (status, _, body) = call(
+        &e.state,
+        "POST",
+        "/ai/generate-image",
+        Some(TOKEN),
+        Some(image_body("nai-diffusion-5-full", 1)),
+    )
+    .await;
+    let text = String::from_utf8_lossy(&body).to_string();
+    assert_eq!(status, 402, "{text}");
+    assert!(text.contains("今日 V5 额度已用完（1 张/天）"), "{text}");
+    assert!(e.mock.requests_to("/ai/generate-image").is_empty());
 }
 
 /// 不识别客户端、不记设备（docs/v3-deviations.md #50）：不管 User-Agent、启动器请求头还是请求体长什么样，

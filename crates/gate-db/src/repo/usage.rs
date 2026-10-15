@@ -94,9 +94,11 @@ pub struct ImageTiming {
     pub site_avg_dur_s: f64,
 }
 
-/// 生图类操作同时刷新 last_image_at：闲置回收只认它（查额度 / 文本聊天不算活跃）。
+/// 真正出图（`image` / `image_stream`）成功才刷新 last_image_at：闲置回收只认它。
+/// 查额度、文本聊天、标签补全不算；放大、导演工具、Vibe 编码也不算（docs/v3-deviations.md #65：
+/// 旧版前缀匹配 `image*` 并把这三种算进去，只用它们「保活」的 Key 不会被回收）。
 fn is_image_kind(kind: &str) -> bool {
-    kind.starts_with("image") || matches!(kind, "upscale" | "augment-image" | "vibe_encode")
+    matches!(kind, "image" | "image_stream")
 }
 
 /// 旧版 `_log_filter`：返回 (` WHERE ...` 或空串, 绑定参数)。

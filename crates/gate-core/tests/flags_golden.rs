@@ -198,16 +198,55 @@ const DOC_FIXES: [(&str, &str); 1] = [(
     "网页 Discord 登录暂停（Discord 回调修复 / 审核期间）。网页只有 Discord 登录，暂停期间成员只能在 Discord 里用 /quota 看额度",
 )];
 
-/// 3.0 删掉的设置：`member_image_download`（成员自助导出原图，docs/v3-deviations.md #49）、
-/// `dm_enabled`（成员私信总闸门，机器人不再私信成员，docs/v3-deviations.md #76）。冻结夹具里还有它们的用例，
-/// 登记表里已经没有，逐个用例跳过；`all_keys` / `facts_table` 在期望值一侧去掉它们。
-const REMOVED_KEYS: [&str; 2] = ["member_image_download", "dm_enabled"];
+/// 3.0 删掉的设置。冻结夹具里还有它们的用例，登记表里已经没有，逐个用例跳过；`all_keys` / `facts_table`
+/// 在期望值一侧去掉它们：
+/// - `member_image_download`：成员自助导出原图（docs/v3-deviations.md #49）；
+/// - `dm_enabled`：成员私信总闸门，机器人不再私信成员（docs/v3-deviations.md #76）；
+/// - `guard_base_daily_images`：V4.5 保底（docs/v3-deviations.md #61）。
+const REMOVED_KEYS: [&str; 3] = [
+    "member_image_download",
+    "dm_enabled",
+    "guard_base_daily_images",
+];
+
+fn is_removed(key: &str) -> bool {
+    REMOVED_KEYS.contains(&key)
+}
 
 /// 夹具用例的 Spec 引用的是不是已删除的设置。
 fn removed_spec(c: &Case) -> bool {
-    c.raw["spec"]["ref"]
-        .as_str()
-        .is_some_and(|k| REMOVED_KEYS.contains(&k))
+    c.raw["spec"]["ref"].as_str().is_some_and(is_removed)
+}
+
+/// `global_daily_v5` 的默认值 3.0 不再取环境变量 `GLOBAL_DAILY_V5`、固定为 150（docs/v3-deviations.md #70）：
+/// 登记表与 facts_table 在期望一侧改写；`default_of` / `get` 里结果取决于默认值的用例跳过，另由
+/// [`global_daily_v5_default_is_fixed`] 测。
+const V5_KEY: &str = "global_daily_v5";
+
+fn v5_spec(c: &Case) -> bool {
+    c.raw["spec"]["ref"].as_str() == Some(V5_KEY)
+}
+
+#[test]
+fn global_daily_v5_default_is_fixed() {
+    let spec = **ALL.iter().find(|s| s.key == V5_KEY).unwrap();
+    assert_eq!((spec.env, spec.default), ("", SpecDefault::Int(150)));
+    // 环境里有没有值都一样
+    for env in [None, Some(json!({"global_daily_v5": 7}))] {
+        assert_eq!(site_flags::default_of(&spec, env.as_ref()), json!(150));
+        assert_eq!(
+            site_flags::get_from_raw(&spec, None, env.as_ref()),
+            json!(150)
+        );
+        assert_eq!(
+            site_flags::get_from_raw(&spec, Some("abc"), env.as_ref()),
+            json!(150)
+        );
+        assert_eq!(
+            site_flags::get_from_raw(&spec, Some("90"), env.as_ref()),
+            json!(90)
+        );
+    }
 }
 
 /// 期望值一侧去掉已删除设置的 `facts_table` 行。
@@ -238,11 +277,16 @@ fn site_registry_golden() {
         match c.raw["fn"].as_str().unwrap() {
             "spec" => {
                 let key = c.out()["key"].as_str().unwrap();
-                if REMOVED_KEYS.contains(&key) {
+                if is_removed(key) {
                     continue;
                 }
                 let s = ALL.iter().find(|s| s.key == key).expect("缺少这个键");
-                assert_eq_py(&c, &spec_json(s), &fix_docs(c.out()));
+                let mut want = fix_docs(c.out());
+                if key == V5_KEY {
+                    want["default"] = json!(150);
+                    want["env"] = json!("");
+                }
+                assert_eq_py(&c, &spec_json(s), &want);
                 n += 1;
             }
             "all_keys" => {
@@ -250,11 +294,14 @@ fn site_registry_golden() {
                 let mut want = c.out().clone();
                 want.as_array_mut()
                     .unwrap()
-                    .retain(|k| !k.as_str().is_some_and(|k| REMOVED_KEYS.contains(&k)));
+                    .retain(|k| !k.as_str().is_some_and(is_removed));
                 assert_eq_py(&c, &Value::Array(keys), &want);
             }
             "facts_table" => {
-                let want = json!(drop_removed_row(c.out().as_str().unwrap()));
+                let want = json!(drop_removed_row(c.out().as_str().unwrap()).replace(
+                    "| `global_daily_v5` | int | `.env global_daily_v5` |",
+                    "| `global_daily_v5` | int | 150 |"
+                ));
                 assert_eq_py(&c, &json!(site_flags::facts_table()), &fix_docs(&want))
             }
             other => panic!("未知 {other}"),
@@ -280,7 +327,7 @@ fn site_parse_golden() {
 #[test]
 fn site_default_of_golden() {
     for c in load(M, "flags/site_default_of") {
-        if removed_spec(&c) {
+        if removed_spec(&c) || v5_spec(&c) {
             continue;
         }
         let spec = spec_of(&c.raw["spec"]);
@@ -292,7 +339,7 @@ fn site_default_of_golden() {
 #[test]
 fn site_get_golden() {
     for c in load(M, "flags/site_get") {
-        if removed_spec(&c) {
+        if removed_spec(&c) || v5_spec(&c) {
             continue;
         }
         let spec = spec_of(&c.raw["spec"]);

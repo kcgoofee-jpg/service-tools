@@ -27,8 +27,8 @@
 //! ## allocation（分配）
 //! - tick：`quota_algo.run(state)`，摘要 [`allocation_tick_summary`]。
 //! - checks：先 [`allocation_query`] 解析 `quota_algo_last`；`keys` = `SELECT COUNT(*) FROM api_keys WHERE quota_auto=1 AND is_admin=0 AND is_test=0 AND enabled=1`；
-//!   `drift` = 同一条再加 `AND (daily_images<>? OR daily_v5<>?)`，参数 `(a, each)`（`a` 为 NULL 时 SQL 比较恒不成立 → 0）；
-//!   `base` = `guard.values.get("base_daily_images")`（没有 Guard 传 `Some(0)`）。
+//!   `drift` = 同一条再加 `AND (daily_images<>? OR daily_v5<>?)`，参数 `(a, each)`（`a` 为 NULL 时 SQL 比较恒不成立 → 0）。
+//!   旧版还有一条「V4.5：保底 ≤ 每日上限」，保底层删除后一起删了（docs/v3-deviations.md #61）。
 //!
 //! ## autopilot（自动驾驶）
 //! - tick：`autopilot.run`，摘要 [`autopilot_tick_summary`]。
@@ -44,7 +44,7 @@
 
 use crate::clock::Clock;
 use crate::quota::{DecideError, PyNum, V5_FALLBACK_RATE, fmt_prec, hget, loads_setting, num};
-use crate::{autopilot, pyc, pyval, quota};
+use crate::{pyc, pyval, quota};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -129,24 +129,28 @@ pub const MODULES: [ModuleMeta; 6] = [
         default_enabled: true,
         periodic: true,
         has_checks: true,
-        custom_enabled: false,
+        // 开关就是动态额度的 `quota_auto_enabled`（不再有单独的 `module_allocation`，docs/v3-deviations.md #70）
+        custom_enabled: true,
         params: &[
             ("今天每人 V4.5", "每天服务日起点后按昨天的用量重算"),
             ("规则", ""),
             ("范围", ""),
-            ("V5 每人范围", "按账号 V5 剩余和恢复速度分"),
+            (
+                "V5 每人",
+                "每天 7 点按恢复速度定全站池，再按前 3 天用过 V5 的人数分，当天不变",
+            ),
         ],
     },
     ModuleMeta {
         name: "autopilot",
         title: "自动驾驶",
-        question: "名额、全站熔断、单个 Key 限流",
+        question: "全站熔断、单个 Key 限流",
         hard_note: "关闭后这些设置保持当前值",
         default_enabled: true,
         periodic: true,
         has_checks: false,
         custom_enabled: false,
-        params: &[("全站熔断", ""), ("单个 Key 限流", ""), ("名额", "")],
+        params: &[("全站熔断", ""), ("单个 Key 限流", "")],
     },
     ModuleMeta {
         name: "risk",
@@ -344,10 +348,13 @@ pub fn allocation_range_text() -> String {
     format!("{}～{} 张", c.quota_base_min_fair, c.quota_ceiling_max)
 }
 
-/// 面板参数「V5 每人范围」。
-pub fn allocation_v5_range_text() -> String {
-    let c = quota::QuotaCfg::default();
-    format!("{}～{} 张", c.quota_v5_min, c.quota_v5_max)
+/// 面板参数「V5 每人」：3.0 的公式（docs/v3-deviations.md #63；旧版是「V5 每人范围」3～30 张）。
+pub fn allocation_v5_rule_text() -> String {
+    format!(
+        "全站池 ÷ max({}, 前 {} 天用过 V5 的人数)，至少 1 张",
+        quota::V5_MIN_PEOPLE,
+        quota::V5_ACTIVE_DAYS
+    )
 }
 
 /// `quota_algo_last` 解析结果里服务层要用的查询参数。
@@ -395,44 +402,17 @@ pub struct AllocationInputs {
     pub last_raw: Option<String>,
     pub keys: i64,
     pub drift: i64,
-    /// `guard.values.get("base_daily_images")`（没有 Guard 时传 `Some(0)`）。
-    pub base: Option<i64>,
 }
 
 pub fn allocation_checks(inp: &AllocationInputs) -> Result<Vec<Check>, DecideError> {
-    let Some(q) = allocation_query(inp.last_raw.as_deref())? else {
+    if allocation_query(inp.last_raw.as_deref())?.is_none() {
         return Ok(Vec::new());
-    };
-    let a = q.a;
-    // V4.5：保底层只在 保底 < 每日上限 时存在；算法把两者设成同一个数后这一层就没了
-    let base = inp.base;
-    let a_truthy = pyval::truthy(&a);
-    let base_ok = match base {
-        None | Some(0) => true,
-        Some(_) if !a_truthy => true,
-        Some(b) => {
-            let af = pyval::number_like(&a)
-                .ok_or_else(|| DecideError::Type(format!("不能比较: {a}")))?;
-            (b as f64) <= af
-        }
-    };
-    let base_check = Check::new(
-        "V4.5：保底 ≤ 每日上限",
-        base_ok,
-        format!(
-            "保底 {} · 每人上限 {}（两者相等 = 没有保底/空闲借用两层，只有每日上限）",
-            base.map_or("None".to_string(), |b| b.to_string()),
-            pyval::py_str(&a)
-        ),
-    );
-    Ok(vec![
-        Check::new(
-            "算法管理的 Key 都已同步",
-            inp.drift == 0,
-            format!("{} 把 Key 的额度和算法结果不一致", inp.drift),
-        ),
-        base_check,
-    ])
+    }
+    Ok(vec![Check::new(
+        "算法管理的 Key 都已同步",
+        inp.drift == 0,
+        format!("{} 把 Key 的额度和算法结果不一致", inp.drift),
+    )])
 }
 
 // ---------------------------------------------------------------------------
@@ -463,14 +443,7 @@ pub fn autopilot_tick_summary(r: &Value) -> String {
 pub const AUTOPILOT_BREAKER_TEXT: &str = "15 分钟上游失败 ≥ 5 次且 ≥ 30% → 暂停出图 5 分钟";
 pub const AUTOPILOT_KEY_GUARD_TEXT: &str = "1 小时被拒 ≥ 60 次 → 暂停 1 小时";
 
-/// 面板参数「名额」。
-pub fn autopilot_slots_text() -> String {
-    format!(
-        "快满且有余量时 +{}，最多 {}（名额不限时不动）",
-        autopilot::SLOTS_STEP,
-        autopilot::SLOTS_MAX
-    )
-}
+// 面板参数「名额」随「名额 +5」规则删除（docs/v3-deviations.md #68）。
 
 // ---------------------------------------------------------------------------
 // 领 Key

@@ -55,7 +55,6 @@ async fn snapshot(state: &AppState) -> Result<Value, ApiError> {
     let reg = ops::registration_settings(state).await?;
     let mut registration = reg.to_map();
     registration.insert("active".into(), json!(ops::active_count(state).await?));
-    registration.insert("v5_capacity".into(), ops::v5_capacity(state).await?);
     let (prompts, thumbs, days) = audit_flags(&state.db, &state.env).await?;
     let labels: Map<String, Value> = FEATURES
         .iter()

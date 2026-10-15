@@ -47,7 +47,9 @@ pub async fn collect_perf(state: &AppState, now: f64) -> Result<PerfReport, Kern
         &PerfParams {
             slots,
             site_interval: limits.image_min_interval,
-            key_interval: limits.key_image_min_interval,
+            // 每把 Key 的出图间隔已删除（docs/v3-deviations.md #64）：同一把 Key 一次只生成一张，
+            // 单人最快也受账号出图间隔约束，所以「单人产能」按账号间隔算
+            key_interval: limits.image_min_interval,
             hourly_cap,
         },
     ))

@@ -1,19 +1,56 @@
 //! `reasons` 与旧 Python（app/reasons.py）对拍：夹具由旧 Python 生成（脚本见标签 py-final）。
+//!
+//! 3.0 删掉的原因码 `over_base`（V4.5 保底用完后全站不空闲，docs/v3-deviations.md #61）：夹具冻结不改，
+//! 在期望一侧去掉它（常量本身、`SITE_LEVEL` / `LABELS` / `BACKFILL` 里的那一项）；历史记录里的
+//! `over_base` 没有短说明了，按 detail 的第一句显示。
+//!
+//! `SITE_LEVEL` 只有自动驾驶用，3.0 并进 `autopilot::KEY_GUARD_SKIP_REASONS`（那份名单去掉 `key_paused`
+//! 就是它），夹具里的 `SITE_LEVEL` 拿这一段来比。
 
+use gate_core::autopilot;
 use gate_core::reasons::{self, Reason};
 use gate_golden::{assert_eq_py_ordered, load};
 use serde_json::{Map, Value, json};
 
 const M: &str = env!("CARGO_MANIFEST_DIR");
 
+/// 3.0 删掉的原因码（#61）。
+const REMOVED: &str = "over_base";
+
+/// 期望一侧去掉已删除的原因码：列表里的码、`[码, 模式]` 对、`{码: 说明}` 的键。
+fn without_removed(v: &Value) -> Value {
+    match v {
+        Value::Array(a) => Value::Array(
+            a.iter()
+                .filter(|x| {
+                    x.as_str() != Some(REMOVED) && x.get(0).and_then(Value::as_str) != Some(REMOVED)
+                })
+                .cloned()
+                .collect(),
+        ),
+        Value::Object(m) => {
+            let mut m = m.clone();
+            m.shift_remove(REMOVED);
+            Value::Object(m)
+        }
+        other => other.clone(),
+    }
+}
+
 #[test]
 fn constants_golden() {
     let mut seen = 0;
     for c in load(M, "reasons/constants") {
         let name = c.raw["name"].as_str().unwrap();
-        let want = &c.raw["value"];
+        if name == "OVER_BASE" {
+            continue;
+        }
+        let want = &without_removed(&c.raw["value"]);
         let got: Value = match name {
-            "SITE_LEVEL" => json!(reasons::SITE_LEVEL),
+            "SITE_LEVEL" => {
+                assert_eq!(autopilot::KEY_GUARD_SKIP_REASONS[0], reasons::KEY_PAUSED);
+                json!(autopilot::KEY_GUARD_SKIP_REASONS[1..])
+            }
             "LABELS" => {
                 let mut m = Map::new();
                 for (k, v) in reasons::LABELS {
@@ -36,7 +73,6 @@ fn constants_golden() {
             "BURST_CAP" => json!(reasons::BURST_CAP),
             "DAILY_CAP" => json!(reasons::DAILY_CAP),
             "PACED" => json!(reasons::PACED),
-            "OVER_BASE" => json!(reasons::OVER_BASE),
             "BREAKER" => json!(reasons::BREAKER),
             "COOLDOWN" => json!(reasons::COOLDOWN),
             "V5_EXHAUSTED" => json!(reasons::V5_EXHAUSTED),
@@ -52,9 +88,9 @@ fn constants_golden() {
         assert_eq_py_ordered(&c, &got, want);
         seen += 1;
     }
-    // 20 个原因码 + SITE_LEVEL + LABELS + BACKFILL
+    // 19 个原因码（夹具里的 20 个去掉 over_base）+ SITE_LEVEL + LABELS + BACKFILL
     assert_eq!(
-        seen, 23,
+        seen, 22,
         "夹具条数变了，检查 reasons.py 是否新增 / 删除了原因码"
     );
 }
@@ -78,6 +114,13 @@ fn reason_label_golden() {
     for c in load(M, "reasons/reason_label") {
         let code = c.arg(0).as_str().unwrap_or("");
         let detail = c.args().get(1).and_then(Value::as_str).unwrap_or("");
-        assert_eq_py_ordered(&c, &json!(reasons::reason_label(code, detail)), c.out());
+        let got = reasons::reason_label(code, detail);
+        if code == REMOVED {
+            // 已删除的码没有短说明：与没有码时一样取 detail 的第一句
+            assert_ne!(Some(got.as_str()), c.out().as_str(), "第 {} 行", c.line);
+            assert_eq!(got, reasons::reason_label("", detail), "第 {} 行", c.line);
+            continue;
+        }
+        assert_eq_py_ordered(&c, &json!(got), c.out());
     }
 }

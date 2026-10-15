@@ -11,6 +11,8 @@
 //! - risk 模块里「出站请求头」「TLS 指纹」两条（3.0 换了文案，见 docs/v3-deviations.md）：两边都用固定占位；
 //! - 3.0 删掉的东西（docs/v3-deviations.md #44）：夹具是冻结的 Python 输出，不重新生成，比较前把这些从期望里去掉——
 //!   被删的整个模块、分配模块里被删的那条校验（连带按剩下的校验重算运行条级别），以及校验没通过时记的 Bug 行。
+//! - 3.0 的额度改动（见 [`v3`] 模块，逐条对应 docs/v3-deviations.md 的编号）：同样只在期望一侧改写；
+//!   操作日志的自增 id 两边都不比（被删掉的日志会让后面的 id 错位）。
 
 use flate2::read::GzDecoder;
 use futures::future::BoxFuture;
@@ -369,9 +371,9 @@ fn compare_writes(
 
 /// 被删的模块。
 const REMOVED_MODULE: &str = "registration_ready";
-/// 分配模块里被删的校验（每人额度 × 人数 vs 全站上限）。
+/// 分配模块里被删的校验：每人额度 × 人数 vs 全站上限（#44）、保底 ≤ 每日上限（#61）。
 const REMOVED_CHECK_MODULE: &str = "allocation";
-const REMOVED_CHECK: &str = "V5：每人额度 × 人数 ≤ 全站上限";
+const REMOVED_CHECKS: [&str; 2] = ["V5：每人额度 × 人数 ≤ 全站上限", "V4.5：保底 ≤ 每日上限"];
 
 /// 已按剩下的校验重算过的运行条级别：`(模块, 运行时刻)` → 级别。后面几步的期望里还带着旧的运行条，要同样改。
 type Levels = HashMap<(String, u64), String>;
@@ -406,7 +408,7 @@ fn fix_entry(name: &str, entry: &mut Value, levels: &mut Levels) {
     }
     let mut this_round = None;
     if let Some(Value::Array(checks)) = e.get_mut("checks") {
-        checks.retain(|c| c["name"] != REMOVED_CHECK);
+        checks.retain(|c| !REMOVED_CHECKS.iter().any(|n| c["name"] == *n));
         let checks = checks.clone();
         this_round = Some(run_level(e, &checks));
     }
@@ -446,7 +448,8 @@ fn fix_setting(key: &Value, value: &mut Value, levels: &mut Levels) {
 }
 
 /// 一步的期望：返回值（tick_all / snapshot）和设置写入里的 `kernel_last`。
-fn fix_expected_step(want: &mut Value, op: &str, levels: &mut Levels) {
+fn fix_expected_step(want: &mut Value, op: &str, levels: &mut Levels, v3: &mut v3::Expect) {
+    v3.fix_step(want, op);
     if let Some(result) = want.get_mut("result") {
         match op {
             "tick_all" => fix_kernel_last(result, levels),
@@ -483,6 +486,689 @@ fn fix_expected_step(want: &mut Value, op: &str, levels: &mut Levels) {
                 }
             }
             _ => {}
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 3.0 的额度改动：比较前在期望一侧改写（夹具冻结不改）
+// ---------------------------------------------------------------------------
+
+mod v3 {
+    use gate_core::jsondump;
+    use serde_json::{Map, Value, json};
+    use std::collections::HashMap;
+
+    /// 期望一侧的改写；跨步骤记住每个设置最后一次（改写后）的值，用来改写最后的表行差异。
+    pub struct Expect {
+        last_written: HashMap<String, String>,
+        /// 旧版这一步写下的全站 V5 池（`global_daily_v5`）。V5 按新公式算出来的数不同（#63），而第二天的
+        /// V4.5 复盘拿它算「可分 = 账号日上限 − 全站 V5」：每步跑完把旧版的值写回库里，让多步场景后面的
+        /// 步骤与旧版从同一个起点继续，V4.5 的部分照样逐位对拍。
+        resync: Vec<(String, String)>,
+        /// 种子里只有原因码 `hourly_cap`、没有「出图量已达上限」文案的拒绝记录的时间戳：
+        /// 旧版的复盘按文案 LIKE 数不到它们，3.0 按原因码数得到（#61）
+        code_only_hourly: Vec<f64>,
+        /// 旧版复盘按节约模式折算过 `used` 的服务日 → 3.0 的 `used`（成员实际张数之和，#67）。
+        /// 由 [`raw_used_days`] 在种子写好之后直接查库得到。
+        pub raw_used: HashMap<String, i64>,
+        /// 旧版的「名额 +5」改过注册名额（#68：3.0 不改，表行差异里也就没有这一行）。
+        slots_changed: bool,
+        /// 这个场景里写过的自动驾驶每小时快照（`hour`）：这些快照里都没有名额（#68）。
+        autopilot_hours: Vec<String>,
+    }
+
+    /// 这些服务日里，旧版的复盘会按账号层面「`units` / `images`」折算 `used`（`units < images`）的，
+    /// 以及 3.0 应得的实际张数（不含测试号、站长号的成员计数之和）。测试自己写 SQL 算，不用被测代码。
+    pub async fn raw_used_days(db: &gate_db::Db, days: &[String]) -> HashMap<String, i64> {
+        let mut out = HashMap::new();
+        for day in days {
+            let up = db
+                .execute_fetchall_compat(
+                    "SELECT COALESCE(SUM(images),0) AS i, COALESCE(SUM(COALESCE(units, images)),0) AS u \
+                     FROM upstream_token_counters WHERE day=?",
+                    &[json!(day)],
+                )
+                .await
+                .unwrap();
+            let (i, u) = (up[0]["i"].as_f64().unwrap(), up[0]["u"].as_f64().unwrap());
+            if i != 0.0 && u < i {
+                let used = db
+                    .execute_fetchall_compat(
+                        "SELECT COALESCE(SUM(c.images),0) AS n FROM counters c JOIN api_keys k ON k.id=c.key_id \
+                         WHERE c.day=? AND k.is_test=0 AND k.is_admin=0",
+                        &[json!(day)],
+                    )
+                    .await
+                    .unwrap();
+                out.insert(day.clone(), used[0]["n"].as_i64().unwrap());
+            }
+        }
+        out
+    }
+
+    /// 模块「分配」的开关（#70：旧版写 `module_allocation`）。
+    pub const QUOTA_SWITCH: &str = "quota_auto_enabled";
+
+    fn switch_key(key: &str) -> &str {
+        if key == "module_allocation" {
+            QUOTA_SWITCH
+        } else {
+            key
+        }
+    }
+
+    /// 3.0 不再写的设置（#61：保底）。
+    const DROPPED_SETTINGS: [&str; 2] = ["guard_base_daily_images", "quota_base_now"];
+
+    /// 整个场景测的是 3.0 已经删掉的规则，没有可比的东西。
+    pub const REMOVED_SCENARIOS: [(&str, &str); 9] = [
+        (
+            "k23_enforce_slots_via_tick",
+            "测的就是内核 tick 里「名额 +5」生效（名额 12 → 17）：规则已删除（docs/v3-deviations.md #68）",
+        ),
+        (
+            "k22_module_error_loose",
+            "自动驾驶读坏掉的上一轮额度复盘而出错：名额规则删除后自动驾驶不再读它、这一轮不出错\
+             （docs/v3-deviations.md #68）；模块出错的记录路径由分配模块的 q15_bad_history_json 等覆盖",
+        ),
+        (
+            "v24_zero_min_people",
+            "私密参数把 V5 人数下限设成 0、没人用过 V5 时旧版抛 ZeroDivisionError；\
+             3.0 的人数下限固定为 10、不读这个参数（docs/v3-deviations.md #63）",
+        ),
+        (
+            "ap14_breaker_observe",
+            "自动驾驶熔断只观察不执行：3.0 一律执行（docs/v3-deviations.md #68）",
+        ),
+        (
+            "ap19_breaker_off",
+            "自动驾驶熔断关闭：3.0 一律执行（docs/v3-deviations.md #68）",
+        ),
+        (
+            "ap20_bad_mode_value",
+            "模式设置写错按观察处理：3.0 不读模式设置、一律执行（docs/v3-deviations.md #68）",
+        ),
+        (
+            "ap22_keyguard_observe",
+            "单 Key 限流只观察不执行：3.0 一律执行（docs/v3-deviations.md #68）",
+        ),
+        (
+            "m04_mixed",
+            "熔断按默认的观察模式触发过一次、旧版只记观察日志：3.0 一律执行（docs/v3-deviations.md #68）",
+        ),
+        (
+            "ap30_bad_quota_history",
+            "名额规则读上一轮额度复盘出错：名额规则已删除、不再读它（docs/v3-deviations.md #68）",
+        ),
+    ];
+
+    /// 自动驾驶的状态 / 返回值：没有名额那一条规则；其余规则旧版在这些场景里没有触发过「观察」，
+    /// 模式一律写成 `enforce`（#68）。
+    fn autopilot_v3(v: &mut Value) {
+        if let Some(rules) = v.get_mut("rules").and_then(Value::as_object_mut) {
+            rules.shift_remove("slots");
+            for r in rules.values_mut() {
+                r["mode"] = json!("enforce");
+            }
+        }
+    }
+
+    /// V5 的结果按新公式算（#63），与旧版无从对拍：两边都换成这个占位，V5 本身由 gate-core 的
+    /// `quota_golden`（按新规则核对每个夹具用例）和 `quota_v3` 测试。
+    const MASK: &str = "<V5：按新公式另行核对>";
+
+    /// 首页文案里的 V5 段（「 · V5 每人 …」到「 · Anlas」或结尾）。
+    fn mask_notice(text: &str) -> String {
+        let Some(i) = text.find(" · V5 每人 ") else {
+            return text.to_string();
+        };
+        let rest = &text[i..];
+        let tail = rest.find(" · Anlas").map_or("", |j| &rest[j..]);
+        format!("{} · {MASK}{tail}", &text[..i])
+    }
+
+    /// `quota_run` 的返回值 / `quota_algo_last`：`v5` 与「同步了几把 Key」取决于 V5 结果。
+    fn mask_quota(v: &mut Value) {
+        if let Some(m) = v.as_object_mut()
+            && m.contains_key("v5")
+        {
+            m.insert("v5".into(), json!(MASK));
+            m.insert("changed_keys".into(), json!(MASK));
+        }
+    }
+
+    /// `kernel_last`：分配模块的摘要「每人 V4.5 a 张 · V5 e 张（全站 V5 g）」里的 V5 段；
+    /// 风险检查「全站今日 V5 合计 n / 日额度 g（p%）」里的日额度（就是当天的全站 V5 池）。
+    /// 夹具里这条检查的级别新旧公式下都一样（都没用到或都超了），级别照比。
+    fn mask_kernel_last(v: &mut Value) {
+        if let Some(Value::String(s)) = v.get_mut("allocation").and_then(|a| a.get_mut("summary"))
+            && let Some(i) = s.find(" · V5 ")
+        {
+            *s = format!("{} · {MASK}", &s[..i]);
+        }
+        let checks = v
+            .get_mut("risk")
+            .and_then(|r| r.get_mut("checks"))
+            .and_then(Value::as_array_mut);
+        for c in checks.into_iter().flatten() {
+            for e in c
+                .get_mut("evidence")
+                .and_then(Value::as_array_mut)
+                .into_iter()
+                .flatten()
+            {
+                if let Value::String(s) = e
+                    && let Some(i) = s.find(" / 日额度 ")
+                    && s.starts_with("全站今日 V5 合计 ")
+                {
+                    *s = format!("{} / 日额度 {MASK}", &s[..i]);
+                }
+            }
+        }
+    }
+
+    fn mask_setting(key: &str, value: &str) -> String {
+        match key {
+            "global_daily_v5" | "register_daily_v5" => MASK.to_string(),
+            "algo_notice" => mask_notice(value),
+            "quota_algo_last" => match jsondump::loads(value) {
+                Some(mut v) => {
+                    mask_quota(&mut v);
+                    jsondump::dumps(&v)
+                }
+                None => value.to_string(),
+            },
+            "kernel_last" => {
+                let mut v: Value = serde_json::from_str(value).expect("kernel_last 是 JSON");
+                mask_kernel_last(&mut v);
+                v.to_string()
+            }
+            _ => value.to_string(),
+        }
+    }
+
+    /// 两边都做（#63）：设置写入里取决于 V5 结果的部分——当天方案（3.0 只在当天第一次计算时写）去掉，
+    /// 全站 V5 / 新 Key 的 V5 默认值 / 首页文案的 V5 段 / `quota_algo_last` 的 V5 换成占位。
+    pub fn mask_writes(writes: &mut Vec<Value>) {
+        let mut out = Vec::new();
+        for w in writes.drain(..) {
+            match w[0].as_str() {
+                Some("set") => {
+                    let key = w[1].as_str().unwrap();
+                    if key == "quota_v5_day_plan" {
+                        continue;
+                    }
+                    out.push(json!([
+                        "set",
+                        key,
+                        mask_setting(key, w[2].as_str().unwrap())
+                    ]));
+                }
+                Some("bulk") => {
+                    let pairs: Vec<Value> = w[1]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .filter(|kv| kv[0] != "quota_v5_day_plan")
+                        .map(|kv| {
+                            let key = kv[0].as_str().unwrap();
+                            json!([key, mask_setting(key, kv[1].as_str().unwrap())])
+                        })
+                        .collect();
+                    if !pairs.is_empty() {
+                        out.push(json!(["bulk", pairs]));
+                    }
+                }
+                _ => out.push(w),
+            }
+        }
+        *writes = out;
+    }
+
+    /// 两边都做（#63）：一步的返回值里取决于 V5 结果的部分。
+    pub fn mask_result(op: &str, v: &mut Value) {
+        match op {
+            "quota_run" => mask_quota(v),
+            "tick_all" => mask_kernel_last(v),
+            "snapshot" => {
+                for m in v.as_array_mut().into_iter().flatten() {
+                    let name = m["name"].as_str().unwrap_or("").to_string();
+                    if let Some(last) = m.get_mut("last") {
+                        let mut wrap = json!({ name.as_str(): last.clone() });
+                        mask_kernel_last(&mut wrap);
+                        *last = wrap[name.as_str()].take();
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// 改写后 added / removed 里完全相同的行互相抵消（多重集差）。
+    fn cancel_pairs(t: &mut Value) {
+        let (Some(added), Some(removed)) = (
+            t.get("added").and_then(Value::as_array).cloned(),
+            t.get("removed").and_then(Value::as_array).cloned(),
+        ) else {
+            return;
+        };
+        let mut left = removed.clone();
+        let mut kept_added = Vec::new();
+        for a in added {
+            match left.iter().position(|r| *r == a) {
+                Some(i) => {
+                    left.remove(i);
+                }
+                None => kept_added.push(a),
+            }
+        }
+        t["added"] = Value::Array(kept_added);
+        t["removed"] = Value::Array(left);
+    }
+
+    /// 复盘：`from` / `to` 只留每人上限 A，去掉 `base_blocks`（#61）。
+    fn review(r: &mut Map<String, Value>) {
+        for k in ["from", "to"] {
+            if let Some(Value::Array(pair)) = r.get_mut(k) {
+                pair.truncate(1);
+            }
+        }
+        r.shift_remove("base_blocks");
+    }
+
+    /// `quota_run` 的返回值 / `quota_algo_last`：没有 `base`（#61）。
+    pub fn quota_result(v: &mut Value) {
+        if let Some(m) = v.as_object_mut() {
+            m.shift_remove("base");
+            if let Some(Value::Object(r)) = m.get_mut("review") {
+                review(r);
+            }
+        }
+    }
+
+    fn reparse(text: &str, f: impl FnOnce(&mut Value)) -> String {
+        let mut v = jsondump::loads(text).expect("写进库的 JSON 合法");
+        f(&mut v);
+        jsondump::dumps(&v)
+    }
+
+    /// 首页文案去掉每人注水那一句（#62）：「（每小时自动恢复 4 张，当天最多约 N 张，每日 7 点重置）」
+    /// →「（每日 7 点重置）」。
+    fn notice(text: &str) -> String {
+        let Some(i) = text.find("（每小时自动恢复 ") else {
+            return text.to_string();
+        };
+        let rest = &text[i..];
+        let j = rest.find("当天最多约 ").expect("注水文案");
+        let k = rest[j..].find(" 张，").expect("注水文案") + j + " 张，".len();
+        format!("{}（{}", &text[..i], &rest[k..])
+    }
+
+    /// 这一轮的复盘是否只因为保底变了才算「调整」：3.0 的首页文案不再写「算法调整」那一句（#61）。
+    fn only_base_changed(history_text: &str) -> bool {
+        let v = jsondump::loads(history_text).unwrap();
+        let Some(r) = v.as_array().and_then(|a| a.last()) else {
+            return false;
+        };
+        let (from, to) = (&r["from"], &r["to"]);
+        from != to && from.get(0) == to.get(0)
+    }
+
+    impl Expect {
+        pub fn new(seed: &[String]) -> Self {
+            let code_only_hourly = seed
+                .iter()
+                .filter(|s| {
+                    s.starts_with("INSERT INTO usage_log") && s.contains("'', 'hourly_cap'")
+                })
+                .map(|s| {
+                    let values = s.split("VALUES (").nth(1).expect("VALUES");
+                    values
+                        .split(", ")
+                        .next()
+                        .unwrap()
+                        .parse::<f64>()
+                        .expect("ts")
+                })
+                .collect();
+            Self {
+                last_written: HashMap::new(),
+                resync: Vec::new(),
+                code_only_hourly,
+                raw_used: HashMap::new(),
+                slots_changed: false,
+                autopilot_hours: Vec::new(),
+            }
+        }
+
+        pub fn take_resync(&mut self) -> Vec<(String, String)> {
+            std::mem::take(&mut self.resync)
+        }
+
+        /// 复盘的 `hourly_blocks`：加上旧版按文案数不到、3.0 按原因码数到的小时（#61）。
+        fn hourly_blocks(&self, r: &mut Map<String, Value>) {
+            if self.code_only_hourly.is_empty() {
+                return;
+            }
+            let Some(day) = r.get("day").and_then(Value::as_str) else {
+                return;
+            };
+            let start = gate_core::clock::Clock::new("Asia/Shanghai", 7)
+                .service_day_start(day)
+                .expect("复盘日期");
+            let mut hours: Vec<i64> = self
+                .code_only_hourly
+                .iter()
+                .filter(|t| start <= **t && **t < start + 86400.0)
+                .map(|t| (t / 3600.0).trunc() as i64)
+                .collect();
+            hours.sort_unstable();
+            hours.dedup();
+            if hours.is_empty() {
+                return;
+            }
+            // 夹具里这类场景没有带文案的记录，旧版数到 0：并集就是这些小时
+            assert_eq!(
+                r["hourly_blocks"], 0,
+                "夹具假设：只有原因码的记录单独成场景"
+            );
+            r.insert("hourly_blocks".into(), json!(hours.len()));
+        }
+
+        /// 复盘的 `used`：不再按节约模式折算（#67）。
+        fn raw_used(&self, r: &mut Map<String, Value>) {
+            if let Some(u) = r
+                .get("day")
+                .and_then(Value::as_str)
+                .and_then(|d| self.raw_used.get(d))
+            {
+                r.insert("used".into(), json!(u));
+            }
+        }
+
+        fn review(&self, r: &mut Map<String, Value>) {
+            review(r);
+            self.hourly_blocks(r);
+            self.raw_used(r);
+        }
+
+        fn quota_result(&self, v: &mut Value) {
+            quota_result(v);
+            if let Some(Value::Object(r)) = v.get_mut("review") {
+                self.hourly_blocks(r);
+                self.raw_used(r);
+            }
+        }
+
+        /// 一个设置的新值；`None` = 3.0 不写这个设置。
+        fn setting(&mut self, key: &str, value: &str, drop_note: bool) -> Option<String> {
+            if DROPPED_SETTINGS.contains(&key) {
+                return None;
+            }
+            if key == "global_daily_v5" {
+                self.resync.push((key.to_string(), value.to_string()));
+            }
+            // 「名额 +5」的写入（#68）：改注册名额、记加名额的时间
+            if key == "register_max_users" {
+                self.slots_changed = true;
+                return None;
+            }
+            if key == "autopilot_slots_at" {
+                return None;
+            }
+            let fixed = match key {
+                "autopilot_last" => reparse(value, autopilot_v3),
+                // 最后一条是这一轮新记的每小时快照；这个场景之前几步记的也一样，都去掉名额
+                "autopilot_history" => reparse(value, |v| {
+                    let Some(list) = v.as_array_mut() else { return };
+                    if let Some(h) = list.last().and_then(|h| h["hour"].as_str()) {
+                        self.autopilot_hours.push(h.to_string());
+                    }
+                    for h in list.iter_mut() {
+                        if h["hour"]
+                            .as_str()
+                            .is_some_and(|x| self.autopilot_hours.iter().any(|y| y == x))
+                            && let Some(o) = h.as_object_mut()
+                        {
+                            o.shift_remove("slots");
+                        }
+                    }
+                }),
+                "quota_algo_last" => reparse(value, |v| self.quota_result(v)),
+                "quota_algo_history" => reparse(value, |v| {
+                    if let Some(Value::Object(r)) = v.as_array_mut().and_then(|a| a.last_mut()) {
+                        self.review(r);
+                    }
+                }),
+                "algo_notice" => {
+                    let i = if drop_note {
+                        value.find("今日额度：").expect("首页文案")
+                    } else {
+                        0
+                    };
+                    notice(&value[i..])
+                }
+                _ => value.to_string(),
+            };
+            if matches!(
+                key,
+                "quota_algo_last"
+                    | "quota_algo_history"
+                    | "algo_notice"
+                    | "autopilot_last"
+                    | "autopilot_history"
+            ) {
+                self.last_written.insert(key.to_string(), fixed.clone());
+            }
+            Some(fixed)
+        }
+
+        /// 一步的期望：设置写入、返回值。
+        pub fn fix_step(&mut self, want: &mut Value, op: &str) {
+            let mut drop_note = false;
+            if let Some(writes) = want
+                .get_mut("settings_writes")
+                .and_then(Value::as_array_mut)
+            {
+                let mut out = Vec::new();
+                for w in writes.iter() {
+                    match w[0].as_str() {
+                        Some("set") => {
+                            let key = switch_key(w[1].as_str().unwrap());
+                            if let Some(v) = self.setting(key, w[2].as_str().unwrap(), drop_note) {
+                                out.push(json!(["set", key, v]));
+                            }
+                        }
+                        Some("bulk") => {
+                            let mut pairs = Vec::new();
+                            for kv in w[1].as_array().unwrap() {
+                                let key = kv[0].as_str().unwrap();
+                                let raw = kv[1].as_str().unwrap();
+                                if key == "quota_algo_history" {
+                                    drop_note = only_base_changed(raw);
+                                }
+                                if let Some(v) = self.setting(key, raw, drop_note) {
+                                    pairs.push(json!([key, v]));
+                                }
+                            }
+                            if !pairs.is_empty() {
+                                out.push(json!(["bulk", pairs]));
+                            }
+                        }
+                        _ => out.push(w.clone()),
+                    }
+                }
+                *writes = out;
+                mask_writes(writes);
+            }
+            if let Some(result) = want.get_mut("result") {
+                match op {
+                    "quota_run" => self.quota_result(result),
+                    "autopilot_run" => autopilot_v3(result),
+                    "probe" => {
+                        if let Some(g) = result
+                            .get_mut("guard_values")
+                            .and_then(Value::as_object_mut)
+                        {
+                            g.shift_remove("base_daily_images");
+                        }
+                    }
+                    // 分配模块的面板参数「V5 每人范围 3～30 张」换成新公式的说明（#63）
+                    "snapshot" => {
+                        for m in result.as_array_mut().into_iter().flatten() {
+                            // 自动驾驶没有「名额」了（#68）
+                            if m["name"] == "autopilot" {
+                                m["question"] = json!("全站熔断、单个 Key 限流");
+                                let params = m["params"].as_array_mut().unwrap();
+                                assert_eq!(params.pop().unwrap()["name"], "名额");
+                            }
+                            if m["name"] == "allocation" {
+                                let p = &mut m["params"][3];
+                                assert_eq!(p["name"], "V5 每人范围");
+                                *p = json!({
+                                    "name": "V5 每人",
+                                    "value": gate_core::modules::allocation_v5_rule_text(),
+                                    "note": "每天 7 点按恢复速度定全站池，再按前 3 天用过 V5 的人数分，当天不变",
+                                });
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        /// 最后的表行差异（期望一侧）：设置行按最后一次写入改写，操作日志按 3.0 的文案改写。
+        pub fn fix_diff(&self, diff: &mut Value) {
+            if let Some(t) = diff.get_mut("site_settings").and_then(Value::as_object_mut) {
+                for side in ["added", "removed"] {
+                    if let Some(rows) = t.get_mut(side).and_then(Value::as_array_mut) {
+                        rows.retain(|r| !DROPPED_SETTINGS.iter().any(|k| r["key"] == *k));
+                        for r in rows.iter_mut() {
+                            if r["key"] == "module_allocation" {
+                                r["key"] = json!(QUOTA_SWITCH);
+                            }
+                        }
+                        // 名额 +5 删除（#68）：不记加名额的时间，也不改注册名额
+                        rows.retain(|r| r["key"] != "autopilot_slots_at");
+                        if self.slots_changed {
+                            rows.retain(|r| r["key"] != "register_max_users");
+                        }
+                        if side == "added" {
+                            for r in rows.iter_mut() {
+                                let key = r["key"].as_str().unwrap_or("").to_string();
+                                if let Some(v) = self.last_written.get(&key) {
+                                    r["value"] = json!(v);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if let Some(rows) = diff
+                .get_mut("admin_actions")
+                .and_then(|t| t.get_mut("added"))
+                .and_then(Value::as_array_mut)
+            {
+                rows.retain_mut(|r| match r["action"].as_str() {
+                    Some("自动驾驶：名额") => false,
+                    // 「上限 a→a2 · 保底 b→b2」→「上限 a→a2」；只有保底变了的那条不再记（#61）
+                    Some("动态额度调整") => {
+                        let target = r["target"].as_str().unwrap();
+                        let upper = target.split(" · 保底 ").next().unwrap().to_string();
+                        let (from, to) = upper.trim_start_matches("上限 ").split_once('→').unwrap();
+                        let keep = from != to;
+                        r["target"] = json!(upper);
+                        keep
+                    }
+                    // 「V4.5 上限 a（保底 b）· V5 …」→「V4.5 上限 a · V5 …」（#61）
+                    Some("动态额度应用") => {
+                        let detail = r["detail"].as_str().unwrap();
+                        if let Some((head, rest)) = detail.split_once("（保底 ")
+                            && let Some((_, tail)) = rest.split_once("）·")
+                        {
+                            r["detail"] = json!(format!("{head} ·{tail}"));
+                        }
+                        true
+                    }
+                    _ => true,
+                });
+            }
+            drop_empty(diff);
+        }
+    }
+
+    /// 两边都做：操作日志不比自增 id（期望一侧删掉的日志会让后面的 id 错位）；
+    /// 取决于 V5 结果的行换成占位或去掉（#63：成员 Key 的 `daily_v5`、V5 相关设置、「动态额度应用」日志——
+    /// 是否下发取决于每人 V5）。
+    pub fn normalize_diff(diff: &mut Value) {
+        if let Some(t) = diff.get_mut("admin_actions").and_then(Value::as_object_mut) {
+            for side in ["added", "removed"] {
+                if let Some(rows) = t.get_mut(side).and_then(Value::as_array_mut) {
+                    rows.retain(|r| r["action"] != "动态额度应用");
+                    for r in rows {
+                        if let Some(o) = r.as_object_mut() {
+                            o.shift_remove("id");
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(t) = diff.get_mut("api_keys") {
+            for side in ["added", "removed"] {
+                for r in t
+                    .get_mut(side)
+                    .and_then(Value::as_array_mut)
+                    .into_iter()
+                    .flatten()
+                {
+                    if r.get("daily_v5").is_some() {
+                        r["daily_v5"] = json!(MASK);
+                    }
+                }
+            }
+            cancel_pairs(t);
+        }
+        if let Some(t) = diff.get_mut("site_settings") {
+            for side in ["added", "removed"] {
+                if let Some(rows) = t.get_mut(side).and_then(Value::as_array_mut) {
+                    rows.retain(|r| r["key"] != "quota_v5_day_plan");
+                    for r in rows.iter_mut() {
+                        let key = r["key"].as_str().unwrap_or("").to_string();
+                        match &mut r["value"] {
+                            Value::String(s) => *s = mask_setting(&key, s),
+                            v if key == "kernel_last" => mask_kernel_last(v),
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            cancel_pairs(t);
+        }
+        if let Some(t) = diff
+            .get_mut("sqlite_sequence")
+            .and_then(Value::as_object_mut)
+        {
+            for side in ["added", "removed"] {
+                if let Some(rows) = t.get_mut(side).and_then(Value::as_array_mut) {
+                    rows.retain(|r| r["name"] != "admin_actions");
+                }
+            }
+        }
+        drop_empty(diff);
+    }
+
+    /// 改写后两边都空了的表从差异里去掉。
+    fn drop_empty(diff: &mut Value) {
+        if let Some(m) = diff.as_object_mut() {
+            m.retain(|_, t| {
+                ["added", "removed"].iter().any(|s| {
+                    t.get(*s)
+                        .and_then(Value::as_array)
+                        .is_some_and(|a| !a.is_empty())
+                })
+            });
         }
     }
 }
@@ -579,13 +1265,13 @@ async fn run_case(case: &Value) -> Result<(), String> {
         ("TZ", "Asia/Shanghai".into()),
         ("DAY_RESET_HOUR", "7".into()),
         ("IMAGE_MIN_INTERVAL", num("image_min_interval")),
-        ("KEY_IMAGE_MIN_INTERVAL", num("key_image_min_interval")),
+        // 夹具 env 里的 key_image_min_interval：3.0 没有每 Key 出图间隔（docs/v3-deviations.md #64），不再传
         ("DEFAULT_KEY_EXPIRES_DAYS", int("default_expires_days")),
         (
             "KEY_INACTIVITY_DELETE_DAYS",
             int("key_inactivity_delete_days"),
         ),
-        ("GLOBAL_DAILY_V5", int("global_daily_v5")),
+        // 夹具 env 里的 global_daily_v5：3.0 没有这个环境变量（全站 V5 归动态额度管，docs/v3-deviations.md #70），不再传
         ("POST_REQUEST_JITTER_MIN", num("post_jitter_min")),
         ("POST_REQUEST_JITTER_MAX", num("post_jitter_max")),
         (
@@ -620,16 +1306,22 @@ async fn run_case(case: &Value) -> Result<(), String> {
     }
 
     // 种子数据
+    // 模块「分配」的开关 3.0 就是动态额度的 quota_auto_enabled（docs/v3-deviations.md #70）：种子里的
+    // module_allocation 按同一个开关写进去
     let seed: Vec<String> = case["seed_sql"]
         .as_array()
         .unwrap()
         .iter()
-        .map(|s| s.as_str().unwrap().to_string())
+        .map(|s| {
+            s.as_str()
+                .unwrap()
+                .replace("'module_allocation'", &format!("'{}'", v3::QUOTA_SWITCH))
+        })
         .collect();
     if !seed.is_empty() {
         state
             .db
-            .run_script(seed)
+            .run_script(seed.clone())
             .await
             .map_err(|e| format!("{name}: 种子数据失败 {e}"))?;
     }
@@ -688,13 +1380,22 @@ async fn run_case(case: &Value) -> Result<(), String> {
     let expected_steps = case["expect"]["steps"].as_array().unwrap();
     let mut seen_alerts = 0usize;
     let mut levels = Levels::new();
+    let mut v3_expect = v3::Expect::new(&seed);
+    let review_days: Vec<String> = steps
+        .iter()
+        .map(|s| {
+            gate_core::clock::Clock::new("Asia/Shanghai", 7)
+                .day(s["at"].as_f64().unwrap() - 86400.0)
+        })
+        .collect();
+    v3_expect.raw_used = v3::raw_used_days(&state.db, &review_days).await;
     for (i, (step, want)) in steps.iter().zip(expected_steps).enumerate() {
         let at = step["at"].as_f64().unwrap();
         gate_server::time::freeze(Some(at));
         let _ = state.db.take_setting_writes();
         let op = step["op"].as_str().unwrap();
         let mut want = want.clone();
-        fix_expected_step(&mut want, op, &mut levels);
+        fix_expected_step(&mut want, op, &mut levels, &mut v3_expect);
         let want = &want;
         let mut got = Map::new();
         let outcome: Result<Option<Value>, String> = match op {
@@ -767,7 +1468,8 @@ async fn run_case(case: &Value) -> Result<(), String> {
         let alerts = settle(&state, &mock).await;
         let new_alerts: Vec<String> = alerts[seen_alerts.min(alerts.len())..].to_vec();
         seen_alerts = alerts.len();
-        let raw_writes = actual_writes(state.db.take_setting_writes());
+        let mut raw_writes = actual_writes(state.db.take_setting_writes());
+        v3::mask_writes(&mut raw_writes);
         let shape = |ws: &[Value]| -> Vec<String> {
             ws.iter()
                 .map(|w| {
@@ -821,6 +1523,8 @@ async fn run_case(case: &Value) -> Result<(), String> {
                 }
             }
             let mut expected = want.get("result").cloned().unwrap_or(Value::Null);
+            v3::mask_result(op, &mut v);
+            v3::mask_result(op, &mut expected);
             if loose {
                 loosen_errors(&mut v);
                 loosen_errors(&mut expected);
@@ -854,6 +1558,14 @@ async fn run_case(case: &Value) -> Result<(), String> {
             return Err(format!(
                 "{ctx}: 告警不同：实际 {new_alerts:?}，期望 {expected_alerts:?}"
             ));
+        }
+        // 把旧版这一步写下的全站 V5 池写回库里，后面的步骤从同一个起点继续（见 v3::Expect::resync）
+        for (k, v) in v3_expect.take_resync() {
+            state
+                .db
+                .set_setting(&k, &v)
+                .await
+                .map_err(|e| e.to_string())?;
         }
     }
 
@@ -909,6 +1621,9 @@ async fn run_case(case: &Value) -> Result<(), String> {
         }
     }
     drop_check_bugs(&mut want_diff);
+    v3_expect.fix_diff(&mut want_diff);
+    v3::normalize_diff(&mut want_diff);
+    v3::normalize_diff(&mut actual_diff);
     if loose {
         // Bug 的特征码 / 堆栈里有 Python 的文件名和函数名：只比数量，不比内容
         let count = |d: &Value| {
@@ -948,6 +1663,10 @@ async fn kernel_replays_match_python() {
     for case in &cases {
         let name = case["name"].as_str().unwrap();
         if only.as_deref().is_some_and(|o| !name.contains(o)) {
+            continue;
+        }
+        if let Some((_, why)) = v3::REMOVED_SCENARIOS.iter().find(|(n, _)| *n == name) {
+            eprintln!("[{name}] 跳过：{why}");
             continue;
         }
         ran += 1;

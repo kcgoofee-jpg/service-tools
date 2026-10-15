@@ -10,7 +10,7 @@
 //! 所以 float 类型的设置被夹到边界时得到的是 **int**（`lo` / `hi` 在登记表里都是整数字面量），
 //! `encode` 因此写出 `"0"` 而不是 `"0.0"`；没夹到边界才是 float。
 
-use crate::{guard, pyc, pyext, pyfmt, pyval};
+use crate::{pyc, pyext, pyfmt, pyval};
 use serde_json::Value;
 
 /// 设置项的类型（`Spec.kind`）。
@@ -148,19 +148,18 @@ pub static HOME_JOIN_OPEN: Spec = spec(
     "landing / admin",
     "首页「加入 Discord」按钮（独立于 register_open：只管首页按钮显示，关 = 置灰「关闭注册」）",
 );
-pub static GLOBAL_DAILY_V5: Spec = with_env(
-    bounded(
-        spec(
-            "global_daily_v5",
-            Kind::Int,
-            SpecDefault::None,
-            "额度 / 首页 / 客户端",
-            "全站每日 V5 张数（0 = 不限）",
-        ),
-        0,
-        100000,
+/// 动态额度每轮写入；没设过按 150。2.x 的默认值取环境变量 `GLOBAL_DAILY_V5`，3.0 删了这个环境变量
+/// （docs/v3-deviations.md #70）。
+pub static GLOBAL_DAILY_V5: Spec = bounded(
+    spec(
+        "global_daily_v5",
+        Kind::Int,
+        SpecDefault::Int(150),
+        "额度 / 首页 / 客户端",
+        "全站每日 V5 张数（0 = 不限）",
     ),
-    "global_daily_v5",
+    0,
+    100000,
 );
 pub static GLOBAL_DAILY_ANLAS: Spec = with_env(
     bounded(
@@ -212,18 +211,6 @@ pub static MEMBER_DAILY_ANLAS: Spec = bounded(
     0,
     100000,
 );
-/// 保底张数的默认值和范围以 guard 为准，这里只是登记出来给别的模块读
-pub static GUARD_BASE: Spec = bounded(
-    spec(
-        "guard_base_daily_images",
-        Kind::Int,
-        SpecDefault::Int(guard::BASE_DAILY_IMAGES.default),
-        "guard（注册私信也读）",
-        "V4.5 每人每天保底张数",
-    ),
-    guard::BASE_DAILY_IMAGES.min,
-    guard::BASE_DAILY_IMAGES.max,
-);
 pub static ALGO_NOTICE: Spec = spec(
     "algo_notice",
     Kind::Str,
@@ -273,7 +260,7 @@ pub static MEMBER_SWEEP: Spec = spec(
 );
 
 /// 登记表（顺序与旧版 `ALL` 一致，`facts_table` 按这个顺序出行）。
-pub static ALL: [&Spec; 14] = [
+pub static ALL: [&Spec; 13] = [
     &MEMBER_SWEEP,
     &WEB_LOGIN_PAUSED,
     &ISSUE_HOURLY_CAP,
@@ -283,7 +270,6 @@ pub static ALL: [&Spec; 14] = [
     &GLOBAL_DAILY_ANLAS,
     &GLOBAL_DAILY_ANLAS_UNTIL,
     &GLOBAL_MONTHLY_ANLAS,
-    &GUARD_BASE,
     &ALGO_NOTICE,
     &IMAGE_RETENTION,
     &IMAGE_CAP_MB,

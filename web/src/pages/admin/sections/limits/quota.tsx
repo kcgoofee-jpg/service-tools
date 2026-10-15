@@ -135,9 +135,7 @@ export default function QuotaCard() {
   const v5 = l.v5;
   const per = imagesPerPercent(mods.data);
   const review = l.review ?? data.history[data.history.length - 1];
-  const lo = data.params.quota_v5_min ?? 0;
-  const hi = data.params.quota_v5_max ?? 0;
-  const d = v5 ? deriveV5(v5, per.value, lo, hi) : null;
+  const d = v5 ? deriveV5(v5, per.value) : null;
   const rc = v5?.rate_check ?? v5?.rate_info;
 
   const setAuto = (on: boolean) =>
@@ -204,25 +202,24 @@ export default function QuotaCard() {
           <Stat
             label="账号 V5 剩余"
             value={v5?.percent == null ? "—" : `${Math.round(v5.percent)}%`}
-            hint={v5 ? `恢复 ${v5.rate}%/天 · 系数 ${v5.k}` : undefined}
+            hint={v5 ? `恢复 ${v5.rate}%/天` : undefined}
           />
         </div>
 
         {d && v5 && (
           <Derive>
             <div>
-              全站 V5 = 恢复 <b>{d.rate}%/天</b> × <b>{d.perPercent} 张/1%</b> × 系数 <b>{d.k}</b> ={" "}
-              <b>{d.calc} 张</b>
+              全站 V5 = 恢复 <b>{d.rate}%/天</b> × <b>{d.perPercent} 张/1%</b> = <b>{d.calc} 张</b>
               {!d.matches && (
                 <>
-                  ；实际采用 <b>{d.global}</b>（账号接近满电的放宽规则，或沿用 7 点定下的方案）
+                  ；实际采用 <b>{d.global}</b>（沿用 7 点定下的当天方案）
                 </>
               )}
             </div>
             {rc && <RateLine info={rc} />}
             <div>
-              每人 V5 = 全站 <b>{d.global}</b> ÷ <b>{d.people}</b> 人（最近 3 天用过 V5 的人数，至少按 10
-              人算）= {d.perPersonRaw}， 限制在 {d.lo}～{d.hi} 张 → <b>{d.each} 张</b>
+              每人 V5 = 全站 <b>{d.global}</b> ÷ <b>{d.people}</b> 人（前 3 天用过 V5 的人数，至少按 10
+              人算），至少 1 张 → <b>{d.each} 张</b>
               {!d.eachMatches && (
                 <>
                   ；实际采用 <b>{v5.each}</b>
@@ -278,8 +275,6 @@ export default function QuotaCard() {
             <NumField form={form} name="quota_step" />
             <NumField form={form} name="quota_ceiling_max" />
             <NumField form={form} name="quota_base_min_fair" />
-            <NumField form={form} name="quota_v5_min" />
-            <NumField form={form} name="quota_v5_max" />
           </div>
           <SaveBar form={form} onSave={save} saving={saving} />
         </form>

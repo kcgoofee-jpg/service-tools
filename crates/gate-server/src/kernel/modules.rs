@@ -28,10 +28,17 @@ fn registrar_err(e: String) -> KernelError {
 // 开关
 // ---------------------------------------------------------------------------
 
-/// 模块是否启用：默认读 `module_<名字>`；「领 Key」直接对接 `register_open`。
+/// 动态额度的总开关（模块「分配」的开关就是它）。
+const QUOTA_SWITCH: &str = "quota_auto_enabled";
+
+/// 模块是否启用：默认读 `module_<名字>`；「领 Key」直接对接 `register_open`，「分配」直接对接动态额度的
+/// `quota_auto_enabled`（旧版另有一个 `module_allocation`，两个开关管同一件事，docs/v3-deviations.md #70）。
 pub(super) async fn enabled(state: &AppState, name: &str) -> Result<bool, KernelError> {
     let m = meta(name)?;
     if m.custom_enabled {
+        if name == "allocation" {
+            return Ok(crate::ops::quota_algo_enabled(&state.db).await?);
+        }
         let v = crate::auth::site_flag(state, &REGISTER_OPEN).await?;
         return Ok(pyval::truthy(&v));
     }
@@ -44,7 +51,12 @@ pub(super) async fn enabled(state: &AppState, name: &str) -> Result<bool, Kernel
 
 pub(super) async fn set_enabled(state: &AppState, name: &str, on: bool) -> Result<(), KernelError> {
     let m = meta(name)?;
-    if m.custom_enabled {
+    if m.custom_enabled && name == "allocation" {
+        state
+            .db
+            .set_setting(QUOTA_SWITCH, if on { "1" } else { "0" })
+            .await?;
+    } else if m.custom_enabled {
         let text = site_flags::encode(&REGISTER_OPEN, &Value::Bool(on))
             .map_err(|e| KernelError::new("ValueError", e.0))?;
         state.db.set_setting(REGISTER_OPEN.key, &text).await?;
@@ -185,12 +197,10 @@ async fn allocation_checks(state: &AppState) -> Result<Vec<Check>, KernelError> 
         return Ok(Vec::new());
     };
     let (keys, drift) = state.db.managed_keys_drift(&q.a, q.each).await?;
-    let base = Some(state.guard.with(|g| g.values["base_daily_images"]));
     Ok(gm::allocation_checks(&AllocationInputs {
         last_raw: raw,
         keys,
         drift,
-        base,
     })?)
 }
 
@@ -295,13 +305,12 @@ pub(super) async fn param_values(state: &AppState, name: &str) -> Vec<Value> {
                 ceiling,
                 Value::String(gm::allocation_rule_text()),
                 Value::String(gm::allocation_range_text()),
-                Value::String(gm::allocation_v5_range_text()),
+                Value::String(gm::allocation_v5_rule_text()),
             ]
         }
         "autopilot" => vec![
             Value::String(gm::AUTOPILOT_BREAKER_TEXT.into()),
             Value::String(gm::AUTOPILOT_KEY_GUARD_TEXT.into()),
-            Value::String(gm::autopilot_slots_text()),
         ],
         "registration" => vec![
             Value::from(state.env.default_expires_days),

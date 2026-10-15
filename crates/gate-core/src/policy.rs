@@ -20,11 +20,6 @@ use std::sync::OnceLock;
 
 // ----------------------------------------------------------------------------- 常量
 
-/// 免费档（V4.5 及以下）「平滑注水」参数：服务日起点先给底仓，之后每小时恢复，全天不超过 Key 的每日上限。
-/// 判定（quota_image_check）与给成员看的文案（quota_algo 首页额度说明）必须用同一组常量。
-pub const FREE_BURST: f64 = 30.0;
-pub const FREE_REFILL_PER_HOUR: f64 = 4.0;
-
 pub const V5_COST_MULTIPLIER: f64 = 1.5;
 
 /// 仅允许明确认识的图片模型族；未知模型不能当旧模型，否则上游新增模型会绕过 V5 / Anlas 保护。
@@ -120,17 +115,6 @@ too many watermarks, negative space, blank page";
 const PNG_MAGIC: &[u8] = b"\x89PNG\r\n\x1a\n";
 
 // ----------------------------------------------------------------------------- 小工具
-
-/// `FREE_BURST + FREE_REFILL_PER_HOUR * 24`：这一天注水桶最多能放出的张数。
-pub fn free_paced_cap(daily_images: i64) -> f64 {
-    if daily_images <= 0 {
-        return 0.0;
-    }
-    f64::min(
-        daily_images as f64,
-        FREE_BURST + FREE_REFILL_PER_HOUR * 24.0,
-    )
-}
 
 fn attribute_error_get(v: &Value) -> PyErr {
     PyErr::Attribute(format!(
@@ -1572,12 +1556,5 @@ mod tests {
     fn gen_key_format() {
         let k = gen_key("nai", &[0; 24]);
         assert_eq!(k, format!("nai-{}", "A".repeat(32)));
-    }
-
-    #[test]
-    fn free_cap_matches_constants() {
-        assert_eq!(free_paced_cap(200), 126.0);
-        assert_eq!(free_paced_cap(50), 50.0);
-        assert_eq!(free_paced_cap(0), 0.0);
     }
 }

@@ -109,8 +109,8 @@ fn constants_golden() {
         let name = c.raw["name"].as_str().unwrap();
         let want = &c.raw["value"];
         let got: Value = match name {
-            "FREE_BURST" => f(policy::FREE_BURST),
-            "FREE_REFILL_PER_HOUR" => f(policy::FREE_REFILL_PER_HOUR),
+            // 每人注水已删除（docs/v3-deviations.md #62）：这两个常量不再存在
+            "FREE_BURST" | "FREE_REFILL_PER_HOUR" => continue,
             "V5_COST_MULTIPLIER" => f(policy::V5_COST_MULTIPLIER),
             "LEGACY_IMAGE_MODEL_PREFIXES" => json!(policy::LEGACY_IMAGE_MODEL_PREFIXES),
             "LEGACY_IMAGE_MODEL_EXACT" => strs_of(&policy::LEGACY_IMAGE_MODEL_EXACT),
@@ -188,13 +188,8 @@ fn char_classes_match_python_re() {
 
 // ----------------------------------------------------------------------------- 小工具
 
-#[test]
-fn free_paced_cap_golden() {
-    for c in load(M, "policy/free_paced_cap") {
-        let got = f(policy::free_paced_cap(int(c.arg(0)) as i64));
-        assert_eq_py_ordered(&c, &got, c.out());
-    }
-}
+// `free_paced_cap`（每人注水一天最多放出的张数）随注水一起删除（docs/v3-deviations.md #62），
+// 夹具 `policy/free_paced_cap` 冻结保留、不再对拍。
 
 #[test]
 fn base64_data_golden() {

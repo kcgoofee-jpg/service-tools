@@ -11,8 +11,7 @@ use crate::middleware::StatusStats;
 use crate::params::ParamsStore;
 use crate::registration::{MemberWeb, RegistrationService};
 use crate::runtime::{
-    AuthGuard, ImageCooldown, Inflight, KeyPacing, KeyPauses, SlidingWindow, TagQueue,
-    UpstreamHealth,
+    AuthGuard, ImageCooldown, KeyPauses, SlidingWindow, TagQueue, UpstreamHealth,
 };
 use crate::web::Assets;
 use gate_core::clock::Clock;
@@ -27,10 +26,10 @@ use tokio_util::task::TaskTracker;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// 运行期可在后台调的四个限制（旧版 RUNTIME_LIMIT_BOUNDS）。
-pub const RUNTIME_LIMIT_BOUNDS: [(&str, i64, i64); 4] = [
+/// 运行期可在后台调的三个限制（旧版 RUNTIME_LIMIT_BOUNDS；每 Key 出图间隔
+/// `key_image_min_interval` 已删除，库里残留的 `runtime_key_image_min_interval` 不再读，docs/v3-deviations.md #64）。
+pub const RUNTIME_LIMIT_BOUNDS: [(&str, i64, i64); 3] = [
     ("queue_timeout", 15, 300),
-    ("key_image_min_interval", 15, 120),
     ("image_min_interval", 15, 120),
     ("image_429_cooldown_seconds", 60, 3600),
 ];
@@ -39,7 +38,6 @@ pub const RUNTIME_LIMIT_BOUNDS: [(&str, i64, i64); 4] = [
 #[derive(Debug, Clone, Copy)]
 pub struct RuntimeLimits {
     pub queue_timeout: f64,
-    pub key_image_min_interval: f64,
     pub image_min_interval: f64,
     pub image_429_cooldown_seconds: f64,
 }
@@ -80,10 +78,8 @@ pub struct Inner {
     pub rpm: SlidingWindow<i64>,
     pub login_attempts: SlidingWindow<String>,
     pub auth_guard: AuthGuard,
-    pub pacing: KeyPacing,
     pub cooldown: ImageCooldown,
     pub pauses: KeyPauses,
-    pub inflight: Inflight,
     pub tags: TagQueue,
     /// 后台运营接口的进程内状态（测试告警节流、运行期限制写锁、Anlas 核对互斥）。
     pub ops: crate::ops::Shared,
@@ -91,8 +87,8 @@ pub struct Inner {
     pub allowance: crate::allowance::ServerAllowance,
     pub health: UpstreamHealth,
     /// 标签补全等非出图请求的全站并发（旧版 GLOBAL_CONCURRENCY；文本接口已删，docs/v3-deviations.md #81）。
+    /// 每把 Key 的信号量（`KEY_CONCURRENCY`）已删除：出图由排队管、标签补全由补全队列管（docs/v3-deviations.md #64）。
     pub global_sem: Arc<tokio::sync::Semaphore>,
-    pub key_sems: Mutex<HashMap<i64, Arc<tokio::sync::Semaphore>>>,
     pub global_waiting: AtomicI64,
     pub global_active: AtomicI64,
     /// 额度预留：只在核对 / 修改预留时持锁，绝不跨上游 HTTP 持有。
@@ -200,7 +196,6 @@ impl AppState {
         )?;
         let limits = RuntimeLimits {
             queue_timeout: env.queue_timeout as f64,
-            key_image_min_interval: env.key_image_min_interval,
             image_min_interval: env.image_min_interval,
             image_429_cooldown_seconds: env.image_429_cooldown_seconds,
         };
@@ -223,16 +218,13 @@ impl AppState {
             rpm: SlidingWindow::new(1024),
             login_attempts: SlidingWindow::new(2048),
             auth_guard: AuthGuard::default(),
-            pacing: KeyPacing::default(),
             cooldown: ImageCooldown::default(),
             pauses: KeyPauses::default(),
-            inflight: Inflight::default(),
             tags: TagQueue::default(),
             ops: crate::ops::Shared::default(),
             allowance,
             health: UpstreamHealth::default(),
             global_sem: Arc::new(tokio::sync::Semaphore::new(global)),
-            key_sems: Mutex::new(HashMap::new()),
             global_waiting: AtomicI64::new(0),
             global_active: AtomicI64::new(0),
             budget: tokio::sync::Mutex::new(Budget::default()),
@@ -341,13 +333,6 @@ impl AppState {
         for (name, v) in values {
             let v = *v as f64;
             match *name {
-                "key_image_min_interval" => {
-                    let old = self.limits.read().expect("limits").key_image_min_interval;
-                    if v > old {
-                        self.pacing.extend(v).await;
-                    }
-                    self.limits.write().expect("limits").key_image_min_interval = v;
-                }
                 "image_min_interval" => {
                     self.nai.set_image_min_interval(v).await;
                     self.limits.write().expect("limits").image_min_interval = v;
@@ -379,17 +364,6 @@ impl AppState {
 
     pub fn month(&self) -> String {
         self.clock.month(self.now())
-    }
-
-    /// 每把 Key 的请求并发（旧版 key_sem）。
-    pub fn key_sem(&self, key_id: i64) -> Arc<tokio::sync::Semaphore> {
-        let n = self.env.key_concurrency.max(1) as usize;
-        self.key_sems
-            .lock()
-            .expect("key_sems")
-            .entry(key_id)
-            .or_insert_with(|| Arc::new(tokio::sync::Semaphore::new(n)))
-            .clone()
     }
 
     /// 首页「近 1 分钟」的请求结果。

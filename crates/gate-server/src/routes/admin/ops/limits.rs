@@ -13,8 +13,8 @@ use axum::extract::{Request, State};
 use axum::routing::get;
 use gate_core::allowance::SETTING as ALERT_THRESHOLD;
 use gate_core::guard::GuardError;
+use gate_core::pyval;
 use gate_core::site_flags::{self, GLOBAL_DAILY_V5, GLOBAL_MONTHLY_ANLAS, MEMBER_DAILY_ANLAS};
-use gate_core::{pyc, pyval};
 use serde_json::{Value, json};
 
 const BODY_LIMIT: usize = 1024 * 1024;
@@ -34,16 +34,23 @@ pub(super) fn router() -> Router<AppState> {
 async fn get_settings(State(state): State<AppState>, _s: AdminSession) -> ApiResult {
     Ok(ok_json(&json!({
         "global_monthly_anlas": pyval::float(site_flag_f64(&state, &GLOBAL_MONTHLY_ANLAS).await?),
-        "global_daily_v5": site_flag(&state, &GLOBAL_DAILY_V5).await?,
+        "global_daily_v5": crate::ops::algo_owned(&state.db).await?.global_daily_v5,
         "member_daily_anlas": site_flag(&state, &MEMBER_DAILY_ANLAS).await?,
         ALERT_THRESHOLD: read_alert_threshold(&state.db).await?,
-        "v5_capacity": crate::ops::v5_capacity(&state).await?,
     })))
 }
 
 async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Request) -> ApiResult {
     let (parts, body) = req.into_parts();
     let body = read_json_body(&parts.headers, body, BODY_LIMIT).await?;
+    // 全站 V5 归动态额度管：开着时不能手改（docs/v3-deviations.md #70）
+    let managed: Vec<&str> = [GLOBAL_DAILY_V5.key]
+        .into_iter()
+        .filter(|k| body.contains_key(*k))
+        .collect();
+    if let Some(m) = crate::ops::managed_error(&state.db, &managed).await? {
+        return Err(HttpError::new(400, m).into());
+    }
     let threshold = match body.get(ALERT_THRESHOLD) {
         Some(v) => v.clone(),
         None => Value::from(read_alert_threshold(&state.db).await?),
@@ -64,6 +71,9 @@ async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Requ
     ) -> Result<Value, ApiError> {
         let value = match body.get(spec.key) {
             Some(v) => v.clone(),
+            None if std::ptr::eq(spec, &GLOBAL_DAILY_V5) => {
+                Value::from(crate::ops::algo_owned(&state.db).await?.global_daily_v5)
+            }
             None => site_flag(state, spec).await?,
         };
         Ok(strict_num(&value, kind, 0.0, hi, spec.key)?)
@@ -96,18 +106,17 @@ async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Requ
         "global_daily_v5": daily_v5,
         "member_daily_anlas": member,
         ALERT_THRESHOLD: threshold,
-        "v5_capacity": crate::ops::v5_capacity(&state).await?,
     })))
 }
 
 // ------------------------------------------------------------------ 排队与冷却
 
-/// 当前生效的四个运行期限制（取整，与旧版 `int(getattr(settings, name))` 一致）。
+/// 当前生效的三个运行期限制（取整，与旧版 `int(getattr(settings, name))` 一致；
+/// 每 Key 出图间隔 `key_image_min_interval` 已删除，docs/v3-deviations.md #64）。
 fn runtime_limits_snapshot(state: &AppState) -> Value {
     let l = state.limits();
     json!({
         "queue_timeout": l.queue_timeout as i64,
-        "key_image_min_interval": l.key_image_min_interval as i64,
         "image_min_interval": l.image_min_interval as i64,
         "image_429_cooldown_seconds": l.image_429_cooldown_seconds as i64,
     })
@@ -170,7 +179,6 @@ async fn guard_view(state: &AppState) -> Result<Value, ApiError> {
             "position": f.position,
             "usable": t.usable(now),
             "today": c.images,
-            "today_units": pyval::float(pyc::round(c.units, 1)),
             "this_hour": state.guard.with(|g| g.hour_count(&t.token_id, now)),
         }));
     }

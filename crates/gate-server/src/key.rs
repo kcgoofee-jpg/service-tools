@@ -81,10 +81,6 @@ impl Key {
     pub fn image_model_scope(&self) -> &str {
         self.str("image_model_scope")
     }
-    /// 手动额度的 Key：填多少就是多少，不受注水 / 保底规则影响（`quota_auto == -1`）。
-    pub fn manual(&self) -> bool {
-        self.get("quota_auto").as_i64() == Some(-1)
-    }
     /// `expires_at and expires_at < now`
     pub fn expired(&self, now: f64) -> bool {
         self.opt_float("expires_at")

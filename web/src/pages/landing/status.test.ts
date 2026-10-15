@@ -9,21 +9,20 @@ import type { Live } from "./types";
 const API = {
   quietHard: "现在是安静时段（3:00–7:00），暂停出图，7 点恢复",
   quietSlow: "现在是安静时段（3:00–7:00），出图放慢到每小时 20 张，约 12 分钟后有空位",
-  daily: "本站今天的出图总量已达上限（每个账号 1000 张/天，按算力折算，用来保护上游账号），明天 7 点恢复",
+  daily: "本站今天的出图总量已达上限（每个账号 1000 张/天，用来保护上游账号），明天 7 点恢复",
   paced:
     "全站出图按时段放行（每天 1000 张平均分到 24 小时，保证晚来的人也有图出），这个时段的份额已用完，约 5 分钟后有空位",
   hourly:
     "最近 60 分钟的出图量已达上限（滚动窗口，全站每小时 150 张，不是整点重置），约 12 分钟后随最早的图滑出窗口逐张恢复",
-  burst: "本时段出图已达上限（每 10 分钟 38 张，用来抹平突发、保护上游账号），约 4 分钟后可继续",
   breaker: "上游连续出错，已暂停出图，约 30 秒后自动恢复",
   cooldown: "上游图片服务限流保护中，所有图片生成暂停约 45 秒",
   queueFull: "当前排队的人太多（全站最多同时排 5 张），请稍后再试",
 };
 
 const idle = (over: Partial<Live> = {}): Live => ({
-  quota: { images_today: 10, units_today: 10.4, images_cap: 1000, v5_today: 2, v5_cap: 63 },
+  quota: { images_today: 10, images_cap: 1000, v5_today: 2, v5_cap: 63 },
   queue: { waiting: 0, running: 0 },
-  guard: { hour: 8, hour_cap: 150, burst_cap: 38, burst_wait: 0, cooldown: 0, blocked: null },
+  guard: { hour: 8, hour_cap: 150, cooldown: 0, blocked: null },
   rules: { queue_cap: 5, hourly_cap: 150, quiet_start: 3, quiet_end: 7, quiet_cap: 0 },
   interval: 2.5,
   me: null,
@@ -107,16 +106,6 @@ describe("deriveStatus：与 API 的 429 原因同一句话", () => {
     expect(v?.detail).toBe("滚动窗口，全站每小时 150 张，不是整点重置，约 12 分钟后逐张恢复");
   });
 
-  it("10 分钟突发限速（guard.burst_wait）：不承诺「即发即画」", () => {
-    const v = deriveStatus(idle({ guard: { hour: 8, hour_cap: 150, burst_cap: 38, burst_wait: 4 } }));
-    expect(v?.tone).toBe("warn");
-    expect(v?.headline).toBe("本时段已到限速");
-    expect(v?.detail).toBe("每 10 分钟 38 张，用来抹平突发、保护上游账号，约 4 分钟后可继续");
-    expect(v?.sentence).not.toContain("马上开始");
-    expect(API.burst).toContain("每 10 分钟 38 张");
-    expect(API.burst).toContain("约 4 分钟后可继续");
-  });
-
   it("熔断：原文照搬", () => {
     const v = deriveStatus(blocked("breaker", API.breaker));
     expect(v?.tone).toBe("bad");
@@ -133,14 +122,13 @@ describe("deriveStatus：与 API 的 429 原因同一句话", () => {
     expect(v?.detail).toContain("滚动窗口，全站每小时 150 张，不是整点重置");
   });
 
-  it("优先级：冷却 > 全站拦截 > 排队满 > 突发 > 小时到顶 > 排队", () => {
+  it("优先级：冷却 > 全站拦截 > 排队满 > 小时到顶 > 排队", () => {
     const base = {
       queue: { waiting: 9, running: 0 },
       guard: {
         cooldown: 10,
         hour: 150,
         hour_cap: 150,
-        burst_wait: 3,
         blocked: { code: "paced", text: API.paced },
       },
     };
@@ -199,14 +187,12 @@ describe("createEstimator", () => {
 });
 
 describe("dailyUsage", () => {
-  it("用折算后的 units_today；上限 0 = 不限", () => {
-    const u = dailyUsage(
-      idle({ quota: { images_today: 10, units_today: 10.6, images_cap: 0, v5_today: 3, v5_cap: 0 } }),
-    );
-    expect(u.total).toEqual({ used: 11, cap: 0 });
+  it("按实际张数；上限 0 = 不限", () => {
+    const u = dailyUsage(idle({ quota: { images_today: 10, images_cap: 0, v5_today: 3, v5_cap: 0 } }));
+    expect(u.total).toEqual({ used: 10, cap: 0 });
     expect(u.v5).toEqual({ used: 3, cap: 0 });
   });
-  it("没有 units_today 时退回 images_today；没有数据全是 0", () => {
+  it("没有数据全是 0", () => {
     expect(dailyUsage(idle({ quota: { images_today: 7, images_cap: 1000 } })).total).toEqual({
       used: 7,
       cap: 1000,

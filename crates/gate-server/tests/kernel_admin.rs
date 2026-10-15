@@ -92,11 +92,13 @@ async fn quota_algo_get_shape_and_put_validation() {
     let api = Api::login(&e).await;
 
     // 什么都没存过：params 是代码里的起点值（整数）；last 是 {}，history 是 []
+    // （保底的 quota_base / quota_base_min / quota_base_step 已删除，docs/v3-deviations.md #61；
+    // V5 的 quota_v5_min / quota_v5_max 随 3～30 夹取删除，#63）
     let (status, text) = api.call("GET", "/quota-algo", None).await;
     assert_eq!(status, 200);
     assert_eq!(
         text,
-        r#"{"last":{},"history":[],"params":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_base":100,"quota_ceiling_max":300,"quota_base_min":50,"quota_base_min_fair":10,"quota_step":25,"quota_base_step":10,"quota_v5_min":3,"quota_v5_max":30}}"#
+        r#"{"last":{},"history":[],"params":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25}}"#
     );
 
     // 校验失败：422 + 旧版文案，不写任何东西
@@ -144,14 +146,14 @@ async fn quota_algo_put_saves_and_recomputes() {
     assert_eq!(status, 200, "{v}");
     assert_eq!(v["ok"], true);
     assert_eq!(v["last"]["enabled"], true);
-    // 初始值同步成今天的 N（上限和保底一起）
+    // 初始值同步成今天的 N（保底已删除，不再写 quota_base_now，docs/v3-deviations.md #61）
     assert_eq!(
         setting(&e, "quota_target_avg").await.as_deref(),
         Some("200")
     );
     assert_eq!(setting(&e, "quota_step").await.as_deref(), Some("30"));
     assert_eq!(setting(&e, "quota_ceiling").await.as_deref(), Some("200"));
-    assert_eq!(setting(&e, "quota_base_now").await.as_deref(), Some("200"));
+    assert_eq!(setting(&e, "quota_base_now").await, None);
     assert_eq!(setting(&e, "nope").await, None);
     // 重算已经执行：额度下发给算法管理的成员 Key，结果写进 quota_algo_last
     let key = e
@@ -188,7 +190,7 @@ async fn quota_algo_put_saves_and_recomputes() {
     let (_, g) = api.json("GET", "/quota-algo", None).await;
     assert_eq!(g["last"]["ceiling"], 200);
     assert_eq!(g["params"]["quota_target_avg"], "200");
-    assert_eq!(g["params"]["quota_base"], 100);
+    assert_eq!(g["params"].get("quota_base"), None);
 
     // 总开关关掉：重算直接返回 {"enabled": false}
     let (status, v) = api
@@ -212,15 +214,71 @@ async fn autopilot_get_before_and_after_a_run() {
     assert_eq!(status, 200);
     let (_, v) = api.json("GET", "/autopilot", None).await;
     let rules = &v["last"]["rules"];
-    assert_eq!(rules["slots"]["mode"], "observe");
-    assert_eq!(
-        rules["slots"]["why"],
-        "名额不限（站长设定），不调整；人多了由动态额度缩小每人份额"
-    );
+    // 名额 +5 与观察 / 关闭模式已删除（docs/v3-deviations.md #68）：只有两条规则，一律执行
+    let names: Vec<&String> = rules.as_object().unwrap().keys().collect();
+    assert_eq!(names, ["breaker", "key_guard"]);
+    assert_eq!(rules["breaker"]["mode"], "enforce");
+    assert_eq!(rules["key_guard"]["mode"], "enforce");
     assert_eq!(rules["breaker"]["value"], false);
     assert_eq!(rules["key_guard"]["why"], "没有 Key 触发");
     assert_eq!(v["history"].as_array().unwrap().len(), 1);
     assert_eq!(v["history"][0]["key_guard"], 0);
+    assert!(v["history"][0].get("slots").is_none());
+}
+
+/// 模式设置不再读（#68）：写成 observe / off 也照样执行——单 Key 限流触发就暂停。
+#[tokio::test]
+async fn autopilot_ignores_old_mode_settings() {
+    let e = setup(&[]).await;
+    member(&e, 5).await;
+    for (k, v) in [
+        ("autopilot_breaker", "off"),
+        ("autopilot_key_guard", "observe"),
+        ("autopilot_slots", "enforce"),
+    ] {
+        e.state.db.set_setting(k, v).await.unwrap();
+    }
+    // 这把 Key 1 小时内被拒 60 次（个人额度用完，算成员自己的拒绝）
+    let key = e
+        .state
+        .db
+        .get_key_by_token("nai-synthetic-0005")
+        .await
+        .unwrap()
+        .unwrap();
+    let kid = key["id"].as_i64().unwrap();
+    for i in 0..60 {
+        e.state
+            .db
+            .add_log(
+                &gate_db::repo::usage::NewLog {
+                    key_id: Some(kid),
+                    kind: "image".into(),
+                    status: "rejected".into(),
+                    reason: "member_quota".into(),
+                    ..Default::default()
+                },
+                e.state.now() - 60.0 + f64::from(i),
+            )
+            .await
+            .unwrap();
+    }
+    let api = Api::login(&e).await;
+    api.json("POST", "/modules/run", None).await;
+    let (_, v) = api.json("GET", "/autopilot", None).await;
+    let kg = &v["last"]["rules"]["key_guard"];
+    assert_eq!(kg["mode"], "enforce");
+    assert_eq!(kg["value"][0]["key"], kid);
+    assert_eq!(kg["value"][0]["applied"], true);
+    assert!(
+        e.state.pauses.paused(kid, e.state.now()).is_some(),
+        "被暂停了"
+    );
+    assert_eq!(
+        e.state.db.get_setting("register_max_users").await.unwrap(),
+        None,
+        "不再改名额"
+    );
 }
 
 #[tokio::test]
@@ -291,7 +349,8 @@ async fn modules_list_toggle_and_run() {
     // 分配模块的 tick 跑了动态额度：成员 Key 拿到了算法给的额度
     assert!(setting(&e, "quota_algo_last").await.is_some());
 
-    // 关闭分配：写 module_allocation=0，立即再跑一轮，面板里 enabled=false 且没有新的运行记录
+    // 关闭分配：就是关掉动态额度（写 quota_auto_enabled=0，不再有单独的 module_allocation，
+    // docs/v3-deviations.md #70），立即再跑一轮，面板里 enabled=false 且没有新的运行记录
     let (status, v) = api
         .json(
             "PUT",
@@ -300,7 +359,16 @@ async fn modules_list_toggle_and_run() {
         )
         .await;
     assert_eq!(status, 200);
-    assert_eq!(setting(&e, "module_allocation").await.as_deref(), Some("0"));
+    assert_eq!(
+        setting(&e, "quota_auto_enabled").await.as_deref(),
+        Some("0")
+    );
+    assert_eq!(setting(&e, "module_allocation").await, None);
+    let (_, q) = api.json("GET", "/quota-algo", None).await;
+    assert_eq!(
+        q["params"]["quota_auto_enabled"], "0",
+        "后台「动态额度」开关同步关掉"
+    );
     let m = v["modules"]
         .as_array()
         .unwrap()
@@ -318,7 +386,10 @@ async fn modules_list_toggle_and_run() {
         .json("PUT", "/modules/allocation", Some(json!({"enabled": true})))
         .await;
     assert_eq!(status, 200);
-    assert_eq!(setting(&e, "module_allocation").await.as_deref(), Some("1"));
+    assert_eq!(
+        setting(&e, "quota_auto_enabled").await.as_deref(),
+        Some("1")
+    );
     let m = v["modules"]
         .as_array()
         .unwrap()
@@ -490,8 +561,6 @@ async fn service_registrar_reads_settings_and_env_defaults() {
         ("DISCORD_GUILD_ID", "9000000000000000099"),
         ("SITE_URL", "https://owl.example"),
         ("REGISTER_MAX_USERS", "20"),
-        ("REGISTER_DAILY_IMAGES", "80"),
-        ("REGISTER_DAILY_V5", "7"),
     ])
     .await;
     let reg = ServiceRegistrar(e.state.registration.clone().expect("注册服务配齐了"));
@@ -506,14 +575,19 @@ async fn service_registrar_reads_settings_and_env_defaults() {
         .unwrap();
     assert_eq!(reg.settings().await.unwrap().max_users, 25);
 
-    // 接进内核后，自动驾驶按这个名额判断（25 个名额、0 人占用 → 名额不变）
+    // 接进内核后跑一轮：自动驾驶的「名额 +5」已删除（docs/v3-deviations.md #68），不看也不改名额
     e.state.kernel.set_registrar(Some(std::sync::Arc::new(reg)));
     let api = Api::login(&e).await;
     api.json("POST", "/modules/run", None).await;
     let (_, v) = api.json("GET", "/autopilot", None).await;
-    assert_eq!(v["last"]["rules"]["slots"]["value"], 25);
+    assert!(v["last"]["rules"].get("slots").is_none());
     assert_eq!(
-        v["last"]["rules"]["slots"]["why"],
-        "昨天只有 0.0 小时数据，名额不变"
+        e.state
+            .db
+            .get_setting("register_max_users")
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("25")
     );
 }

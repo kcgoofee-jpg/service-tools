@@ -11,7 +11,7 @@
 //!
 //! `/healthz`、`/`、`/survey`、`/admin*`、`/_owl/*`、图标在 pages.rs。
 
-use crate::auth::{authenticate, client_ip, ctx_of, header_str, site_flag_f64};
+use crate::auth::{authenticate, client_ip, ctx_of, header_str};
 use crate::error::{ApiError, ApiResult, HttpError, InternalError, json_response, ok_json};
 use crate::key::Key;
 use crate::live::{self, Snapshot, StreamKind, StreamSlot, wire_text};
@@ -28,7 +28,6 @@ use futures::StreamExt;
 use gate_core::pyc::{strip, take_chars};
 use gate_core::pyloads::{self, Options};
 use gate_core::pyobj::{Obj, PyDict};
-use gate_core::site_flags::GLOBAL_DAILY_V5;
 use gate_db::repo::feedback::Survey;
 use serde_json::{Map, Value, json};
 use std::convert::Infallible;
@@ -540,10 +539,6 @@ async fn queue_status(State(state): State<AppState>) -> ApiResult {
         .reduce(f64::min)
         .unwrap_or(0.0);
     let lim = state.limits();
-    let pacing = state
-        .pacing
-        .waiting
-        .load(std::sync::atomic::Ordering::Relaxed);
     let (active, waiting) = (
         state
             .global_active
@@ -555,7 +550,7 @@ async fn queue_status(State(state): State<AppState>) -> ApiResult {
     Ok(ok_json(&json!({
         "global": {
             "active": active,
-            "waiting": waiting + pacing,
+            "waiting": waiting,
             "concurrency": usable.iter().map(|t| t.image_slots.limit() as i64).sum::<i64>(),
         },
         "image_next_slot_in": gate_core::pyc::round(next, 1),
@@ -749,7 +744,7 @@ async fn subscription(state: &AppState, key: &Key) -> Result<Value, InternalErro
     let data = gate_core::client_views::SubscriptionData {
         month_anlas_used: state.db.month_anlas(key.id(), &month).await?,
         daily_v5_used: state.db.get_counter(key.id(), &day).await?.v5,
-        global_v5_limit: site_flag_f64(state, &GLOBAL_DAILY_V5).await? as i64,
+        global_v5_limit: crate::ops::algo_owned(&state.db).await?.global_daily_v5,
         global_v5_total: state.db.day_v5_total(&day).await?,
     };
     gate_core::client_views::subscription_payload(&key.0, state.now(), &data)

@@ -178,6 +178,12 @@ impl Discord {
 // ------------------------------------------------------------------ 公共小件
 
 async fn setup_reg(extra: &[(&str, &str)]) -> (Env, Discord) {
+    setup_reg_with(extra, true).await
+}
+
+/// `legacy_expiry`：旧版夹具都是在 `REGISTER_EXPIRES_DAYS` 默认 30 天下录的；3.0 默认改成 0（不过期，
+/// docs/v3-deviations.md #70），对拍这些用例时显式给回 30。
+async fn setup_reg_with(extra: &[(&str, &str)], legacy_expiry: bool) -> (Env, Discord) {
     let d = Discord::start().await;
     let base = d.url();
     let mut vars: Vec<(&str, &str)> = vec![
@@ -189,6 +195,9 @@ async fn setup_reg(extra: &[(&str, &str)]) -> (Env, Discord) {
         ("SITE_URL", "https://gate.test"),
         ("DISCORD_API_BASE", &base),
     ];
+    if legacy_expiry {
+        vars.push(("REGISTER_EXPIRES_DAYS", "30"));
+    }
     vars.extend_from_slice(extra);
     let e = setup(&vars).await;
     (e, d)
@@ -452,6 +461,24 @@ async fn ban_revokes_the_key_and_blocks_reissue_until_unban() {
 // ------------------------------------------------------------------ 桥接：发 Key
 
 const WELCOME: &str = "🦉 **欢迎来到猫头鹰公益站！** 这是你的 API Key（只发这一次，请先保存）：\n`<KEY>`\n\n**三步开始出图（以柏宝绘为例）**\n1. 打开柏宝绘 → 渠道 → 配置 → 新建接入点\n2. 接口地址填 `https://gate.test`（**不要**加 /v1）\n3. API Key 填上面 `nai-` 开头的整串，保存后随便生成一张图试试\n其他支持自定义 NovelAI 地址的客户端同样这样填。\n\n**不确定填对没有？** 在 Discord 输入 `/quota`，能看到额度就说明 Key 正常；也可以在 https://gate.test 用 Discord 登录查看自己的额度。\n\n**规则**\n• 每日额度：每人每天最多 V4.5 及以下 30 张，全站共用、先到先得；每天 7 点重置\n• 已开通功能：文生图\n• 连续 3 天没有成功出图会被自动回收，之后不能再领（不另行提醒）\n• 每把 Key 同时生成 1 张、排队 1 张，多发的会被退回，等前一张出完再发\n• 只提供免费出图：V4.5 及以下总像素 ≤1024×1024（宽高取 64 的倍数，超出自动等比缩小）；≤28 步、每次 1 张；图生图 / 局部重绘不开放；Vibe 在「已开通功能」里时可用，消耗每日 Anlas 额度\n• Key 只给本服务器成员：退出服务器后 Key 自动失效\n• 一人一把，请勿分享：共用或转售会被回收\n\n**常用命令**：`/quota` 看今日额度 · `/resetkey` Key 丢了或泄露时换新 · `/help` 简要说明\n遇到问题到 🛠️｜问题反馈 发截图（记得打码 Key）。";
+
+/// 没配 `REGISTER_EXPIRES_DAYS`：新 Key 不过期，欢迎私信里也没有「有效期」那一行（docs/v3-deviations.md #70）
+#[tokio::test]
+async fn issued_key_never_expires_by_default() {
+    let (e, _d) = setup_reg_with(&[], false).await;
+    open_registration(&e).await;
+    let r = issue(&e, MEMBER).await;
+    assert_eq!(r.0, 200, "{:?}", r.2);
+    assert!(!r.2["message"].as_str().unwrap().contains("有效期"));
+    let row = e
+        .state
+        .db
+        .key_row_for_discord(MEMBER)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(row["expires_at"].is_null(), "{row:?}");
+}
 
 #[tokio::test]
 async fn issue_mints_a_key_exactly_like_legacy() {
@@ -2425,26 +2452,25 @@ async fn registration_settings_ops_match_legacy() {
         .set_setting("register_daily_v5", "3")
         .await
         .unwrap();
-    // 名额 × 每人 V5 超过全站 V5 日限（150）：后台设置页带提醒（机器人的 /limit 命令已删除，docs/v3-deviations.md #73）
-    let cap_after = |max_users: i64| {
-        let st = e.state.clone();
-        async move {
-            gate_server::ops::set_registration(
-                &st,
-                &obj(json!({"max_users": max_users, "notify": false})),
-            )
-            .await
-            .unwrap();
-            gate_server::ops::v5_capacity(&st).await.unwrap()
-        }
-    };
-    let cap = cap_after(60).await;
-    assert_eq!(cap["short"], true);
-    assert_eq!(
-        cap["message"],
-        "名额 60 × 每人 V5 3 = 180 张/天，超过全站 V5 日限 150：先用的人用满后，后面的人当天没有 V5。建议把全站 V5 调到 180，或降低每人 V5。"
-    );
-    assert_eq!(cap_after(50).await["short"], false);
+    // 名额 × 每人 V5 超过全站 V5 日限（150）：不再提醒（`v5_capacity` 已删除，docs/v3-deviations.md #69；
+    // 机器人的 /limit 命令也已删除，#73），名额照常保存
+    for max_users in [60, 50] {
+        gate_server::ops::set_registration(
+            &e.state,
+            &obj(json!({"max_users": max_users, "notify": false})),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            e.state
+                .db
+                .get_setting("register_max_users")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some(max_users.to_string().as_str())
+        );
+    }
     // 校验（旧版抛 ValueError，消息原样）
     let set = |b: Value| {
         let st = e.state.clone();
@@ -2470,6 +2496,19 @@ async fn registration_settings_ops_match_legacy() {
         invalid(set(json!({"expires_days": 99999})).await),
         "expires_days 超出范围 0～3650"
     );
+    // 动态额度开着（默认）：新 Key 的张数 / V5 / 模型范围归算法管，不能手改（docs/v3-deviations.md #70）
+    match set(json!({"image_scope": "all", "daily_images": 5})).await {
+        Err(gate_server::ops::OpsError::Managed(m)) => assert_eq!(
+            m,
+            "daily_images、image_scope 由动态额度管理：关闭动态额度后才能手动修改"
+        ),
+        other => panic!("应当是动态额度管着：{other:?}"),
+    }
+    e.state
+        .db
+        .set_setting("quota_auto_enabled", "0")
+        .await
+        .unwrap();
     set(json!({"image_scope": "x"})).await.unwrap();
     assert_eq!(
         e.state

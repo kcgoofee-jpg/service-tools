@@ -1,16 +1,20 @@
 //! 运行期共享状态（旧版 `state.py` 的 GateState 里与请求相关的部分）：
 //! - 一个通用滑动窗口 [`SlidingWindow`]，取代旧版 5 份几乎相同的实现（RPM / 无效 Key / 后台登录 / 捐赠 / 前端报错）；
-//! - 每把 Key 的出图间隔（含「被本地拒绝时退还」）；
 //! - 防爆破（IPv6 聚合到 /64）；
 //! - 全站图片冷却（上游 429 后）；
 //! - Key 暂停闸门（自动驾驶限流等）。
 //!
 //! 时间：墙钟用 `crate::time::now()`，间隔类用 tokio 单调时钟（测试可暂停）。
+//!
+//! 每把 Key 的限速只剩两层：出图排队（同时生成 1 张 + 排队 1 张，见 `admission::image_admission`）和
+//! 每分钟次数（RPM）。2.x 的「每把 Key 两张图至少隔 15 秒」（`KEY_IMAGE_MIN_INTERVAL`）与出图请求的
+//! 「同一把 Key 同时在途 ≤ 4」已删除（docs/v3-deviations.md #64；后者原先只剩文本路由在用，文本接口 #81 删除后
+//! 整层删掉）。
 
 use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 use std::net::IpAddr;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use tokio::time::{Duration, Instant};
 
 /// 滑动窗口计数器。
@@ -145,106 +149,6 @@ impl AuthGuard {
     }
 }
 
-/// 排队超时。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct QueueTimeout;
-
-/// 同一把 Key 同时进行中的请求已达上限。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TooManyInflight;
-
-/// 每把 Key 的出图间隔（旧版 `wait_for_key_image_slot` / `refund_key_image_slot`）。
-#[derive(Default)]
-pub struct KeyPacing {
-    inner: tokio::sync::Mutex<PacingState>,
-    /// 正在等间隔的请求数（首页「排队」显示用）。
-    pub waiting: std::sync::atomic::AtomicI64,
-}
-
-#[derive(Default)]
-struct PacingState {
-    next_at: HashMap<i64, Instant>,
-    taken: HashMap<i64, (Option<Instant>, Instant)>,
-}
-
-impl KeyPacing {
-    /// 等到这把 Key 的间隔到点并占位；超过 `timeout` 返回 Err。
-    pub async fn wait(&self, key_id: i64, interval: f64, timeout: f64) -> Result<(), QueueTimeout> {
-        let fut = async {
-            loop {
-                let wait = {
-                    let mut s = self.inner.lock().await;
-                    let now = Instant::now();
-                    let next = s.next_at.get(&key_id).copied();
-                    match next.filter(|n| *n > now) {
-                        None => {
-                            let new = now + Duration::from_secs_f64(interval.max(0.0));
-                            s.next_at.insert(key_id, new);
-                            s.taken.insert(key_id, (next, new));
-                            if s.next_at.len() > 1024 {
-                                let stale: Vec<i64> = s
-                                    .next_at
-                                    .iter()
-                                    .filter(|(_, v)| **v <= now)
-                                    .map(|(k, _)| *k)
-                                    .collect();
-                                for k in stale {
-                                    s.next_at.remove(&k);
-                                    s.taken.remove(&k);
-                                }
-                            }
-                            return;
-                        }
-                        Some(n) => n - now,
-                    }
-                };
-                struct Waiting<'a>(&'a std::sync::atomic::AtomicI64);
-                impl Drop for Waiting<'_> {
-                    fn drop(&mut self) {
-                        self.0.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
-                    }
-                }
-                self.waiting
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                let _w = Waiting(&self.waiting);
-                tokio::time::sleep(wait).await;
-            }
-        };
-        tokio::time::timeout(Duration::from_secs_f64(timeout.max(0.0)), fut)
-            .await
-            .map_err(|_| QueueTimeout)
-    }
-
-    /// 请求在到达上游前被本地拒绝时归还占用；已被后续请求覆盖则不动。
-    pub async fn refund(&self, key_id: i64) {
-        let mut s = self.inner.lock().await;
-        if let Some((prev, new)) = s.taken.remove(&key_id)
-            && s.next_at.get(&key_id) == Some(&new)
-        {
-            match prev {
-                Some(p) => {
-                    s.next_at.insert(key_id, p);
-                }
-                None => {
-                    s.next_at.remove(&key_id);
-                }
-            }
-        }
-    }
-
-    /// 调大间隔时，正在冷却的 Key 立即按新间隔顺延。
-    pub async fn extend(&self, interval: f64) {
-        let mut s = self.inner.lock().await;
-        let now = Instant::now();
-        let new = now + Duration::from_secs_f64(interval.max(0.0));
-        for v in s.next_at.values_mut() {
-            if *v > now && new > *v {
-                *v = new;
-            }
-        }
-    }
-}
-
 /// 全站图片冷却（上游 429 后）。
 #[derive(Default)]
 pub struct ImageCooldown {
@@ -313,59 +217,6 @@ impl KeyPauses {
     }
 }
 
-/// 每个 Authorization 同时进行中的请求数（读请求体之前就限制：25 MB 的生图请求在 2 GB 机器上很贵）。
-#[derive(Default, Clone)]
-pub struct Inflight {
-    inner: Arc<Mutex<HashMap<String, usize>>>,
-}
-
-pub const MAX_INFLIGHT_PER_KEY: usize = 4;
-
-/// 占用一个名额；可以移进后台任务（流式响应要占到推流和结算结束）。
-pub struct InflightPermit {
-    owner: Arc<Mutex<HashMap<String, usize>>>,
-    ident: String,
-}
-
-impl Drop for InflightPermit {
-    fn drop(&mut self) {
-        let mut m = self.owner.lock().expect("inflight");
-        if let Some(n) = m.get_mut(&self.ident) {
-            *n -= 1;
-            if *n == 0 {
-                m.remove(&self.ident);
-            }
-        }
-    }
-}
-
-impl Inflight {
-    /// 与鉴权同样归一化：「Bearer K」「bearer K」「Bearer  K」是同一把 Key。没有凭据不限制（返回 Ok(None)）。
-    pub fn acquire(&self, authorization: &str) -> Result<Option<InflightPermit>, TooManyInflight> {
-        let raw = gate_core::pyc::strip(gate_core::pyc::take_chars(authorization, 512));
-        let (scheme, rest) = raw.split_once(' ').unwrap_or((raw, ""));
-        let ident = if scheme.eq_ignore_ascii_case("bearer") {
-            gate_core::pyc::strip(rest)
-        } else {
-            raw
-        }
-        .to_string();
-        if ident.is_empty() {
-            return Ok(None);
-        }
-        let mut m = self.inner.lock().expect("inflight");
-        let n = m.entry(ident.clone()).or_insert(0);
-        if *n >= MAX_INFLIGHT_PER_KEY {
-            return Err(TooManyInflight);
-        }
-        *n += 1;
-        Ok(Some(InflightPermit {
-            owner: self.inner.clone(),
-            ident,
-        }))
-    }
-}
-
 /// 同一把 Key 两次标签补全至少间隔 2 秒（补全很轻，旧查询会被新查询取代）。
 pub const TAG_MIN_INTERVAL: f64 = 2.0;
 
@@ -395,13 +246,10 @@ pub enum TagAdmit {
 }
 
 impl TagQueue {
-    /// `global_concurrency`、`key_image_min_interval` 取当前设置。被取消（超时 / 断开）时排队计数照样归还。
-    pub async fn wait(
-        &self,
-        key_id: i64,
-        global_concurrency: i64,
-        key_image_min_interval: f64,
-    ) -> TagAdmit {
+    /// `global_concurrency` 取当前设置。被取消（超时 / 断开）时排队计数照样归还。
+    /// 同一把 Key 两次补全至少隔 [`TAG_MIN_INTERVAL`] 秒（旧版取它与每 Key 出图间隔的较小者；
+    /// 每 Key 出图间隔已删除，docs/v3-deviations.md #64）。
+    pub async fn wait(&self, key_id: i64, global_concurrency: i64) -> TagAdmit {
         struct Waiting<'a>(&'a TagQueue, i64);
         impl Drop for Waiting<'_> {
             fn drop(&mut self) {
@@ -446,8 +294,8 @@ impl TagQueue {
                 if !s.active.contains(&key_id) && s.active.len() < capacity {
                     if delay.is_zero() {
                         s.active.insert(key_id);
-                        let gap = TAG_MIN_INTERVAL.min(key_image_min_interval).max(0.0);
-                        s.next_at.insert(key_id, now + Duration::from_secs_f64(gap));
+                        s.next_at
+                            .insert(key_id, now + Duration::from_secs_f64(TAG_MIN_INTERVAL));
                         return TagAdmit::Admitted;
                     }
                     Some(delay)
@@ -564,34 +412,5 @@ mod tests {
         assert!(g.record_failure("203.0.113.9", 20, 600, 900, 19.0));
         assert_eq!(g.blocked("203.0.113.9", 20.0), 899);
         assert_eq!(g.blocked("203.0.113.10", 20.0), 0);
-    }
-
-    #[test]
-    fn inflight_normalizes_bearer() {
-        let f = Inflight::default();
-        let a = f.acquire("Bearer K").unwrap();
-        let b = f.acquire("bearer  K").unwrap();
-        let c = f.acquire("BEARER K").unwrap();
-        let d = f.acquire(" Bearer K ").unwrap();
-        assert!(f.acquire("Bearer K").is_err());
-        drop((a, b, c, d));
-        assert!(f.acquire("Bearer K").is_ok());
-        assert!(f.acquire("").unwrap().is_none());
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn pacing_and_refund() {
-        let p = KeyPacing::default();
-        p.wait(7, 15.0, 90.0).await.unwrap();
-        // 被本地拒绝：退还，下一次立即可发
-        p.refund(7).await;
-        let t0 = Instant::now();
-        p.wait(7, 15.0, 90.0).await.unwrap();
-        assert_eq!(Instant::now(), t0);
-        // 没退还：要等满 15 秒
-        p.wait(7, 15.0, 90.0).await.unwrap();
-        assert!(Instant::now() - t0 >= Duration::from_secs(15));
-        // 排队超时
-        assert!(p.wait(7, 15.0, 1.0).await.is_err());
     }
 }

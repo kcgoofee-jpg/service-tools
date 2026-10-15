@@ -74,9 +74,7 @@ export default function GuardCard() {
               ))}
             </div>
           </details>
-          <p class="muted small">
-            V4.5 由「动态额度」管理：每人上限 {data.values.base_daily_images} 张，先到先得。
-          </p>
+          <p class="muted small">V4.5 每人每天的上限由「动态额度」管理，不在这里设。</p>
           <SaveBar form={form} onSave={trySave} saving={saving} label="保存账号保护" />
         </form>
       </div>
