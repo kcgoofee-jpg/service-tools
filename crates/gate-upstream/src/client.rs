@@ -142,8 +142,6 @@ impl Observer for NoObserver {}
 #[derive(Debug, Clone)]
 pub struct Config {
     pub image_host: String,
-    pub text_host: String,
-    pub legacy_text_host: String,
     pub proxy: Option<String>,
     pub custom_user_agent: Option<String>,
     pub http2: bool,
@@ -171,8 +169,6 @@ pub struct TokenFields {
     pub forbidden_streak: i64,
     pub forbidden_trips: i64,
     pub forbidden_last: f64,
-    pub text_blocked_until: f64,
-    pub text_forbidden: i64,
 }
 
 pub struct Token {
@@ -214,8 +210,6 @@ impl Token {
                 forbidden_streak: 0,
                 forbidden_trips: 0,
                 forbidden_last: 0.0,
-                text_blocked_until: 0.0,
-                text_forbidden: 0,
             }),
         }
     }
@@ -529,12 +523,6 @@ impl<H: Hooks> NaiClient<H> {
     pub fn image_host(&self) -> &str {
         self.inner.cfg.image_host.trim_end_matches('/')
     }
-    pub fn text_host(&self) -> &str {
-        self.inner.cfg.text_host.trim_end_matches('/')
-    }
-    pub fn legacy_text_host(&self) -> &str {
-        self.inner.cfg.legacy_text_host.trim_end_matches('/')
-    }
 
     /// 客户端启动以来的单调秒数（`TokenFields::image_next_at` 用的就是这个时钟；首页 / 后台算「还要等几秒」要用）。
     pub fn mono(&self) -> f64 {
@@ -761,7 +749,6 @@ impl<H: Hooks> NaiClient<H> {
         requires_anlas: bool,
         v5_free: bool,
         image_job: bool,
-        text_job: bool,
     ) -> Result<Option<Arc<Token>>, UpstreamError> {
         let hooks = &self.inner.hooks;
         let mut pool = self.inner.pool.lock().await;
@@ -774,26 +761,6 @@ impl<H: Hooks> NaiClient<H> {
             .collect();
         if usable.is_empty() {
             return Ok(None);
-        }
-        if text_job {
-            let now = self.now();
-            let open: Vec<Arc<Token>> = usable
-                .iter()
-                .filter(|t| t.with(|f| f.text_blocked_until <= now))
-                .cloned()
-                .collect();
-            if open.is_empty() {
-                let earliest = usable
-                    .iter()
-                    .map(|t| t.with(|f| f.text_blocked_until))
-                    .fold(f64::INFINITY, f64::min);
-                let wait = ((earliest - now) as i64).max(1);
-                return Err(UpstreamError::new(
-                    503,
-                    format!("上游文本通道限流冷却中，约 {wait} 秒后恢复（生图不受影响）"),
-                ));
-            }
-            usable = open;
         }
         if image_job && hooks.has_guard() {
             let day = hooks.day();
@@ -980,7 +947,7 @@ impl<H: Hooks> NaiClient<H> {
     fn event_401(&self) {
         self.inner.hooks.event(
             "upstream_401",
-            "NovelAI 返回 401：上游 Token 已失效，生图和文本全部不可用，请尽快更换 Token。",
+            "NovelAI 返回 401：上游 Token 已失效，生图全部不可用，请尽快更换 Token。",
             1800.0,
         );
     }
@@ -1040,7 +1007,6 @@ impl<H: Hooks> NaiClient<H> {
                     o.requires_anlas,
                     o.v5_free,
                     o.image_lane && o.wait_for_image_slot,
-                    false,
                 )
                 .await?
             else {
@@ -1301,10 +1267,7 @@ impl<H: Hooks> NaiClient<H> {
         allowance: Option<&dyn Allowance>,
         obs: &dyn Observer,
     ) -> Result<ImageStream<H>, UpstreamError> {
-        let Some(token) = self
-            .pick_token(requires_anlas, v5_free, true, false)
-            .await?
-        else {
+        let Some(token) = self.pick_token(requires_anlas, v5_free, true).await? else {
             return Err(self.unavailable(requires_anlas, v5_free).await);
         };
         let mut fl = InFlight {
@@ -1454,123 +1417,6 @@ impl<H: Hooks> NaiClient<H> {
             token,
             completed_images: 0,
         })
-    }
-
-    /// 打开文本流（不重试）；调用方持有并读取响应。
-    pub async fn text_stream(
-        &self,
-        url: &str,
-        body: &Value,
-        obs: &dyn Observer,
-    ) -> Result<wreq::Response, UpstreamError> {
-        let Some(token) = self.pick_token(false, false, false, true).await? else {
-            return Err(UpstreamError::new(
-                503,
-                "上游令牌全部被限流或不可用，请稍后再试",
-            ));
-        };
-        let req = self.build(
-            &token,
-            wreq::Method::POST,
-            url,
-            Some(body),
-            "text/event-stream",
-        );
-        let resp = {
-            let _d = token.dispatch_lock.lock().await;
-            if !token.with(|f| f.admin_enabled) {
-                return Err(UpstreamError::new(503, "上游令牌已停用，未发送请求"));
-            }
-            req.send().await.map_err(|e| {
-                let mut err = UpstreamError::new(502, format!("上游请求失败：{e}"));
-                err.transport = true;
-                err
-            })?
-        };
-        let status = resp.status().as_u16();
-        if status != 200 && status != 201 {
-            if status == 401 {
-                self.mark_unauthorized(&token);
-            }
-            obs.status(status);
-            let retry_after = resp
-                .headers()
-                .get("retry-after")
-                .and_then(|v| v.to_str().ok())
-                .map(str::to_string);
-            // 文本 403 要窥探一小段判断是不是「模型不存在」；其余错误体按政策不读
-            let peek = if status == 403 {
-                peek_body(resp).await
-            } else {
-                drop(resp);
-                String::new()
-            };
-            if status == 401 {
-                self.event_401();
-                return Err(UpstreamError::new(
-                    502,
-                    "上游令牌已失效（401），请站长更换 NovelAI Token",
-                ));
-            }
-            if status == 403 {
-                if gate_core::upstream_policy::is_model_level_403(&peek) {
-                    return Err(UpstreamError::new(
-                        400,
-                        "上游不认识这个文本模型；本站可用的文本模型：llama-3-erato-v1、kayra-v1",
-                    ));
-                }
-                let tripped = token.with(|f| {
-                    f.fails += 1;
-                    f.text_forbidden += 1;
-                    if f.text_forbidden >= 3 {
-                        f.text_forbidden = 0;
-                        true
-                    } else {
-                        false
-                    }
-                });
-                if tripped {
-                    self.inner.hooks.event(
-                        "upstream_403_text",
-                        "NovelAI 对文本 / 语音请求连续返回 403。生图仍可用，但请检查上游账号状态。",
-                        1800.0,
-                    );
-                }
-                return Err(UpstreamError::new(
-                    403,
-                    "上游拒绝了请求（HTTP 403），该账号已临时隔离保护",
-                ));
-            }
-            if status == 429 {
-                let wait = gate_core::upstream_policy::clamp_retry_after_f64(
-                    retry_after_or_default(retry_after.as_deref(), self.now()),
-                );
-                let now = self.now();
-                token.with(|f| {
-                    f.fails += 1;
-                    f.text_blocked_until = f.text_blocked_until.max(now + wait);
-                });
-                return Err(UpstreamError::new(
-                    429,
-                    format!(
-                        "上游限流(429)，文本 / 语音通道暂停约 {} 秒，请稍后再试",
-                        wait as i64
-                    ),
-                ));
-            }
-            let s = if matches!(status, 400 | 422 | 503) {
-                status
-            } else {
-                502
-            };
-            return Err(UpstreamError::new(
-                s,
-                format!("上游文本请求失败（HTTP {status}）"),
-            ));
-        }
-        token.with(|f| f.text_forbidden = 0);
-        self.mark_ok(&token);
-        Ok(resp)
     }
 
     /// 只读查询（订阅 / Anlas 余额 / Token 校验）：与出图同一套浏览器请求头，不跟随重定向，不碰调度。

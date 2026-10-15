@@ -178,11 +178,12 @@ async fn usage_logs_filter_and_paginate() {
         a.get(&format!("{A}/logs?feature=upscale")).await.json()["total"],
         15
     );
-    assert_eq!(
-        a.get(&format!("{A}/logs?feature=text")).await.json()["total"],
-        15,
-        "chat 归在文本功能下"
-    );
+    // 文本生成 / 语音已删（docs/v3-deviations.md #81）：不能再按它们筛选；旧的 chat / text 记录仍在全部列表里
+    for f in ["text", "voice"] {
+        a.get(&format!("{A}/logs?feature={f}"))
+            .await
+            .assert_detail(422, "未知功能");
+    }
     assert_eq!(
         a.get(&format!("{A}/logs?feature=")).await.json()["total"],
         45

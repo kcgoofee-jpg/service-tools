@@ -90,13 +90,13 @@ fn site(s: Site) -> Router {
             }),
         )
         .route(
-            "/v1/models",
+            "/queue-status",
             get(|State(s): State<Site>, h: HeaderMap| async move {
                 serve(
                     State(s),
-                    "/v1/models",
+                    "/queue-status",
                     h,
-                    json!({"object": "list", "data": [{"id": "m"}]}),
+                    json!({"global": {"active": 0, "waiting": 0, "concurrency": 1}}),
                 )
                 .await
             }),
@@ -156,7 +156,7 @@ async fn healthy_site_passes_without_a_key() {
             ("public/status", Flag::Pass),
             ("public/live", Flag::Pass),
             ("status.json", Flag::Pass),
-            ("v1/models", Flag::Pass),
+            ("queue-status", Flag::Pass),
             ("v1/me without key -> 401", Flag::Pass),
             ("v1/me wrong key -> 401", Flag::Pass),
             ("v1/me valid key", Flag::Info),

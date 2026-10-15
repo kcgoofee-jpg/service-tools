@@ -602,7 +602,7 @@ async fn ops_grant_ban_unban_audit() {
         (bad.0, bad.2),
         (
             422,
-            json!({"detail": "未知功能：image,upscale,augment,vibe,tags,text,voice"})
+            json!({"detail": "未知功能：image,upscale,augment,vibe,tags"})
         )
     );
     let nobody =
@@ -1186,9 +1186,7 @@ async fn quota_and_resetkey_match_legacy() {
                    {"id": "upscale", "label": "放大", "on": false},
                    {"id": "augment", "label": "导演工具（线稿、上色等）", "on": false},
                    {"id": "vibe", "label": "Vibe 编码", "on": false},
-                   {"id": "tags", "label": "标签补全", "on": false},
-                   {"id": "text", "label": "文本生成 / OpenAI 兼容聊天", "on": false},
-                   {"id": "voice", "label": "语音合成", "on": false}]})
+                   {"id": "tags", "label": "标签补全", "on": false}]})
     );
     // 全站关掉某功能后，即使这把 Key 授权了也显示关
     e.state

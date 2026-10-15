@@ -1,7 +1,6 @@
 //! 对外公开的上游错误文案（移植自 `app/upstream_errors.py`）：只描述失败，不带任何上游响应内容。
 //!
 //! 上游的 JSON / HTML 可能含账号信息、URL 或回显的凭据，所以按状态码挑本地文案，而不是尝试脱敏。
-//! `text_stream_events`（异步 IO）留待后续移植，不在 gate-core。
 
 pub fn upstream_error_message(status: i64) -> String {
     let message = match status {

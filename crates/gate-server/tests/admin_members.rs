@@ -181,7 +181,6 @@ async fn keys_list_shape_roles_and_counters() {
             "daily_anlas",
             "daily_v5",
             "monthly_anlas",
-            "daily_text_tokens",
             "rpm",
             "allow_anlas",
             "allow_img2img",
@@ -209,7 +208,8 @@ async fn keys_list_shape_roles_and_counters() {
     assert_eq!(
         k["used"],
         json!({"images": 3, "generated_images_total": 6, "legacy_free_images": 1, "anlas": 1.24, "v5": 2,
-               "text_tokens": 7, "requests": 4})
+               "requests": 4}),
+        "不再返回文本 token 计数（docs/v3-deviations.md #81）"
     );
     assert_eq!(keys[1]["role"], "invite");
     assert_eq!(keys[1]["role_label"], "邀请");
@@ -247,7 +247,7 @@ async fn create_key_validates_then_stores_manual_quota() {
         ),
         (
             json!({"features": ["nope"]}),
-            "features 必须是功能名列表：image,upscale,augment,vibe,tags,text,voice",
+            "features 必须是功能名列表：image,upscale,augment,vibe,tags",
         ),
     ] {
         a.post(&format!("{A}/keys"), body)
@@ -322,6 +322,41 @@ async fn create_key_validates_then_stores_manual_quota() {
     assert!(
         acts.iter()
             .any(|(act, _, d, ok)| act == "新建 Key" && d.contains("daily_images") && !ok)
+    );
+}
+
+/// 每日文本额度不再读也不再写（docs/v3-deviations.md #81）：创建 / 修改里带这个字段被忽略（不校验范围），
+/// 返回的 Key 没有这个字段；新建的 Key 在列里写 0（列保留，只增不减），已有的 Key 的列原样不动。
+#[tokio::test]
+async fn daily_text_tokens_is_ignored_and_never_returned() {
+    let (e, a) = ready().await;
+    let r = a
+        .post(
+            &format!("{A}/keys"),
+            json!({"name": "x", "daily_text_tokens": 100_000_001}),
+        )
+        .await;
+    assert_eq!(r.status, 200, "{}", r.text());
+    let key = r.json()["key"].clone();
+    assert!(key.get("daily_text_tokens").is_none());
+    assert!(key["used"].get("text_tokens").is_none());
+    let row = e
+        .state
+        .db
+        .get_key(key["id"].as_i64().unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(row["daily_text_tokens"], 0);
+
+    let url = format!("{A}/keys/1");
+    let before = e.state.db.get_key(1).await.unwrap().unwrap()["daily_text_tokens"].clone();
+    let r = a.patch(&url, json!({"daily_text_tokens": -1})).await;
+    assert_eq!(r.status, 200, "{}", r.text());
+    assert!(r.json()["key"].get("daily_text_tokens").is_none());
+    assert_eq!(
+        e.state.db.get_key(1).await.unwrap().unwrap()["daily_text_tokens"],
+        before
     );
 }
 
@@ -518,8 +553,15 @@ async fn patch_key_updates_fields_and_quota_ownership() {
     let r = a.patch(&url, json!({"expires_days": 0})).await;
     assert_eq!(r.json()["key"]["expires_at"], Value::Null);
     // features：列表按功能顺序规整，null = 不限
-    let r = a.patch(&url, json!({"features": ["text", "image"]})).await;
-    assert_eq!(r.json()["key"]["features"], json!(["image", "text"]));
+    let r = a.patch(&url, json!({"features": ["vibe", "image"]})).await;
+    assert_eq!(r.json()["key"]["features"], json!(["image", "vibe"]));
+    // 文本生成 / 语音已不是功能（docs/v3-deviations.md #81）：和别的未知名字一样 422
+    a.patch(&url, json!({"features": ["image", "text"]}))
+        .await
+        .assert_detail(
+            422,
+            "features 必须是功能名列表：image,upscale,augment,vibe,tags",
+        );
     let r = a.patch(&url, json!({"features": null})).await;
     assert_eq!(r.json()["key"]["features"], Value::Null);
     // 身份组随 PATCH 一起改；is_admin 单独传被忽略

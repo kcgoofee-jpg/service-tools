@@ -122,8 +122,6 @@ pub struct EnvConfig {
     pub nai_token_v5_daily_limits: Vec<i64>,
     pub nai_token_allow_anlas: Vec<bool>,
     pub image_host: String,
-    pub text_host: String,
-    pub text_host_legacy: String,
     pub upstream_proxy: String,
     pub upstream_user_agent: String,
     pub upstream_http2: bool,
@@ -173,12 +171,8 @@ pub struct EnvConfig {
     pub default_daily_anlas: f64,
     pub default_daily_v5: i64,
     pub default_monthly_anlas: f64,
-    pub default_daily_text_tokens: i64,
     pub default_rpm: i64,
     pub default_expires_days: i64,
-    // 文本
-    pub max_text_output_tokens: i64,
-    pub max_input_chars: i64,
     pub seed_demo_key: bool,
     pub registration: Option<RegistrationEnv>,
 }
@@ -310,8 +304,6 @@ impl EnvConfig {
             nai_token_allow_anlas: per_token_bools("NAI_TOKEN_ALLOW_ANLAS", true),
             nai_tokens,
             image_host: r.str("NAI_IMAGE_HOST", "https://image.novelai.net"),
-            text_host: r.str("NAI_TEXT_HOST", "https://text.novelai.net"),
-            text_host_legacy: r.str("NAI_TEXT_HOST_LEGACY", "https://api.novelai.net"),
             upstream_proxy: r.trimmed("UPSTREAM_PROXY"),
             upstream_user_agent: r.trimmed("UPSTREAM_USER_AGENT"),
             upstream_http2: r.bool("UPSTREAM_HTTP2", true),
@@ -354,11 +346,8 @@ impl EnvConfig {
             default_daily_anlas: r.float("DEFAULT_DAILY_ANLAS", 100.0),
             default_daily_v5: r.int("DEFAULT_DAILY_V5", 50),
             default_monthly_anlas: r.float("DEFAULT_MONTHLY_ANLAS", 2500.0),
-            default_daily_text_tokens: r.int("DEFAULT_DAILY_TEXT_TOKENS", 150000),
             default_rpm: r.int("DEFAULT_RPM", 10),
             default_expires_days: r.int("DEFAULT_KEY_EXPIRES_DAYS", 30),
-            max_text_output_tokens: r.int("MAX_TEXT_OUTPUT_TOKENS", 250),
-            max_input_chars: r.int("MAX_INPUT_CHARS", 24000),
             seed_demo_key: r.bool("SEED_DEMO_KEY", false),
             forwarded_allow_ips: split_list("FORWARDED_ALLOW_IPS", "127.0.0.1"),
             registration,
@@ -418,7 +407,6 @@ mod tests {
         assert!(!c.upstream_http2);
         assert!(c.admin_cookie_secure, "只有 0/false/no/off 才关闭");
         assert!(c.registration.is_none());
-        assert_eq!(c.max_text_output_tokens, 250);
     }
 
     #[test]
