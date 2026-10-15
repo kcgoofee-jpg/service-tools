@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 # Ubuntu/Debian 服务器基础加固（需 root，可重复执行）：
-# 防火墙(22/80/443)、SSH 仅密钥登录 + fail2ban、自动安全更新、1GB 交换分区、SQLite 每日备份(保留 7 天)。
+# 防火墙(22/80/443)、SSH 仅密钥登录 + fail2ban、自动安全更新、1GB 交换分区、SQLite 每晚 03:30 本机备份（GFS 14/8/6：每日 14 份、每周 8 份、每月 6 份）。
 # 运行前请确认你已经能用密钥登录——脚本会在 authorized_keys 为空时跳过关闭密码登录，避免把自己锁在外面。
 set -euo pipefail
 [ "$(id -u)" = 0 ] || { echo "请用 root 运行"; exit 1; }
-APP_DIR="${APP_DIR:-/opt/service-tools}"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -q && apt-get install -y -q ufw fail2ban unattended-upgrades sqlite3
 

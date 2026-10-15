@@ -4,15 +4,10 @@ gate.davidzhao.top {
 		path /self-register /self-register/*
 	}
 	respond @bridge 404
-	respond /openapi.json 404
-
-	# 【安全红线】边缘剥离外部伪造的内部测试头，严防绕过防分享与风控
-	request_header -X-Admin-Test
-	request_header -X-Test-Channel
 
 	# 只压缩网页、后台、前端资源和公开 JSON；出图接口与两条实时推送（SSE）不压缩，避免缓冲
 	@compress {
-		path / /admin /admin/* /status /status.json /public/* /_owl/* /static/*
+		path / /admin /admin/* /status /status.json /public/* /_owl/*
 		not path /public/live/stream /admin/api/events
 	}
 	encode @compress zstd gzip
