@@ -1,37 +1,35 @@
-//! 后台常驻任务（旧版 `app/background_tasks.py`）与启动 / 关停序列。
+//! 定时任务（旧版 `app/background_tasks.py` + 内核模块的周期部分）与启动 / 关停序列。
 //!
-//! 三个循环，全部挂在 `state.tasks` 上，睡觉时听 `state.shutdown`：
+//! 每件事一个循环，全部挂在 `state.tasks` 上，启动后立即跑第一轮，睡觉时听 `state.shutdown`：
 //!
-//! | 循环 | 间隔 | 做什么 |
+//! | 任务 | 周期 | 做什么 |
 //! |---|---|---|
-//! | 维护 | 5 分钟 ±20% | 清过期记录 / 状态码统计落库 / 原图保存期与容量上限 / 自动关闭不用处理的 Bug（最多 10 分钟一次）/ 注册服务的三个同步（`registration::registrar_jobs`）/ 磁盘自检 / 官方状态 |
-//! | 内核 | 10 分钟 ±20% | 各模块 tick + 交叉校验（旧版叫 `anlas_rebalance_loop`，名字是历史遗留：Anlas 自动分配 10-13 已删除，现在就是内核） |
-//! | 闲置回收 | 1 小时 | 长期不用的 Key 删除并拉黑（站点出不了图的服务日不算，见 [`idle_recycle_window`]）；`KEY_INACTIVITY_DELETE_DAYS=0` 时**什么都不做** |
+//! | `quota` 动态额度 | 10 分钟 ±20% | `quota::decide`：服务日第一次跑时复盘昨天、定当天的 V5 方案，之后每轮把额度下发给算法管理的 Key |
+//! | `upstream_snapshot` 上游 V5 快照 | 10 分钟 ±20%，满 1 小时才记 | 主动读一次订阅，写 `upstream_snapshots`（安静时段测速用） |
+//! | `hourly_cap` 每小时上限自动调整 | 10 分钟 ±20% | `guard.adapt_daily`：平稳一天且顶到过上限 +10 |
+//! | `breaker` 全站熔断 | 10 分钟 ±20% | 15 分钟内上游失败 ≥ 5 次、≥ 30%、来自 ≥ 2 把 Key → 停 5 分钟 |
+//! | `key_guard` 单 Key 限流 | 10 分钟 ±20% | 1 小时被拒 ≥ 60 次 → 暂停这把 Key 1 小时 |
+//! | `maintenance` 维护 | 5 分钟 ±20% | 清过期记录 / 状态码统计落库 / 原图保存期与容量上限 / 自动关闭不用处理的 Bug（最多 10 分钟一次）/ 注册服务的三个同步（`registration::registrar_jobs`）/ 磁盘自检 / 官方状态 |
+//! | `idle_recycle` 闲置回收 | 1 小时 | 长期不用的 Key 删除并拉黑（站点出不了图的服务日不算，见 [`idle_recycle_window`]）；`KEY_INACTIVITY_DELETE_DAYS=0` 时**什么都不做** |
 //!
-//! 一个循环里的一轮工作做到底才响应关停（只在睡觉时被打断）：额度重算这类多步写入不能被拦腰切断。
-//!
-//! # 没有移植的
-//!
-//! - `anlas_rebalance_loop` 里关于 Anlas 自动分配的部分：旧版 10-13 起它就只剩调 `kernel.tick_all()` 了，
-//!   所以只留内核循环；`anlas_auto` 列与 `/anlas-pool` 接口不归这里管。
+//! 每轮的结果记进设置 `job_last`，后台「系统」页的「定时任务」卡片显示（[`registry`]）。
+//! 一轮工作做到底才响应关停（只在睡觉时被打断）：额度重算这类多步写入不能被拦腰切断。
+
+mod autopilot;
+mod capacity;
+pub mod quota;
+pub mod registry;
+
+pub use registry::{JOBS, Job, JobError, JobsState, Origin, find, guarded, run_once, spawn_job};
 
 use crate::action_log::{RETENTION_DAYS as ADMIN_ACTION_RETENTION_DAYS, log_action};
 use crate::audit::{audit_flags, audit_image_cap_mb, audit_image_keep_hours};
 use crate::bugs::Report;
-use crate::kernel::{KernelError, ServiceRegistrar};
 use crate::state::AppState;
 use gate_core::idle;
 use gate_db::repo::discord::BanInfo;
-use std::future::Future;
-use std::sync::Arc;
 use std::time::Duration;
 
-/// 内核循环的基准间隔（秒）。
-pub const KERNEL_TICK_SECONDS: f64 = 600.0;
-/// 维护循环的基准间隔（秒）。
-pub const MAINTENANCE_SECONDS: f64 = 300.0;
-/// 闲置回收循环的间隔（秒）。
-pub const CLEANUP_SECONDS: f64 = 3600.0;
 /// 关停时等待记账 / 写库任务的最长时间（docker `stop_grace_period` 是 120 秒）。
 pub const SHUTDOWN_WAIT_SECONDS: u64 = 110;
 
@@ -58,7 +56,7 @@ async fn sleep_or_shutdown(state: &AppState, seconds: f64) -> bool {
     }
 }
 
-fn capture(state: &AppState, source: &str, e: &KernelError) {
+fn capture(state: &AppState, source: &str, e: &JobError) {
     state.bugs.capture(Report {
         source,
         error: Some((&e.ty, &e.msg)),
@@ -70,40 +68,18 @@ fn capture(state: &AppState, source: &str, e: &KernelError) {
 // 启动 / 关停
 // ---------------------------------------------------------------------------
 
-/// 启动序列（在 `AppState::build` 之后调用）：读回内核运行记录 → 把注册服务接进内核 → 拉起所有循环 →
-/// 「服务已启动」提醒（冷却 60 秒）。
-///
-/// 注册服务配齐（`state.registration`）时，内核的 registrar 自动接上；没配齐就是旧版的 `registrar is None`。
-pub async fn startup(state: &AppState) -> Result<(), KernelError> {
-    state.kernel.load(state).await?;
-    if let Some(svc) = &state.registration
-        && state.kernel.registrar().is_none()
-    {
-        state
-            .kernel
-            .set_registrar(Some(Arc::new(ServiceRegistrar(svc.clone()))));
-    }
+/// 启动序列（在 `AppState::build` 之后调用）：读回定时任务的运行记录 → 拉起所有循环。
+pub async fn startup(state: &AppState) -> Result<(), JobError> {
+    state.jobs.load(&state.db).await?;
     spawn_all(state);
     Ok(())
 }
 
-/// 拉起所有常驻循环。每个循环都在 `state.shutdown` 取消后尽快退出。
+/// 拉起所有定时任务的循环。每个循环都在 `state.shutdown` 取消后尽快退出。
 pub fn spawn_all(state: &AppState) {
-    spawn_loop(state, "maintenance", maintenance_loop);
-    spawn_loop(state, "inactive_key_cleanup", inactive_key_cleanup_loop);
-    spawn_loop(state, "kernel_tick", kernel_tick_loop);
-}
-
-fn spawn_loop<F, Fut>(state: &AppState, name: &'static str, f: F)
-where
-    F: FnOnce(AppState) -> Fut,
-    Fut: Future<Output = ()> + Send + 'static,
-{
-    let fut = f(state.clone());
-    state.tasks.spawn(async move {
-        fut.await;
-        tracing::info!(task = name, "后台任务已停止");
-    });
+    for job in JOBS.iter() {
+        spawn_job(state, job);
+    }
 }
 
 /// 优雅关停的后半段（HTTP 服务已经停止接收新连接并等完在途请求之后）：
@@ -147,61 +123,55 @@ pub async fn flush_status_stats(state: &AppState) -> Result<(), gate_db::DbError
 }
 
 // ---------------------------------------------------------------------------
-// 内核循环
+// 维护
 // ---------------------------------------------------------------------------
 
-async fn kernel_tick_loop(state: AppState) {
-    loop {
-        if let Err(e) = state.kernel.tick_all(&state).await {
-            capture(&state, "kernel", &e);
-        }
-        // 抖动的意义：一个 tick 里会向上游发订阅 / V5 额度查询，精确的 600 秒网格是最容易被
-        // 上游识别为自动化调度的形态（2026-10-12 反封号审查）。
-        if !sleep_or_shutdown(&state, jittered(KERNEL_TICK_SECONDS, 0.2)).await {
-            return;
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// 维护循环
-// ---------------------------------------------------------------------------
-
-async fn maintenance_loop(state: AppState) {
-    loop {
-        maintenance_once(&state).await;
-        if !sleep_or_shutdown(&state, jittered(MAINTENANCE_SECONDS, 0.2)).await {
-            return;
-        }
-    }
-}
-
-/// 维护循环的一轮：每个任务各自出错、各自记 Bug，不影响其他任务。
-pub async fn maintenance_once(state: &AppState) {
-    macro_rules! job {
-        ($name:literal, $fut:expr) => {
+/// 维护的一轮：每一步各自出错、各自记 Bug（来源 `maintenance:<步骤>`），不影响其他步骤。
+/// 返回出错的步骤（显示名, 错误）。
+pub async fn maintenance_once(state: &AppState) -> Vec<(&'static str, JobError)> {
+    let mut failed = Vec::new();
+    macro_rules! step {
+        ($name:literal, $label:literal, $fut:expr) => {
             if state.shutdown.is_cancelled() {
-                return;
+                return failed;
             }
             if let Err(e) = $fut.await {
                 capture(state, concat!("maintenance:", $name), &e);
+                failed.push(($label, e));
             }
         };
     }
-    job!("purge", purge(state));
+    step!("purge", "清理过期记录", purge(state));
     // 清理之后再自动关 Bug：先关再清的话，久未出现的旧 Bug 会在同一轮里直接被删，来不及留下「自动处理」的痕迹
-    job!("bug_triage", bug_triage(state));
+    step!("bug_triage", "自动关闭 Bug", bug_triage(state));
     // 同步身份组 / 补全资料 / 退群回收（注册服务自己逐步记错；没配齐就什么都不做）
     if state.shutdown.is_cancelled() {
-        return;
+        return failed;
     }
     crate::registration::registrar_jobs(state).await;
-    job!("disk", disk_check(state));
-    job!("official", official_status(state));
+    step!("disk", "磁盘检查", disk_check(state));
+    step!("official", "官方状态", official_status(state));
+    failed
+}
+
+/// 定时任务「维护」：跑一轮 [`maintenance_once`]，出错的步骤合成一句（各步骤已经各自记过 Bug）。
+pub(crate) async fn maintenance_job(state: &AppState) -> Result<String, JobError> {
+    let failed = maintenance_once(state).await;
+    if !failed.is_empty() {
+        let text: Vec<String> = failed
+            .iter()
+            .map(|(label, e)| format!("{label}出错：{e}"))
+            .collect();
+        return Err(JobError::reported(text.join("；")));
+    }
+    if state.shutdown.is_cancelled() {
+        return Ok("正在关停，本轮没做完".to_string());
+    }
+    Ok("全部完成".to_string())
 }
 
 /// 自动关闭不需要人处理的 Bug（见 [`crate::bugs::Bugs::auto_triage`]）。最多 10 分钟一次，启动后的第一轮维护就会跑。
-pub async fn bug_triage(state: &AppState) -> Result<(), KernelError> {
+pub async fn bug_triage(state: &AppState) -> Result<(), JobError> {
     let now = state.now();
     if state.bugs.triage_due(now) {
         state.bugs.auto_triage(now).await?;
@@ -210,7 +180,7 @@ pub async fn bug_triage(state: &AppState) -> Result<(), KernelError> {
 }
 
 /// 清理过期记录；原图的保存期与容量上限。
-pub async fn purge(state: &AppState) -> Result<(), KernelError> {
+pub async fn purge(state: &AppState) -> Result<(), JobError> {
     let db = &state.db;
     // 0 = 长期保留：已向成员披露保留范围，用于防滥用、回测和优化算法
     let days = audit_flags(db).await?.2;
@@ -235,7 +205,7 @@ pub async fn purge(state: &AppState) -> Result<(), KernelError> {
     Ok(())
 }
 
-async fn purge_audit_images(state: &AppState) -> Result<(), KernelError> {
+async fn purge_audit_images(state: &AppState) -> Result<(), JobError> {
     let db = &state.db;
     let keep_h = audit_image_keep_hours(db).await?;
     if keep_h > 0 {
@@ -260,14 +230,14 @@ async fn purge_audit_images(state: &AppState) -> Result<(), KernelError> {
 }
 
 /// 磁盘剩余不足 10% 提醒站长（同一条 6 小时一次）。
-async fn disk_check(state: &AppState) -> Result<(), KernelError> {
+async fn disk_check(state: &AppState) -> Result<(), JobError> {
     let st = rustix::fs::statvfs(&state.env.data_dir)
-        .map_err(|e| KernelError::new("OSError", e.to_string()))?;
+        .map_err(|e| JobError::new("OSError", e.to_string()))?;
     // shutil.disk_usage：free = f_bavail * f_frsize，total = f_blocks * f_frsize
     let free = st.f_bavail.saturating_mul(st.f_frsize);
     let total = st.f_blocks.saturating_mul(st.f_frsize);
     if total == 0 {
-        return Err(KernelError::new("ZeroDivisionError", "division by zero"));
+        return Err(JobError::new("ZeroDivisionError", "division by zero"));
     }
     if (free as f64) / (total as f64) < 0.10 {
         state.alerter.notify(
@@ -282,12 +252,12 @@ async fn disk_check(state: &AppState) -> Result<(), KernelError> {
     Ok(())
 }
 
-/// NovelAI 官方状态（status.io 公开接口）：状态页那边的 `fetch_official`，维护循环每轮取一次，失败保留上次的结果。
-/// 地址默认是官方接口；测试用 `state.kernel.set_official_api(..)`（进程内）或环境变量 `OFFICIAL_STATUS_URL`（起真实二进制时）
+/// NovelAI 官方状态（status.io 公开接口）：状态页那边的 `fetch_official`，维护每轮取一次，失败保留上次的结果。
+/// 地址默认是官方接口；测试用 `state.jobs.set_official_api(..)`（进程内）或环境变量 `OFFICIAL_STATUS_URL`（起真实二进制时）
 /// 指到本地 / 不可达的地址，保证不出本机。
-async fn official_status(state: &AppState) -> Result<(), KernelError> {
+async fn official_status(state: &AppState) -> Result<(), JobError> {
     let url = state
-        .kernel
+        .jobs
         .official_api()
         .or_else(|| {
             std::env::var("OFFICIAL_STATUS_URL")
@@ -303,23 +273,41 @@ async fn official_status(state: &AppState) -> Result<(), KernelError> {
 // 闲置 Key 回收
 // ---------------------------------------------------------------------------
 
-async fn inactive_key_cleanup_loop(state: AppState) {
-    loop {
-        // 2026-10-13 站长：取消闲置提醒私信。3 天闲置 = 直接删 Key 并拉黑名单，不再提前 24 小时通知。
-        match delete_inactive_keys(&state).await {
-            Ok(0) => {}
-            Ok(n) => tracing::info!("deleted {n} inactive API key(s)"),
-            Err(e) => capture(&state, "cleanup", &e),
+/// 定时任务「闲置回收」。2026-10-13 站长：取消闲置提醒私信。3 天闲置 = 直接删 Key 并拉黑名单，不再提前 24 小时通知。
+pub(crate) async fn idle_recycle_job(state: &AppState) -> Result<String, JobError> {
+    Ok(match recycle_inactive_keys(state).await? {
+        Recycle::Off => "关闭（天数=0）".to_string(),
+        Recycle::Skipped => "最近 60 分钟没出图，本轮跳过".to_string(),
+        Recycle::Done {
+            deleted,
+            skipped_days,
+        } => {
+            if deleted > 0 {
+                tracing::info!("deleted {deleted} inactive API key(s)");
+            }
+            if skipped_days > 0 {
+                format!("回收 {deleted} 把（不算站点没在正常出图的 {skipped_days} 天）")
+            } else {
+                format!("回收 {deleted} 把")
+            }
         }
-        if !sleep_or_shutdown(&state, CLEANUP_SECONDS).await {
-            return;
-        }
-    }
+    })
+}
+
+/// 一轮闲置回收的结果。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Recycle {
+    /// `KEY_INACTIVITY_DELETE_DAYS=0`：关闭。
+    Off,
+    /// 最近 60 分钟全站没有成功出图（不在安静时段）：本轮跳过。
+    Skipped,
+    /// 删掉的 Key 数；`skipped_days` = 往回多数的、站点没在正常出图的服务日数。
+    Done { deleted: usize, skipped_days: i64 },
 }
 
 /// 本轮闲置回收的截止时间；站点眼下就出不了图时返回 `None`（本轮不回收）。
 ///
-/// 站点自己出不了图的服务日不算成员闲置（docs/v3-deviations.md #55）：
+/// 站点自己出不了图的服务日不算成员闲置：
 /// - 已完结的服务日全站成功出图不到 [`idle::HEALTHY_DAY_MIN_IMAGES`] 张 → 跳过，往回多数一天（最多回看 30 天）；
 /// - 当前服务日：不在安静时段、且最近 60 分钟全站一张都没出成功 → 本轮直接跳过。
 ///
@@ -328,7 +316,7 @@ pub async fn idle_recycle_window(
     state: &AppState,
     days: i64,
     now: f64,
-) -> Result<Option<idle::IdleWindow>, KernelError> {
+) -> Result<Option<idle::IdleWindow>, JobError> {
     let quiet = state.guard.with(|g| g.in_quiet(now));
     if !quiet {
         let recent = state
@@ -364,19 +352,27 @@ pub async fn idle_recycle_window(
     Ok(Some(idle::idle_window(now, days, &served)))
 }
 
-/// 永久回收长期未使用的普通 Key，并拉入黑名单（由站长在后台管理与解封）。
+/// 永久回收长期未使用的普通 Key，并拉入黑名单（由站长在后台管理与解封）。返回删掉的 Key 数，见 [`recycle_inactive_keys`]。
+pub async fn delete_inactive_keys(state: &AppState) -> Result<usize, JobError> {
+    Ok(match recycle_inactive_keys(state).await? {
+        Recycle::Done { deleted, .. } => deleted,
+        Recycle::Off | Recycle::Skipped => 0,
+    })
+}
+
+/// 闲置回收的一轮。
 ///
 /// **`KEY_INACTIVITY_DELETE_DAYS=0` 表示关闭：这时无论库里有什么都不会删任何 Key**（线上现在是 3，10-13 起开着）。
-/// 「连续 N 天」不算站点自己出不了图的服务日，见 [`idle_recycle_window`]。返回删掉的 Key 数。
-pub async fn delete_inactive_keys(state: &AppState) -> Result<usize, KernelError> {
+/// 「连续 N 天」不算站点自己出不了图的服务日，见 [`idle_recycle_window`]。
+pub async fn recycle_inactive_keys(state: &AppState) -> Result<Recycle, JobError> {
     let days = std::cmp::max(0, state.env.key_inactivity_delete_days);
     if days == 0 {
-        return Ok(0);
+        return Ok(Recycle::Off);
     }
     let now = state.now();
     let Some(window) = idle_recycle_window(state, days, now).await? else {
         tracing::info!("最近 60 分钟全站没有成功出图（不在安静时段），本轮不做闲置回收");
-        return Ok(0);
+        return Ok(Recycle::Skipped);
     };
     if window.skipped_days > 0 {
         tracing::info!(
@@ -439,7 +435,10 @@ pub async fn delete_inactive_keys(state: &AppState) -> Result<usize, KernelError
             }
         }
     }
-    Ok(key_ids.len())
+    Ok(Recycle::Done {
+        deleted: key_ids.len(),
+        skipped_days: window.skipped_days,
+    })
 }
 
 #[cfg(test)]

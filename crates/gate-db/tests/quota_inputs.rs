@@ -18,7 +18,7 @@ fn rejected(key_id: i64, reason: &str, detail: &str) -> NewLog {
 }
 
 /// 被每小时上限拦的小时按原因码 `hourly_cap` 数，不看文案（旧版按 `LIKE '%出图量已达上限%'` 数，
-/// 文案一改就静默失效；保底文案的计数随保底删除，docs/v3-deviations.md #61）。
+/// 文案一改就静默失效；保底文案的计数随保底删除）。
 #[tokio::test]
 async fn hourly_blocks_are_counted_by_reason_code() {
     let dir = tempfile::tempdir().unwrap();
@@ -65,7 +65,7 @@ async fn hourly_blocks_are_counted_by_reason_code() {
     assert_eq!(d.yesterday.paced_blocks, 1);
 }
 
-/// 节约模式的折算已删除（docs/v3-deviations.md #67）：上游计数只按张数累加；
+/// 节约模式的折算已删除：上游计数只按张数累加；
 /// `units` 列照旧跟着 `images` 一起涨（回滚到 2.x 时它拿 `units` 和每日上限比）。
 #[tokio::test]
 async fn upstream_counter_is_plain_image_count() {

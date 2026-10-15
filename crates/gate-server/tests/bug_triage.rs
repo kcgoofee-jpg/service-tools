@@ -1,4 +1,4 @@
-//! Bug 追踪的降噪与自动处理（docs/v3-deviations.md #45）：
+//! Bug 追踪的降噪与自动处理：
 //! 1. 网页报错上报：浏览器网络失败、非本站脚本的 `Uncaught …` 不入库；
 //! 2. 错误账本：上游故障造成的 5xx 不记 Bug，本站自己的 500 照记；
 //! 3. 维护循环里的自动处理：噪音立刻关，注意级 24 小时 / 错误级 7 天没再出现的关；再出现按「复发」重新打开。
@@ -520,7 +520,7 @@ async fn manual_resolve_is_not_marked_automatic() {
 async fn maintenance_round_runs_triage_at_most_every_ten_minutes() {
     let e = setup(&[]).await;
     let s = &e.state;
-    s.kernel
+    s.jobs
         .set_official_api(Some("http://127.0.0.1:9/never".into()));
     seed(
         &e,

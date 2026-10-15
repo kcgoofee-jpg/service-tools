@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Mod } from "../modules/core";
+import type { Job } from "../system/jobs-core";
 import { buildReminders, computeVerdict, type Reminder } from "./reminders";
 import type { Overview } from "./types";
 
@@ -16,15 +16,12 @@ const ov = (p: Partial<Overview> = {}): Overview => ({
   log_since: null,
   ...p,
 });
-const base = { bot: null, bugs: null, modules: null, now: NOW };
-const mod = (enabled: boolean, last: Mod["last"]): Mod => ({
-  name: "m",
-  title: "m",
-  question: "",
-  enabled,
-  hard_note: "",
-  periodic: true,
-  params: [],
+const base = { bot: null, bugs: null, jobs: null, now: NOW };
+const job = (title: string, last: Job["last"]): Job => ({
+  name: title,
+  title,
+  every: "每 10 分钟",
+  every_secs: 600,
   last,
 });
 
@@ -71,15 +68,37 @@ describe("buildReminders", () => {
     expect(warns[0]?.level).toBe("warn");
   });
 
-  it("机器人离线、模块自检失败（已关闭的模块不算）", () => {
+  it("机器人离线、定时任务出错或超时（还没跑过的不算），链接到系统页的定时任务卡片", () => {
+    const run = (at: number, ok = true) => ({ at, ok, ms: 42, summary: ok ? "完成" : "数据库锁超时" });
     const r = buildReminders({
       ...base,
       overview: ov(),
       bot: { status: { online: false } },
-      modules: { modules: [mod(true, { ok: false }), mod(false, { ok: false }), mod(true, { ok: true })] },
+      jobs: {
+        jobs: [
+          job("动态额度", run(NOW - 60, false)),
+          job("全站熔断", run(NOW - 3 * 600 - 1)),
+          job("维护", run(NOW - 3 * 600)),
+          job("闲置回收", null),
+        ],
+      },
     });
-    expect(r.map((x) => x.key)).toEqual(["discord", "modules"]);
-    expect(r[1]?.title).toBe("1 个模块自检没通过");
+    expect(r.map((x) => x.key)).toEqual(["discord", "jobs"]);
+    expect(r[1]).toMatchObject({
+      level: "warn",
+      title: "2 个定时任务上次出错或超时没运行",
+      detail: "动态额度、全站熔断",
+      to: "/admin/system#jobs",
+    });
+  });
+
+  it("定时任务都正常时不提醒", () => {
+    const r = buildReminders({
+      ...base,
+      overview: ov(),
+      jobs: { jobs: [job("动态额度", { at: NOW - 60, ok: true, ms: 1, summary: "" }), job("维护", null)] },
+    });
+    expect(r).toEqual([]);
   });
 });
 

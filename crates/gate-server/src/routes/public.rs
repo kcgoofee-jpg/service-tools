@@ -654,7 +654,7 @@ fn one_line(text: &str) -> String {
 
 /// 首页 / 后台网页的脚本报错上报（只收本站页面的错误；每 IP 每 10 分钟 10 条，全站每 10 分钟 100 条）。
 ///
-/// 3.0 起另外丢弃两类（docs/v3-deviations.md #45）：浏览器网络失败（断网 / 请求被取消，不是我们的缺陷），
+/// 3.0 起另外丢弃两类：浏览器网络失败（断网 / 请求被取消，不是我们的缺陷），
 /// 以及出错脚本不在 `/_owl/` 下的 `Uncaught …`（旧版缓存页、浏览器插件）。
 async fn client_error(State(state): State<AppState>, req: Request) -> Response {
     let (parts, body) = req.into_parts();
@@ -724,7 +724,7 @@ async fn client_error(State(state): State<AppState>, req: Request) -> Response {
 
 // ------------------------------------------------------------------ 客户端兼容视图（/user/*）
 
-/// 虚拟订阅视图：数字由 gate_core 算（纯函数，golden 对拍过），这里只负责把库里的数查好。
+/// 虚拟订阅视图：数字由 gate_core 算（纯函数），这里只负责把库里的数查好。
 async fn subscription(state: &AppState, key: &Key) -> Result<Value, InternalError> {
     let (day, month) = (state.day(), state.month());
     let data = gate_core::client_views::SubscriptionData {

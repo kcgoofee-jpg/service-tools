@@ -1,0 +1,67 @@
+/* 定时任务卡片。只用 tokens.css 的变量；宽屏表格、窄屏卡片（断点见 members/shared.tsx 的 NARROW）。 */
+
+/* 表格：任务名是行标题，跟正文一样的颜色，不粘顶；也不要表头那条内阴影（否则和格线叠成两条线） */
+.table-wrap .jobs-tbl th[scope="row"] {
+  position: static;
+  background: none;
+  box-shadow: none;
+  color: var(--text);
+  font-weight: 600;
+}
+.jobs-tbl tbody th,
+.jobs-tbl td {
+  vertical-align: middle;
+}
+/* 摘要列占满剩下的宽度；错误文字可能是一长串没有空格的字，逐字折行，不撑出横向滚动条
+   （末尾几个字绑在一起，见 jobs.tsx 的 Summary） */
+.jobs-tbl td.wrap {
+  width: 100%;
+}
+.jobs__sum {
+  word-break: normal;
+  overflow-wrap: anywhere;
+}
+.jobs__err {
+  color: var(--danger);
+  font-weight: 600;
+}
+.jobs__ms {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 窄屏卡片：任务名 + 徽标 / 摘要 / 周期 · 上次 · 耗时 */
+.jobs-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.jobs-item {
+  display: grid;
+  gap: var(--sp-1);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-sm); /* 与表格里的字号一致 */
+  min-width: 0;
+}
+.jobs-item:last-child {
+  border-bottom: 0;
+}
+.jobs-item__top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+.jobs-item__top b {
+  font-weight: 600;
+}
+
+/* 卡片下方的指路：链接夹在弱化色的句子里，靠下划线区分（不只靠颜色） */
+.jobs__foot a {
+  text-decoration: underline;
+}

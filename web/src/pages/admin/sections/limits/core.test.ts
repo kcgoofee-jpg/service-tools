@@ -25,14 +25,11 @@ describe("deriveV5（全站 V5 = 恢复 × 每 1% 张数；每人 = max(1, 全�
 });
 
 describe("imagesPerPercent", () => {
-  it("优先取容量模块给的参数，拿不到才用默认值", () => {
-    expect(
-      imagesPerPercent({ modules: [{ name: "capacity", params: [{ name: "V5 每 1% ≈ 张", value: 13 }] }] }),
-    ).toEqual({
-      value: 13,
-      fromApi: true,
-    });
+  it("优先取动态额度接口给的 images_per_percent，拿不到才用默认值", () => {
+    expect(imagesPerPercent({ images_per_percent: 13 })).toEqual({ value: 13, fromApi: true });
+    expect(imagesPerPercent({})).toEqual({ value: 14.2, fromApi: false });
     expect(imagesPerPercent(null)).toEqual({ value: 14.2, fromApi: false });
+    expect(imagesPerPercent(undefined)).toEqual({ value: 14.2, fromApi: false });
   });
 });
 

@@ -1,5 +1,5 @@
 //! 健壮性：任意字节喂进解码器 / 解析器都不能 panic；校验结果与切块方式无关（限额足够大时）。
-//! （与旧 Python 的逐条对拍在 `*_golden.rs`；这里是 proptest 补充。）
+//! （逐条用例在 `*_snapshot.rs`；这里是 proptest 补充。）
 
 use base64::Engine;
 use gate_core::image_events::{

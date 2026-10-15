@@ -1,6 +1,6 @@
 //! 后台「日志与记录」接口：用量日志 / 操作日志 / Bug / 生成记录 / 反馈 / 问卷 / 捐赠 / 全站重置。
 //!
-//! 逐字节对拍旧版见 `admin_golden.rs`；这里按接口写成可读的用例（鉴权、校验文案、返回结构、写进库的行、操作日志、导出内容）。
+//! 逐字节快照见 `admin_snapshot.rs`；这里按接口写成可读的用例（鉴权、校验文案、返回结构、写进库的行、操作日志、导出内容）。
 
 mod admin_util;
 mod common;
@@ -178,7 +178,7 @@ async fn usage_logs_filter_and_paginate() {
         a.get(&format!("{A}/logs?feature=upscale")).await.json()["total"],
         15
     );
-    // 文本生成 / 语音已删（docs/v3-deviations.md #81）：不能再按它们筛选；旧的 chat / text 记录仍在全部列表里
+    // 文本生成 / 语音已删：不能再按它们筛选；旧的 chat / text 记录仍在全部列表里
     for f in ["text", "voice"] {
         a.get(&format!("{A}/logs?feature={f}"))
             .await
@@ -360,7 +360,7 @@ async fn bug_tracker_lists_resolves_and_names_keys() {
             "last_key",
             "last_path",
             "resolved_at",
-            "auto_resolved", // 3.0 新增（docs/v3-deviations.md #45）
+            "auto_resolved", // 3.0 新增
             "key_name"
         ]
     );
@@ -668,7 +668,7 @@ fn hex_bytes(h: &str) -> Vec<u8> {
 #[tokio::test]
 async fn feedback_list_and_csv_export() {
     let (_e, a) = ready().await;
-    // docs/v3-deviations.md #52：/反馈 现在是一段文字；旧版选择题的记录（id 2）照常显示成一行摘要
+    // /反馈 现在是一段文字；旧版选择题的记录（id 2）照常显示成一行摘要
     a.sql(
         r#"INSERT INTO api_keys(id, name, token, created_at) VALUES (2, '乙', 'nai-t-2', 1.0);
          INSERT INTO feedback(ts, discord_id, username, key_id, answers) VALUES

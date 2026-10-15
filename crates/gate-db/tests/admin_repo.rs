@@ -1,5 +1,5 @@
 //! 后台「成员 / 记录」接口用到的裸 SQL（`repo::admin_members` / `repo::admin_records`）。
-//! 路由层的逐字节对拍在 gate-server 的 `admin_golden.rs`，这里只验证 SQL 本身的语义。
+//! 路由层的逐字节快照在 gate-server 的 `admin_snapshot.rs`，这里只验证 SQL 本身的语义。
 
 use gate_db::Db;
 use gate_db::repo::admin_members::BindOutcome;

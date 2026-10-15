@@ -36,7 +36,19 @@ describe("bugSource", () => {
     expect(bugSource("maintenance:disk")).toBe("维护任务 · 磁盘监控");
     expect(bugSource("web:admin")).toBe("网页脚本 · 后台");
     expect(bugSource("check:foo")).toBe("交叉校验 · foo");
+    expect(bugSource("module:capacity")).toBe("模块 · capacity");
     expect(bugSource("zzz")).toBe("zzz");
+  });
+
+  it("定时任务：job:<name> 显示标题，未知 name 原样显示", () => {
+    expect(bugSource("job:quota")).toBe("定时任务 · 动态额度");
+    expect(bugSource("job:upstream_snapshot")).toBe("定时任务 · 上游 V5 快照");
+    expect(bugSource("job:hourly_cap")).toBe("定时任务 · 每小时上限自动调整");
+    expect(bugSource("job:breaker")).toBe("定时任务 · 全站熔断");
+    expect(bugSource("job:key_guard")).toBe("定时任务 · 单 Key 限流");
+    expect(bugSource("job:maintenance")).toBe("定时任务 · 维护");
+    expect(bugSource("job:idle_recycle")).toBe("定时任务 · 闲置回收");
+    expect(bugSource("job:new_thing")).toBe("定时任务 · new_thing");
   });
 });
 

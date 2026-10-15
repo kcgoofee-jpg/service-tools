@@ -4,7 +4,7 @@
 
 mod auth;
 mod incidents;
-mod kernel;
+mod jobs;
 mod members;
 mod ops;
 mod records;
@@ -30,7 +30,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .merge(auth::router())
         .merge(incidents::router())
         .merge(ops::router())
-        .merge(kernel::router())
+        .merge(jobs::router())
         .merge(members::router())
         .merge(records::router())
         .route_layer(from_fn_with_state(state, audited))
@@ -89,20 +89,7 @@ async fn target_of(state: &AppState, template: &str, path: &str) -> String {
     if let Some((_, t)) = suffix.iter().find(|(s, _)| template.ends_with(s)) {
         return (*t).to_string();
     }
-    if template.contains("/modules/")
-        && let Some(name) = param("name")
-    {
-        let title = gate_core::modules::MODULES
-            .iter()
-            .find(|m| m.name == name)
-            .map_or(name.clone(), |m| m.title.to_string());
-        return format!("模块 {title}");
-    }
-    let tail: &[(&str, &str)] = &[
-        ("/modules/run", "全部模块"),
-        ("/announcement", "站点公告"),
-        ("/password", "后台登录密码"),
-    ];
+    let tail: &[(&str, &str)] = &[("/announcement", "站点公告"), ("/password", "后台登录密码")];
     tail.iter()
         .find(|(s, _)| template.ends_with(s))
         .map_or_else(String::new, |(_, t)| (*t).to_string())

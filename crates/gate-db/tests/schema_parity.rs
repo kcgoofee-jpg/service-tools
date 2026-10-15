@@ -52,8 +52,8 @@ fn dump_conn(con: &Connection) -> Value {
     json!({"objects": objects, "columns": columns})
 }
 
-/// 旧版 Python 建出来的表结构（冻结的夹具），加上 3.0 新增的列（`bootstrap::RUST_ADDED_COLUMNS`，
-/// 见 docs/v3-deviations.md #45）。夹具本身不改：按夹具里的 DDL 在内存库里重建，再补列，重新导出。
+/// 旧版 Python 建出来的表结构（冻结的夹具），加上 3.0 新增的列（`bootstrap::RUST_ADDED_COLUMNS`）。
+/// 夹具本身不改：按夹具里的 DDL 在内存库里重建，再补列，重新导出。
 fn python_schema_plus_rust_additions() -> Value {
     let master: Value = serde_json::from_str(include_str!("fixtures/python_master.json")).unwrap();
     let objects = master["objects"].as_array().unwrap();

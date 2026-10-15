@@ -20,7 +20,7 @@ Discord（/register 等）──▶ nai-bots naimei ──(桥接密钥)──�
 
 | 二进制 | 作用 |
 |---|---|
-| `nai-gate` | 网关：成员接口（出图 / 流式 / 工具 / 标签补全 / 查询自己的额度）、首页与实时看板、后台、状态页、Discord 登录、后台任务（自适应额度内核、维护、闲置回收）。 |
+| `nai-gate` | 网关：成员接口（出图 / 流式 / 工具 / 标签补全 / 查询自己的额度）、首页与实时看板、后台、状态页、Discord 登录、定时任务（动态额度、上游快照、每小时上限调整、熔断、单 Key 限流、维护、闲置回收）。 |
 | `nai-bots` | Discord 机器人 `naimei`（奶妹）：`/register` 领 Key、`/quota` 看额度、`/resetkey` 换 Key、`/help`、`/反馈`。不私信、不读频道消息、没有管理员命令；只拿自己需要的变量，拿不到上游 Token。 |
 | `nai-ops` | 运维：巡检（只有「危险」才私信站长）、快照、脱敏快照、冒烟。 |
 
@@ -28,13 +28,13 @@ Discord（/register 等）──▶ nai-bots naimei ──(桥接密钥)──�
 
 | 目录 | 内容 |
 |---|---|
-| `crates/gate-core` | 纯逻辑（无 I/O）：参数策略、额度算法、自动驾驶、账号保护、流协议、Python 语义（舍入、JSON 序列化）。约 15 万条 golden 用例与 2.x 逐位对拍。 |
+| `crates/gate-core` | 纯逻辑（无 I/O）：参数策略、额度算法、自动驾驶、账号保护、流协议、Python 语义（舍入、JSON 序列化）。 |
 | `crates/gate-db` | 唯一写 SQL 的地方：建表迁移（只增不减，可回滚到 2.x）、各类查询。 |
 | `crates/gate-upstream` | NovelAI 客户端：wreq 模拟 Chrome TLS / HTTP2 指纹、令牌池、出图间隔、取消安全的结算。 |
 | `crates/gate-server` | 网关本体（axum）：路由、鉴权、准入与额度预留、记账、后台任务、关停。 |
 | `crates/gate-discord` / `gate-ops` | 机器人 / 运维命令。 |
 | `crates/gate-testkit` | 测试用的假 NovelAI 上游。 |
-| `web/` | 前端：Vite + TypeScript + Preact（首页、问卷、后台 9 个分区），严格 CSP、亮暗主题、无障碍对比度 ≥ 4.5:1。 |
+| `web/` | 前端：Vite + TypeScript + Preact（首页、问卷、后台 8 个分区），严格 CSP、亮暗主题、无障碍对比度 ≥ 4.5:1。 |
 
 ## 部署
 
@@ -61,24 +61,25 @@ cd web && pnpm vite                         # 前端热更新 :5173，接口代�
 
 ```bash
 cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace                      # 单元、golden 对拍（冻结的 2.x 输出）、集成（假上游）
+cargo test --workspace                      # 单元、快照、手写规则测试、集成（假上游）
 cd web && pnpm biome check . && pnpm tsc --noEmit && pnpm vitest run
 cd web && E2E_BASE=http://localhost:5174 pnpm exec playwright test   # 先跑 cargo xtask dev 和 vite --port 5174
 tools/ci/check-fixtures.sh                  # 公开仓库红线：夹具只许合成数据
 ```
 
 `web/e2e/layout.spec.ts` 是排版硬规则：各宽度下不许出现「最后一行只剩一两个字」、同一行控件必须等高对齐。
-2.x 的 Python 代码、pytest 和生成 golden 夹具的脚本都在 git 标签 `py-final` 里；夹具已冻结，行为有意改动时记进
-[docs/v3-deviations.md](docs/v3-deviations.md)。
+快照测试：输入与当前输出存在各 crate 的 `tests/snapshots/**/*.jsonl`，一行一例。行为有意改动时跑
+`UPDATE_SNAPSHOT=1 cargo test -p <crate> --test <名字>` 重写快照，在 PR 里写明改了哪些快照、为什么；CI 不许更新快照。
+行为改动同时写进 [CHANGELOG.md](CHANGELOG.md)。2.x 的 Python 代码和上线期间的逐位对拍夹具在 git 标签 `py-final`、
+`v3-deviations-final` 里。
 
 ## 文档
 
 - [docs/OPERATIONS.md](docs/OPERATIONS.md)：运维手册
-- [docs/v3-deviations.md](docs/v3-deviations.md)：3.0 与 2.x 的有意差异（每条有原因）
 - [docs/用户限制说明.md](docs/用户限制说明.md)：给成员看的限制说明
 - [deploy/ops/SYSTEM-FACTS.md](deploy/ops/SYSTEM-FACTS.md)：系统事实清单（额度、账号保护、告警、Key 的一生，数字以代码为准）
 - [docs/research/novelai-v5-官方资料整理.md](docs/research/novelai-v5-官方资料整理.md)：NovelAI V5 官方资料整理（额度算法的依据）
-- [CHANGELOG.md](CHANGELOG.md)
+- [CHANGELOG.md](CHANGELOG.md)：更新日志（3.0 相对 2.x 的改动按主题汇总）
 
 ## 安全与隐私
 

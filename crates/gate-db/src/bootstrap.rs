@@ -59,9 +59,9 @@ const ADD_COLUMNS: &[&str] = &[
 /// 只放在这里、不写进 `schema.sql`：全新库与线上库走同一条路（建出旧版的表再补列），
 /// `tests/schema_parity.rs` 的「Python 建的表」一侧也是按这份清单补出来的。
 pub const RUST_ADDED_COLUMNS: &[&str] = &[
-    // Bug 自动处理的原因码（gate_core::errors::AutoReason::code）；站长手动处理 / 未处理为 NULL。见 docs/v3-deviations.md #45
+    // Bug 自动处理的原因码（gate_core::errors::AutoReason::code）；站长手动处理 / 未处理为 NULL。
     "ALTER TABLE error_events ADD COLUMN auto_resolved TEXT",
-    // Key 的停用原因（gate_core::key_status）；启用中 / 2.x 停用的为 NULL。见 docs/v3-deviations.md #47
+    // Key 的停用原因（gate_core::key_status）；启用中 / 2.x 停用的为 NULL。
     "ALTER TABLE api_keys ADD COLUMN disabled_reason TEXT",
 ];
 

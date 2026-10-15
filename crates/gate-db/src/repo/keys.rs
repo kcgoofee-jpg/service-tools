@@ -220,7 +220,7 @@ impl Db {
     /// 邀请标签的 Key 豁免。「宽限起点」设置损坏（解析不了 / 非有限 / 负数）时返回空，绝不触发批量删除。
     ///
     /// 已过期的 Key（`expires_at <= now`）不算闲置：过期后请求一律 403、`last_image_at` 不会再更新，
-    /// 它们照旧在成员下次 /register 时释放，不进封禁表（docs/v3-deviations.md #56）。
+    /// 它们照旧在成员下次 /register 时释放，不进封禁表。
     pub async fn inactive_key_ids(&self, cutoff: f64, now: f64) -> Result<Vec<i64>> {
         self.read(move |c| {
             let raw: Option<String> = c

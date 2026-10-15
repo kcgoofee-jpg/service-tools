@@ -5,8 +5,7 @@
 //! 永远不会让调用方出错或阻塞：入库在后台任务里做。
 //!
 //! 3.0 起不再记「不是本站缺陷」的噪音（浏览器网络失败、上游故障、非本站脚本），已记下的由
-//! [`Bugs::auto_triage`] 定期自动关闭；注意级 24 小时、错误级 7 天没再出现的也一并关闭，再出现按「复发」重新打开
-//! （docs/v3-deviations.md #45）。
+//! [`Bugs::auto_triage`] 定期自动关闭；注意级 24 小时、错误级 7 天没再出现的也一并关闭，再出现按「复发」重新打开。
 
 use gate_core::errors::{
     AutoReason, Capture, ExcInfo, OpenBug, TRIAGE_INTERVAL, auto_resolve_reason, build_event,

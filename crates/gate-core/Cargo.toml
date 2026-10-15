@@ -1,6 +1,6 @@
 [package]
 name = "gate-core"
-description = "纯领域逻辑：无 I/O、无 tokio。额度 / 准入 / 上游判据 / 流解码，全部用 golden 向量与旧 Python 对拍。"
+description = "纯领域逻辑：无 I/O、无 tokio。额度 / 准入 / 上游判据 / 流解码。"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -18,7 +18,7 @@ base64.workspace = true
 rmpv.workspace = true
 
 [dev-dependencies]
-gate-golden = { path = "../gate-golden" }
+gate-snapshot = { path = "../gate-snapshot" }
 proptest.workspace = true
 sha2.workspace = true
 hex.workspace = true

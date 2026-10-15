@@ -1,4 +1,4 @@
-//! 闲置回收的口径：只有真正出图（`image` / `image_stream`）成功才算「用过」（docs/v3-deviations.md #65）。
+//! 闲置回收的口径：只有真正出图（`image` / `image_stream`）成功才算「用过」。
 
 use gate_db::Db;
 use gate_db::repo::keys::NewKey;

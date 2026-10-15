@@ -33,7 +33,7 @@ pub fn strip_v1_alias(mut req: Request<Body>) -> Request<Body> {
     req
 }
 
-/// 第 2 步：请求上下文（请求编号、计时）。不识别客户端：docs/v3-deviations.md #50。
+/// 第 2 步：请求上下文（请求编号、计时）。不识别客户端（按 UA 猜不准）。
 pub async fn request_context(mut req: Request, next: Next) -> Response {
     let ctx = ReqCtx::new();
     req.extensions_mut().insert(ctx.clone());

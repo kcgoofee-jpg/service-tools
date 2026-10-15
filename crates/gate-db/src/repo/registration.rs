@@ -36,7 +36,7 @@ pub struct NewRegistration<'a> {
 pub struct DepartedCandidate {
     pub discord_id: String,
     /// 领到的是站长发的邀请 Key（带「邀请」标签）时：`(key_id, Key 名字)`。
-    /// 邀请 Key 只由站长手动删，退群时不回收（docs/v3-deviations.md #57）。
+    /// 邀请 Key 只由站长手动删，退群时不回收。
     pub invite_key: Option<(i64, String)>,
 }
 
@@ -199,7 +199,7 @@ impl Db {
     // ------------------------------------------------------------------ 退群回收 / 资料补全
 
     /// 该核对「是否还在服务器」的领取记录（最久没核对的在前），并带上是不是邀请 Key。
-    /// 邀请 Key 的持有人照样核对（退群时给站长留一条提醒），但不回收（docs/v3-deviations.md #57）。
+    /// 邀请 Key 的持有人照样核对（退群时给站长留一条提醒），但不回收。
     pub async fn departed_candidates(
         &self,
         now: f64,

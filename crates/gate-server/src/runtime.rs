@@ -8,7 +8,7 @@
 //!
 //! 每把 Key 的限速只剩两层：出图排队（同时生成 1 张 + 排队 1 张，见 `admission::image_admission`）和
 //! 每分钟次数（RPM）。2.x 的「每把 Key 两张图至少隔 15 秒」（`KEY_IMAGE_MIN_INTERVAL`）与出图请求的
-//! 「同一把 Key 同时在途 ≤ 4」已删除（docs/v3-deviations.md #64；后者原先只剩文本路由在用，文本接口 #81 删除后
+//! 「同一把 Key 同时在途 ≤ 4」已删除（与排队重复；后者原先只剩文本路由在用，文本接口删除后
 //! 整层删掉）。
 
 use std::collections::{HashMap, VecDeque};
@@ -239,7 +239,7 @@ struct TagState {
 
 /// 标签补全同时打向 NovelAI 的全站并发数（单账号建议保持 1，太高会触发 429 甚至风控）。
 /// 出图不受它影响：出图由每把上游 Token 的出图槽位和最小间隔控制。
-/// 原来是环境变量 `GLOBAL_CONCURRENCY`（旧说明写成了「全站并发」，其实一直只管标签补全），现在是常量（docs/v3-deviations.md #95）。
+/// 原来是环境变量 `GLOBAL_CONCURRENCY`（旧说明写成了「全站并发」，其实一直只管标签补全），现在是常量。
 pub const TAG_CONCURRENCY: i64 = 1;
 
 /// 排队结果：放行 / 全站排队已满 / 被同一 Key 更新的查询取代。
@@ -253,7 +253,7 @@ pub enum TagAdmit {
 impl TagQueue {
     /// `global_concurrency` 传 [`TAG_CONCURRENCY`]。被取消（超时 / 断开）时排队计数照样归还。
     /// 同一把 Key 两次补全至少隔 [`TAG_MIN_INTERVAL`] 秒（旧版取它与每 Key 出图间隔的较小者；
-    /// 每 Key 出图间隔已删除，docs/v3-deviations.md #64）。
+    /// 每 Key 出图间隔已删除）。
     pub async fn wait(&self, key_id: i64, global_concurrency: i64) -> TagAdmit {
         struct Waiting<'a>(&'a TagQueue, i64);
         impl Drop for Waiting<'_> {

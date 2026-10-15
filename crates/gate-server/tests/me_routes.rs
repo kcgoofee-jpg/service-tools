@@ -1,9 +1,9 @@
 //! `GET /v1/me` 的端到端测试：真实的 AppState + 路由 + 记账，上游换成本地假服务。
 //!
 //! 这个文件原先是文本生成 / 流式 / 语音 / OpenAI 兼容聊天路由的测试（`text_routes.rs`）。文本接口在 2026-10-15
-//! 整套删除（docs/v3-deviations.md #81），只留下 `/v1/me` 的用例；`/v1/models`、`/v1` 随之删除，也不再测。
+//! 整套删除，只留下 `/v1/me` 的用例；`/v1/models`、`/v1` 随之删除，也不再测。
 //! 期望值里的字节串来自旧 Python 网关，功能列表按 3.0 现状少了「文本」「语音」两项；`today` 里去掉了
-//! `daily_images_base`（保底，docs/v3-deviations.md #61）与 `anlas_auto`（V5 续杯，#66）。
+//! `daily_images_base`（保底）与 `anlas_auto`（V5 续杯）。
 
 mod common;
 use axum::http::StatusCode;
@@ -180,7 +180,7 @@ async fn me_auth_errors() {
     assert_gate_error(status, &body, 401, "无效的 API Key");
 }
 
-/// 文本生成 / 流式 / 语音 / OpenAI 兼容聊天 / 模型列表整套删除（docs/v3-deviations.md #81）：
+/// 文本生成 / 流式 / 语音 / OpenAI 兼容聊天 / 模型列表整套删除：
 /// 这些地址现在和任何不存在的地址一样回 404，带不带 Key 都一样，更不会往上游发请求或写用量日志。
 #[tokio::test]
 async fn removed_text_endpoints_are_plain_404s() {

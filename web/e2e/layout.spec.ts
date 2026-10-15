@@ -88,7 +88,6 @@ const ADMIN = [
   "/admin/upstream",
   "/admin/onboarding",
   "/admin/limits",
-  "/admin/modules",
   "/admin/discord",
   "/admin/system",
 ];

@@ -70,7 +70,7 @@ pub struct Spec {
     pub hi: Option<i64>,
     pub choices: &'static [&'static str],
     /// 默认值取自 `config.Settings` 的这个属性（.env 可调），空串 = 不取。
-    /// 3.0 登记表里已经没有取环境变量的设置（docs/v3-deviations.md #92），这条路径只为冻结夹具里的内联 Spec 对拍保留。
+    /// 3.0 登记表里已经没有取环境变量的设置，这条路径只为冻结夹具里的内联 Spec 对拍保留。
     pub env: &'static str,
 }
 
@@ -117,11 +117,10 @@ pub static REGISTER_OPEN: Spec = spec(
     "register_open",
     Kind::Flag,
     SpecDefault::Bool(false),
-    "modules / registration",
+    "registration",
     "开放 /register 领取",
 );
-/// 动态额度每轮写入；没设过按 150。2.x 的默认值取环境变量 `GLOBAL_DAILY_V5`，3.0 删了这个环境变量
-/// （docs/v3-deviations.md #70）。
+/// 动态额度每轮写入；没设过按 150。2.x 的默认值取环境变量 `GLOBAL_DAILY_V5`，3.0 删了这个环境变量。
 pub static GLOBAL_DAILY_V5: Spec = bounded(
     spec(
         "global_daily_v5",
@@ -134,7 +133,7 @@ pub static GLOBAL_DAILY_V5: Spec = bounded(
     100000,
 );
 /// 全站每日 Anlas 池（Vibe PVP）。没设过按 200；2.x / 3.0 早期的默认值取环境变量 `GLOBAL_DAILY_ANLAS`，
-/// 现已删除（docs/v3-deviations.md #92）。
+/// 现已删除（默认值直接写在登记表里）。
 pub static GLOBAL_DAILY_ANLAS: Spec = bounded(
     spec(
         "global_daily_anlas",
@@ -146,7 +145,7 @@ pub static GLOBAL_DAILY_ANLAS: Spec = bounded(
     0,
     100000,
 );
-/// 全站每月 Anlas 预算。没设过按 10000；环境变量 `GLOBAL_MONTHLY_ANLAS` 已删除（docs/v3-deviations.md #92）。
+/// 全站每月 Anlas 预算。没设过按 10000；环境变量 `GLOBAL_MONTHLY_ANLAS` 已删除（默认值直接写在这里）。
 pub static GLOBAL_MONTHLY_ANLAS: Spec = bounded(
     spec(
         "global_monthly_anlas",
@@ -206,7 +205,7 @@ pub static MEMBER_SWEEP: Spec = spec(
     "退群回收：每人每天核对一次是否还在服务器，不在就删 Key",
 );
 
-/// 登记表（顺序与旧版 `ALL` 一致，已删除的设置不在里面，见 docs/v3-deviations.md #92）。
+/// 登记表（顺序与旧版 `ALL` 一致，已删除的设置不在里面）。
 pub static ALL: [&Spec; 9] = [
     &MEMBER_SWEEP,
     &ISSUE_HOURLY_CAP,
@@ -365,7 +364,7 @@ mod tests {
 
     #[test]
     fn anlas_budgets_have_fixed_defaults() {
-        // 默认值在登记表里，不再取环境变量（docs/v3-deviations.md #92）
+        // 默认值在登记表里，不再取环境变量
         assert_eq!(get_from_raw(&GLOBAL_DAILY_ANLAS, None, None), json!(200));
         assert_eq!(
             get_from_raw(&GLOBAL_MONTHLY_ANLAS, None, None),

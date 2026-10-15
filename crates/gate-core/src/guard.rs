@@ -16,7 +16,7 @@
 //!   AND images>0 ORDER BY ts`，行交给 [`stamps_from_rows`] + [`GuardCore::seed_hour`]；
 //! - `token_block_reason(db, token_id, day)` 里的 `db.get_upstream_counter(token_id, day)`
 //!   （`upstream_token_counters` 表的 `images`，没有记录是 0；旧版用节约模式折算后的 `units`，
-//!   节约模式早已删除，docs/v3-deviations.md #67）：服务层取出 `used` 传进来
+//!   节约模式早已删除）：服务层取出 `used` 传进来
 //!   （旧版 `daily == 0` 或熔断 / 安静时段已经拦下时不会去读，多读一次没有可观察的差别）；
 //! - `on_upstream_429`：读 `guard_429_cap_at`，写 `guard_account_hourly_cap` / `guard_hourly_adapted_at` /
 //!   `guard_last_upstream_429` / `guard_429_cap_at`（方法返回要写的键值，旧版 `db is None` 时不写）；
@@ -27,7 +27,7 @@
 //!
 //! 每小时上限自动调整的下限 / 上限 / 步长（`hourly_min` / `hourly_max` / `hourly_step`）是后台可改的设置，
 //! 与其它字段一起存 `guard_<名称>`。2.x 里它们是私密参数文件 `private_params.json` 的 `capacity.hourly_*`，
-//! 3.0 取消了私密参数文件（docs/v3-deviations.md #91）；乘性减的系数是常量 [`HOURLY_DECREASE`]。
+//! 3.0 取消了私密参数文件；乘性减的系数是常量 [`HOURLY_DECREASE`]。
 //!
 //! 与旧版一致的怪癖（照抄，别「修」）：
 //! - `guard_429_cap_at` 写的是 `min(prev, old)` 这个**对象**：前值是 float，`old` 是 int，`min` 取到谁写谁的 `str`，
@@ -37,14 +37,14 @@
 //!
 //! 已删除功能的残留不移植：3 小时上限（`WINDOW_3H` 只剩队列保留期）、10 分钟旋钮、每日熔断。
 //!
-//! 3.0 删除的（docs/v3-deviations.md #61）：「V4.5 每人保底 + 全站空闲时借用到每日上限」整层——
+//! 3.0 删除的：「V4.5 每人保底 + 全站空闲时借用到每日上限」整层——
 //! 设置 `base_daily_images`、`site_idle`、`paced_headroom`。额度是 PVP：每人只有一个上限，
 //! 全站按时段放行（`paced`）对所有人一视同仁。
 //!
-//! 3.0 删除的（docs/v3-deviations.md #64）：10 分钟突发窗口（每 10 分钟 ≤ 每小时上限 ÷ 4，`burst_cap`）。
+//! 3.0 删除的：10 分钟突发窗口（每 10 分钟 ≤ 每小时上限 ÷ 4，`burst_cap`）。
 //! 账号出图间隔 20 秒 + 随机 0～5 秒时，10 分钟最多出 30 张，永远到不了 40 张的窗口上限。
 //!
-//! 3.0 新增的（docs/v3-deviations.md #87）：出图后静默 `post_jitter_min` / `post_jitter_max`，与开始抖动
+//! 3.0 新增的：出图后静默 `post_jitter_min` / `post_jitter_max`，与开始抖动
 //! `interval_jitter` 并列，原来是环境变量 `POST_REQUEST_JITTER_MIN/MAX`。怎么用见 gate-upstream 的 `scheduler.rs`。
 
 use crate::clock::Clock;
@@ -192,7 +192,7 @@ pub fn setting_key(name: &str) -> String {
     format!("guard_{name}")
 }
 
-/// Python 异常的类型（golden 只对拍类型）。
+/// Python 异常的类型（测试只比对类型）。
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum GuardError {
     #[error("ValueError: {0}")]
@@ -774,7 +774,7 @@ impl GuardCore {
                 reasons::HOURLY_CAP,
             ));
         }
-        // 2.x 在这里还有「每 10 分钟 ≤ 每小时上限 ÷ 4」的突发窗口：账号出图间隔下永远到不了，已删除（#64）
+        // 2.x 在这里还有「每 10 分钟 ≤ 每小时上限 ÷ 4」的突发窗口：账号出图间隔下永远到不了，已删除
         None
     }
 
@@ -822,7 +822,7 @@ impl GuardCore {
     }
 
     /// 轮到这把 Key 的这一张了吗：它是这把 Key 还在的条目里最早登记的（前面那张已出完或被取消）。
-    /// 每把 Key 同时只生成 1 张，排在后面的那张等它——取代旧版每把 Key 一个的信号量（docs/v3-deviations.md #64）。
+    /// 每把 Key 同时只生成 1 张，排在后面的那张等它——取代旧版每把 Key 一个的信号量。
     pub fn key_turn(&self, key_id: i64, entry_id: i64) -> bool {
         !self
             .entries
@@ -942,7 +942,7 @@ mod tests {
 
     #[test]
     fn no_burst_window_below_the_hourly_cap() {
-        // 10 分钟里出了 60 张（旧版的突发窗口 ⌈1.5 × 150 ÷ 4⌉ = 57 早就拦了），每小时上限 150 还没到：放行（#64）
+        // 10 分钟里出了 60 张（旧版的突发窗口 ⌈1.5 × 150 ÷ 4⌉ = 57 早就拦了），每小时上限 150 还没到：放行
         let mut g = guard();
         g.record_start("t", NOON - 300.0, 60);
         assert_eq!(g.token_block_reason("t", 0.0, NOON), None);
@@ -954,7 +954,7 @@ mod tests {
 
     #[test]
     fn daily_cap_counts_real_images() {
-        // 节约模式已删除（#67）：按实际张数比，文案不再写「按算力折算」
+        // 节约模式已删除：按实际张数比，文案不再写「按算力折算」
         let mut g = guard();
         g.values.insert("daily_burst".into(), 0); // 不分时段，只看每日上限
         assert_eq!(g.token_block_reason("t", 999.0, NOON), None);

@@ -102,6 +102,8 @@ jobs:
       - uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: 红线脚本自检（.gz 解压路径确实在拦）
+        run: tools/ci/check-fixtures.sh --self-test
       - name: 夹具与测试数据只允许合成数据
         run: tools/ci/check-fixtures.sh
 

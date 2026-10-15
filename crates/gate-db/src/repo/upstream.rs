@@ -6,7 +6,7 @@ use rusqlite::params;
 use serde::Serialize;
 
 /// `get_upstream_counter` 的结果。表里的 `units`（节约模式折算的张数）3.0 不再读，
-/// 只在写入时跟 `images` 一起累加、给回滚到 2.x 用（docs/v3-deviations.md #67）。
+/// 只在写入时跟 `images` 一起累加、给回滚到 2.x 用。
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct UpstreamCounter {
     pub images: i64,
@@ -184,7 +184,7 @@ impl Db {
 
     /// 上游 Token 当日出图张数累加。`images < 1` 什么都不做。
     /// `units` 列照旧按「一张 = 一份」一起累加（2.x 读它和每日上限比；回滚窗口内要保持一致）。
-    /// 旧版的 `weight`（节约模式折算）已删除（docs/v3-deviations.md #67）。
+    /// 旧版的 `weight`（节约模式折算）已删除（节约模式早已不存在）。
     pub async fn bump_upstream_image_counter(
         &self,
         token_id: &str,

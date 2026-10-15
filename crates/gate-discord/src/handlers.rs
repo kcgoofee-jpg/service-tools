@@ -451,7 +451,7 @@ mod tests {
 
     #[test]
     fn quota_has_no_service_status_line() {
-        // 服务状态那一行（docs/v3-deviations.md #74）已删除：info 里就算还带着 status / recent / failed 也不显示
+        // 服务状态那一行已删除（状态在状态页看）：info 里就算还带着 status / recent / failed 也不显示
         let info = json!({"open": true, "notice": "", "upstream": {
             "status": "degraded", "recent": 12, "failed": 7, "image_cooldown_seconds": 0}});
         let text = quota_text(&quota_data(), Some(&info), NOW).unwrap();

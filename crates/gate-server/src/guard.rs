@@ -1,4 +1,4 @@
-//! 账号保护的运行层：`gate_core::guard::GuardCore`（纯逻辑，golden 对拍过）+ 读写库 + 告警。
+//! 账号保护的运行层：`gate_core::guard::GuardCore`（纯逻辑）+ 读写库 + 告警。
 //! 对应旧版 `app/guard.py` 里带 `await db` 的方法（load / save / seed_hour / token_block_reason /
 //! on_upstream_429 / adapt_daily）。核心状态放在同步 Mutex 里，从不跨 await 持锁：先查库，再算。
 

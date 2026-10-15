@@ -56,9 +56,8 @@ mimalloc.workspace = true
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
 gate-testkit = { path = "../gate-testkit" }
-gate-golden = { path = "../gate-golden" }
+gate-snapshot = { path = "../gate-snapshot" }
 tempfile = "3"
-flate2 = "1"
 rmpv.workspace = true
 
 [lints]

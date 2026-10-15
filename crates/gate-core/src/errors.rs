@@ -1,4 +1,4 @@
-//! Bug 追踪的纯逻辑（`app/errors.py`）：错误特征码、事件字段的截断规则。3.0 不再私信「新 bug / 复发」（docs/v3-deviations.md #102）。
+//! Bug 追踪的纯逻辑（`app/errors.py`）：错误特征码、事件字段的截断规则。3.0 不再私信「新 bug / 复发」（非重大事故只写日志）。
 //!
 //! 不移植的部分：
 //! - `Tracker` 的 I/O（`_store_locked` 的 SQL、`list` / `resolve` / `purge` 等）。表是 `error_events`
@@ -8,11 +8,11 @@
 //!   （例如 panic 的 `file:line` 或模块路径），传给 [`signature`] 即可；同一个位置要稳定。
 //! - `traceback.format_exception` 生成的堆栈文本：由调用方传入（[`ExcInfo::stack`]）。
 //!
-//! 3.0 新增（旧版没有，见 docs/v3-deviations.md #45）：「自动处理」的纯判断——哪些噪音不算 Bug、哪条未处理的 Bug
+//! 3.0 新增（旧版没有）：「自动处理」的纯判断——哪些噪音不算 Bug、哪条未处理的 Bug
 //! 该自动关闭（[`auto_resolve_reason`]）。I/O 在 gate-db（查询 / 更新）与 gate-server（`bugs.rs`、维护循环）。
 //!
 //! 特征码 = `sha1(basis)` 的前 12 个十六进制字符。SHA-1 在这里只是去重用的指纹，不涉及安全，
-//! 所以用一个自带的小实现（工作区依赖里没有 sha1），并用 golden 对拍保证与 `hashlib.sha1` 一致。
+//! 所以用一个自带的小实现（工作区依赖里没有 sha1），上线期间与 `hashlib.sha1` 逐条对拍过。
 
 use crate::pyc;
 
@@ -250,7 +250,7 @@ pub fn build_event(c: &Capture<'_>, now: f64) -> Captured {
     }
 }
 
-// ---------------------------------------------------------------- 自动处理（3.0 新增，见 docs/v3-deviations.md #45）
+// ---------------------------------------------------------------- 自动处理（3.0 新增）
 
 /// 注意级（warn）的 Bug 多久没再出现就自动关闭（秒）：24 小时。
 pub const STALE_WARN_SECS: f64 = 24.0 * 3600.0;

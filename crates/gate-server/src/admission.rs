@@ -6,7 +6,7 @@
 //!
 //! 每把 Key 的限速只有两层：这里的排队（同时生成 1 张 + 排队 1 张）和每分钟次数（RPM，`auth::check_rpm`）。
 //! 2.x 另有每把 Key 15 秒出图间隔（`wait_for_user_image_slot` / `refund_local_reject`）和每把 Key 一个的
-//! 信号量（`KEY_CONCURRENCY`），都与排队重复，已删除（docs/v3-deviations.md #64）。
+//! 信号量（`KEY_CONCURRENCY`），都与排队重复，已删除。
 
 use crate::auth::site_flag_f64;
 use crate::error::{ApiError, GateError, InternalError};
@@ -205,7 +205,7 @@ impl Drop for Slots {
     }
 }
 
-/// `_key` 只为调用方签名不变而保留：每把 Key 的信号量已删除（docs/v3-deviations.md #64）——出图由
+/// `_key` 只为调用方签名不变而保留：每把 Key 的信号量已删除——出图由
 /// [`image_admission`] 的排队保证同一把 Key 同时只生成 1 张，标签补全由补全队列保证同一把 Key 一次一条，
 /// 文本请求走全站并发槽。
 pub async fn acquire_slots(state: &AppState, _key: &Key, image: bool) -> Result<Slots, GateError> {
@@ -270,8 +270,8 @@ pub async fn quota_image_check(
             )
             .into());
         }
-        // 每人只有每日上限：2.x 的「每人注水」（底仓 30 张、每小时补 4 张，docs/v3-deviations.md #62）和
-        // 「保底 + 全站空闲时借用」（#61）都已删除；全站按时段放行在 guard_precheck 里对所有人一视同仁。
+        // 每人只有每日上限：2.x 的「每人注水」（底仓 30 张、每小时补 4 张）和
+        // 「保底 + 全站空闲时借用」都已删除；全站按时段放行在 guard_precheck 里对所有人一视同仁。
     }
     if est.v5 > 0 {
         // V5 周额度是账户级共享资源，用全站日计数镜像

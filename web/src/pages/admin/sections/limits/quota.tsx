@@ -11,7 +11,6 @@ import {
   deriveV5,
   imagesPerPercent,
   MANUAL_N_SPEC,
-  type ModulesLite,
   type QuotaAlgo,
   type QuotaReview,
   type RateInfo,
@@ -106,7 +105,6 @@ function History(props: { rows: QuotaReview[] }) {
 
 export default function QuotaCard() {
   const { data, error, loading } = useAdmin<QuotaAlgo>(URL);
-  const mods = useAdmin<ModulesLite>("/admin/api/modules");
   const [confirmOff, setConfirmOff] = useState(false);
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
@@ -133,7 +131,7 @@ export default function QuotaCard() {
   const autoOn = data.params.quota_auto_enabled !== 0;
   const l = data.last;
   const v5 = l.v5;
-  const per = imagesPerPercent(mods.data);
+  const per = imagesPerPercent(data);
   const review = l.review ?? data.history[data.history.length - 1];
   const d = v5 ? deriveV5(v5, per.value) : null;
   const rc = v5?.rate_check ?? v5?.rate_info;
@@ -234,7 +232,7 @@ export default function QuotaCard() {
             )}
             <div class="muted">
               每 1% ≈ {per.value} 张：官方 100% ≈ 1730 张（按 23 步估算），折成成员常用的 28 步
-              {per.fromApi ? "（取自「容量」模块参数）" : "（接口没给出，用默认值）"}。
+              {per.fromApi ? "（取自动态额度接口）" : "（接口没给出，用默认值）"}。
             </div>
           </Derive>
         )}

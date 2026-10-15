@@ -1,4 +1,5 @@
 /** 日志相关的显示格式化（纯函数）：模型短名、功能名、耗时。 */
+import { JOB_TITLES } from "../system/jobs-core";
 
 /** 功能 id → 完整名 / 短名（后端 features.FEATURES 的副本） */
 export const FEATURES: Array<{ id: string; label: string; short: string }> = [
@@ -103,6 +104,8 @@ export function bugSource(s: string): string {
   if (BUG_SRC[s]) return BUG_SRC[s];
   if (s.startsWith("maintenance:")) return `维护任务 · ${MAINT_TASKS[s.slice(12)] ?? s.slice(12)}`;
   if (s.startsWith("web:")) return `网页脚本 · ${WEB_PAGES[s.slice(4)] ?? s.slice(4)}`;
+  if (s.startsWith("job:")) return `定时任务 · ${JOB_TITLES[s.slice(4)] ?? s.slice(4)}`;
+  // 3.0 之前「模块」报的 Bug：历史记录里还会有
   if (s.startsWith("module:")) return `模块 · ${s.slice(7)}`;
   if (s.startsWith("check:")) return `交叉校验 · ${s.slice(6)}`;
   return s;

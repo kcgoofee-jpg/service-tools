@@ -34,3 +34,6 @@ web/playwright-report/
 __pycache__/
 *.pyc
 .venv/
+
+# cargo llvm-cov 的覆盖率原始数据
+*.profraw

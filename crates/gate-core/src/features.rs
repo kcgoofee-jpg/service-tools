@@ -6,7 +6,7 @@
 //! - `check(db, key, name, settings)` 里的 `site_flags.get(...)`：只有 `name == "vibe"` 且前面没放行时才读
 //!   `global_daily_anlas`（int）这个键，算法见 [`needs_vibe_site_flags`]；取到的值交给 [`check_decision`]。
 //!   判定本身（[`check_decision`]）是纯函数。2.x 还读 `global_daily_anlas_until`（开放截止时间戳），
-//!   后台一直没有写入口，3.0 删除（docs/v3-deviations.md #92）。
+//!   后台一直没有写入口，3.0 删除。
 //!
 //! 已知边界：`features_global` 里若有 Python 才认的裸 `NaN` / `Infinity`，serde_json 会当成坏 JSON（→ 全部开启）。
 

@@ -43,7 +43,7 @@ fn help_lists_every_subcommand() {
     for sub in ["patrol", "snapshot", "ro-sanitize", "smoke"] {
         assert!(text.contains(sub), "--help 里没有 {sub}：{text}");
     }
-    // 群发私信、公告、状态页事件、提示词统计都已删除（docs/v3-deviations.md #71）
+    // 群发私信、公告、状态页事件、提示词统计都已删除（后台有入口或没人用）
     for gone in ["dm-broadcast", "announce", "incident", "prompt-stats"] {
         assert!(!text.contains(gone), "--help 里不该再有 {gone}：{text}");
     }

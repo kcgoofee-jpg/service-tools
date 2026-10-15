@@ -1,6 +1,6 @@
 //! `GET /v1/me`：这把 Key 自己的额度、功能开关和闲置回收设置（旧版 `app/routers/text_routes.py` 里的 `/v1/me`）。
 //!
-//! 2026-10-15 文本生成 / 语音 / OpenAI 兼容聊天整套接口删除（docs/v3-deviations.md #81），这个文件原先叫
+//! 2026-10-15 文本生成 / 语音 / OpenAI 兼容聊天整套接口删除（线上几乎没人用），这个文件原先叫
 //! `text.rs`，只留下了 `/v1/me`（线上冒烟 `nai-ops smoke` 和用 Key 自查额度的脚本在用）。
 
 use crate::auth::{authenticate, require_feature};
@@ -57,7 +57,7 @@ async fn me(state: &AppState, parts: &Parts) -> ApiResult {
     let anlas_today = if c.anlas > 0.0 { c.anlas } else { 0.0 };
     let anlas_month = state.db.month_anlas(key.id(), &state.month()).await?;
     let features = feature_view(state, &key).await?;
-    // 3.0 去掉的字段（docs/v3-deviations.md #61 / #66）：`daily_images_base`（保底）、`anlas_auto`（V5 续杯）
+    // 3.0 去掉的字段：`daily_images_base`（保底）、`anlas_auto`（V5 续杯）
     Ok(ok_json(&json!({
         "name": key.name(),
         "is_admin": key.is_admin(),

@@ -5,11 +5,11 @@
 import { num } from "../../../lib/format";
 import { useAdmin } from "../Admin";
 import { LoadError, Loading, SectionHead, Stat } from "./_kit";
-import type { ModulesResponse } from "./modules/core";
 import { FeatureUsage } from "./overview/FeatureUsage";
 import { buildReminders, computeVerdict } from "./overview/reminders";
 import type { BotResp, BugsResp, Overview as OverviewData } from "./overview/types";
 import { Verdict } from "./overview/Verdict";
+import type { JobsResponse } from "./system/jobs-core";
 import "./overview.css";
 
 /** 一行小字里的几段：每段不拆开（不让「测试」折成「测 / 试」），段与段之间可以换行 */
@@ -30,7 +30,7 @@ export default function Overview() {
   const ov = useAdmin<OverviewData>("/admin/api/overview");
   const bugs = useAdmin<BugsResp>("/admin/api/errors");
   const bot = useAdmin<BotResp>("/admin/api/discord-bot");
-  const mods = useAdmin<ModulesResponse>("/admin/api/modules");
+  const jobs = useAdmin<JobsResponse>("/admin/api/jobs");
 
   const d = ov.data;
   if (!d) {
@@ -47,7 +47,7 @@ export default function Overview() {
       overview: d,
       bot: bot.data,
       bugs: bugs.data,
-      modules: mods.data,
+      jobs: jobs.data,
       now: Date.now() / 1000,
     }),
   );

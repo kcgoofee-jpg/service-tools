@@ -1,9 +1,9 @@
 /**
- * 总览的「有 N 件事要处理」：只列真正要站长动手的事——未处理的 Bug、模块自检没通过、奶妹离线、上游 Token 失效或没配置。
+ * 总览的「有 N 件事要处理」：只列真正要站长动手的事——未处理的 Bug、定时任务出错或超时没运行、奶妹离线、上游 Token 失效或没配置。
  * 纯函数，方便单测。磁盘、预算、限流中的账号这类不用马上处理的事不在这里提醒（真正的重大事故走告警渠道）。
  */
 import { rel } from "../../../../lib/format";
-import { type ModulesResponse, moduleState } from "../modules/core";
+import { alertJobs, type JobsResponse, jobAlertCount } from "../system/jobs-core";
 import type { BotResp, BugsResp, Overview } from "./types";
 
 export type Level = "bad" | "warn";
@@ -22,12 +22,12 @@ export type ReminderInput = {
   overview: Overview;
   bot: BotResp | null;
   bugs: BugsResp | null;
-  modules: ModulesResponse | null;
+  jobs: JobsResponse | null;
   now: number;
 };
 
 export function buildReminders(inp: ReminderInput): Reminder[] {
-  const { overview: d, bot, bugs, modules, now } = inp;
+  const { overview: d, bot, bugs, jobs, now } = inp;
   const items: Reminder[] = [];
   const add = (level: Level, key: string, title: string, detail: string, to: string, label: string) =>
     items.push({ key, level, title, detail, to, label });
@@ -75,15 +75,17 @@ export function buildReminders(inp: ReminderInput): Reminder[] {
       "Bug 未处理",
     );
   }
-  const badMods = (modules?.modules ?? []).filter((m) => moduleState(m) === "bad").length;
-  if (badMods) {
+  const badJobs = jobAlertCount(jobs, now);
+  if (badJobs) {
     add(
       "warn",
-      "modules",
-      `${badMods} 个模块自检没通过`,
-      "数据对不上或规则没生效",
-      "/admin/modules",
-      "模块自检",
+      "jobs",
+      `${badJobs} 个定时任务上次出错或超时没运行`,
+      alertJobs(jobs, now)
+        .map((j) => j.title)
+        .join("、"),
+      "/admin/system#jobs",
+      "定时任务",
     );
   }
   return items;

@@ -1,7 +1,7 @@
 //! 桥接契约：一个迷你 axum 假网关，按网关 `/self-register/*` 的真实行为实现
 //! （鉴权方式、必填字段、错误码与 `detail` 文案、响应 JSON 形状），用来验证机器人发出的请求
 //! 合乎网关的预期、并且能正确解读网关的每一种响应。网关侧的实现（crates/gate-server/src/routes/registration.rs）
-//! 照这份契约对接；管理员接口 `ops` / `slots` / `revoke` 已删除（docs/v3-deviations.md #73）。
+//! 照这份契约对接；管理员接口 `ops` / `slots` / `revoke` 已删除（管理都在网页后台）。
 
 // 假网关里用 Response 当 Err 方便早退，体积大无所谓
 #![allow(clippy::result_large_err)]
@@ -145,7 +145,7 @@ async fn issue(State(s): State<Shared>, h: HeaderMap, Json(body): Json<Value>) -
     Json(json!({"message": "领取成功！你的 Key：nai-contract", "key_id": 7})).into_response()
 }
 
-/// `/self-register/feedback`（docs/v3-deviations.md #52）：一段文字，去掉首尾空白后不到 2 个字回 400「写点什么再提交吧～」。
+/// `/self-register/feedback`：一段文字，去掉首尾空白后不到 2 个字回 400「写点什么再提交吧～」。
 async fn feedback(State(s): State<Shared>, h: HeaderMap, Json(body): Json<Value>) -> Response {
     gate!(s, "POST", "/self-register/feedback", h, body);
     if let Err(r) = checked(&body) {
@@ -158,7 +158,7 @@ async fn feedback(State(s): State<Shared>, h: HeaderMap, Json(body): Json<Value>
     Json(json!({"message": "收到啦，谢谢你的反馈～奶妹会转给站长 ✨"})).into_response()
 }
 
-/// 心跳。3.0 起只有 `status`（`event` 和 `/self-register/bot/config` 随跑图分享设置一起删了：docs/v3-deviations.md #54）。
+/// 心跳。3.0 起只有 `status`（`event` 和 `/self-register/bot/config` 随跑图分享设置一起删了）。
 async fn bot_report(State(s): State<Shared>, h: HeaderMap, Json(body): Json<Value>) -> Response {
     gate!(s, "POST", "/self-register/bot/report", h, body);
     // BotReport：status 可选

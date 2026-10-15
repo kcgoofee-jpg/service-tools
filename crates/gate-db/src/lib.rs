@@ -5,8 +5,8 @@
 //!   遇到 `SQLITE_BUSY`（备份脚本、旧版 Python 同时开着库等）按旧版的节奏重试 4 次。
 //! - **只读连接池**（默认 2 个）：WAL 下读不阻塞写，查询放在 `spawn_blocking` 里跑。
 //!
-//! `repo` 模块是旧版 `class Database`（app/database.py）的逐方法移植，`tests/repo_golden.rs` 用
-//! 旧 Python 生成的夹具（脚本见标签 py-final）逐方法对拍（返回值 + 整库内容 + 原图目录）。
+//! `repo` 模块是旧版 `class Database`（app/database.py）的逐方法移植，`tests/repo_snapshot.rs` 对每个方法的
+//! 返回值、有变化的表和原图目录做快照（输入取自旧 Python 生成的夹具，脚本见标签 py-final）。
 //!
 //! 旧版的问题（共享主连接上一条语句失败后事务不结束 → 之后所有写都 locked，见 database.py
 //! `_rollback_on_error`）在这里不存在：事务由 `rusqlite::Transaction` 的 Drop 自动回滚。
@@ -52,15 +52,6 @@ struct Inner {
     image_dir: PathBuf,
     writer: std::sync::mpsc::SyncSender<Job>,
     readers: Mutex<Vec<Connection>>,
-    /// 测试 / 对拍用：开启后按发生顺序记下每一次对 `site_settings` 的写入（见 [`SettingWrite`]）。
-    setting_log: Mutex<Option<Vec<SettingWrite>>>,
-}
-
-/// 一次对 `site_settings` 的写入（`set_setting` 或 `set_settings_bulk`），值是最终落库的字符串。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SettingWrite {
-    Set(String, String),
-    Bulk(Vec<(String, String)>),
 }
 
 /// 写事务里遇到锁冲突时的重试次数（与旧版 `record` 的 4 次一致）。
@@ -121,7 +112,6 @@ impl Db {
                 image_dir,
                 writer: tx,
                 readers: Mutex::new(pool),
-                setting_log: Mutex::new(None),
             }),
         })
     }
@@ -188,34 +178,6 @@ impl Db {
         rx.await
             .map_err(|_| DbError::WriterGone)?
             .map_err(DbError::from)
-    }
-
-    /// 开 / 关「记录 site_settings 写入」。开启时清空已有记录。
-    pub fn record_setting_writes(&self, on: bool) {
-        *self.inner.setting_log.lock().expect("设置写入记录锁") = on.then(Vec::new);
-    }
-
-    /// 取走（并清空）到目前为止记下的 site_settings 写入。
-    pub fn take_setting_writes(&self) -> Vec<SettingWrite> {
-        self.inner
-            .setting_log
-            .lock()
-            .expect("设置写入记录锁")
-            .as_mut()
-            .map(std::mem::take)
-            .unwrap_or_default()
-    }
-
-    pub(crate) fn note_setting_write(&self, w: SettingWrite) {
-        if let Some(log) = self
-            .inner
-            .setting_log
-            .lock()
-            .expect("设置写入记录锁")
-            .as_mut()
-        {
-            log.push(w);
-        }
     }
 
     /// 在只读连接上执行查询（WAL 快照读，不阻塞写）。

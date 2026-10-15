@@ -37,7 +37,7 @@ impl Alerter {
             api_base: api_base.trim_end_matches('/').to_string(),
             last: Mutex::new(HashMap::new()),
             dm_channel: tokio::sync::Mutex::new(None),
-            // 没有 UA 会被 Discord 前面的 Cloudflare 判成机器人直接 403（1010），告警就悄悄发不出去（docs/v3-deviations.md #59）
+            // 没有 UA 会被 Discord 前面的 Cloudflare 判成机器人直接 403（1010），告警就悄悄发不出去
             http: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(10))
                 .user_agent(gate_core::discord_ua::DISCORD_USER_AGENT)
