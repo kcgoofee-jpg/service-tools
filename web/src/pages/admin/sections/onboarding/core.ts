@@ -30,7 +30,7 @@ export type Ops = {
   audit: AuditInfo;
 };
 
-/** 消耗官方 Anlas（付费点数）的功能：开启前要确认（接口没有给出这个清单，与 app/features.py 的 ANLAS_FEATURES 对应） */
+/** 消耗官方 Anlas（付费点数）的功能：开启前要确认（接口没有给出这个清单，与 crates/gate-core/src/features.rs 的 ANLAS_FEATURES 对应） */
 export const ANLAS_FEATURES: Record<string, string> = {
   vibe: "每次编码参考图约 2 Anlas",
   upscale: "按图片大小扣 Anlas",

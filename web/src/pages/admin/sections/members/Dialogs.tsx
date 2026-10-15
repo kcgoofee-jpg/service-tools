@@ -4,8 +4,9 @@ import { useEffect, useId, useState } from "preact/hooks";
 import { getJSON } from "../../../../lib/api";
 import { fullTime, rel } from "../../../../lib/format";
 import { Badge, Button, CopyField, copyText, Dialog, Field, Notice, Skeleton } from "../../../../ui";
+import { Avatar, ConfirmDialog, TableWrap, useBusy } from "../_kit";
 import { addBan, addTag, bindDiscord, gift, giveCoupon, removeBan } from "./actions";
-import { Avatar, ConfirmDialog, Empty, TableScroll, useBusy, useDebounced, usePageData } from "./shared";
+import { Empty, useDebounced, usePageData } from "./shared";
 import type { Ban, Coupon } from "./types";
 import { isDiscordId, parseNum } from "./validate";
 
@@ -473,7 +474,7 @@ export function BansDialog(props: { onClose: () => void; onChanged: (text: strin
             />
           </Field>
           {error && <Notice tone="danger">读取黑名单失败：{error}</Notice>}
-          <TableScroll label="封禁黑名单" class={pending ? "xa-busy" : undefined}>
+          <TableWrap label="封禁黑名单" class={pending ? "xa-busy" : undefined}>
             <table class="table">
               <caption class="sr-only">封禁黑名单</caption>
               <thead>
@@ -520,7 +521,7 @@ export function BansDialog(props: { onClose: () => void; onChanged: (text: strin
               </tbody>
             </table>
             {!bans.length && !pending && <Empty title={dq ? "没有匹配的记录" : "当前没有封禁黑名单记录"} />}
-          </TableScroll>
+          </TableWrap>
           <h3 class="mb-h4">手动添加封禁</h3>
           <form
             class="mb-banadd"

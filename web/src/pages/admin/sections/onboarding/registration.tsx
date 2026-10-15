@@ -1,18 +1,9 @@
 /** 自助领 Key：开放开关、名额、有效期、新成员默认额度与功能、限定身份组。 */
 import { useMemo, useState } from "preact/hooks";
 import { Badge, Button, Card, Meter, Notice, toast } from "../../../../ui";
-import { act } from "../../Admin";
+import { actOrError, ConfirmDialog } from "../_kit";
 import { featureIds } from "../members/types";
-import {
-  ConfirmDialog,
-  NumField,
-  SaveBar,
-  SelectField,
-  SwitchRow,
-  TextField,
-  useForm,
-  withTone,
-} from "../system/forms";
+import { NumField, SaveBar, SelectField, SwitchRow, TextField, useForm, withTone } from "../system/forms";
 import { FEATURE_PREFIX, type Ops, regBody, regServer, regSpecs, roleProblem } from "./core";
 
 const URL = "/admin/api/ops/registration";
@@ -35,15 +26,14 @@ export default function RegistrationCard(props: { ops: Ops; algoOn: boolean }) {
     ? "由「额度与保护 › 动态额度」自动设置（每 10 分钟重算），关闭动态额度后才能手改"
     : undefined;
 
+  /** 返回 undefined = 已保存；返回字符串 = 失败原因 */
   const send = async (notify: boolean) => {
     const body = regBody(form.changes(), form.raw as (n: string) => string | boolean, names, notify);
     setSaving(true);
-    const ok = await act("PUT", URL, body, "领 Key 设置已保存");
+    const err = await actOrError("PUT", URL, body, "领 Key 设置已保存");
     setSaving(false);
-    if (ok) {
-      form.commit();
-      setPendingSave(false);
-    }
+    if (!err) form.commit();
+    return err;
   };
   const trySave = () => {
     if (roleErr) {
@@ -52,10 +42,11 @@ export default function RegistrationCard(props: { ops: Ops; algoOn: boolean }) {
     }
     // 名额上限变化会在成员公告频道发名额公告：让站长选发不发
     if ("max_users" in form.changes()) setPendingSave(true);
-    else void send(true);
+    else void send(true).then((err) => err && toast(err, { error: true }));
   };
-  const setOpen = async (open: boolean, notify: boolean) => {
-    const ok = await act(
+  /** 返回 undefined = 已改；返回字符串 = 失败原因 */
+  const setOpen = (open: boolean, notify: boolean) =>
+    actOrError(
       "PUT",
       URL,
       { open, ...(notify ? {} : { notify: false }) },
@@ -67,8 +58,6 @@ export default function RegistrationCard(props: { ops: Ops; algoOn: boolean }) {
           ? "已暂停领 Key（已公告）"
           : "已暂停领 Key（未公告）",
     );
-    if (ok) setToggleTo(null);
-  };
 
   return (
     <Card
@@ -176,14 +165,12 @@ export default function RegistrationCard(props: { ops: Ops; algoOn: boolean }) {
       <ConfirmDialog
         open={toggleTo !== null}
         title={toggleTo ? "开放自助领 Key？" : "暂停自助领 Key？"}
-        confirmLabel={toggleTo ? "开放并公告" : "暂停并公告"}
-        tone="primary"
+        confirmText={toggleTo ? "开放并公告" : "暂停并公告"}
         onClose={() => setToggleTo(null)}
-        extra={
-          <Button onClick={() => void setOpen(toggleTo === true, false)}>
-            {toggleTo ? "仅开放，不公告" : "仅暂停，不公告"}
-          </Button>
-        }
+        extra={{
+          text: toggleTo ? "仅开放，不公告" : "仅暂停，不公告",
+          onClick: () => setOpen(toggleTo === true, false),
+        }}
         onConfirm={() => setOpen(toggleTo === true, true)}
       >
         <p>
@@ -195,10 +182,9 @@ export default function RegistrationCard(props: { ops: Ops; algoOn: boolean }) {
       <ConfirmDialog
         open={pendingSave}
         title="名额上限有变化"
-        confirmLabel="保存并公告"
-        tone="primary"
+        confirmText="保存并公告"
         onClose={() => setPendingSave(false)}
-        extra={<Button onClick={() => void send(false)}>仅保存，不公告</Button>}
+        extra={{ text: "仅保存，不公告", onClick: () => send(false) }}
         onConfirm={() => send(true)}
       >
         <p>

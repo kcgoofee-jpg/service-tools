@@ -2,27 +2,15 @@
  * 设置类分区（上游 / 领 Key 与功能 / 额度与保护 / 模块 / Discord / 系统）共用的表单件。
  *
  * - useForm：按字段规格校验（规则同后端），只提交改过的字段；编辑期间暂停全局自动刷新（busy）。
- * - 开关、数字 / 文字 / 下拉字段、保存条、确认对话框、「推算过程」框。
+ * - 开关、数字 / 文字 / 下拉字段、保存条、「推算过程」框。
  * 只用 ui 组件库与 tokens.css 的变量。
  */
 import type { ComponentChildren } from "preact";
-import { useEffect, useId, useMemo, useRef, useState } from "preact/hooks";
-import { Button, cx, Dialog, Notice } from "../../../../ui";
-import { busy } from "../../Admin";
+import { useId, useMemo, useState } from "preact/hooks";
+import { Button, cx } from "../../../../ui";
+import { useBusy } from "../_kit";
 import { type FieldSpec, parseField, type Raw, sameRaw, toRaw } from "./core";
 import "./forms.css";
-
-/* ---------------- 编辑期间暂停自动刷新 ---------------- */
-/** active 为真期间让全局刷新节拍暂停（Admin.tsx 的 busy 计数）。 */
-export function useBusy(active: boolean): void {
-  useEffect(() => {
-    if (!active) return;
-    busy.value++;
-    return () => {
-      busy.value--;
-    };
-  }, [active]);
-}
 
 /* ---------------- 表单状态 ---------------- */
 export type Form = {
@@ -378,83 +366,6 @@ export function SaveBar(props: { form: Form; onSave: () => unknown; saving?: boo
   );
 }
 
-/* ---------------- 确认对话框 ---------------- */
-export function ConfirmDialog(props: {
-  open: boolean;
-  title: ComponentChildren;
-  children: ComponentChildren;
-  confirmLabel: string;
-  tone?: "danger" | "primary";
-  /** 必须原样输入这段话才能确认（高危操作） */
-  requireText?: string;
-  onConfirm: () => unknown;
-  onClose: () => void;
-  /** 额外的选项按钮（例如「仅保存，不公告」），出现在取消与确认之间 */
-  extra?: ComponentChildren;
-}) {
-  const [typed, setTyped] = useState("");
-  const [pending, setPending] = useState(false);
-  const tid = useId();
-  const input = useRef<HTMLInputElement>(null);
-  useBusy(props.open);
-  useEffect(() => {
-    if (props.open) {
-      setTyped("");
-      setPending(false);
-    }
-  }, [props.open]);
-  const ready = !props.requireText || typed.trim() === props.requireText;
-  return (
-    <Dialog
-      open={props.open}
-      title={props.title}
-      onClose={props.onClose}
-      footer={
-        <>
-          <Button onClick={props.onClose} disabled={pending}>
-            取消
-          </Button>
-          {props.extra}
-          <Button
-            variant={props.tone === "danger" ? "danger" : "primary"}
-            disabled={!ready || pending}
-            onClick={async () => {
-              setPending(true);
-              try {
-                await props.onConfirm();
-              } finally {
-                setPending(false);
-              }
-            }}
-          >
-            {pending ? "处理中…" : props.confirmLabel}
-          </Button>
-        </>
-      }
-    >
-      <div class="confirm">
-        {props.children}
-        {props.requireText && (
-          <div class="field">
-            <label class="field__label" for={`${tid}-in`}>
-              请输入「{props.requireText}」以确认
-            </label>
-            <input
-              id={`${tid}-in`}
-              ref={input}
-              class="input"
-              type="text"
-              autoComplete="off"
-              value={typed}
-              onInput={(e) => setTyped((e.target as HTMLInputElement).value)}
-            />
-          </div>
-        )}
-      </div>
-    </Dialog>
-  );
-}
-
 /* ---------------- 展示件 ---------------- */
 /** 「推算过程」框：把决定数字的来源摆出来，方便站长用常识检查。 */
 export function Derive(props: { title?: string; tone?: "warn"; children: ComponentChildren }) {
@@ -484,19 +395,7 @@ export function Kv(props: { rows: Array<[ComponentChildren, ComponentChildren]> 
 export const withTone = <T extends string>(tone: T | undefined | false): { tone?: T } =>
   tone ? { tone } : {};
 
-/** 可横向滚动的表格容器：键盘可聚焦（无障碍要求），窄屏只在容器内滚动，不撑出页面 */
-export function TableWrap(props: { label: string; children: ComponentChildren }) {
-  return (
-    // biome-ignore lint/a11y/noNoninteractiveTabindex: 可滚动区域必须能用键盘聚焦（axe: scrollable-region-focusable）
-    <section class="table-wrap" tabIndex={0} aria-label={props.label}>
-      {props.children}
-    </section>
-  );
-}
-
 /** 分区根容器：保证表格等宽内容不会把页面撑出横向滚动条 */
 export function Sect(props: { children: ComponentChildren }) {
   return <div class="sect">{props.children}</div>;
 }
-
-export { Notice };

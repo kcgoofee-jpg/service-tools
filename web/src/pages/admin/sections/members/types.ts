@@ -107,16 +107,8 @@ export type Coupon = {
 };
 
 export type OpsSnapshot = {
-  registration: { daily_images: number; daily_v5: number; expires_days: number; features: string[] | null };
+  registration: { daily_images: number; daily_v5: number };
   features: { labels: Record<string, string>; new_key: string[] | null };
-  audit: {
-    prompts: boolean;
-    thumbs: boolean;
-    retention_days: number;
-    image_cap_mb: number;
-    image_bytes: number;
-    image_keep_hours: number;
-  };
 };
 
 /** 功能名（后端 features.FEATURES 的副本；接口给了 labels 就以接口为准） */

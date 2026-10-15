@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   aspectOf,
   charsText,
-  gb,
   hasPicture,
   negativeText,
   paramsLine,
@@ -44,10 +43,9 @@ describe("提示词块", () => {
 });
 
 describe("其他", () => {
-  it("是否有图、容量、状态文字", () => {
+  it("是否有图、状态文字", () => {
     expect(hasPicture({ has_image: 0, has_thumb: 1 })).toBe(true);
     expect(hasPicture({ has_image: false, has_thumb: false })).toBe(false);
-    expect(gb(1073741824 * 1.5)).toBe("1.5 GB");
     expect(statusText("ok")).toBe("成功");
     expect(statusText("timeout")).toBe("timeout");
     expect(statusText("")).toBe("错误");

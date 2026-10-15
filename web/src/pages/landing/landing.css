@@ -104,11 +104,8 @@ a.btn:hover {
   font-size: var(--fs-lg);
   color: var(--text-2);
 }
-.lp-cta {
-  gap: var(--sp-3);
-}
 
-/* 登录成员：手机上按 额度 → 状态 → Key → 券 → 问卷 排；桌面分两列，各列内部顺序不变 */
+/* 登录成员：手机上按 额度 → 状态 → Key → 券 排；桌面分两列，各列内部顺序不变 */
 .lp-grid {
   display: flex;
   flex-direction: column;
@@ -128,9 +125,6 @@ a.btn:hover {
 }
 .lp-o4 {
   order: 4;
-}
-.lp-o5 {
-  order: 5;
 }
 
 /* 某块没有内容时它的外壳不占位，否则会多出一道间距 */
@@ -205,28 +199,6 @@ a.btn:hover {
   font-size: var(--fs-sm);
   color: var(--muted);
 }
-
-/* ---------- 成员 ---------- */
-.lp-facts {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-  gap: var(--sp-3);
-  margin: var(--sp-5) 0 0;
-  padding-top: var(--sp-4);
-  border-top: 1px solid var(--border);
-  font-size: var(--fs-sm);
-}
-.lp-facts dt {
-  color: var(--muted);
-}
-.lp-facts dd {
-  margin: 0;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-.lp-facts dd .muted {
-  font-weight: 400;
-}
 .lp-keyrow {
   display: flex;
   align-items: stretch;
@@ -237,6 +209,7 @@ a.btn:hover {
   min-width: 0;
 }
 .lp-keyrow .btn {
+  height: auto; /* 与左边的 Key 框等高：不用按钮自己的固定高度（sm 是 30px，Key 框是 36px） */
   min-height: 0;
   align-self: stretch;
 }

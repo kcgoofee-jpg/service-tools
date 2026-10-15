@@ -4,8 +4,8 @@ import { useState } from "preact/hooks";
 import { fullTime } from "../../../../lib/format";
 import { Button, Skeleton } from "../../../../ui";
 import { useAdmin } from "../../Admin";
-import { LoadError } from "../_kit";
-import { downloadFile, Empty, NARROW, TableScroll, useDebounced, useMedia } from "../members/shared";
+import { LoadError, TableWrap } from "../_kit";
+import { downloadFile, Empty, NARROW, useDebounced, useMedia } from "../members/shared";
 import { filterFeedback, splitTail } from "./feedbackStats";
 import type { FeedbackItem, FeedbackResp } from "./types";
 
@@ -100,7 +100,7 @@ export function Feedback() {
             ))}
           </ul>
         ) : (
-          <TableScroll label="成员反馈">
+          <TableWrap label="成员反馈">
             <table class="table lg-table">
               <caption class="sr-only">成员反馈</caption>
               <thead>
@@ -124,7 +124,7 @@ export function Feedback() {
                 ))}
               </tbody>
             </table>
-          </TableScroll>
+          </TableWrap>
         )}
         {rows.length > shown.length && (
           <div class="lg-more">

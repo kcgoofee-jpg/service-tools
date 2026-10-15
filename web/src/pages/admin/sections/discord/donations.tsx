@@ -3,7 +3,7 @@ import { useState } from "preact/hooks";
 import { fullTime } from "../../../../lib/format";
 import { Badge, Button, Card, CopyField, Dialog } from "../../../../ui";
 import { act } from "../../Admin";
-import { TableWrap, useBusy } from "../system/forms";
+import { TableWrap, useBusy } from "../_kit";
 import { type Donation, type Donations, maskToken } from "./core";
 
 function DonationRow(props: { d: Donation; onHandle?: (d: Donation) => void }) {

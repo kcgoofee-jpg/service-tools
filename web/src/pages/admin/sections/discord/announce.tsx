@@ -2,8 +2,8 @@
 import { useState } from "preact/hooks";
 import { Button, Card } from "../../../../ui";
 import { act, useAdmin } from "../../Admin";
-import { LoadError, Loading } from "../_kit";
-import { ConfirmDialog, SaveBar, TextAreaField, useBusy, useForm } from "../system/forms";
+import { actOrError, ConfirmDialog, LoadError, Loading, useBusy } from "../_kit";
+import { SaveBar, TextAreaField, useForm } from "../system/forms";
 import { ANNOUNCE_SPECS, DC_ANNOUNCE_MAX } from "./core";
 
 function SiteAnnouncement() {
@@ -99,19 +99,17 @@ function DiscordSend() {
       <ConfirmDialog
         open={open}
         title="发到公告频道？"
-        confirmLabel="立即发送"
+        confirmText="立即发送"
         onClose={() => setOpen(false)}
         onConfirm={async () => {
-          const ok = await act(
+          const err = await actOrError(
             "POST",
             "/admin/api/announcement/send",
             { text: t },
             "已交给奶妹，公告频道几秒内可见",
           );
-          if (ok) {
-            setText("");
-            setOpen(false);
-          }
+          if (!err) setText("");
+          return err;
         }}
       >
         <p>奶妹会立即把下面这条消息发到公告频道，发出后无法撤回：</p>

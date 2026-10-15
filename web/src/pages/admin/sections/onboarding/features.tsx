@@ -1,10 +1,10 @@
 /** 全站功能开关。 */
 import { useMemo, useState } from "preact/hooks";
-import { Badge, Card, Notice } from "../../../../ui";
-import { act } from "../../Admin";
+import { Badge, Card, Notice, toast } from "../../../../ui";
+import { actOrError, ConfirmDialog } from "../_kit";
 import { featureIds } from "../members/types";
 import type { FieldSpec } from "../system/core";
-import { ConfirmDialog, SaveBar, SwitchRow, useForm } from "../system/forms";
+import { SaveBar, SwitchRow, useForm } from "../system/forms";
 import { ANLAS_FEATURES, type Ops } from "./core";
 
 export function FeaturesCard(props: { ops: Ops }) {
@@ -23,14 +23,13 @@ export function FeaturesCard(props: { ops: Ops }) {
   const turningOn = Object.keys(ch).filter((n) => ch[n] === true && ANLAS_FEATURES[n]);
   const turningOff = Object.keys(ch).filter((n) => ch[n] === false);
 
+  /** 返回 undefined = 已保存；返回字符串 = 失败原因 */
   const save = async () => {
     setSaving(true);
-    const ok = await act("PUT", "/admin/api/ops/features", { flags: ch }, "功能开关已保存");
+    const err = await actOrError("PUT", "/admin/api/ops/features", { flags: ch }, "功能开关已保存");
     setSaving(false);
-    if (ok) {
-      form.commit();
-      setConfirm(false);
-    }
+    if (!err) form.commit();
+    return err;
   };
 
   return (
@@ -57,14 +56,18 @@ export function FeaturesCard(props: { ops: Ops }) {
         <SaveBar
           form={form}
           saving={saving}
-          onSave={() => (turningOn.length || turningOff.length ? setConfirm(true) : void save())}
+          onSave={() =>
+            turningOn.length || turningOff.length
+              ? setConfirm(true)
+              : void save().then((err) => err && toast(err, { error: true }))
+          }
         />
       </form>
       <ConfirmDialog
         open={confirm}
         title="确认修改功能开关？"
-        confirmLabel="确认保存"
-        tone={turningOff.length ? "danger" : "primary"}
+        confirmText="确认保存"
+        danger={turningOff.length > 0}
         onClose={() => setConfirm(false)}
         onConfirm={save}
       >

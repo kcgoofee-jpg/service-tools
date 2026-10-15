@@ -1,9 +1,9 @@
 /** 账号保护与排队：每个上游账号的每日 / 每小时上限、安静时段、间隔抖动、排队数。 */
 import { useMemo, useState } from "preact/hooks";
-import { Card, Notice } from "../../../../ui";
-import { act, useAdmin } from "../../Admin";
-import { LoadError, Loading } from "../_kit";
-import { ConfirmDialog, Derive, NumField, SaveBar, useForm } from "../system/forms";
+import { Card, Notice, toast } from "../../../../ui";
+import { useAdmin } from "../../Admin";
+import { actOrError, ConfirmDialog, LoadError, Loading } from "../_kit";
+import { Derive, NumField, SaveBar, useForm } from "../system/forms";
 import { GUARD_ADVANCED, GUARD_CORE, type Guard, guardSpecs, pacedText } from "./core";
 
 const URL = "/admin/api/guard";
@@ -32,18 +32,20 @@ export default function GuardCard() {
   const burst = Number(form.raw("daily_burst")) || 0;
   const paced = pacedText(cap, burst);
 
+  /** 返回 undefined = 已保存；返回字符串 = 失败原因 */
   const doSave = async () => {
     setSaving(true);
-    const ok = await act("PUT", URL, form.changes(), "账号保护已保存，立即生效");
+    const err = await actOrError("PUT", URL, form.changes(), "账号保护已保存，立即生效");
     setSaving(false);
-    if (ok) form.commit();
+    if (!err) form.commit();
+    return err;
   };
   const trySave = () => {
     const ch = form.changes();
     // 每小时 / 每日上限是保护唯一上游账号的硬闸门：填 0 = 关掉该项，必须确认
     const zeros = ["account_hourly_cap", "account_daily_cap"].filter((k) => k in ch && ch[k] === 0);
     if (zeros.length) setZero(zeros.map((k) => form.specs[k]?.label ?? k));
-    else void doSave();
+    else void doSave().then((err) => err && toast(err, { error: true }));
   };
 
   return (
@@ -82,13 +84,10 @@ export default function GuardCard() {
       <ConfirmDialog
         open={zero !== null}
         title="确定关掉这项保护？"
-        confirmLabel="关掉保护并保存"
-        tone="danger"
+        confirmText="关掉保护并保存"
+        danger
         onClose={() => setZero(null)}
-        onConfirm={async () => {
-          await doSave();
-          setZero(null);
-        }}
+        onConfirm={doSave}
       >
         <Notice tone="warn">
           「{(zero ?? []).join("」「")}」填了

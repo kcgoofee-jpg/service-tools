@@ -250,10 +250,6 @@
   align-content: start;
   min-width: 0;
 }
-.mb-meters {
-  display: grid;
-  gap: var(--sp-3);
-}
 .mb-ctl {
   display: grid;
   gap: 4px;
@@ -337,27 +333,6 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--sp-2);
-}
-
-/* 24 小时生图速率 */
-.mb-rate {
-  display: grid;
-  gap: 6px;
-}
-.mb-rate__bars {
-  display: grid;
-  grid-template-columns: repeat(24, 1fr);
-  align-items: end;
-  gap: 2px;
-  height: 36px;
-}
-.mb-rate__bars i {
-  display: block;
-  border-radius: 2px;
-  background: var(--surface-3);
-}
-.mb-rate__bars i.on {
-  background: var(--accent);
 }
 
 @media (max-width: 860px) {

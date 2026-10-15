@@ -110,9 +110,6 @@
   color: var(--muted);
   font-size: var(--fs-sm);
 }
-.card--flat {
-  box-shadow: none;
-}
 .card--accent {
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
   background: linear-gradient(180deg, var(--accent-soft), var(--surface) 70%);
@@ -534,11 +531,6 @@
 }
 .select:disabled {
   cursor: not-allowed;
-}
-.select--block {
-  width: 100%;
-  justify-self: stretch;
-  field-sizing: fixed;
 }
 .input:focus-visible,
 .select:focus-visible,

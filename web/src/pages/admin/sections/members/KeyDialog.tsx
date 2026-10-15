@@ -3,6 +3,7 @@ import type { ComponentChildren } from "preact";
 import { useEffect, useId, useMemo, useRef, useState } from "preact/hooks";
 import { getJSON } from "../../../../lib/api";
 import { Button, Dialog, Field, Notice, Skeleton, toast } from "../../../../ui";
+import { useBusy } from "../_kit";
 import { call } from "./actions";
 import {
   buildBody,
@@ -13,7 +14,7 @@ import {
   type KeyForm,
 } from "./keyForm";
 import { roleOf } from "./logic";
-import { useBusy, useCloseGuard } from "./shared";
+import { useCloseGuard } from "./shared";
 import {
   FEATURE_LABELS,
   type KeyRow,

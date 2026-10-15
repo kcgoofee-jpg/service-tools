@@ -1,22 +1,16 @@
 /** 服务器状态：磁盘、上游健康、告警渠道、生成记录与原图存储（清空原图）。 */
 import { useState } from "preact/hooks";
 import { duration } from "../../../../lib/format";
-import { Badge, Button, Card, Meter, Notice, toast } from "../../../../ui";
-import { act, useAdmin } from "../../Admin";
-import { LoadError, Loading, Stat } from "../_kit";
+import { Badge, Button, Card, Meter, Notice } from "../../../../ui";
+import { useAdmin } from "../../Admin";
+import { actOrError, ConfirmDialog, LoadError, Loading, Stat } from "../_kit";
+import type { AuditInfo } from "../onboarding/core";
 import { bytesText, mbText } from "./core";
-import { ConfirmDialog, Kv, withTone } from "./forms";
+import { Kv, withTone } from "./forms";
 
 export type ServerStatus = {
   alerts: { configured: boolean; sent: number };
-  audit: {
-    prompts: boolean;
-    thumbs: boolean;
-    retention_days: number;
-    image_cap_mb: number;
-    image_bytes: number;
-    image_keep_hours: number;
-  };
+  audit: AuditInfo;
   upstream: { status: string; recent: number; failed: number; image_cooldown_seconds: number };
   protection: {
     auth_fail_max: number;
@@ -118,13 +112,11 @@ export function AlertsCard() {
       <ConfirmDialog
         open={open}
         title="发送测试告警？"
-        confirmLabel="发送"
-        tone="primary"
+        confirmText="发送"
         onClose={() => setOpen(false)}
-        onConfirm={async () => {
-          const ok = await act("POST", "/admin/api/alerts/test", undefined, "测试告警已发出，请检查告警渠道");
-          if (ok) setOpen(false);
-        }}
+        onConfirm={() =>
+          actOrError("POST", "/admin/api/alerts/test", undefined, "测试告警已发出，请检查告警渠道")
+        }
       >
         <p>会向告警渠道发一条真实的测试消息（10 秒内只能发一次）。</p>
       </ConfirmDialog>
@@ -150,22 +142,18 @@ export function StorageCard() {
       <ConfirmDialog
         open={open}
         title="清空全部原图？"
-        confirmLabel="清空"
-        tone="danger"
-        requireText="清空"
+        confirmText="清空"
+        danger
+        phrase="清空"
         onClose={() => setOpen(false)}
-        onConfirm={async () => {
-          const r = await act<{ purged: number }>(
+        onConfirm={() =>
+          actOrError<{ purged: number }>(
             "POST",
             "/admin/api/audit/purge-images",
             { confirm: "清空" },
-            "",
-          );
-          if (r) {
-            toast(`已清空 ${r.purged} 张原图`);
-            setOpen(false);
-          }
-        }}
+            (r) => `已清空 ${r.purged} 张原图`,
+          )
+        }
       >
         <Notice tone="danger">
           将删除服务器上的全部原图（当前占用 {bytesText(a.image_bytes)}

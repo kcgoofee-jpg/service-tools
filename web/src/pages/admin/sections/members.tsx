@@ -7,7 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { useLocation } from "preact-iso";
 import { Button, Menu, toast } from "../../../ui";
 import { useAdmin } from "../Admin";
-import { LoadError, Loading, SectionHead } from "./_kit";
+import { ConfirmDialog, LoadError, Loading, SectionHead } from "./_kit";
 import {
   addTag,
   clearShare,
@@ -49,7 +49,7 @@ import {
 } from "./members/logic";
 import type { DetailActions } from "./members/MemberDetail";
 import { MemberList } from "./members/MemberList";
-import { ConfirmDialog, Empty, NARROW, Seg, useMedia } from "./members/shared";
+import { Empty, NARROW, Seg, useMedia } from "./members/shared";
 import type { KeysResp, MemberRow, MembersResp } from "./members/types";
 import "./members.css";
 

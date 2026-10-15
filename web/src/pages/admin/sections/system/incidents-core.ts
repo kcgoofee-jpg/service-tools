@@ -1,7 +1,7 @@
 /**
  * 状态页事件：常量与文案检查（纯函数，可单测）。
  *
- * 标准句式与生命周期照 app/status_page.py（Atlassian Statuspage 标准）：
+ * 标准句式与生命周期照后端 crates/gate-ops/src/incident.rs（Atlassian Statuspage 标准）：
  * 调查中 → 已确定 → 监控中 → 已解决，中途可发「更新」。标题 = 受影响的功能 + 现象，不写原因；
  * 正文只写成员能感知到的影响、时间段和进展，不写内部原因细节、数据量、版本号、配置名、哪个成员、哪把 Key。
  */
@@ -30,11 +30,16 @@ export const IMPACT_LABEL: Record<Impact, string> = {
   major: "部分中断",
   critical: "严重中断",
 };
-export const COMPONENTS: Array<{ key: string; label: string; onPublicPage: boolean }> = [
-  { key: "upstream", label: "NovelAI 上游（生图）", onPublicPage: true },
-  { key: "api", label: "出图接口", onPublicPage: true },
-  { key: "web", label: "官网与后台", onPublicPage: false },
-  { key: "bot", label: "Discord 机器人（奶妹）", onPublicPage: false },
+/** 状态页上的组件：新建事件的表单只列公开页显示的 upstream / api */
+export const PUBLIC_COMPONENTS: Array<{ key: string; label: string }> = [
+  { key: "upstream", label: "NovelAI 上游（生图）" },
+  { key: "api", label: "出图接口" },
+];
+/** 旧事件可能还带着官网 / 机器人这两个不公开的组件：显示名字用 */
+export const COMPONENTS: Array<{ key: string; label: string }> = [
+  ...PUBLIC_COMPONENTS,
+  { key: "web", label: "官网与后台" },
+  { key: "bot", label: "Discord 机器人（奶妹）" },
 ];
 export const CREATE_STATUSES: Status[] = ["investigating", "identified", "monitoring", "resolved"];
 export const UPDATE_STATUSES: Status[] = ["investigating", "identified", "update", "monitoring", "resolved"];

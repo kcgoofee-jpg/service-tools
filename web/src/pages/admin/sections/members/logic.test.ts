@@ -238,7 +238,7 @@ describe("排序 / 身份 / 查找", () => {
 
 describe("头像首字", () => {
   it("跳过颜文字符号，名字里没有字母就用用户名", async () => {
-    const { initialOf } = await import("./shared");
+    const { initialOf } = await import("../_kit");
     expect(initialOf("月见草")).toBe("月");
     expect(initialOf("kestrel")).toBe("K");
     expect(initialOf("(๑•̀ㅂ•́)", "tanuki")).toBe("T");

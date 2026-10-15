@@ -12,17 +12,6 @@ export type BotStatus = {
 };
 export type BotData = { status: BotStatus };
 
-/** Discord 头像只接受官方 CDN */
-export function safeAvatar(url: string | null | undefined): string | null {
-  if (!url) return null;
-  try {
-    const u = new URL(url);
-    return u.protocol === "https:" && u.hostname === "cdn.discordapp.com" ? u.href : null;
-  } catch {
-    return null;
-  }
-}
-
 export type Donation = {
   id: number;
   ts: number;

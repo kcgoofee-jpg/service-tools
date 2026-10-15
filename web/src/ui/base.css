@@ -44,13 +44,10 @@ p {
 }
 
 /* 折行：不让最后一行只剩一两个字（站长 10-15「受不了」）。
-   balance 让各行长度接近（Chrome 限 6 行内、Firefox 10 行内生效），本站的文字块几乎都在这个范围；
-   更长的正文由 pretty 兜底避开孤字。e2e/layout.spec.ts 在各宽度下逐页检查。 */
+   balance 让各行长度接近（Chrome 限 6 行内、Firefox 10 行内生效），本站的文字块几乎都在这个范围。
+   e2e/layout.spec.ts 在各宽度下逐页检查。 */
 body {
   text-wrap: balance;
-}
-:where(.prose p, .prose li) {
-  text-wrap: pretty;
 }
 
 a {
@@ -124,12 +121,6 @@ pre {
 }
 .spacer {
   flex: 1;
-}
-
-.grid-2 {
-  display: grid;
-  gap: var(--sp-4);
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
 }
 
 @media (prefers-reduced-motion: reduce) {
