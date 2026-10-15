@@ -1,4 +1,4 @@
-/** 总览用到的接口形状：/admin/api/overview，以及提醒要看的 errors / discord-bot。模块自检的形状在 modules/core.ts。 */
+/** 总览用到的接口形状：/admin/api/overview，以及提醒要看的 errors / discord-bot。定时任务（/admin/api/jobs）的形状在 system/jobs-core.ts。 */
 import type { PoolToken } from "../upstream/core";
 
 export type FeatBucket = {

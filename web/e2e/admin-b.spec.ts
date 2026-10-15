@@ -1,5 +1,5 @@
 /**
- * 后台 B 组分区（上游 / 领 Key 与功能 / 额度与保护 / 模块 / Discord / 系统）的端到端检查：
+ * 后台 B 组分区（上游 / 领 Key 与功能 / 额度与保护 / Discord / 系统）的端到端检查：
  * 登录门、逐个分区无控制台报错 / 无障碍 / 窄屏不横向滚动、改一项设置并保存、危险操作的确认框。
  *
  * 前置：后端（`cargo xtask dev`）+ 前端都在跑，E2E_BASE 指向前端（要用 localhost，后端按 ADMIN_ALLOWED_ORIGINS 校验 Origin）：
@@ -29,7 +29,6 @@ const SECTIONS = [
   { id: "upstream", title: "上游" },
   { id: "onboarding", title: "领 Key 与功能" },
   { id: "limits", title: "额度与保护" },
-  { id: "modules", title: "模块" },
   { id: "discord", title: "Discord" },
   { id: "system", title: "系统" },
 ] as const;
@@ -191,7 +190,7 @@ test("Discord：机器人只有状态卡（离线角标）；公告发送要确�
   ).toContainText("!");
   await expect(page.getByText("机器人状态")).toBeVisible();
   await expect(page.getByText("离线", { exact: true })).toBeVisible();
-  // 跑图分享设置、AI 评论、最近动作已删除（docs/v3-deviations.md #54）
+  // 跑图分享设置、AI 评论、最近动作已删除
   // 封禁黑名单只在「成员 › 更多」、成员问卷只在「日志 › 问卷」，这里不再有第二份
   for (const gone of ["跑图分享设置", "AI 评论", "最近动作", "封禁黑名单", "成员问卷"])
     await expect(page.getByText(gone)).toHaveCount(0);
@@ -205,19 +204,32 @@ test("Discord：机器人只有状态卡（离线角标）；公告发送要确�
   await expect(dialog).toBeHidden();
 });
 
-test("模块：列出真实模块，切换启用并还原", async ({ page }) => {
-  await visit(page, "modules", "模块");
-  await expect(page.getByText("8 大核心模块")).toHaveCount(0);
-  const titles = await page.locator(".card__title").allTextContents();
-  expect(titles.length).toBeGreaterThanOrEqual(5);
-  const sw = page.getByRole("switch", { name: /^观测/ });
-  await expect(sw).toHaveAttribute("aria-checked", "true");
-  await sw.click();
-  await expect(page.getByText("已关闭「观测」")).toBeVisible();
-  await expect(sw).toHaveAttribute("aria-checked", "false");
-  await sw.click();
-  await expect(page.getByText("已启用「观测」")).toBeVisible();
-  await expect(sw).toHaveAttribute("aria-checked", "true");
+test("系统：定时任务卡片列出 7 个任务，只看结果（没有开关、没有按钮）；旧的模块页跳到这里", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await visit(page, "system", "系统");
+  const card = page.locator("#jobs");
+  await expect(card.getByRole("heading", { name: "定时任务" })).toBeVisible();
+  const titles = await card.getByRole("rowheader").allTextContents();
+  expect(titles.map((t) => t.trim()).sort()).toEqual(
+    ["动态额度", "上游 V5 快照", "每小时上限自动调整", "全站熔断", "单 Key 限流", "维护", "闲置回收"].sort(),
+  );
+  const badges = await card.locator(".badge").allTextContents();
+  expect(badges).toHaveLength(7);
+  for (const b of badges) expect(["正常", "出错", "超过 3 个周期没跑", "还没跑过"]).toContain(b.trim());
+  await expect(card.getByRole("switch")).toHaveCount(0);
+  await expect(card.getByRole("button")).toHaveCount(0);
+  // 动态额度开关只在「额度与保护」，这里只是指路
+  await expect(card.getByRole("link", { name: "「额度与保护」" })).toHaveAttribute("href", "/admin/limits");
+
+  // 窄屏改成一条条卡片，任务一个不少
+  await page.setViewportSize({ width: 375, height: 812 });
+  await expect(card.locator(".jobs-item")).toHaveCount(7);
+
+  await page.goto("/admin/modules");
+  await expect(page).toHaveURL(/\/admin\/system#jobs$/);
+  await expect(page.getByRole("heading", { level: 1, name: "系统", exact: true })).toBeVisible();
 });
 
 test("领 Key 与功能：改有效期并保存", async ({ page }) => {
