@@ -11,7 +11,7 @@ use crate::middleware::StatusStats;
 use crate::params::ParamsStore;
 use crate::registration::{MemberWeb, RegistrationService};
 use crate::runtime::{
-    AuthGuard, ImageCooldown, Inflight, KeyPauses, SlidingWindow, TagQueue, UpstreamHealth,
+    AuthGuard, ImageCooldown, KeyPauses, SlidingWindow, TagQueue, UpstreamHealth,
 };
 use crate::web::Assets;
 use gate_core::clock::Clock;
@@ -80,7 +80,6 @@ pub struct Inner {
     pub auth_guard: AuthGuard,
     pub cooldown: ImageCooldown,
     pub pauses: KeyPauses,
-    pub inflight: Inflight,
     pub tags: TagQueue,
     /// 后台运营接口的进程内状态（测试告警节流、运行期限制写锁、Anlas 核对互斥）。
     pub ops: crate::ops::Shared,
@@ -221,7 +220,6 @@ impl AppState {
             auth_guard: AuthGuard::default(),
             cooldown: ImageCooldown::default(),
             pauses: KeyPauses::default(),
-            inflight: Inflight::default(),
             tags: TagQueue::default(),
             ops: crate::ops::Shared::default(),
             allowance,

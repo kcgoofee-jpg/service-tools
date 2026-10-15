@@ -8,12 +8,13 @@
 //!
 //! 每把 Key 的限速只剩两层：出图排队（同时生成 1 张 + 排队 1 张，见 `admission::image_admission`）和
 //! 每分钟次数（RPM）。2.x 的「每把 Key 两张图至少隔 15 秒」（`KEY_IMAGE_MIN_INTERVAL`）与出图请求的
-//! 「同一把 Key 同时在途 ≤ 4」已删除（docs/v3-deviations.md #64）。
+//! 「同一把 Key 同时在途 ≤ 4」已删除（docs/v3-deviations.md #64；后者原先只剩文本路由在用，文本接口 #81 删除后
+//! 整层删掉）。
 
 use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 use std::net::IpAddr;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use tokio::time::{Duration, Instant};
 
 /// 滑动窗口计数器。
@@ -148,10 +149,6 @@ impl AuthGuard {
     }
 }
 
-/// 同一把 Key 同时进行中的请求已达上限。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TooManyInflight;
-
 /// 全站图片冷却（上游 429 后）。
 #[derive(Default)]
 pub struct ImageCooldown {
@@ -217,62 +214,6 @@ impl KeyPauses {
 
     pub fn snapshot(&self) -> HashMap<i64, (f64, String)> {
         self.inner.lock().expect("pauses").clone()
-    }
-}
-
-/// 每个 Authorization 同时进行中的请求数（读请求体之前就限制）。
-///
-/// 只剩文本路由在用：文本请求没有排队，靠它和全站并发限住同一把 Key 的并发。出图请求已有排队
-/// （同时生成 1 张 + 排队 1 张）和 RPM，这一层与它们重复，3.0 不再对出图请求生效（docs/v3-deviations.md #64）。
-#[derive(Default, Clone)]
-pub struct Inflight {
-    inner: Arc<Mutex<HashMap<String, usize>>>,
-}
-
-pub const MAX_INFLIGHT_PER_KEY: usize = 4;
-
-/// 占用一个名额；可以移进后台任务（流式响应要占到推流和结算结束）。
-pub struct InflightPermit {
-    owner: Arc<Mutex<HashMap<String, usize>>>,
-    ident: String,
-}
-
-impl Drop for InflightPermit {
-    fn drop(&mut self) {
-        let mut m = self.owner.lock().expect("inflight");
-        if let Some(n) = m.get_mut(&self.ident) {
-            *n -= 1;
-            if *n == 0 {
-                m.remove(&self.ident);
-            }
-        }
-    }
-}
-
-impl Inflight {
-    /// 与鉴权同样归一化：「Bearer K」「bearer K」「Bearer  K」是同一把 Key。没有凭据不限制（返回 Ok(None)）。
-    pub fn acquire(&self, authorization: &str) -> Result<Option<InflightPermit>, TooManyInflight> {
-        let raw = gate_core::pyc::strip(gate_core::pyc::take_chars(authorization, 512));
-        let (scheme, rest) = raw.split_once(' ').unwrap_or((raw, ""));
-        let ident = if scheme.eq_ignore_ascii_case("bearer") {
-            gate_core::pyc::strip(rest)
-        } else {
-            raw
-        }
-        .to_string();
-        if ident.is_empty() {
-            return Ok(None);
-        }
-        let mut m = self.inner.lock().expect("inflight");
-        let n = m.entry(ident.clone()).or_insert(0);
-        if *n >= MAX_INFLIGHT_PER_KEY {
-            return Err(TooManyInflight);
-        }
-        *n += 1;
-        Ok(Some(InflightPermit {
-            owner: self.inner.clone(),
-            ident,
-        }))
     }
 }
 
@@ -471,18 +412,5 @@ mod tests {
         assert!(g.record_failure("203.0.113.9", 20, 600, 900, 19.0));
         assert_eq!(g.blocked("203.0.113.9", 20.0), 899);
         assert_eq!(g.blocked("203.0.113.10", 20.0), 0);
-    }
-
-    #[test]
-    fn inflight_normalizes_bearer() {
-        let f = Inflight::default();
-        let a = f.acquire("Bearer K").unwrap();
-        let b = f.acquire("bearer  K").unwrap();
-        let c = f.acquire("BEARER K").unwrap();
-        let d = f.acquire(" Bearer K ").unwrap();
-        assert!(f.acquire("Bearer K").is_err());
-        drop((a, b, c, d));
-        assert!(f.acquire("Bearer K").is_ok());
-        assert!(f.acquire("").unwrap().is_none());
     }
 }
