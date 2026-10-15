@@ -94,13 +94,6 @@ pub(crate) async fn apply_effects(
                 daily_images,
                 daily_v5,
             } => state.db.quota_apply_to_keys(daily_images, daily_v5).await?,
-            // ops.set_registration(db, {"max_users": n, "notify": False}, ...)：只落库，不发公告
-            Effect::SetRegistrationMaxUsers { max_users } => {
-                state
-                    .db
-                    .set_settings_bulk(&[("register_max_users".to_string(), max_users.to_string())])
-                    .await?;
-            }
             Effect::TripBreaker {
                 seconds,
                 reason,
@@ -190,40 +183,12 @@ pub async fn run_quota(state: &AppState) -> Result<Value, KernelError> {
     }
 }
 
-/// 自动驾驶一轮（旧版 `autopilot.run(state, registrar)`）。
+/// 自动驾驶一轮（旧版 `autopilot.run(state, registrar)`；「名额 +5」已删除，docs/v3-deviations.md #68）。
 pub async fn run_autopilot(state: &AppState) -> Result<Value, KernelError> {
     let now = state.now();
     let clock = &state.clock;
     let db = &state.db;
     let settings = read_settings(state, &autopilot::SETTING_KEYS_READ).await?;
-    let registrar = match state.kernel.registrar() {
-        Some(r) => {
-            let cfg = r
-                .settings()
-                .await
-                .map_err(|e| KernelError::new("RegistrarError", e))?;
-            let active = r
-                .count_active()
-                .await
-                .map_err(|e| KernelError::new("RegistrarError", e))?;
-            Some(autopilot::Registrar {
-                max_users: cfg.max_users,
-                active,
-            })
-        }
-        None => None,
-    };
-    // 上一轮复盘里 queue_full 的统计窗口；读不懂的话 decide 自己会按旧版报同样的错
-    let queue_hours = match autopilot::queue_window(
-        settings.get("quota_algo_history").map(String::as_str),
-        clock,
-    ) {
-        Ok(Some((start, end))) => {
-            db.autopilot_queue_hours(start, end, autopilot::QUEUE_BUSY_REJECTS)
-                .await?
-        }
-        _ => 0,
-    };
     let breaker = match autopilot::breaker_since(
         now,
         settings.get("autopilot_breaker_until").map(String::as_str),
@@ -248,9 +213,6 @@ pub async fn run_autopilot(state: &AppState) -> Result<Value, KernelError> {
     let inp = autopilot::AutopilotInputs {
         now,
         settings,
-        registrar,
-        global_daily_v5_default: global_daily_v5_default(state),
-        queue_hours,
         breaker,
         guard: Some(autopilot::GuardState { breaker_until }),
         pauses: Some(autopilot::PausedKeys { paused }),

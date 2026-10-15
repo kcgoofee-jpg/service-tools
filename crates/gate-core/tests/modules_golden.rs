@@ -39,6 +39,13 @@ const REMOVED_META_FIELDS: [&str; 1] = ["report_bugs"];
 
 /// 3.0 额度改动对模块元数据的影响（期望一侧改写）。
 fn v3_meta(name: &str, want: &mut Value) {
+    if name == "autopilot" {
+        // 「名额 +5」删除（docs/v3-deviations.md #68）
+        assert_eq!(want["question"], "名额、全站熔断、单个 Key 限流");
+        want["question"] = json!("全站熔断、单个 Key 限流");
+        let params = want["params"].as_array_mut().unwrap();
+        assert_eq!(params.pop().unwrap()[0], "名额");
+    }
     if name == "allocation" {
         // V5 每人上限改成公式、没有 3～30 的范围（docs/v3-deviations.md #63）
         let p = &mut want["params"][3];
@@ -302,7 +309,7 @@ fn params_golden() {
             "autopilot_params" => {
                 assert_eq!(json!(AUTOPILOT_BREAKER_TEXT), out["全站熔断"]);
                 assert_eq!(json!(AUTOPILOT_KEY_GUARD_TEXT), out["单个 Key 限流"]);
-                assert_eq!(json!(autopilot_slots_text()), out["名额"]);
+                // 「名额」随「名额 +5」规则删除（#68）
             }
             "registration_params" => {
                 let days = c.raw["inputs"]["days"].as_i64().unwrap();

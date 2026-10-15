@@ -232,26 +232,6 @@ impl Db {
 
     // ------------------------------------------------------------------ 自动驾驶（autopilot.run）
 
-    /// 上一轮复盘那天里「排队满被拒」≥ `min_rejects` 次的小时数。
-    pub async fn autopilot_queue_hours(
-        &self,
-        start: f64,
-        end: f64,
-        min_rejects: i64,
-    ) -> Result<i64> {
-        self.read(move |c| {
-            let mut stmt = c.prepare(
-                "SELECT CAST(ts/3600 AS INT) h FROM usage_log WHERE ts>=? AND ts<? \
-                 AND reason='queue_full' GROUP BY h HAVING COUNT(*)>=?",
-            )?;
-            let n = stmt
-                .query_map(params![start, end, min_rejects], |_| Ok(()))?
-                .count();
-            Ok(n as i64)
-        })
-        .await
-    }
-
     /// 熔断统计：`since` 之后上游真正出错的次数与出图请求总数（没有行时 SUM 为 NULL）。
     pub async fn autopilot_breaker_rows(&self, since: f64) -> Result<BreakerRows> {
         self.read(move |c| {

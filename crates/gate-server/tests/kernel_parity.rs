@@ -512,6 +512,10 @@ mod v3 {
         /// 旧版复盘按节约模式折算过 `used` 的服务日 → 3.0 的 `used`（成员实际张数之和，#67）。
         /// 由 [`raw_used_days`] 在种子写好之后直接查库得到。
         pub raw_used: HashMap<String, i64>,
+        /// 旧版的「名额 +5」改过注册名额（#68：3.0 不改，表行差异里也就没有这一行）。
+        slots_changed: bool,
+        /// 这个场景里写过的自动驾驶每小时快照（`hour`）：这些快照里都没有名额（#68）。
+        autopilot_hours: Vec<String>,
     }
 
     /// 这些服务日里，旧版的复盘会按账号层面「`units` / `images`」折算 `used`（`units < images`）的，
@@ -547,11 +551,57 @@ mod v3 {
     const DROPPED_SETTINGS: [&str; 2] = ["guard_base_daily_images", "quota_base_now"];
 
     /// 整个场景测的是 3.0 已经删掉的规则，没有可比的东西。
-    pub const REMOVED_SCENARIOS: [(&str, &str); 1] = [(
-        "v24_zero_min_people",
-        "私密参数把 V5 人数下限设成 0、没人用过 V5 时旧版抛 ZeroDivisionError；\
-         3.0 的人数下限固定为 10、不读这个参数（docs/v3-deviations.md #63）",
-    )];
+    pub const REMOVED_SCENARIOS: [(&str, &str); 9] = [
+        (
+            "k23_enforce_slots_via_tick",
+            "测的就是内核 tick 里「名额 +5」生效（名额 12 → 17）：规则已删除（docs/v3-deviations.md #68）",
+        ),
+        (
+            "k22_module_error_loose",
+            "自动驾驶读坏掉的上一轮额度复盘而出错：名额规则删除后自动驾驶不再读它、这一轮不出错\
+             （docs/v3-deviations.md #68）；模块出错的记录路径由分配模块的 q15_bad_history_json 等覆盖",
+        ),
+        (
+            "v24_zero_min_people",
+            "私密参数把 V5 人数下限设成 0、没人用过 V5 时旧版抛 ZeroDivisionError；\
+             3.0 的人数下限固定为 10、不读这个参数（docs/v3-deviations.md #63）",
+        ),
+        (
+            "ap14_breaker_observe",
+            "自动驾驶熔断只观察不执行：3.0 一律执行（docs/v3-deviations.md #68）",
+        ),
+        (
+            "ap19_breaker_off",
+            "自动驾驶熔断关闭：3.0 一律执行（docs/v3-deviations.md #68）",
+        ),
+        (
+            "ap20_bad_mode_value",
+            "模式设置写错按观察处理：3.0 不读模式设置、一律执行（docs/v3-deviations.md #68）",
+        ),
+        (
+            "ap22_keyguard_observe",
+            "单 Key 限流只观察不执行：3.0 一律执行（docs/v3-deviations.md #68）",
+        ),
+        (
+            "m04_mixed",
+            "熔断按默认的观察模式触发过一次、旧版只记观察日志：3.0 一律执行（docs/v3-deviations.md #68）",
+        ),
+        (
+            "ap30_bad_quota_history",
+            "名额规则读上一轮额度复盘出错：名额规则已删除、不再读它（docs/v3-deviations.md #68）",
+        ),
+    ];
+
+    /// 自动驾驶的状态 / 返回值：没有名额那一条规则；其余规则旧版在这些场景里没有触发过「观察」，
+    /// 模式一律写成 `enforce`（#68）。
+    fn autopilot_v3(v: &mut Value) {
+        if let Some(rules) = v.get_mut("rules").and_then(Value::as_object_mut) {
+            rules.shift_remove("slots");
+            for r in rules.values_mut() {
+                r["mode"] = json!("enforce");
+            }
+        }
+    }
 
     /// V5 的结果按新公式算（#63），与旧版无从对拍：两边都换成这个占位，V5 本身由 gate-core 的
     /// `quota_golden`（按新规则核对每个夹具用例）和 `quota_v3` 测试。
@@ -776,6 +826,8 @@ mod v3 {
                 resync: Vec::new(),
                 code_only_hourly,
                 raw_used: HashMap::new(),
+                slots_changed: false,
+                autopilot_hours: Vec::new(),
             }
         }
 
@@ -846,7 +898,32 @@ mod v3 {
             if key == "global_daily_v5" {
                 self.resync.push((key.to_string(), value.to_string()));
             }
+            // 「名额 +5」的写入（#68）：改注册名额、记加名额的时间
+            if key == "register_max_users" {
+                self.slots_changed = true;
+                return None;
+            }
+            if key == "autopilot_slots_at" {
+                return None;
+            }
             let fixed = match key {
+                "autopilot_last" => reparse(value, autopilot_v3),
+                // 最后一条是这一轮新记的每小时快照；这个场景之前几步记的也一样，都去掉名额
+                "autopilot_history" => reparse(value, |v| {
+                    let Some(list) = v.as_array_mut() else { return };
+                    if let Some(h) = list.last().and_then(|h| h["hour"].as_str()) {
+                        self.autopilot_hours.push(h.to_string());
+                    }
+                    for h in list.iter_mut() {
+                        if h["hour"]
+                            .as_str()
+                            .is_some_and(|x| self.autopilot_hours.iter().any(|y| y == x))
+                            && let Some(o) = h.as_object_mut()
+                        {
+                            o.shift_remove("slots");
+                        }
+                    }
+                }),
                 "quota_algo_last" => reparse(value, |v| self.quota_result(v)),
                 "quota_algo_history" => reparse(value, |v| {
                     if let Some(Value::Object(r)) = v.as_array_mut().and_then(|a| a.last_mut()) {
@@ -865,7 +942,11 @@ mod v3 {
             };
             if matches!(
                 key,
-                "quota_algo_last" | "quota_algo_history" | "algo_notice"
+                "quota_algo_last"
+                    | "quota_algo_history"
+                    | "algo_notice"
+                    | "autopilot_last"
+                    | "autopilot_history"
             ) {
                 self.last_written.insert(key.to_string(), fixed.clone());
             }
@@ -913,6 +994,7 @@ mod v3 {
             if let Some(result) = want.get_mut("result") {
                 match op {
                     "quota_run" => self.quota_result(result),
+                    "autopilot_run" => autopilot_v3(result),
                     "probe" => {
                         if let Some(g) = result
                             .get_mut("guard_values")
@@ -924,6 +1006,12 @@ mod v3 {
                     // 分配模块的面板参数「V5 每人范围 3～30 张」换成新公式的说明（#63）
                     "snapshot" => {
                         for m in result.as_array_mut().into_iter().flatten() {
+                            // 自动驾驶没有「名额」了（#68）
+                            if m["name"] == "autopilot" {
+                                m["question"] = json!("全站熔断、单个 Key 限流");
+                                let params = m["params"].as_array_mut().unwrap();
+                                assert_eq!(params.pop().unwrap()["name"], "名额");
+                            }
                             if m["name"] == "allocation" {
                                 let p = &mut m["params"][3];
                                 assert_eq!(p["name"], "V5 每人范围");
@@ -946,6 +1034,11 @@ mod v3 {
                 for side in ["added", "removed"] {
                     if let Some(rows) = t.get_mut(side).and_then(Value::as_array_mut) {
                         rows.retain(|r| !DROPPED_SETTINGS.iter().any(|k| r["key"] == *k));
+                        // 名额 +5 删除（#68）：不记加名额的时间，也不改注册名额
+                        rows.retain(|r| r["key"] != "autopilot_slots_at");
+                        if self.slots_changed {
+                            rows.retain(|r| r["key"] != "register_max_users");
+                        }
                         if side == "added" {
                             for r in rows.iter_mut() {
                                 let key = r["key"].as_str().unwrap_or("").to_string();
@@ -963,6 +1056,7 @@ mod v3 {
                 .and_then(Value::as_array_mut)
             {
                 rows.retain_mut(|r| match r["action"].as_str() {
+                    Some("自动驾驶：名额") => false,
                     // 「上限 a→a2 · 保底 b→b2」→「上限 a→a2」；只有保底变了的那条不再记（#61）
                     Some("动态额度调整") => {
                         let target = r["target"].as_str().unwrap();

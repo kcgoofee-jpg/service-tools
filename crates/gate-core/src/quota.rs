@@ -175,9 +175,6 @@ pub enum Effect {
     },
     /// 把算法结果下发给所有算法管理的成员 Key（见模块文档）。
     UpdateKeys { daily_images: i64, daily_v5: i64 },
-    /// 自动驾驶：`ops.set_registration(db, {"max_users": n, "notify": False}, state, registrar)`，
-    /// 即 `set_settings_bulk({"register_max_users": n})`（不通知）。
-    SetRegistrationMaxUsers { max_users: i64 },
     /// 自动驾驶：`guard.trip_breaker(seconds, reason, now)`（内存态）。
     TripBreaker {
         seconds: i64,

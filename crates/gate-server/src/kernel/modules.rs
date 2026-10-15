@@ -299,7 +299,6 @@ pub(super) async fn param_values(state: &AppState, name: &str) -> Vec<Value> {
         "autopilot" => vec![
             Value::String(gm::AUTOPILOT_BREAKER_TEXT.into()),
             Value::String(gm::AUTOPILOT_KEY_GUARD_TEXT.into()),
-            Value::String(gm::autopilot_slots_text()),
         ],
         "registration" => vec![
             Value::from(state.env.default_expires_days),

@@ -44,7 +44,7 @@
 
 use crate::clock::Clock;
 use crate::quota::{DecideError, PyNum, V5_FALLBACK_RATE, fmt_prec, hget, loads_setting, num};
-use crate::{autopilot, pyc, pyval, quota};
+use crate::{pyc, pyval, quota};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -143,13 +143,13 @@ pub const MODULES: [ModuleMeta; 6] = [
     ModuleMeta {
         name: "autopilot",
         title: "自动驾驶",
-        question: "名额、全站熔断、单个 Key 限流",
+        question: "全站熔断、单个 Key 限流",
         hard_note: "关闭后这些设置保持当前值",
         default_enabled: true,
         periodic: true,
         has_checks: false,
         custom_enabled: false,
-        params: &[("全站熔断", ""), ("单个 Key 限流", ""), ("名额", "")],
+        params: &[("全站熔断", ""), ("单个 Key 限流", "")],
     },
     ModuleMeta {
         name: "risk",
@@ -442,14 +442,7 @@ pub fn autopilot_tick_summary(r: &Value) -> String {
 pub const AUTOPILOT_BREAKER_TEXT: &str = "15 分钟上游失败 ≥ 5 次且 ≥ 30% → 暂停出图 5 分钟";
 pub const AUTOPILOT_KEY_GUARD_TEXT: &str = "1 小时被拒 ≥ 60 次 → 暂停 1 小时";
 
-/// 面板参数「名额」。
-pub fn autopilot_slots_text() -> String {
-    format!(
-        "快满且有余量时 +{}，最多 {}（名额不限时不动）",
-        autopilot::SLOTS_STEP,
-        autopilot::SLOTS_MAX
-    )
-}
+// 面板参数「名额」随「名额 +5」规则删除（docs/v3-deviations.md #68）。
 
 // ---------------------------------------------------------------------------
 // 领 Key
