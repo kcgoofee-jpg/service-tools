@@ -868,15 +868,21 @@ async fn run_case(case: &Value) -> Result<(), String> {
     let mut want_diff = case["expect"]["tables_diff"].clone();
     // 3.0 给 error_events 多加了一列 `auto_resolved`（Bug 自动处理，docs/v3-deviations.md #45）；
     // Python 夹具里的行没有它，补成默认值 NULL（新增的行恒为 NULL）
-    for side in ["added", "removed"] {
-        if let Some(rows) = want_diff
-            .get_mut("error_events")
-            .and_then(|t| t.get_mut(side))
-            .and_then(Value::as_array_mut)
-        {
-            for row in rows {
-                if let Some(o) = row.as_object_mut() {
-                    o.insert("auto_resolved".into(), Value::Null);
+    // 同理：api_keys 多了 `disabled_reason`（停用原因，docs/v3-deviations.md #47），内核不停用 Key，恒为 NULL
+    for (table, column) in [
+        ("error_events", "auto_resolved"),
+        ("api_keys", "disabled_reason"),
+    ] {
+        for side in ["added", "removed"] {
+            if let Some(rows) = want_diff
+                .get_mut(table)
+                .and_then(|t| t.get_mut(side))
+                .and_then(Value::as_array_mut)
+            {
+                for row in rows {
+                    if let Some(o) = row.as_object_mut() {
+                        o.insert(column.into(), Value::Null);
+                    }
                 }
             }
         }

@@ -1154,7 +1154,10 @@ async fn member_survey_identifies_by_discord_session() {
     .await;
     assert_eq!(
         (status, json_of(&b)),
-        (StatusCode::FORBIDDEN, json!({"detail": "该 Key 已被禁用"}))
+        (
+            StatusCode::FORBIDDEN,
+            json!({"detail": "该 Key 已被站长停用，有疑问请联系站长。"})
+        )
     );
 
     // 伪造 / 过期的会话不被认，也没有 Bearer：401

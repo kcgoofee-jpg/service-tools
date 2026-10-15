@@ -61,6 +61,8 @@ const ADD_COLUMNS: &[&str] = &[
 pub const RUST_ADDED_COLUMNS: &[&str] = &[
     // Bug 自动处理的原因码（gate_core::errors::AutoReason::code）；站长手动处理 / 未处理为 NULL。见 docs/v3-deviations.md #45
     "ALTER TABLE error_events ADD COLUMN auto_resolved TEXT",
+    // Key 的停用原因（gate_core::key_status）；启用中 / 2.x 停用的为 NULL。见 docs/v3-deviations.md #47
+    "ALTER TABLE api_keys ADD COLUMN disabled_reason TEXT",
 ];
 
 /// 触发器每次启动按同一定义重建（旧库里可能还是不写 is_test 的老定义）。
@@ -131,13 +133,6 @@ pub fn run(conn: &mut Connection, now: f64, backfill: &[(&str, &str)]) -> rusqli
             Err(e) => return Err(e),
         }
     }
-    for ddl in RUST_ADDED_COLUMNS {
-        match conn.execute(ddl, []) {
-            Ok(_) => {}
-            Err(e) if is_duplicate_column(&e) => {}
-            Err(e) => return Err(e),
-        }
-    }
     conn.execute_batch(REBUILD_TRIGGER)?;
     conn.execute(
         "UPDATE upstream_token_counters SET units=images WHERE units IS NULL",
@@ -145,6 +140,15 @@ pub fn run(conn: &mut Connection, now: f64, backfill: &[(&str, &str)]) -> rusqli
     )?;
     if !has_column(conn, "api_keys", "discord_id")? {
         conn.execute("ALTER TABLE api_keys ADD COLUMN discord_id TEXT", [])?;
+    }
+    // 3.0 的列放在旧版所有列（含上面的 discord_id）之后：全新库和线上库的列顺序一致，
+    // 旧版整行插入（`INSERT ... VALUES(...)` 不带列名）的位置也不受影响。
+    for ddl in RUST_ADDED_COLUMNS {
+        match conn.execute(ddl, []) {
+            Ok(_) => {}
+            Err(e) if is_duplicate_column(&e) => {}
+            Err(e) => return Err(e),
+        }
     }
     conn.execute(
         "UPDATE api_keys SET discord_id=\

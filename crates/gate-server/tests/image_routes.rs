@@ -116,6 +116,75 @@ async fn auth_errors_have_novelai_shape() {
     assert!(e.mock.requests().is_empty());
 }
 
+/// 停用的 Key：按停用原因给出说明（docs/v3-deviations.md #47）。全站重置停掉的要告诉成员去重新领。
+#[tokio::test]
+async fn disabled_key_message_depends_on_reason() {
+    let e = setup(&[]).await;
+    let msg = |body: &[u8]| -> String {
+        let v: Value = serde_json::from_slice(body).unwrap();
+        v["error"]["message"]
+            .as_str()
+            .or(v["message"].as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+    let reason = |state: gate_server::AppState| async move {
+        state
+            .db
+            .get_key(1)
+            .await
+            .unwrap()
+            .unwrap()
+            .get("disabled_reason")
+            .cloned()
+            .unwrap_or(Value::Null)
+    };
+    let request = || {
+        call(
+            &e.state,
+            "POST",
+            "/ai/generate-image",
+            Some(TOKEN),
+            Some(image_body("x", 1)),
+        )
+    };
+
+    // 全站重置
+    e.state.db.reset_all_keys().await.unwrap();
+    assert_eq!(reason(e.state.clone()).await, "site_reset");
+    let (status, _, body) = request().await;
+    assert_eq!(status, 403);
+    assert!(
+        msg(&body).contains("全站重置") && msg(&body).contains("/register"),
+        "{}",
+        msg(&body)
+    );
+
+    // 重新启用：原因清掉；站长手动停用：另一种说明
+    let on = json!({"enabled": true});
+    e.state
+        .db
+        .update_key(1, on.as_object().unwrap())
+        .await
+        .unwrap();
+    assert_eq!(reason(e.state.clone()).await, Value::Null);
+    let off = json!({"enabled": false});
+    e.state
+        .db
+        .update_key(1, off.as_object().unwrap())
+        .await
+        .unwrap();
+    assert_eq!(reason(e.state.clone()).await, "admin");
+    let (status, _, body) = request().await;
+    assert_eq!(status, 403);
+    assert!(
+        msg(&body).ends_with("该 Key 已被站长停用，有疑问请联系站长。"),
+        "{}",
+        msg(&body)
+    );
+    assert!(e.mock.requests().is_empty());
+}
+
 #[tokio::test]
 async fn unknown_model_is_rejected_and_logged() {
     let e = setup(&[]).await;

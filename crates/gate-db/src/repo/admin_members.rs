@@ -325,9 +325,9 @@ impl Db {
                 |r| value::i64_or(r, 0, 0),
             )?;
             let disabled = tx.execute(
-                "UPDATE api_keys SET enabled=0 WHERE is_admin=0 AND NOT EXISTS \
+                "UPDATE api_keys SET enabled=0, disabled_reason=? WHERE is_admin=0 AND NOT EXISTS \
                  (SELECT 1 FROM key_tags t WHERE t.key_id=api_keys.id AND t.tag=?)",
-                [INVITE_TAG],
+                params![gate_core::key_status::SITE_RESET, INVITE_TAG],
             )? as i64;
             tx.execute(
                 "DELETE FROM discord_registrations WHERE NOT EXISTS \

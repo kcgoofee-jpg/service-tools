@@ -157,6 +157,8 @@ async fn snapshot(db: &Db, errors: bool) -> Value {
                 {
                     o.shift_remove("anlas_auto");
                     o.shift_remove("v5_pinned");
+                    // 3.0 新增：停用原因（docs/v3-deviations.md #47）
+                    o.shift_remove("disabled_reason");
                 }
                 // 3.0 新增的列（docs/v3-deviations.md #45）：旧版没有，比较时去掉
                 if t == ERRORS_TABLE
@@ -216,6 +218,21 @@ fn drop_deleted_member_fields(text: &str) -> String {
                 for k in ["anlas_auto", "anlas_mode", "v5_pinned"] {
                     o.shift_remove(k);
                 }
+            }
+        }
+    }
+    v.to_string()
+}
+
+/// 从成员页每一行里去掉某个字段（只在有意差异的场景用）。
+fn drop_member_field(text: &str, field: &str) -> String {
+    let Ok(mut v) = serde_json::from_str::<Value>(text) else {
+        return text.to_string();
+    };
+    if let Some(members) = v["members"].as_array_mut() {
+        for m in members {
+            if let Some(o) = m.as_object_mut() {
+                o.shift_remove(field);
             }
         }
     }
@@ -340,6 +357,16 @@ async fn run_variant(lines: &[Value], variant: &str, diffs: &mut Vec<String>) ->
                 serde_json::from_str::<Value>(want).map_or(want.to_string(), |v| v.to_string())
             } else {
                 want.to_string()
+            };
+            // 「early」场景是凌晨 0–7 点：旧版把「今日重置」的起点算成当天 7 点（在未来），一律返回 null；
+            // 3.0 按当前服务日起算（docs/v3-deviations.md #46），这一个字段两边都不比。
+            let (want, got) = if variant == "early" && l["path"] == "/admin/api/members" {
+                (
+                    drop_member_field(&want, "reset_today"),
+                    drop_member_field(&got, "reset_today"),
+                )
+            } else {
+                (want, got)
             };
             let got = if l["path"] == "/admin/api/members" {
                 // 与上面同样经 serde 重新序列化，只比结构、键顺序和数值类型

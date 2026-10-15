@@ -182,6 +182,19 @@ impl Db {
         if sets.is_empty() {
             return Ok(());
         }
+        // 改启用状态时一并记停用原因（3.0 新增）：启用就清掉；停用时调用方可传 `disabled_reason`，不传按站长手动停用
+        if let Some(v) = fields.get("enabled") {
+            if pyval::truthy(v) {
+                sets.push("disabled_reason=NULL".into());
+            } else {
+                sets.push("disabled_reason=?".into());
+                let why = fields
+                    .get("disabled_reason")
+                    .and_then(Value::as_str)
+                    .unwrap_or(gate_core::key_status::ADMIN);
+                vals.push(SqlValue::Text(why.to_string()));
+            }
+        }
         vals.push(SqlValue::Integer(key_id));
         let sql = format!("UPDATE api_keys SET {} WHERE id=?", sets.join(", "));
         self.write(move |tx| {
