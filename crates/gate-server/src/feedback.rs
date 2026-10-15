@@ -1,82 +1,23 @@
-//! 成员反馈（旧版 `app/feedback.py`）：`/反馈` 命令弹出 Discord 表单（5 道必填单选题），答案存库，后台查看与导出。
+//! 成员反馈：`/反馈` 命令弹出 Discord 表单（一段 2–1000 字的文字），文字存库，后台查看与导出。
 //!
 //! 不私信、不群发：成员自己发起，回执只有本人可见（680009 申诉期规则）。
+//!
+//! 旧版是 5 道必填单选题；选择题归「问卷」，3.0 起 `/反馈` 只收文字（docs/v3-deviations.md #52）。
+//! 库里已有的旧记录（`answers` 是 score / pain / wish / client / freq 的选择）照常显示成一行摘要。
 
 use gate_core::pyc::{strip, take_chars};
-use gate_core::pyext::py_str;
-use gate_core::pyval::truthy;
 use gate_db::{Db, DbError};
-use serde_json::{Map, Value, json};
-
-/// 一道单选题。
-pub struct Question {
-    pub id: &'static str,
-    pub label: &'static str,
-    pub options: &'static [&'static str],
-}
-
-/// 全部是必填单选题（站长 10/11：不要填空题）。Discord 弹窗最多 5 题，题目 ≤45 字，每题最多 25 个选项、选项 ≤100 字。
-/// 改这里，下次有人打开 /反馈 就生效（机器人每次现取题目）。
-pub const QUESTIONS: [Question; 5] = [
-    Question {
-        id: "score",
-        label: "整体用下来感觉怎么样？",
-        options: &["非常满意", "满意", "一般", "不太满意", "很不满意"],
-    },
-    Question {
-        id: "pain",
-        label: "目前最困扰你的是？",
-        options: &[
-            "排队太久 / 经常提示人多",
-            "每天张数不够用",
-            "V5 额度太少",
-            "出图失败或报错",
-            "不会配置 / 教程看不懂",
-            "没什么困扰",
-        ],
-    },
-    Question {
-        id: "wish",
-        label: "最希望优先改进哪一项？",
-        options: &[
-            "多给一些 V5",
-            "多给一些 V4.5 张数",
-            "出图更快、少排队",
-            "开放更多功能（放大、导演工具等）",
-            "更清楚的教程",
-            "保持现状就好",
-        ],
-    },
-    Question {
-        id: "client",
-        label: "你主要用什么来出图？",
-        options: &[
-            "网页前端（类似官网）",
-            "SillyTavern 等聊天前端",
-            "ComfyUI / SD WebUI 类工具",
-            "手机 App",
-            "其他",
-        ],
-    },
-    Question {
-        id: "freq",
-        label: "你多久用一次公益站？",
-        options: &["每天都用", "每周几次", "偶尔用", "刚来还没怎么用"],
-    },
-];
+use serde_json::{Value, json};
 
 /// 同一个人 10 分钟内只收一份，防刷。
 pub const COOLDOWN: f64 = 600.0;
+/// 最少 / 最多多少字（去掉首尾空白之后按字符数算；多出来的部分截掉）。
+pub const MIN_CHARS: usize = 2;
+pub const MAX_CHARS: usize = 1000;
 
-/// `QUESTIONS` 的 JSON 形态：`[{"id","label","options":[...]}]`（`/feedback/questions` 的返回）。
-pub fn questions_json() -> Value {
-    Value::Array(
-        QUESTIONS
-            .iter()
-            .map(|q| json!({"id": q.id, "label": q.label, "options": q.options}))
-            .collect(),
-    )
-}
+pub const RECEIPT: &str = "收到啦，谢谢你的反馈～奶妹会转给站长 ✨";
+pub const TOO_SHORT: &str = "写点什么再提交吧～";
+pub const TOO_FREQUENT: &str = "刚刚已经收到你的反馈啦，过 10 分钟再提交新的吧。";
 
 /// 提交失败：旧版抛 `ValueError`（中文原因，机器人原样转述给成员）。
 #[derive(Debug)]
@@ -91,61 +32,81 @@ impl From<DbError> for SubmitError {
     }
 }
 
-/// 只收题目里有的选项；不认识的题目和选项丢掉。
-pub fn clean(answers: &Map<String, Value>) -> Vec<(&'static str, String)> {
-    let mut out = Vec::new();
-    for q in &QUESTIONS {
-        // str(answers.get(id, "") or "").strip()
-        let v = match answers.get(q.id) {
-            Some(v) if truthy(v) => strip(&py_str(v)).to_string(),
-            _ => String::new(),
-        };
-        if q.options.contains(&v.as_str()) {
-            out.push((q.id, v));
-        }
-    }
-    out
-}
-
-/// 存一份反馈。返回给本人看的回执文字；不合格返回 [`SubmitError::Rejected`]。
+/// 存一份反馈（`feedback.answers` 里存 `{"text": "..."}`）。返回给本人看的回执文字；
+/// 太短 / 太频繁返回 [`SubmitError::Rejected`]。
 pub async fn submit(
     db: &Db,
     discord_id: &str,
     username: &str,
     key_id: Option<i64>,
-    answers: &Map<String, Value>,
+    text: &str,
     now: f64,
 ) -> Result<String, SubmitError> {
-    let a = clean(answers);
-    if a.len() < QUESTIONS.len() {
-        return Err(SubmitError::Rejected(
-            "有题目没选，请重新打开 /反馈 选完再提交。".into(),
-        ));
+    let text = strip(text);
+    if text.chars().count() < MIN_CHARS {
+        return Err(SubmitError::Rejected(TOO_SHORT.into()));
     }
+    let text = take_chars(text, MAX_CHARS);
     if let Some(last) = db.last_feedback_ts(discord_id).await?
         && last != 0.0
         && now - last < COOLDOWN
     {
-        return Err(SubmitError::Rejected(
-            "刚刚已经收到你的反馈啦，过 10 分钟再提交新的吧。".into(),
-        ));
+        return Err(SubmitError::Rejected(TOO_FREQUENT.into()));
     }
-    let stored: Map<String, Value> = a
-        .into_iter()
-        .map(|(k, v)| (k.to_string(), Value::String(v)))
-        .collect();
     db.insert_feedback(
         now,
         discord_id,
         take_chars(username, 80),
         key_id,
-        &gate_core::jsondump::dumps(&Value::Object(stored)),
+        &gate_core::jsondump::dumps(&json!({"text": text})),
     )
     .await?;
-    Ok("收到啦，谢谢你的反馈～奶妹会转给站长 ✨".into())
+    Ok(RECEIPT.into())
 }
 
-/// 后台查看用：`answers` 已解析成对象（旧版 `listing`）。
+/// 旧版选择题的题目 id → 摘要里的简称（顺序即旧版题目顺序）。
+const LEGACY_FIELDS: [(&str, &str); 5] = [
+    ("score", "整体"),
+    ("pain", "困扰"),
+    ("wish", "希望"),
+    ("client", "客户端"),
+    ("freq", "频率"),
+];
+
+/// 一份反馈给后台看的文字，以及是不是旧版选择题的记录。
+/// 新记录就是成员写的话；旧记录拼成一行「（旧版选择题）整体：满意；困扰：…；希望：…」；什么都没有就是空串。
+pub fn display_text(answers: &Value) -> (String, bool) {
+    if let Some(text) = answers.get("text").and_then(Value::as_str) {
+        return (strip(text).to_string(), false);
+    }
+    let parts: Vec<String> = LEGACY_FIELDS
+        .iter()
+        .filter_map(|(id, label)| {
+            let v = strip(answers.get(*id)?.as_str()?);
+            (!v.is_empty()).then(|| format!("{label}：{v}"))
+        })
+        .collect();
+    if parts.is_empty() {
+        (String::new(), false)
+    } else {
+        (format!("（旧版选择题）{}", parts.join("；")), true)
+    }
+}
+
+/// 后台看的「成员」：Key 名 → 用户名 → Discord ID，取第一个非空的。
+pub fn member_label(item: &Value) -> String {
+    ["key_name", "username", "discord_id"]
+        .iter()
+        .find_map(|k| {
+            item.get(*k)
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+        })
+        .unwrap_or("")
+        .to_string()
+}
+
+/// 后台查看用（旧版 `listing`）：新 → 旧。每条带 `text`（显示用的文字）和 `legacy`（是不是旧版选择题）。
 pub async fn listing(db: &Db, limit: i64) -> Result<Vec<Value>, DbError> {
     let rows = db.list_feedback(limit).await?;
     Ok(rows
@@ -157,10 +118,11 @@ pub async fn listing(db: &Db, limit: i64) -> Result<Vec<Value>, DbError> {
                 .filter(|s| !s.is_empty())
                 .and_then(gate_core::jsondump::loads)
                 .unwrap_or_else(|| json!({}));
+            let (text, legacy) = display_text(&answers);
             json!({
                 "id": r["id"], "ts": r["ts"], "discord_id": r["discord_id"], "username": r["username"],
-                "key_id": r["key_id"], "answers": answers,
-                "key_name": r.get("name").and_then(Value::as_str).unwrap_or(""),
+                "key_id": r["key_id"], "key_name": r.get("name").and_then(Value::as_str).unwrap_or(""),
+                "text": text, "legacy": legacy,
             })
         })
         .collect())
@@ -180,27 +142,41 @@ mod tests {
     use super::*;
 
     #[test]
-    fn questions_fit_discord_modal_limits() {
-        assert!((1..=5).contains(&QUESTIONS.len()));
-        for q in &QUESTIONS {
-            assert!(q.label.chars().count() <= 45);
-            assert!((2..=25).contains(&q.options.len()));
-            assert!(q.options.iter().all(|o| o.chars().count() <= 100));
-            let mut seen = q.options.to_vec();
-            seen.sort_unstable();
-            seen.dedup();
-            assert_eq!(seen.len(), q.options.len());
-        }
+    fn new_rows_show_the_text_as_written() {
+        assert_eq!(
+            display_text(&json!({"text": "排队有点久"})),
+            ("排队有点久".to_string(), false)
+        );
     }
 
     #[test]
-    fn clean_drops_unknown() {
-        let mut m = Map::new();
-        m.insert("score".into(), json!(" 满意 "));
-        m.insert("pain".into(), json!("我自己编的"));
-        m.insert("bogus".into(), json!("x"));
-        let c = clean(&m);
-        assert_eq!(c, vec![("score", "满意".to_string())]);
+    fn old_choice_rows_become_one_readable_line() {
+        let old = json!({"score": "满意", "pain": "排队太久 / 经常提示人多", "wish": "多给一些 V5",
+                         "client": "手机 App", "freq": "每天都用"});
+        assert_eq!(
+            display_text(&old),
+            (
+                "（旧版选择题）整体：满意；困扰：排队太久 / 经常提示人多；希望：多给一些 V5；客户端：手机 App；频率：每天都用"
+                    .to_string(),
+                true
+            )
+        );
+        // 缺的题目跳过，不认识的键丢掉
+        assert_eq!(
+            display_text(&json!({"score": " 一般 ", "pain": "", "bogus": "x", "freq": "偶尔用"})),
+            ("（旧版选择题）整体：一般；频率：偶尔用".to_string(), true)
+        );
+        assert_eq!(display_text(&json!({})), (String::new(), false));
+    }
+
+    #[test]
+    fn member_prefers_key_name_then_username_then_id() {
+        let m = |k: &str, u: &str, d: &str| {
+            member_label(&json!({"key_name": k, "username": u, "discord_id": d}))
+        };
+        assert_eq!(m("月见草", "alice", "900000000000000001"), "月见草");
+        assert_eq!(m("", "alice", "900000000000000001"), "alice");
+        assert_eq!(m("", "", "900000000000000001"), "900000000000000001");
     }
 
     #[test]

@@ -116,7 +116,7 @@ pub fn definitions() -> Vec<Value> {
         command("quota", "查看今日额度、Key 有效期和服务状态", vec![], false),
         command(
             "反馈",
-            "给站长提意见：5 道选择题，30 秒填完（只有你能看到，不会私信你）",
+            "写几句话给站长（只有你能看到，不会私信你）",
             vec![],
             false,
         ),

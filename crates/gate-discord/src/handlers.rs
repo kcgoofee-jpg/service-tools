@@ -9,7 +9,7 @@ use gate_core::{pyc, pyval};
 use serde_json::{Map, Value};
 
 use crate::events::Interaction;
-use crate::pystr::{json_key, py_str};
+use crate::pystr::py_str;
 
 // ---------- 文案常量（测试里与 Python 源码里的字符串逐字比对） ----------
 
@@ -24,11 +24,19 @@ pub const REGISTER_NOT_CONFIGURED: &str = "领 Key 功能尚未配置完成。";
 pub const REGISTER_UNAVAILABLE: &str = "领 Key 暂不可用，请稍后再试。";
 pub const REGISTER_DONE: &str = "领取成功。";
 pub const REGISTER_NOT_ELIGIBLE: &str = "未通过资格检查。";
-pub const FEEDBACK_UNAVAILABLE: &str = "问卷暂时打不开，请稍后再试。";
 pub const FEEDBACK_DEFAULT_RECEIPT: &str = "收到啦～";
-pub const FEEDBACK_MODAL_TITLE: &str = "猫头鹰公益站 · 反馈问卷";
-pub const FEEDBACK_PLACEHOLDER: &str = "请选择";
-pub const HELP_COMMANDS: &str = "`/register` 领取 Key（结果仅你可见，含配置教程）· `/quota` 额度和服务状态 · `/resetkey` 换新 Key · `/反馈` 给站长提意见";
+// /反馈 在 3.0 改成一段文字（docs/v3-deviations.md #52）：下面这几句是 3.0 新写的，不在旧 Python 里。
+pub const FEEDBACK_MODAL_TITLE: &str = "猫头鹰公益站 · 反馈";
+pub const FEEDBACK_LABEL: &str = "想对站长说的话";
+pub const FEEDBACK_PLACEHOLDER: &str =
+    "遇到的问题、建议都可以写。只有站长能看到，回执只有你自己可见。";
+/// 弹窗和文字框的 custom_id（只有这一个弹窗，固定值就够了，机器人重启后提交也认得）。
+pub const FEEDBACK_MODAL_ID: &str = "owl-feedback";
+pub const FEEDBACK_TEXT_ID: &str = "text";
+/// 文字框的字数范围，和网关一致（网关会再校验一遍）。
+pub const FEEDBACK_MIN_LENGTH: u32 = 2;
+pub const FEEDBACK_MAX_LENGTH: u32 = 1000;
+pub const HELP_COMMANDS: &str = "`/register` 领取 Key（结果仅你可见，含配置教程）· `/quota` 额度和服务状态 · `/resetkey` 换新 Key · `/反馈` 写几句话给站长";
 pub const HELP_CLOSED: &str = "⚠ 领 Key 当前已关闭，开放时间看站长公告。";
 pub const QUOTA_DISABLED: &str = "⚠ 这把 Key 已被停用，请联系站长。";
 
@@ -42,9 +50,9 @@ pub const ALL_COPY: &[&str] = &[
     REGISTER_UNAVAILABLE,
     REGISTER_DONE,
     REGISTER_NOT_ELIGIBLE,
-    FEEDBACK_UNAVAILABLE,
     FEEDBACK_DEFAULT_RECEIPT,
     FEEDBACK_MODAL_TITLE,
+    FEEDBACK_LABEL,
     FEEDBACK_PLACEHOLDER,
     HELP_COMMANDS,
     HELP_CLOSED,
@@ -404,99 +412,36 @@ pub fn register_message(status: u16, body: &[u8]) -> Result<String, HandlerError
 
 // ---------- /反馈 ----------
 
-/// 弹窗里的一道题（已按 Discord 限制截断）。
-#[derive(Debug, Clone, PartialEq)]
-pub struct Question {
-    /// 网关给的题目 id（`answers` 的键）。
-    pub id: Value,
-    /// `str(q["label"])[:45]`
-    pub label: String,
-    /// `[str(o)[:100] for o in q["options"][:25]]`
-    pub options: Vec<String>,
-}
-
-/// `data["questions"][:5]`，逐题截断。`data` 必须是 200 的响应。
-pub fn parse_questions(data: &Value) -> Result<Vec<Question>, HandlerError> {
-    let list = key(obj(data)?, "questions")?
-        .as_array()
-        .ok_or_else(|| HandlerError::Type("questions is not a list".into()))?;
-    let mut out = Vec::new();
-    for q in list.iter().take(5) {
-        let q = obj(q)?;
-        let options = key(q, "options")?
-            .as_array()
-            .ok_or_else(|| HandlerError::Type("options is not a list".into()))?
-            .iter()
-            .take(25)
-            .map(|o| pyc::take_chars(&py_str(o), 100).to_owned())
-            .collect();
-        let label = pyc::take_chars(&py_str(key(q, "label")?), 45).to_owned();
-        out.push(Question {
-            id: key(q, "id")?.clone(),
-            label,
-            options,
-        });
-    }
-    Ok(out)
-}
-
-/// 题目为空的判断：`not data.get("questions")`（缺键 / null / 空列表 / 空串 / 0 都算空）。
-pub fn questions_empty(data: &Value) -> Result<bool, HandlerError> {
-    Ok(!get_truthy(obj(data)?, "questions"))
-}
-
-/// 弹窗 JSON（等同 discord.py `Modal.to_dict()`）：每题一个必填单选下拉，包在 Label(18) 里。
-/// `custom_ids` 是 (弹窗 custom_id, 各下拉的 custom_id)。
-pub fn modal_json(questions: &[Question], modal_id: &str, select_ids: &[String]) -> Value {
-    let components: Vec<Value> = questions
-        .iter()
-        .zip(select_ids)
-        .map(|(q, sid)| {
-            let options: Vec<Value> = q
-                .options
-                .iter()
-                .map(|o| serde_json::json!({"label": o, "value": o, "default": false}))
-                .collect();
-            let mut select = serde_json::json!({
-                "type": 3,
-                "custom_id": sid,
-                "min_values": 1,
-                "max_values": 1,
-                "disabled": false,
+/// 弹窗 JSON：一个必填的多行文字框（TextInput，style 2），包在 Label(18) 里。
+/// 点 `/反馈` 立刻弹出，不先问网关（网关慢时「先取题目再弹窗」会超过 3 秒让弹窗失败）。
+pub fn feedback_modal() -> Value {
+    serde_json::json!({
+        "custom_id": FEEDBACK_MODAL_ID,
+        "title": FEEDBACK_MODAL_TITLE,
+        "components": [{
+            "type": 18,
+            "label": FEEDBACK_LABEL,
+            "component": {
+                "type": 4,
+                "custom_id": FEEDBACK_TEXT_ID,
+                "style": 2,
+                "min_length": FEEDBACK_MIN_LENGTH,
+                "max_length": FEEDBACK_MAX_LENGTH,
                 "required": true,
                 "placeholder": FEEDBACK_PLACEHOLDER,
-            });
-            // discord.py 在没有选项时整个省略 `options` 键（Discord 随后会以 400 拒绝这个弹窗，同样照旧）
-            if !options.is_empty() {
-                select["options"] = Value::Array(options);
-            }
-            serde_json::json!({"type": 18, "label": q.label, "component": select})
-        })
-        .collect();
-    serde_json::json!({
-        "custom_id": modal_id,
-        "title": FEEDBACK_MODAL_TITLE,
-        "components": components,
+            },
+        }],
     })
 }
 
-/// 提交时的 `answers`：`{qid: values[0] or ""}`，题目顺序；qid 按 `json.dumps` 规则转成字符串键，同键后者覆盖前者。
-pub fn feedback_answers(
-    fields: &[(Value, String)],
-    submitted: &[(String, Vec<String>)],
-) -> Result<Map<String, Value>, HandlerError> {
-    let mut answers = Map::new();
-    for (qid, select_id) in fields {
-        let value = submitted
-            .iter()
-            .find(|(id, _)| id == select_id)
-            .and_then(|(_, v)| v.first())
-            .cloned()
-            .unwrap_or_default();
-        let k = json_key(qid).ok_or_else(|| HandlerError::Type("unhashable type".into()))?;
-        answers.insert(k, Value::String(value));
-    }
-    Ok(answers)
+/// 弹窗提交里文字框的内容（`events::modal_values` 取出的 custom_id → 值列表）；没找到就是空串，交给网关拒绝。
+pub fn feedback_text(submitted: &[(String, Vec<String>)]) -> String {
+    submitted
+        .iter()
+        .find(|(id, _)| id == FEEDBACK_TEXT_ID)
+        .and_then(|(_, v)| v.first())
+        .cloned()
+        .unwrap_or_default()
 }
 
 /// 提交后的回执：`result.get("message", "收到啦～")`（200 且是对象）否则 `str(result)`。
@@ -798,50 +743,27 @@ mod tests {
     }
 
     #[test]
-    fn questions_are_truncated_like_python_slices() {
-        let long_label = "题".repeat(60);
-        let options: Vec<String> = (0..30)
-            .map(|i| format!("选项{i}{}", "x".repeat(120)))
-            .collect();
-        let qs: Vec<Value> = (0..7)
-            .map(|i| json!({"id": format!("q{i}"), "label": long_label, "options": options}))
-            .collect();
-        let parsed = parse_questions(&json!({"questions": qs})).unwrap();
-        assert_eq!(parsed.len(), 5);
-        assert_eq!(parsed[0].label.chars().count(), 45);
-        assert_eq!(parsed[0].options.len(), 25);
-        assert_eq!(parsed[0].options[0].chars().count(), 100);
-        assert!(parse_questions(&json!({"questions": [{"id": "a", "label": "b"}]})).is_err());
-        assert!(questions_empty(&json!({"questions": []})).unwrap());
-        assert!(questions_empty(&json!({})).unwrap());
-        assert!(!questions_empty(&json!({"questions": [1]})).unwrap());
-    }
-
-    #[test]
-    fn modal_json_shape_matches_discordpy() {
-        let qs = vec![Question {
-            id: json!("score"),
-            label: "整体感觉？".into(),
-            options: vec!["好".into(), "差".into()],
-        }];
-        let m = modal_json(&qs, "m1", &["s1".to_string()]);
+    fn feedback_modal_is_one_required_paragraph_in_a_label() {
         assert_eq!(
-            m.to_string(),
-            r#"{"custom_id":"m1","title":"猫头鹰公益站 · 反馈问卷","components":[{"type":18,"label":"整体感觉？","component":{"type":3,"custom_id":"s1","min_values":1,"max_values":1,"disabled":false,"required":true,"placeholder":"请选择","options":[{"label":"好","value":"好","default":false},{"label":"差","value":"差","default":false}]}}]}"#
+            feedback_modal().to_string(),
+            r#"{"custom_id":"owl-feedback","title":"猫头鹰公益站 · 反馈","components":[{"type":18,"label":"想对站长说的话","component":{"type":4,"custom_id":"text","style":2,"min_length":2,"max_length":1000,"required":true,"placeholder":"遇到的问题、建议都可以写。只有站长能看到，回执只有你自己可见。"}}]}"#
         );
+        // Discord 的长度限制：标题 / Label ≤ 45 字，占位符 ≤ 100 字
+        assert!(FEEDBACK_MODAL_TITLE.chars().count() <= 45);
+        assert!(FEEDBACK_LABEL.chars().count() <= 45);
+        assert!(FEEDBACK_PLACEHOLDER.chars().count() <= 100);
     }
 
     #[test]
-    fn answers_default_to_empty_string_and_dedupe_keys() {
-        let fields = vec![
-            (json!("a"), "s1".to_string()),
-            (json!("b"), "s2".to_string()),
-            (json!(1), "s3".to_string()),
+    fn feedback_text_comes_from_the_text_input_only() {
+        let submitted = vec![
+            ("other".to_string(), vec!["不相干".to_string()]),
+            ("text".to_string(), vec!["排队有点久".to_string()]),
         ];
-        let submitted = vec![("s1".to_string(), vec!["好".to_string(), "忽略".to_string()])];
-        let a = feedback_answers(&fields, &submitted).unwrap();
-        assert_eq!(Value::Object(a).to_string(), r#"{"a":"好","b":"","1":""}"#);
-        assert!(feedback_answers(&[(json!([1]), "s".into())], &[]).is_err());
+        assert_eq!(feedback_text(&submitted), "排队有点久");
+        assert_eq!(feedback_text(&submitted[..1]), "");
+        assert_eq!(feedback_text(&[]), "");
+        assert_eq!(feedback_text(&[("text".to_string(), vec![])]), "");
     }
 
     fn interaction(user: Value, member_extra: Value) -> Interaction {

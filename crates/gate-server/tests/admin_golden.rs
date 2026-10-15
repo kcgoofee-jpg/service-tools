@@ -389,7 +389,13 @@ async fn run_variant(lines: &[Value], variant: &str, diffs: &mut Vec<String>) ->
                 );
             }
         }
-        if let Some(want) = l["text"].as_str() {
+        // /反馈 在 3.0 改成一段文字（docs/v3-deviations.md #52）：冻结的旧版列表带 5 道选择题的 `questions` 和 `answers`、
+        // 导出按题目一题一列，响应原文不再相同。这两步照常重放（会留下「导出成员反馈」的操作记录，后面的步骤要用），
+        // 但不比响应原文；新格式的断言在 admin_records.rs 的 `feedback_list_and_csv_export`。
+        let v3_feedback = l["path"]
+            .as_str()
+            .is_some_and(|p| p == "/admin/api/feedback" || p == "/admin/api/feedback/export");
+        if let Some(want) = l["text"].as_str().filter(|_| !v3_feedback) {
             let got = norm_text(&String::from_utf8_lossy(&body));
             let is_errors_list = l["path"]
                 .as_str()

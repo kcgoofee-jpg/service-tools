@@ -114,10 +114,41 @@ fn compare(label: &str, actual: &[Value], expected: &[Value], failures: &mut Vec
     }
 }
 
+/// `/help` 里 `/反馈` 的说明：冻结夹具是旧版原文，3.0 改成「写几句话给站长」。
+const LEGACY_HELP_FEEDBACK: &str = "`/反馈` 给站长提意见";
+const V3_HELP_FEEDBACK: &str = "`/反馈` 写几句话给站长";
+
+/// 把期望里的旧版 `/help` 文案换成 3.0 的（docs/v3-deviations.md #52）。
+fn v3_help_copy(v: &mut Value) {
+    match v {
+        Value::String(s) => {
+            if s.contains(LEGACY_HELP_FEEDBACK) {
+                *s = s.replace(LEGACY_HELP_FEEDBACK, V3_HELP_FEEDBACK);
+            }
+        }
+        Value::Array(a) => a.iter_mut().for_each(v3_help_copy),
+        Value::Object(o) => o.values_mut().for_each(v3_help_copy),
+        _ => {}
+    }
+}
+
+/// 冻结的 Python 夹具，换成 3.0 的期望（夹具本身不改）：
+/// - `feedback_*` 场景是旧版「先向网关取 5 道题、再弹出 5 个下拉框，提交 `answers`」的流程；`/反馈` 在 3.0 改成
+///   一段文字（docs/v3-deviations.md #52），这些场景整组不再适用，在这里滤掉。新流程见 `tests/feedback_text.rs`；
+/// - `/help` 的命令清单里 `/反馈` 的说明换了，期望里按 [`v3_help_copy`] 的规则换掉再比。
 fn scenarios() -> Vec<Value> {
     gate_golden::load(env!("CARGO_MANIFEST_DIR"), "discord_flows")
         .into_iter()
         .map(|c| c.raw)
+        .filter(|sc| {
+            !sc["name"]
+                .as_str()
+                .is_some_and(|n| n.starts_with("feedback_"))
+        })
+        .map(|mut sc| {
+            v3_help_copy(&mut sc);
+            sc
+        })
         .collect()
 }
 
@@ -163,7 +194,8 @@ async fn commands_and_modals_replay_like_discordpy() {
             );
         }
     }
-    assert!(count > 80, "场景数量异常：{count}");
+    // 夹具共 108 步，滤掉 `feedback_*` 的 32 步（见 `scenarios`）后剩 76
+    assert!(count > 70, "场景数量异常：{count}");
     assert!(
         failures.is_empty(),
         "{} 处不一致：\n{}",

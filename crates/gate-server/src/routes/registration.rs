@@ -36,10 +36,6 @@ pub fn router() -> Router<AppState> {
         .route("/self-register/slots", post(slots))
         .route("/self-register/issue", post(issue))
         .route("/self-register/feedback", post(feedback_submit))
-        .route(
-            "/self-register/feedback/questions",
-            post(feedback_questions),
-        )
         .route("/self-register/bot/config", get(bot_config_get))
         .route("/self-register/bot/report", post(bot_report))
 }
@@ -114,23 +110,6 @@ impl Model {
                 }
                 default.unwrap_or("").to_string()
             }
-        }
-    }
-
-    /// `name: dict = {}`
-    fn dict(&mut self, name: &str) -> Map<String, Value> {
-        match self.get(name) {
-            Some(Value::Object(m)) => m,
-            Some(other) => {
-                self.fail(
-                    "dict_type",
-                    vec![name],
-                    "Input should be a valid dictionary",
-                    &other,
-                );
-                Map::new()
-            }
-            None => Map::new(),
         }
     }
 
@@ -666,13 +645,13 @@ async fn issue(State(state): State<AppState>, req: Request) -> ApiResult {
     }
 }
 
-/// /反馈 表单提交（机器人转来）。没领 Key 的成员也能提交。
+/// /反馈 表单提交（机器人转来）：一段文字，2–1000 字。没领 Key 的成员也能提交。
 async fn feedback_submit(State(state): State<AppState>, req: Request) -> ApiResult {
     let (parts, body) = req.into_parts();
     let mut m = read_model(&parts, body).await?;
     let who = Who::read(&mut m);
     let username = m.string("username", Some(""));
-    let answers = m.dict("answers");
+    let text = m.string("text", Some(""));
     m.finish()?;
     let svc = authorize(&state, &parts, true)?;
     let discord_id = checked(svc, &who)?;
@@ -682,7 +661,7 @@ async fn feedback_submit(State(state): State<AppState>, req: Request) -> ApiResu
         discord_id,
         &username,
         key.as_ref().map(Key::id),
-        &answers,
+        &text,
         state.now(),
     )
     .await
@@ -692,13 +671,6 @@ async fn feedback_submit(State(state): State<AppState>, req: Request) -> ApiResu
     })?;
     log_bot(&state, discord_id, "提交反馈（/反馈）", "", "").await;
     Ok(ok_json(&json!({"message": message})))
-}
-
-/// 机器人启动时来读问卷题目（改题目不用改机器人代码）。
-async fn feedback_questions(State(state): State<AppState>, req: Request) -> ApiResult {
-    let (parts, _body) = req.into_parts();
-    authorize(&state, &parts, true)?;
-    Ok(ok_json(&json!({"questions": feedback::questions_json()})))
 }
 
 /// 机器人每分钟来读一次配置（后台「Discord」页可改，不用重启机器人）。

@@ -156,13 +156,21 @@
   flex-wrap: wrap;
   gap: var(--sp-3);
 }
-.lg-qa {
-  display: grid;
-  gap: var(--sp-2);
-  margin: 0;
+/* 成员反馈：时间 · 成员 · 内容。内容列占满剩下的宽度；成员写的换行原样保留，
+   中文逐字折行（表格默认的 keep-all 遇到没有标点的长句会撑出横向滚动条）。
+   末尾几个字绑在一起不折行（见 Feedback.tsx 的 Text），所以最后一行不会只剩一两个字 */
+.table td.lg-fbcell {
+  width: 100%;
+  min-width: 240px;
 }
-.lg-qa dd {
-  margin: 0;
+.lg-fbtext {
+  white-space: pre-wrap;
+  word-break: normal;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+.lg-fbtail {
+  white-space: nowrap;
 }
 
 /* Bug 详情 */

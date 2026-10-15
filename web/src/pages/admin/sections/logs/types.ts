@@ -83,7 +83,6 @@ export type BugRow = {
 };
 export type BugsResp = { errors: BugRow[]; open: number };
 
-export type FeedbackQuestion = { id: string; label: string; options: string[] };
 export type FeedbackItem = {
   id: number;
   ts: number;
@@ -91,9 +90,12 @@ export type FeedbackItem = {
   username: string;
   key_id: number | null;
   key_name: string;
-  answers: Record<string, string>;
+  /** 显示用的文字：新记录是成员写的话；旧版选择题的记录是一行摘要「（旧版选择题）整体：…；困扰：…」；什么都没有是空串 */
+  text: string;
+  /** 是不是旧版选择题的记录（text 是服务端拼的摘要） */
+  legacy: boolean;
 };
-export type FeedbackResp = { questions: FeedbackQuestion[]; items: FeedbackItem[] };
+export type FeedbackResp = { items: FeedbackItem[] };
 
 export type SurveyRow = {
   ts: number;

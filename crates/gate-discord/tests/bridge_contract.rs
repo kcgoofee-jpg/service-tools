@@ -215,29 +215,15 @@ async fn issue(State(s): State<Shared>, h: HeaderMap, Json(body): Json<Value>) -
     Json(json!({"message": "领取成功！你的 Key：nai-contract", "key_id": 7})).into_response()
 }
 
-async fn feedback_questions(
-    State(s): State<Shared>,
-    h: HeaderMap,
-    Json(body): Json<Value>,
-) -> Response {
-    gate!(s, "POST", "/self-register/feedback/questions", h, body);
-    Json(json!({"questions": [
-        {"id": "score", "label": "整体用下来感觉怎么样？", "options": ["非常满意", "满意"]},
-        {"id": "freq", "label": "你多久用一次公益站？", "options": ["每天都用", "偶尔用"]},
-    ]}))
-    .into_response()
-}
-
+/// `/self-register/feedback`（docs/v3-deviations.md #52）：一段文字，去掉首尾空白后不到 2 个字回 400「写点什么再提交吧～」。
 async fn feedback(State(s): State<Shared>, h: HeaderMap, Json(body): Json<Value>) -> Response {
     gate!(s, "POST", "/self-register/feedback", h, body);
     if let Err(r) = checked(&body) {
         return r;
     }
-    let answers = body.get("answers").and_then(Value::as_object);
-    if answers
-        .is_none_or(|a| a.len() < 2 || a.values().any(|v| v.as_str().is_none_or(str::is_empty)))
-    {
-        return detail(400, "有题目没选，请重新打开 /反馈 选完再提交。");
+    let text = body.get("text").and_then(Value::as_str).unwrap_or("");
+    if text.trim().chars().count() < 2 {
+        return detail(400, "写点什么再提交吧～");
     }
     Json(json!({"message": "收到啦，谢谢你的反馈～奶妹会转给站长 ✨"})).into_response()
 }
@@ -266,10 +252,6 @@ async fn gateway() -> (Bridge, Shared, String) {
         .route("/self-register/ops", post(ops))
         .route("/self-register/issue", post(issue))
         .route("/self-register/feedback", post(feedback))
-        .route(
-            "/self-register/feedback/questions",
-            post(feedback_questions),
-        )
         .route("/self-register/bot/config", get(bot_config))
         .route("/self-register/bot/report", post(bot_report))
         .with_state(seen.clone());
@@ -485,39 +467,23 @@ async fn register_issue_contract() {
 #[tokio::test]
 async fn feedback_contract() {
     let (bridge, seen, _) = gateway().await;
-    let payload = who_payload(&interaction(MEMBER, GUILD), None, &[]).unwrap();
-    let q = bridge
-        .command("/self-register/feedback/questions", &payload)
-        .await
-        .unwrap();
-    assert!(q.is_ok());
-    let questions = handlers::parse_questions(&q.data).unwrap();
-    assert_eq!(questions.len(), 2);
-    assert_eq!(questions[0].options, ["非常满意", "满意"]);
-
-    // 答案缺一题 → 网关 400 + 中文原因，机器人原样转述
-    let partial = call(
+    // 太短 → 网关 400 + 中文原因，机器人原样转述
+    let short = call(
         &bridge,
         "/self-register/feedback",
         MEMBER,
         None,
-        &[
-            ("answers", json!({"score": "满意", "freq": ""})),
-            ("username", json!("alice")),
-        ],
+        &[("text", json!(" 好 ")), ("username", json!("alice"))],
     )
     .await;
-    assert_eq!(
-        handlers::feedback_receipt(&partial),
-        "有题目没选，请重新打开 /反馈 选完再提交。"
-    );
+    assert_eq!(handlers::feedback_receipt(&short), "写点什么再提交吧～");
     let full = call(
         &bridge,
         "/self-register/feedback",
         MEMBER,
         None,
         &[
-            ("answers", json!({"score": "满意", "freq": "偶尔用"})),
+            ("text", json!("排队有点久，希望快一点")),
             ("username", json!("alice")),
         ],
     )
@@ -528,13 +494,20 @@ async fn feedback_contract() {
     );
 
     let seen = seen.lock().unwrap();
+    // 不再向网关要题目
+    assert!(
+        seen.requests
+            .iter()
+            .all(|(_, p, _)| p == "/self-register/feedback")
+    );
     let (_, _, body) = seen
         .requests
         .iter()
         .rfind(|(_, p, _)| p == "/self-register/feedback")
         .unwrap();
     assert_eq!(body["username"], "alice");
-    assert_eq!(body["answers"], json!({"score": "满意", "freq": "偶尔用"}));
+    assert_eq!(body["text"], "排队有点久，希望快一点");
+    assert!(body.get("answers").is_none());
 }
 
 #[tokio::test]

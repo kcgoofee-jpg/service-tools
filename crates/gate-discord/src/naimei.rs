@@ -3,8 +3,8 @@
 //! 与 `integration/discord_bot.py` 逐行对应；与 Discord 的交互次序、ephemeral 标志、deferred 时机都照抄：
 //! - `/register /quota /resetkey /help /open /limit /ban /unban /slots /revoke`：先 `defer(ephemeral)`（3 秒内确认），
 //!   再去问网关，最后用跟进消息（ephemeral）回话；
-//! - `/反馈`：**先问网关要题目、再弹窗**（Python 就是这个顺序；网关慢于 3 秒时弹窗会失败，成员看到
-//!   「应用程序没有响应」——保持一致，不在这里悄悄改行为）；
+//! - `/反馈`：**立刻弹出**一个只有一段文字的弹窗，不先问网关（docs/v3-deviations.md #52；旧版先取题目再弹窗，
+//!   网关慢于 3 秒时弹窗会失败）。提交时先 `defer(ephemeral)`，再把文字交给网关，回执只有本人可见；
 //! - 命令抛出任何错误 → 打 `[bug]` 日志，并回一句「出了点问题……」（已确认过就用跟进消息，否则直接回复）；
 //! - 不发私信、不加表情、不碰论坛（画廊点赞 / AI 评论没有移植）。
 
@@ -31,8 +31,6 @@ use crate::events::{
 use crate::handlers::{self, Backend, HandlerError};
 use crate::pystr::py_str;
 
-/// 反馈弹窗的有效期（`FeedbackModal(timeout=900)`）。
-pub const MODAL_TTL: Duration = Duration::from_secs(900);
 /// 配置同步 / 心跳间隔。
 pub const SYNC_INTERVAL: Duration = Duration::from_secs(60);
 
@@ -104,17 +102,10 @@ pub fn mentions_bot(content: &str, bot_id: &str) -> bool {
     content.contains(&format!("<@{bot_id}>")) || content.contains(&format!("<@!{bot_id}>"))
 }
 
-struct PendingModal {
-    created: Instant,
-    /// (题目 id, 对应下拉框的 custom_id)，顺序即题目顺序。
-    fields: Vec<(Value, String)>,
-}
-
 #[derive(Default)]
 struct Inner {
     bot: Option<User>,
     guilds: HashMap<String, GuildInfo>,
-    modals: HashMap<String, PendingModal>,
     mentions: MentionLimiter,
     sync_started: bool,
     /// 后台「Discord」页的配置（画廊相关，当前版本只读不执行）。
@@ -141,10 +132,6 @@ fn unix_now() -> f64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs_f64())
         .unwrap_or(0.0)
-}
-
-fn random_hex() -> String {
-    format!("{:032x}", rand::random::<u128>())
 }
 
 impl Naimei {
@@ -410,64 +397,24 @@ impl Naimei {
         Ok(r.followup(&handlers::revoke_text(&member, &b)).await?)
     }
 
-    /// `/反馈`：现取题目 → 弹出 Discord 自带表单。成员自己发起，不私信、不群发。
-    async fn cmd_feedback(&self, it: &Interaction, r: &Responder<'_>) -> Result<(), CmdError> {
-        let b = self
-            .backend("/self-register/feedback/questions", it, None, &[])
-            .await?;
-        if !b.is_ok() || handlers::questions_empty(&b.data)? {
-            return Ok(r.send_message(handlers::FEEDBACK_UNAVAILABLE).await?);
-        }
-        let questions = handlers::parse_questions(&b.data)?;
-        let modal_id = random_hex();
-        let select_ids: Vec<String> = questions.iter().map(|_| random_hex()).collect();
-        let modal = handlers::modal_json(&questions, &modal_id, &select_ids);
-        r.send_modal(modal).await?;
-        // discord.py 在 send_modal 成功后才登记弹窗并开始 900 秒计时
-        let fields = questions
-            .into_iter()
-            .map(|q| q.id)
-            .zip(select_ids)
-            .collect();
-        let mut inner = self.lock();
-        inner.modals.retain(|_, m| m.created.elapsed() < MODAL_TTL);
-        inner.modals.insert(
-            modal_id,
-            PendingModal {
-                created: Instant::now(),
-                fields,
-            },
-        );
-        Ok(())
+    /// `/反馈`：立刻弹出只有一段文字的表单。成员自己发起，不私信、不群发。
+    async fn cmd_feedback(&self, _it: &Interaction, r: &Responder<'_>) -> Result<(), CmdError> {
+        Ok(r.send_modal(handlers::feedback_modal()).await?)
     }
 
     /// 弹窗提交（`on_submit`）。出错只记日志，不回成员消息（`Modal.on_error` 的默认行为）；
-    /// 未知 / 过期的弹窗直接忽略。
+    /// 不是反馈弹窗的（例如升级前发出去的旧版选择题弹窗）直接忽略。
     async fn handle_modal_submit(self: &Arc<Self>, it: &Interaction) {
-        let Some(custom_id) = it.data.as_ref().and_then(|d| d.custom_id.clone()) else {
+        let custom_id = it.data.as_ref().and_then(|d| d.custom_id.as_deref());
+        if custom_id != Some(handlers::FEEDBACK_MODAL_ID) {
             return;
-        };
-        let fields = {
-            let inner = self.lock();
-            match inner.modals.get(&custom_id) {
-                Some(m) if m.created.elapsed() < MODAL_TTL => m.fields.clone(),
-                _ => return,
-            }
-        };
-        match self.submit_feedback(it, &fields).await {
-            // 无异常才 stop()；出错的弹窗继续留着（成员可以重新提交），直到超时
-            Ok(()) => {
-                self.lock().modals.remove(&custom_id);
-            }
-            Err(e) => error!("Ignoring exception in modal: {}: {e}", e.kind()),
+        }
+        if let Err(e) = self.submit_feedback(it).await {
+            error!("Ignoring exception in modal: {}: {e}", e.kind());
         }
     }
 
-    async fn submit_feedback(
-        &self,
-        it: &Interaction,
-        fields: &[(Value, String)],
-    ) -> Result<(), CmdError> {
+    async fn submit_feedback(&self, it: &Interaction) -> Result<(), CmdError> {
         let r = Responder::new(self, it);
         r.defer(true).await?;
         let components = it
@@ -475,8 +422,7 @@ impl Naimei {
             .as_ref()
             .map(|d| d.components.as_slice())
             .unwrap_or(&[]);
-        let submitted = events::modal_values(components);
-        let answers = handlers::feedback_answers(fields, &submitted)?;
+        let text = handlers::feedback_text(&events::modal_values(components));
         let username = it.actor().map_or("", |u| u.username.as_str());
         let b = self
             .backend(
@@ -484,7 +430,7 @@ impl Naimei {
                 it,
                 None,
                 &[
-                    ("answers", Value::Object(answers)),
+                    ("text", json!(text)),
                     ("username", json!(pyc::take_chars(username, 80))),
                 ],
             )

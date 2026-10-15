@@ -1293,33 +1293,27 @@ async fn quota_shows_quiet_window_and_member_default_anlas() {
 // ------------------------------------------------------------------ 桥接：反馈 / 机器人配置
 
 #[tokio::test]
-async fn feedback_flow_matches_legacy() {
+async fn feedback_takes_one_text() {
     let (e, _d) = setup_reg(&[]).await;
-    let q = bridge(&e, "/self-register/feedback/questions", who(MEMBER, MEMBER)).await;
-    assert_eq!(q.0, 200);
-    let qs = q.2["questions"].as_array().unwrap();
-    assert_eq!(qs.len(), 5);
-    assert_eq!(qs[0]["id"], "score");
-    assert_eq!(qs[0]["label"], "整体用下来感觉怎么样？");
-    assert_eq!(
-        qs[0]["options"],
-        json!(["非常满意", "满意", "一般", "不太满意", "很不满意"])
-    );
-    // 问卷题目也要鉴权
+    // 选择题的「取题目」接口已经去掉（docs/v3-deviations.md #52）
+    let gone = bridge(&e, "/self-register/feedback/questions", who(MEMBER, MEMBER)).await;
+    assert_eq!(gone.0, 404);
+    // 提交也要鉴权
     let anon = parse(
-        Call::new("POST", "/self-register/feedback/questions")
+        Call::new("POST", "/self-register/feedback")
+            .json(merge(who(MEMBER, MEMBER), json!({"text": "你好呀"})))
             .send(&e.state)
             .await,
     );
-    assert_eq!(anon.0, 401);
-    let full = json!({"score": "满意", "pain": "没什么困扰", "wish": "保持现状就好",
-                      "client": "手机 App", "freq": "偶尔用"});
+    assert_eq!((anon.0, anon.2), (401, json!({"detail": "未授权"})));
+
+    // 没领 Key 也能提交；首尾空白去掉，回执是固定那句
     let ok = bridge(
         &e,
         "/self-register/feedback",
         merge(
             who(MEMBER, MEMBER),
-            json!({"username": "alice", "answers": full}),
+            json!({"username": "alice", "text": "  排队有点久，\n希望快一点。 \n"}),
         ),
     )
     .await;
@@ -1333,18 +1327,21 @@ async fn feedback_flow_matches_legacy() {
     let rows = e.state.db.list_feedback(10).await.unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0]["discord_id"], MEMBER);
+    assert_eq!(rows[0]["username"], "alice");
     assert!(rows[0]["key_id"].is_null(), "没领 Key 也能提交");
-    // 存的 JSON 与 Python json.dumps(ensure_ascii=False) 逐字节一致（带空格的分隔符）
+    // 存进 `feedback.answers` 的是 {"text": …}（带空格的分隔符，和 Python json.dumps(ensure_ascii=False) 一致）
     assert_eq!(
         rows[0]["answers"].as_str().unwrap(),
-        r#"{"score": "满意", "pain": "没什么困扰", "wish": "保持现状就好", "client": "手机 App", "freq": "偶尔用"}"#
+        r#"{"text": "排队有点久，\n希望快一点。"}"#
     );
+
+    // 10 分钟内同一个人只收一份
     let again = bridge(
         &e,
         "/self-register/feedback",
         merge(
             who(MEMBER, MEMBER),
-            json!({"username": "alice", "answers": full}),
+            json!({"username": "alice", "text": "再来一条"}),
         ),
     )
     .await;
@@ -1355,39 +1352,47 @@ async fn feedback_flow_matches_legacy() {
             json!({"detail": "刚刚已经收到你的反馈啦，过 10 分钟再提交新的吧。"})
         )
     );
-    let partial = bridge(
-        &e,
-        "/self-register/feedback",
-        merge(who(OTHER, OTHER), json!({"answers": {"score": "满意"}})),
-    )
-    .await;
-    assert_eq!(
-        (partial.0, partial.2),
-        (
-            400,
-            json!({"detail": "有题目没选，请重新打开 /反馈 选完再提交。"})
+    assert_eq!(e.state.db.list_feedback(10).await.unwrap().len(), 1);
+
+    // 空的、只有空白、不到 2 个字、没带 text：都不收，也不占冷却
+    for body in [
+        json!({"username": "bob", "text": ""}),
+        json!({"username": "bob", "text": " \n\t　 "}),
+        json!({"username": "bob", "text": " 好 "}),
+        json!({"username": "bob"}),
+    ] {
+        let r = bridge(
+            &e,
+            "/self-register/feedback",
+            merge(who(OTHER, OTHER), body),
         )
-    );
+        .await;
+        assert_eq!((r.0, r.2), (400, json!({"detail": "写点什么再提交吧～"})));
+    }
+    assert_eq!(e.state.db.list_feedback(10).await.unwrap().len(), 1);
+    // text 不是字符串：和其它字段一样回 422
     let typed = bridge(
         &e,
         "/self-register/feedback",
-        merge(who(OTHER, OTHER), json!({"answers": "x"})),
+        merge(who(OTHER, OTHER), json!({"text": 5})),
     )
     .await;
     assert_eq!(
         typed.2,
-        json!({"detail": [{"type": "dict_type", "loc": ["body", "answers"],
-                           "msg": "Input should be a valid dictionary", "input": "x"}]})
+        json!({"detail": [{"type": "string_type", "loc": ["body", "text"],
+                           "msg": "Input should be a valid string", "input": 5}]})
     );
-    // 领了 Key 的人：反馈记上 key_id
+
+    // 领了 Key 的人：反馈记上 key_id；超过 1000 字（首尾空白不算）截成 1000 字
     open_registration(&e).await;
     issue(&e, OTHER).await;
+    let long = "长".repeat(1500);
     let ok = bridge(
         &e,
         "/self-register/feedback",
         merge(
             who(OTHER, OTHER),
-            json!({"username": "bob", "answers": full}),
+            json!({"username": "bob", "text": format!("  {long}  ")}),
         ),
     )
     .await;
@@ -1395,6 +1400,46 @@ async fn feedback_flow_matches_legacy() {
     let rows = e.state.db.list_feedback(10).await.unwrap();
     assert_eq!(rows[0]["discord_id"], OTHER);
     assert_eq!(rows[0]["key_id"], 2);
+    let stored: Value = serde_json::from_str(rows[0]["answers"].as_str().unwrap()).unwrap();
+    assert_eq!(stored["text"].as_str().unwrap().chars().count(), 1000);
+    assert_eq!(stored["text"], "长".repeat(1000));
+}
+
+/// 冷却按传入的时间算：600 秒内拒绝，满 600 秒再收；被拒绝的不占冷却。
+#[tokio::test]
+async fn feedback_cooldown_is_ten_minutes_per_person() {
+    use gate_server::feedback::{SubmitError, submit};
+    let e = setup(&[]).await;
+    let db = &e.state.db;
+    let t0 = 1_760_000_000.0;
+    assert!(
+        submit(db, MEMBER, "alice", None, "第一条", t0)
+            .await
+            .is_ok()
+    );
+    for dt in [0.0, 1.0, 599.9] {
+        let r = submit(db, MEMBER, "alice", None, "又一条", t0 + dt).await;
+        assert!(
+            matches!(&r, Err(SubmitError::Rejected(m)) if m == "刚刚已经收到你的反馈啦，过 10 分钟再提交新的吧。"),
+            "dt={dt}: {r:?}"
+        );
+    }
+    // 别人不受影响；太短的先被拦下，也不会写库
+    assert!(
+        submit(db, OTHER, "bob", None, "好的", t0 + 1.0)
+            .await
+            .is_ok()
+    ); // 刚好 2 个字
+    assert!(matches!(
+        submit(db, MEMBER, "alice", None, "好", t0 + 700.0).await,
+        Err(SubmitError::Rejected(m)) if m == "写点什么再提交吧～"
+    ));
+    assert!(
+        submit(db, MEMBER, "alice", None, "第二条", t0 + 600.0)
+            .await
+            .is_ok()
+    );
+    assert_eq!(db.list_feedback(10).await.unwrap().len(), 3);
 }
 
 #[tokio::test]

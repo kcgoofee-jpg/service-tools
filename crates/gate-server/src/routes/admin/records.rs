@@ -5,7 +5,7 @@ use super::req::{Ctx, R, Reject, bytes_response, internal, py_quote, sql_int};
 use super::{ActionLogged, actor};
 use crate::action_log::log_action;
 use crate::error::{HttpError, ok_json};
-use crate::feedback::{listing, questions_json, safe_cell};
+use crate::feedback::{listing, member_label, safe_cell};
 use crate::state::AppState;
 use axum::Router;
 use axum::extract::{Request, State};
@@ -489,25 +489,27 @@ fn csv_line(cells: &[String]) -> String {
     out
 }
 
-/// CSV 单元格：数字 / 空值按 Python 的 `str()` 写；文本做防注入处理。
-fn cell(v: &Value) -> String {
-    match v {
-        Value::Null => String::new(),
-        Value::String(s) => safe_cell(s),
-        other => pyval::py_str(other),
+/// 带 BOM 的 CSV（Excel 打开不乱码）：表头一行 + 数据行。
+fn csv_bytes(header: &[&str], rows: &[Vec<String>]) -> Vec<u8> {
+    let mut s = String::from('\u{feff}');
+    s.push_str(&csv_line(
+        &header.iter().map(|h| (*h).to_string()).collect::<Vec<_>>(),
+    ));
+    for r in rows {
+        s.push_str(&csv_line(r));
     }
+    s.into_bytes()
 }
 
-/// 成员 /反馈 提交的问卷，最新在前。
+/// 成员 /反馈 写的话，最新在前。每条的 `text` 是显示用的文字（旧版选择题的记录是一行摘要，`legacy` 为真）。
 async fn feedback_list(State(state): State<AppState>, req: Request) -> R {
     let mut cx = Ctx::new(state, req).await?;
     cx.admin().await?;
     let items = listing(&cx.state.db, 500).await?;
-    Ok(ok_json(
-        &json!({"questions": questions_json(), "items": items}),
-    ))
+    Ok(ok_json(&json!({"items": items})))
 }
 
+/// CSV 三列：time、member（Key 名 / 用户名 / Discord ID）、text（旧版选择题的记录是同一行摘要）。
 async fn feedback_export(State(state): State<AppState>, req: Request) -> R {
     let mut cx = Ctx::new(state, req).await?;
     cx.admin().await?;
@@ -518,41 +520,18 @@ async fn feedback_export(State(state): State<AppState>, req: Request) -> R {
             .partial_cmp(&pyval::number_like(&b["ts"]))
             .unwrap_or(std::cmp::Ordering::Equal)
     });
-    let questions = questions_json();
-    let qs = questions.as_array().cloned().unwrap_or_default();
-    let mut header: Vec<String> = ["time", "discord_id", "username", "key_id", "key_name"]
+    let rows: Vec<Vec<String>> = items
         .iter()
-        .map(|s| (*s).to_string())
-        .collect();
-    header.extend(
-        qs.iter()
-            .map(|q| q["label"].as_str().unwrap_or("").to_string()),
-    );
-    let mut text = String::from('\u{feff}');
-    text.push_str(&csv_line(&header));
-    for it in &items {
-        let mut row = vec![
-            safe_cell(
-                &st.clock
+        .map(|it| {
+            vec![
+                st.clock
                     .format(it["ts"].as_f64().unwrap_or(0.0), "%Y-%m-%d %H:%M:%S"),
-            ),
-            safe_cell(it["discord_id"].as_str().unwrap_or("")),
-            safe_cell(it["username"].as_str().unwrap_or("")),
-            match it["key_id"].as_i64() {
-                Some(k) if k != 0 => k.to_string(),
-                _ => String::new(),
-            },
-            safe_cell(it["key_name"].as_str().unwrap_or("")),
-        ];
-        for q in &qs {
-            let a = it["answers"]
-                .get(q["id"].as_str().unwrap_or(""))
-                .cloned()
-                .unwrap_or(Value::String(String::new()));
-            row.push(cell(&a));
-        }
-        text.push_str(&csv_line(&row));
-    }
+                safe_cell(&member_label(it)),
+                safe_cell(it["text"].as_str().unwrap_or("")),
+            ]
+        })
+        .collect();
+    let text = csv_bytes(&["time", "member", "text"], &rows);
     log_action(
         &st.db,
         &actor(&st, &cx.parts),
@@ -569,7 +548,7 @@ async fn feedback_export(State(state): State<AppState>, req: Request) -> R {
     );
     // 注意 filename* 末尾多出来的那个引号是旧版的笔误，照抄（浏览器照样识别）
     Ok(bytes_response(
-        text.into_bytes(),
+        text,
         "text/csv; charset=utf-8",
         &[
             (

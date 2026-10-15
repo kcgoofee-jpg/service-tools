@@ -667,39 +667,63 @@ fn hex_bytes(h: &str) -> Vec<u8> {
 #[tokio::test]
 async fn feedback_list_and_csv_export() {
     let (_e, a) = ready().await;
+    // docs/v3-deviations.md #52：/反馈 现在是一段文字；旧版选择题的记录（id 2）照常显示成一行摘要
     a.sql(
-        "INSERT INTO api_keys(id, name, token, created_at) VALUES (2, '乙', 'nai-t-2', 1.0);\
-         INSERT INTO feedback(ts, discord_id, username, key_id, answers) VALUES \
-         (200.0, '900000000000000002', '=cmd,\"x\"', 2, '{\"score\":\"一般\",\"pain\":\"没什么困扰\"}'), \
-         (100.0, '900000000000000001', 'user1', 1, '{\"score\":\"满意\",\"freq\":\"每天都用\"}'), \
-         (300.0, '900000000000000099', 'gone', 99, '{}');",
+        r#"INSERT INTO api_keys(id, name, token, created_at) VALUES (2, '乙', 'nai-t-2', 1.0);
+         INSERT INTO feedback(ts, discord_id, username, key_id, answers) VALUES
+         (200.0, '900000000000000002', 'plain', 2, '{"text": "排队有点久,\n\"希望\"快一点"}'),
+         (100.0, '900000000000000001', 'user1', 1, '{"score": "满意", "pain": "排队太久 / 经常提示人多", "wish": "多给一些 V5", "freq": "每天都用"}'),
+         (300.0, '900000000000000099', '=cmd,"x"', 99, '{}'),
+         (400.0, '900000000000000004', 'u4', NULL, '{"text": "=HYPERLINK(1)"}');"#,
     )
     .await;
     let v = a.get(&format!("{A}/feedback")).await.json();
-    let qs = v["questions"].as_array().unwrap();
-    assert_eq!(
-        qs.iter()
-            .map(|q| q["id"].as_str().unwrap())
-            .collect::<Vec<_>>(),
-        ["score", "pain", "wish", "client", "freq"]
-    );
-    assert_eq!(qs[0]["label"], "整体用下来感觉怎么样？");
-    assert_eq!(qs[0]["options"].as_array().unwrap().len(), 5);
+    assert!(v.get("questions").is_none(), "题目已经去掉: {v}");
     let items = v["items"].as_array().unwrap();
     assert_eq!(
         items
             .iter()
             .map(|i| i["id"].as_i64().unwrap())
             .collect::<Vec<_>>(),
-        [3, 1, 2],
+        [4, 3, 1, 2],
         "最新在前"
     );
-    assert_eq!(items[1]["key_name"], "乙");
-    assert_eq!(items[0]["key_name"], "");
+    // 只有这几个字段（不再带 answers）
     assert_eq!(
-        items[2]["answers"],
-        json!({"score": "满意", "freq": "每天都用"})
+        items[0]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        [
+            "id",
+            "ts",
+            "discord_id",
+            "username",
+            "key_id",
+            "key_name",
+            "text",
+            "legacy"
+        ]
     );
+    assert_eq!(items[0]["text"], "=HYPERLINK(1)");
+    assert_eq!(items[0]["legacy"], false);
+    assert_eq!(items[0]["key_name"], "");
+    assert!(items[0]["key_id"].is_null());
+    assert_eq!(items[1]["text"], "", "什么都没有的记录文字为空");
+    assert_eq!(items[1]["legacy"], false);
+    assert_eq!(items[2]["text"], "排队有点久,\n\"希望\"快一点");
+    assert_eq!(items[2]["legacy"], false);
+    assert_eq!(items[2]["key_name"], "乙");
+    // 旧版选择题：缺的题目跳过，其余拼成一行
+    assert_eq!(
+        items[3]["text"],
+        "（旧版选择题）整体：满意；困扰：排队太久 / 经常提示人多；希望：多给一些 V5；频率：每天都用"
+    );
+    assert_eq!(items[3]["legacy"], true);
+    assert_eq!(items[3]["key_name"], "测试成员");
+
     let r = a.get(&format!("{A}/feedback/export")).await;
     assert_eq!(r.status, 200);
     assert_eq!(r.headers["content-type"], "text/csv; charset=utf-8");
@@ -711,21 +735,33 @@ async fn feedback_list_and_csv_export() {
     assert!(disp.contains("; filename*=UTF-8''owl-feedback-"), "{disp}");
     let text = r.text();
     assert!(text.starts_with('\u{feff}'));
+    // 行尾是 \r\n，单元格里的换行只有 \n，所以按 \r\n 切就是按记录切
     let lines: Vec<&str> = text.trim_start_matches('\u{feff}').split("\r\n").collect();
-    assert_eq!(
-        lines[0],
-        "time,discord_id,username,key_id,key_name,整体用下来感觉怎么样？,目前最困扰你的是？,最希望优先改进哪一项？,你主要用什么来出图？,你多久用一次公益站？"
-    );
+    assert_eq!(lines[0], "time,member,text");
     assert!(
-        lines[1].ends_with(",900000000000000001,user1,1,测试成员,满意,,,,每天都用"),
-        "按时间升序: {}",
+        lines[1].starts_with("1970-01-01 ")
+            && lines[1].ends_with(
+                ",测试成员,（旧版选择题）整体：满意；困扰：排队太久 / 经常提示人多；希望：多给一些 V5；频率：每天都用"
+            ),
+        "按时间升序，旧记录同一行摘要: {}",
         lines[1]
     );
     assert!(
-        lines[2].contains(",900000000000000002,\"'=cmd,\"\"x\"\"\",2,乙,一般,没什么困扰,,,"),
-        "公式防注入 + CSV 转义: {}",
+        lines[2].ends_with(",乙,\"排队有点久,\n\"\"希望\"\"快一点\""),
+        "成员取 Key 名，文字里的逗号 / 换行 / 引号按 CSV 转义: {}",
         lines[2]
     );
+    assert!(
+        lines[3].ends_with(",\"'=cmd,\"\"x\"\"\","),
+        "没有 Key 名用用户名；公式防注入 + CSV 转义；空文字: {}",
+        lines[3]
+    );
+    assert!(
+        lines[4].ends_with(",u4,'=HYPERLINK(1)"),
+        "文字也防公式注入: {}",
+        lines[4]
+    );
+    assert_eq!(lines.len(), 6, "表头 + 4 条 + 末尾空串");
     assert!(
         a.actions()
             .await
