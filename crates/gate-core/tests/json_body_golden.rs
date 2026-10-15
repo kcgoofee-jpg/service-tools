@@ -95,7 +95,8 @@ fn parse_json_golden() {
     for c in cases {
         let got = match raw_of(&c.raw["raw"]) {
             Raw::Bytes(b) => json_body::parse_json(&b),
-            Raw::Str(s) => json_body::parse_json_str(&s),
+            // 网关收到的请求体都是字节；str 入口没有生产调用方，已删除（docs/v3-deviations.md #101）
+            Raw::Str(_) => continue,
         };
         if c.get("ok").and_then(Value::as_bool).unwrap() {
             ok += 1;

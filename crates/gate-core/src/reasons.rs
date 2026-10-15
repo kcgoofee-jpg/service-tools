@@ -73,11 +73,6 @@ impl std::fmt::Display for Reason {
     }
 }
 
-/// `getattr(text, "code", "") or ""`
-pub fn code_of(reason: &Reason) -> &str {
-    reason.code()
-}
-
 /// 只用于数据库升级时回填原因码上线之前的旧记录（按顺序匹配，先匹配到的生效；模式是 SQL `LIKE`）。
 pub const BACKFILL: &[(&str, &str)] = &[
     (QUEUE_FULL, "%排队的人太多%"),
@@ -201,8 +196,8 @@ mod tests {
     #[test]
     fn reason_carries_code_like_a_str_subclass() {
         let r = Reason::new("排队的人太多", QUEUE_FULL);
-        assert_eq!(code_of(&r), "queue_full");
+        assert_eq!(r.code(), "queue_full");
         assert_eq!(&*r, "排队的人太多");
-        assert_eq!(code_of(&Reason::plain("x")), "");
+        assert_eq!(Reason::plain("x").code(), "");
     }
 }

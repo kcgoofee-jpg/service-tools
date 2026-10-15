@@ -105,7 +105,7 @@ fn code_of_golden() {
             // 普通 str / None：没有 .code 属性，返回 ""
             _ => Reason::plain(text),
         };
-        assert_eq_py_ordered(&c, &json!(reasons::code_of(&reason)), c.out());
+        assert_eq_py_ordered(&c, &json!(reason.code()), c.out());
     }
 }
 

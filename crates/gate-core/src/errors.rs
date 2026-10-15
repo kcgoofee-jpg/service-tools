@@ -354,10 +354,6 @@ impl AutoReason {
             AutoReason::StaleError => "stale_error",
         }
     }
-
-    pub fn from_code(code: &str) -> Option<AutoReason> {
-        Self::ALL.into_iter().find(|r| r.code() == code)
-    }
 }
 
 /// 浏览器网络失败的报错文案（小写比较）：断网、切后台、页面跳转时被取消的请求都会这样报。
@@ -650,15 +646,6 @@ mod tests {
         assert_eq!(at("weird", 8.0 * 86400.0), Some(AutoReason::StaleError));
         // 时钟回拨：last_seen 在未来，不关
         assert_eq!(at("warn", -3600.0), None);
-    }
-
-    #[test]
-    fn auto_reason_codes_roundtrip() {
-        for r in AutoReason::ALL {
-            assert_eq!(AutoReason::from_code(r.code()), Some(r));
-        }
-        assert_eq!(AutoReason::from_code("manual"), None);
-        assert_eq!(AutoReason::from_code(""), None);
     }
 
     #[test]

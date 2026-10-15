@@ -265,17 +265,6 @@ impl GuardCore {
         }
     }
 
-    /// 构造并按库里的键值加载设置（见 [`load_settings`](Self::load_settings)）。
-    pub fn from_settings(
-        tz: &str,
-        reset_hour: i64,
-        stored: &BTreeMap<String, String>,
-    ) -> Result<Self, GuardError> {
-        let mut g = Self::new(tz, reset_hour);
-        g.load_settings(stored)?;
-        Ok(g)
-    }
-
     fn v(&self, name: &str) -> i64 {
         self.values[name]
     }
@@ -785,11 +774,6 @@ impl GuardCore {
                 return;
             }
         }
-    }
-
-    /// 当前排队中（未开始生成）的 key_id，按到达先后。
-    pub fn waiting_keys(&self) -> Vec<i64> {
-        self.waiting_sorted().iter().map(|e| e.key).collect()
     }
 
     fn waiting_sorted(&self) -> Vec<&Entry> {

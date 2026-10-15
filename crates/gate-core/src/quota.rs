@@ -813,22 +813,6 @@ impl PyNum {
         }
     }
 
-    /// `x * k`（k 为 int）：int * int 仍是 int，含 float 则是 float。
-    pub fn mul_int(self, k: i64) -> Self {
-        match self {
-            Self::Int(i) => Self::Int(i.saturating_mul(k)),
-            Self::Float(f) => Self::Float(f * k as f64),
-        }
-    }
-
-    /// `self - other`
-    pub fn minus(self, other: Self) -> Self {
-        match (self, other) {
-            (Self::Int(a), Self::Int(b)) => Self::Int(a.saturating_sub(b)),
-            (a, b) => Self::Float(a.as_f64() - b.as_f64()),
-        }
-    }
-
     /// 从 JSON 数字（int / float，不含 bool）转换。
     pub fn from_value(v: &Value) -> Option<Self> {
         match v {

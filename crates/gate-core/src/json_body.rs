@@ -78,11 +78,6 @@ pub fn parse_json(raw: &[u8]) -> Result<Parsed, JsonError> {
     finish(pyloads::loads_bytes(raw, strict_options())?)
 }
 
-/// `body.parse_json(raw)`（raw 是 str：以 BOM 开头直接报错，与 bytes 不同）。
-pub fn parse_json_str(raw: &str) -> Result<Parsed, JsonError> {
-    finish(pyloads::loads_str(raw, strict_options())?)
-}
-
 fn int_to_value(i: i128) -> Value {
     if let Ok(v) = i64::try_from(i) {
         return Value::Number(v.into());

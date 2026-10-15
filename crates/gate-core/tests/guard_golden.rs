@@ -524,7 +524,13 @@ fn replay(c: &Case, counts: &mut BTreeMap<String, usize>) {
                 Ok(Value::Null)
             }
             "queue_view" => Ok(g.queue_view(step["key"].as_i64())),
-            "waiting_keys" => Ok(json!(g.waiting_keys())),
+            // `waiting_keys` 没有生产调用方，已删除（docs/v3-deviations.md #101）：从公开的 `entries`
+            // 现算「排队中的 key_id，按到达先后」，照样核对排队顺序
+            "waiting_keys" => {
+                let mut w: Vec<_> = g.entries.iter().filter(|e| !e.running).collect();
+                w.sort_by(|a, b| a.since.total_cmp(&b.since));
+                Ok(json!(w.iter().map(|e| e.key).collect::<Vec<_>>()))
+            }
             // 已删除（#61）：只重放它的副作用——别人在排队就直接返回；否则记一次每小时上限，
             // 上限不为 0 时数每个账号的小时用量（弹出 3 小时前的时间戳）。不比返回值
             "site_idle" => {

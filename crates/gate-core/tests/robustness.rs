@@ -79,9 +79,6 @@ proptest! {
         let _ = pyloads::loads_bytes(&raw, Options::LOADS);
         let _ = json_body::parse_json(&raw);
         let _ = json_body::parse_json_body(&raw);
-        if let Ok(s) = std::str::from_utf8(&raw) {
-            let _ = json_body::parse_json_str(s);
-        }
     }
 
     #[test]

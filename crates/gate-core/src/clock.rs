@@ -49,14 +49,6 @@ impl Clock {
             .to_string()
     }
 
-    /// Python 的 `ts or time.time()`：`None` 与 `0.0` 都表示「现在」。
-    pub fn or_now(ts: Option<f64>, now: f64) -> f64 {
-        match ts {
-            Some(t) if t != 0.0 => t,
-            _ => now,
-        }
-    }
-
     /// `state.day_start(ts)`：该时刻所在服务日的起点时间戳。
     pub fn day_start(&self, ts: f64) -> f64 {
         let shift = (self.reset_hour * 3600) as f64;
