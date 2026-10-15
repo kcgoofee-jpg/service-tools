@@ -654,7 +654,7 @@ fn one_line(text: &str) -> String {
 
 /// 首页 / 后台网页的脚本报错上报（只收本站页面的错误；每 IP 每 10 分钟 10 条，全站每 10 分钟 100 条）。
 ///
-/// 3.0 起另外丢弃两类（docs/v3-deviations.md #45）：浏览器网络失败（断网 / 请求被取消，不是我们的缺陷），
+/// 3.0 起另外丢弃两类：浏览器网络失败（断网 / 请求被取消，不是我们的缺陷），
 /// 以及出错脚本不在 `/_owl/` 下的 `Uncaught …`（旧版缓存页、浏览器插件）。
 async fn client_error(State(state): State<AppState>, req: Request) -> Response {
     let (parts, body) = req.into_parts();

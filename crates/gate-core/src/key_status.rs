@@ -1,4 +1,4 @@
-//! Key 的停用原因（3.0 新增，见 docs/v3-deviations.md #47）：`api_keys.disabled_reason` 的取值，
+//! Key 的停用原因（3.0 新增）：`api_keys.disabled_reason` 的取值，
 //! 以及成员拿停用的 Key 请求时看到的说明。以前一律是「该 Key 已被禁用」，被全站重置停掉的成员
 //! 不知道该去重新领，客户端里一直留着旧 Key。
 

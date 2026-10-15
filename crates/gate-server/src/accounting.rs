@@ -170,7 +170,7 @@ impl AppState {
 /// 成员接口错误的收尾（放在请求上下文中间件里面）：
 /// - 鉴权之后被拒（4xx）且本请求还没记过日志：统一记一条「rejected」，方便排查成员问题；
 /// - 5xx 的 GateError：按消息归并成 Bug（网关自己的故障）；原因在上游的（`GateError::upstream`）不记——
-///   上游故障在用量日志和「上游」页里看得到，不是本站的缺陷（docs/v3-deviations.md #45）；
+///   上游故障在用量日志和「上游」页里看得到，不是本站的缺陷；
 /// - 未预料的内部错误：记 Bug，有 Key 且没记过日志时补一条「error」；上游传输层失败
 ///   （`error::upstream_transport`）对成员仍是 500，但同样不记 Bug。
 pub async fn error_ledger(State(state): State<AppState>, req: Request, next: Next) -> Response {
@@ -295,7 +295,7 @@ mod tests {
         assert_eq!(kind_for_path("/ai/generate-image-stream"), "image_stream");
         assert_eq!(kind_for_path("/nai/ai/generate-image"), "image");
         assert_eq!(kind_for_path("/ai/generate-image/suggest-tags"), "tags");
-        // 文本接口已删除（docs/v3-deviations.md #81），这些路径不会再走到记账；按「账户查询」兜底
+        // 文本接口已删除，这些路径不会再走到记账；按「账户查询」兜底
         assert_eq!(kind_for_path("/ai/generate"), "account");
         assert_eq!(kind_for_path("/user/subscription"), "account");
     }

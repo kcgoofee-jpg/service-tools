@@ -1,5 +1,5 @@
 //! 发往 NovelAI 的请求头：浏览器层的头取自 wreq-util 的 Chrome emulation——与 TLS / HTTP2 指纹是**同一个
-//! profile**，不手写 UA；我们只补请求相关的头（站长 10-15 批准指纹统一升级，docs/v3-deviations.md #86）。
+//! profile**，不手写 UA；我们只补请求相关的头（站长 10-15 批准指纹统一升级）。
 //!
 //! ## 指纹池
 //! 按上游 Token 的序号轮流分配（`index % 3`）：Chrome 149 / Windows、Chrome 148 / Windows、Chrome 149 / macOS

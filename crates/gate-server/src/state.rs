@@ -26,7 +26,7 @@ use tokio_util::task::TaskTracker;
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// 运行期可在后台调的三个限制（旧版 RUNTIME_LIMIT_BOUNDS；每 Key 出图间隔
-/// `key_image_min_interval` 已删除，库里残留的 `runtime_key_image_min_interval` 不再读，docs/v3-deviations.md #64）。
+/// `key_image_min_interval` 已删除，库里残留的 `runtime_key_image_min_interval` 不再读）。
 pub const RUNTIME_LIMIT_BOUNDS: [(&str, i64, i64); 3] = [
     ("queue_timeout", 15, 300),
     ("image_min_interval", 15, 120),
@@ -84,8 +84,8 @@ pub struct Inner {
     /// V5 官方免费额度缓存（只有真实出图会刷新）。
     pub allowance: crate::allowance::ServerAllowance,
     pub health: UpstreamHealth,
-    /// 标签补全的全站并发（容量是常量 [`crate::runtime::TAG_CONCURRENCY`]；文本接口已删，docs/v3-deviations.md #81）。
-    /// 每把 Key 的信号量（`KEY_CONCURRENCY`）已删除：出图由排队管、标签补全由补全队列管（docs/v3-deviations.md #64）。
+    /// 标签补全的全站并发（容量是常量 [`crate::runtime::TAG_CONCURRENCY`]；文本接口已删）。
+    /// 每把 Key 的信号量（`KEY_CONCURRENCY`）已删除：出图由排队管、标签补全由补全队列管。
     pub global_sem: Arc<tokio::sync::Semaphore>,
     pub global_waiting: AtomicI64,
     pub global_active: AtomicI64,

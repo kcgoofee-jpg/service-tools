@@ -141,7 +141,7 @@ pub fn request_images(body: Option<&Value>) -> i64 {
     parsed.unwrap_or(1).max(1)
 }
 
-/// Retry-After 解析；旧版遇到超长数字 / 越界日期会抛异常导致冷却不生效（见 docs/v3-deviations.md #1），这里按默认 20 秒。
+/// Retry-After 解析；旧版遇到超长数字 / 越界日期会抛异常导致冷却不生效，这里按默认 20 秒。
 fn retry_after_or_default(headers: &HeaderMap, now: f64) -> f64 {
     let header = headers.get("retry-after").and_then(|v| v.to_str().ok());
     gate_core::upstream_policy::parse_retry_after(header, now).unwrap_or(20.0)

@@ -87,8 +87,8 @@ async fn generate_image_ok_records_usage() {
     assert_eq!((c.images, c.legacy_free_images), (1, 1));
 }
 
-/// 每人只有每日上限：2.x 的每人注水（底仓 30 张、每小时补 4 张，一天最多约 126 张）已删除
-/// （docs/v3-deviations.md #62）。上限 200、今天已用 150 张的算法管理成员照样能出图，不会被 `paced` 拦下；
+/// 每人只有每日上限：2.x 的每人注水（底仓 30 张、每小时补 4 张，一天最多约 126 张）已删除。
+/// 上限 200、今天已用 150 张的算法管理成员照样能出图，不会被 `paced` 拦下；
 /// 用满上限才是「今日 V4.5 免费图额度已用完」。
 #[tokio::test]
 async fn no_per_member_pacing_below_the_daily_cap() {
@@ -150,7 +150,7 @@ async fn no_per_member_pacing_below_the_daily_cap() {
     assert!(!text.contains("每小时自动恢复"), "{text}");
 }
 
-/// 每把 Key 的限速只剩排队与 RPM 两层（docs/v3-deviations.md #64）：
+/// 每把 Key 的限速只剩排队与 RPM 两层：
 /// - 同一把 Key 同时只生成 1 张：第二张排队、等第一张出完才发往上游（即使还有空着的上游账号）——
 ///   这是排队本身做的，旧版靠每把 Key 一个的信号量；
 /// - 再多的并发请求是「上一张还没出完」（`key_busy`），不再有「同时进行中的请求过多」（`key_rate`）；
@@ -239,7 +239,7 @@ async fn one_image_per_key_at_a_time_without_per_key_interval() {
     assert_eq!(reasons, ["key_busy", "key_busy"], "{rows:?}");
 }
 
-/// 「V5 续杯」已删除（docs/v3-deviations.md #66）：旧版 `anlas_auto` 的 Key 当天个人 V5 用完、
+/// 「V5 续杯」已删除：旧版 `anlas_auto` 的 Key 当天个人 V5 用完、
 /// 账号 V5 也见底时会改用 Anlas 出同规格 V5；现在个人 V5 用完就是 402，不会悄悄花 Anlas。
 #[tokio::test]
 async fn no_v5_refill_with_anlas() {
@@ -290,7 +290,7 @@ async fn no_v5_refill_with_anlas() {
     assert!(e.mock.requests_to("/ai/generate-image").is_empty());
 }
 
-/// 不识别客户端、不记设备（docs/v3-deviations.md #50）：不管 User-Agent、启动器请求头还是请求体长什么样，
+/// 不识别客户端、不记设备：不管 User-Agent、启动器请求头还是请求体长什么样，
 /// 用量日志的 client 列都是空串，后台日志接口也不返回这个字段。
 #[tokio::test]
 async fn usage_log_never_records_a_client() {
@@ -348,7 +348,7 @@ async fn auth_errors_have_novelai_shape() {
     assert!(e.mock.requests().is_empty());
 }
 
-/// 停用的 Key：按停用原因给出说明（docs/v3-deviations.md #47）。全站重置停掉的要告诉成员去重新领。
+/// 停用的 Key：按停用原因给出说明。全站重置停掉的要告诉成员去重新领。
 #[tokio::test]
 async fn disabled_key_message_depends_on_reason() {
     let e = setup(&[]).await;
@@ -639,7 +639,7 @@ async fn v1_alias_and_root_post_route_to_generate() {
 
 #[tokio::test]
 async fn generation_audit_records_prompt_and_image() {
-    // 记录开关只来自后台设置（环境变量 AUDIT_PROMPTS / AUDIT_THUMBS 已删除，docs/v3-deviations.md #93）
+    // 记录开关只来自后台设置（环境变量 AUDIT_PROMPTS / AUDIT_THUMBS 已删除）
     let e = setup(&[]).await;
     e.state.db.set_setting("audit_prompts", "1").await.unwrap();
     e.state.db.set_setting("audit_thumbs", "1").await.unwrap();

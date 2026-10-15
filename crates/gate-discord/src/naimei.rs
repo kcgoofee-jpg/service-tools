@@ -2,11 +2,11 @@
 //!
 //! 与 Discord 的交互次序：
 //! - `/register /quota /resetkey /help`：先 `defer(ephemeral)`（3 秒内确认），再去问网关，最后用跟进消息（ephemeral）回话；
-//! - `/反馈`：**立刻弹出**一个只有一段文字的弹窗，不先问网关（docs/v3-deviations.md #52；先取题目再弹窗，
+//! - `/反馈`：**立刻弹出**一个只有一段文字的弹窗，不先问网关（先取题目再弹窗，
 //!   网关慢于 3 秒时弹窗会失败）。提交时先 `defer(ephemeral)`，再把文字交给网关，回执只有本人可见；
 //! - 命令出错 → 打 `[bug]` 日志，并回一句「出了点问题……」（已确认过就用跟进消息，否则直接回复）；
-//! - 不发私信、不加表情、不碰论坛，也不读频道里的消息（没有 GUILD_MESSAGES Intent，@奶妹 不会回应，
-//!   docs/v3-deviations.md #73）；管理员命令都在网页后台，机器人里没有。
+//! - 不发私信、不加表情、不碰论坛，也不读频道里的消息（没有 GUILD_MESSAGES Intent，@奶妹 不会回应）；
+//!   管理员命令都在网页后台，机器人里没有。
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};

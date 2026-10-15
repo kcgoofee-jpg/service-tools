@@ -133,7 +133,7 @@ fn bot_internal(e: BotConfigError) -> InternalError {
     InternalError(e.to_string())
 }
 
-/// 机器人在线状态（心跳）。跑图分享设置和最近动作已删除：docs/v3-deviations.md #54。
+/// 机器人在线状态（心跳）。跑图分享设置和最近动作已删除（机器人从未实现）。
 async fn discord_bot_get(State(state): State<AppState>, _s: AdminSession) -> ApiResult {
     let status = state.db.get_setting(bot_config::STATUS_KEY).await?;
     let snapshot = bot_config::snapshot(status.as_deref(), state.now()).map_err(bot_internal)?;

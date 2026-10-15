@@ -476,7 +476,7 @@ async fn create_key(State(state): State<AppState>, req: Request) -> R {
         daily_anlas,
         daily_v5,
         monthly_anlas,
-        // 文本接口已删除（docs/v3-deviations.md #81）：列保留（只增不减），新 Key 写 0，不再读
+        // 文本接口已删除：列保留（只增不减），新 Key 写 0，不再读
         daily_text_tokens: 0,
         rpm,
         allow_anlas: truthy("allow_anlas"),
@@ -996,8 +996,8 @@ async fn delete_ban(State(state): State<AppState>, req: Request) -> R {
 // ----------------------------------------------------------------------------- 奖励
 
 /// 奖励一位 Discord 用户（站长手动触发）：`{"discord_id", "username"?, "global_name"?, "reason", "coupon_days": 7}`
-/// 没有 Key → 直接发一把（不受名额限制），新 Key 放在响应的 `key` 里，由站长手动转交（机器人不私信成员，
-/// docs/v3-deviations.md #76）；然后发一张重置券（note = reason）。旧版的 `reply`（让奶妹回复某条消息）已删除，传了会被忽略。
+/// 没有 Key → 直接发一把（不受名额限制），新 Key 放在响应的 `key` 里，由站长手动转交（机器人不私信成员）；
+/// 然后发一张重置券（note = reason）。旧版的 `reply`（让奶妹回复某条消息）已删除，传了会被忽略。
 async fn gift_member(State(state): State<AppState>, req: Request) -> R {
     let mut cx = Ctx::new(state, req).await?;
     cx.admin().await?;
@@ -1241,8 +1241,7 @@ async fn members(State(state): State<AppState>, req: Request) -> R {
     }
 
     // 今日「重置今日额度」痕迹：按服务日起点统计次数与最近一次（从操作日志取，只读）。
-    // 起点是**当前服务日**的 7 点。旧版用日历日期算起点，凌晨 0–7 点起点落在未来，这段时间一直显示「没重置过」
-    // （docs/v3-deviations.md #46）。
+    // 起点是**当前服务日**的 7 点。旧版用日历日期算起点，凌晨 0–7 点起点落在未来，这段时间一直显示「没重置过」。
     let day_start = st.clock.service_day_start(&today).unwrap_or(0.0);
     let mut reset_map: HashMap<i64, (i64, f64)> = HashMap::new();
     for (a_ts, target) in st.db.quota_reset_marks(day_start).await? {

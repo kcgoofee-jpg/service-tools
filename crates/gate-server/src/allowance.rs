@@ -97,7 +97,7 @@ impl ServerAllowance {
             Begin::Cached => return Ok(false),
             Begin::Fetch => {}
         }
-        // 与这把 Token 生图时同一个浏览器指纹（旧版固定用第 0 套，docs/v3-deviations.md #86）
+        // 与这把 Token 生图时同一个浏览器指纹（旧版固定用第 0 套）
         let url = format!(
             "{}/user/subscription",
             nai.image_host().trim_end_matches('/')

@@ -129,7 +129,7 @@ pub async fn build(state: &AppState, now: f64) -> Result<Map<String, Value>, Int
     let gv = |name: &str| values.get(name).copied().unwrap_or(0);
     let usable = (accounts.iter().filter(|a| a.usable).count() as i64).max(1);
     let v5_cap = crate::ops::algo_owned(&state.db).await?.global_daily_v5;
-    // 10 分钟突发窗口已删除（docs/v3-deviations.md #64）：`guard` 段不再有 `burst_cap` / `burst_wait`
+    // 10 分钟突发窗口已删除（出图间隔下到不了）：`guard` 段不再有 `burst_cap` / `burst_wait`
     let (hour_cap, quiet) = state.guard.with(|g| (g.hourly_cap(now), g.in_quiet(now)));
     let min_interval = {
         let v = state.limits().image_min_interval;
@@ -219,7 +219,7 @@ pub async fn build(state: &AppState, now: f64) -> Result<Map<String, Value>, Int
         "quota".into(),
         json!({
             "images_today": images_today,
-            // 节约模式的折算张数 `units_today` 已删除（docs/v3-deviations.md #67）：每日上限就按 images_today 比
+            // 节约模式的折算张数 `units_today` 已删除：每日上限就按 images_today 比
             "images_cap": gv("account_daily_cap") * usable,
             "v5_today": state.db.day_v5_total(&day).await?,
             "v5_cap": v5_cap,
@@ -257,7 +257,7 @@ pub async fn build(state: &AppState, now: f64) -> Result<Map<String, Value>, Int
     );
     body.insert(
         "rules".into(),
-        // 3.0 删掉的字段（docs/v3-deviations.md #61）：`base`（保底）、`borrow_open`（空闲借用）、
+        // 3.0 删掉的字段：`base`（保底）、`borrow_open`（空闲借用）、
         // `anlas`（早已下线的 Anlas 自动分配占位）
         json!({
             "key_queue": gv("key_image_queue"),
@@ -317,7 +317,7 @@ async fn build_meta(state: &AppState) -> Result<Map<String, Value>, InternalErro
         "key_inactivity_delete_days".into(),
         json!(env.key_inactivity_delete_days),
     );
-    // 网页登录常开（暂停开关 web_login_paused 已删除，docs/v3-deviations.md #92）；字段留着是因为已打开的旧页面还在读它
+    // 网页登录常开（暂停开关 web_login_paused 已删除）；字段留着是因为已打开的旧页面还在读它
     m.insert("web_login".into(), json!(true));
     m.insert(
         "audit_notice".into(),
@@ -340,7 +340,7 @@ pub async fn has_announcement(state: &AppState) -> bool {
 
 // ------------------------------------------------------------------ /public/status
 
-/// 首页「使用须知」里的排队规则；数值来自后台「账号保护与排队」（保底已删除，docs/v3-deviations.md #61）。
+/// 首页「使用须知」里的排队规则；数值来自后台「账号保护与排队」（保底已删除：每人只有每日上限）。
 fn public_limits(state: &AppState) -> Value {
     let v = state.guard.with(|g| g.values.clone());
     let get = |k: &str| v.get(k).copied().unwrap_or(0);

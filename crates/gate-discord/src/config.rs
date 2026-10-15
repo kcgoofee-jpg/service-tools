@@ -9,7 +9,7 @@
 //! | `SITE_URL` | 空串（去掉末尾 `/`） |
 //!
 //! 2.x 的 compose 还给奶妹传过 `PRAISE_*` / `GALLERY_AI_DAILY` / `AUDIT_*`，那是画廊 AI 评论用的。
-//! 该功能 3.0 没有移植，后来整体删除（docs/v3-deviations.md #54）；3.0 的 compose 不再传这些变量，
+//! 该功能 3.0 没有移植，后来整体删除；3.0 的 compose 不再传这些变量，
 //! 旧环境里残留的会被忽略。
 
 use anyhow::{Context, bail};

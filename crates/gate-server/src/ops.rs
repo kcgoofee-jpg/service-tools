@@ -23,7 +23,7 @@ use std::sync::Mutex;
 pub enum OpsError {
     /// 旧版 `ValueError` / `TypeError`：路由层回 422，原文作为 `detail`。
     Invalid(String),
-    /// 动态额度开着时想改它管的设置：400（docs/v3-deviations.md #70）。
+    /// 动态额度开着时想改它管的设置：400。
     Managed(String),
     Db(DbError),
     /// 库里的存档坏了（旧版会抛未捕获的异常 → 500）。
@@ -65,7 +65,7 @@ pub struct Shared {
 /// 动态额度每轮都写的四个设置：新 Key 的每日 V4.5 / V5 张数与模型范围、全站每日 V5。
 /// 读取只走 [`algo_owned`]；动态额度开着时后台不能改（[`managed_error`]）。
 /// 2.x 的环境变量 `REGISTER_DAILY_IMAGES` / `REGISTER_DAILY_V5` / `REGISTER_IMAGE_SCOPE` / `GLOBAL_DAILY_V5`
-/// 已删除，没设过时用这里的起点值（docs/v3-deviations.md #70）。
+/// 已删除，没设过时用这里的起点值。
 #[derive(Debug, Clone, PartialEq)]
 pub struct AlgoOwned {
     /// `register_daily_images`，起点 30。
@@ -213,7 +213,7 @@ pub async fn registration_settings_for(db: &Db, configured: bool) -> Result<Regi
         defaults::REGISTER_EXPIRES_DAYS,
     );
     // 限定身份组：只有在这个 Discord 服务器里拥有这个身份组的人能领 Key（可以是别的社区的服务器）。
-    // 都为空 = 不限定（环境变量 DISCORD_ROLE_ID 已删除，身份组只在后台「领 Key」里设，docs/v3-deviations.md #93）。
+    // 都为空 = 不限定（环境变量 DISCORD_ROLE_ID 已删除，身份组只在后台「领 Key」里设）。
     let role_guild = read("register_role_guild").await?.unwrap_or_default();
     let role_id = read("register_role_id").await?.unwrap_or_default();
     let role_note = read("register_role_note").await?.unwrap_or_default();
@@ -233,7 +233,7 @@ pub async fn registration_settings_for(db: &Db, configured: bool) -> Result<Regi
 }
 
 // 2.x 这里还有 `v5_capacity`（「名额 × 每人 V5 是否超过全站 V5 日限」的超卖提示）。额度是 PVP，
-// 每人上限只是上限，「名额 × 每人」本来就可以超过全站池；3.0 删除（docs/v3-deviations.md #69）。
+// 每人上限只是上限，「名额 × 每人」本来就可以超过全站池；3.0 删除。
 
 /// 占用名额的人数（旧版 `_active_count`，与实际名额检查同一口径）。
 pub async fn active_count(state: &AppState) -> Result<i64, DbError> {
@@ -296,7 +296,7 @@ pub fn registration_notice(before: (bool, i64), after: (bool, i64), active: i64)
 }
 
 /// 保存注册设置；开放 / 关闭或名额上限变化会在公告频道通知成员（`notify: false` 可关闭）。
-/// 新 Key 的每日张数 / V5 / 模型范围归动态额度管：动态额度开着时带这几个字段回 400（docs/v3-deviations.md #70）。
+/// 新 Key 的每日张数 / V5 / 模型范围归动态额度管：动态额度开着时带这几个字段回 400。
 pub async fn set_registration(state: &AppState, body: &Map<String, Value>) -> Result<(), OpsError> {
     let db = &state.db;
     let managed: Vec<&str> = ["daily_images", "daily_v5", "image_scope"]

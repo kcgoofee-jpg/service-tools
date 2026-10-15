@@ -1,8 +1,8 @@
 //! 命令流程：同样的交互进来，发给网关桥接的请求、发给 Discord 的请求（路径 / 查询 / JSON）和回给成员的文字
 //! 必须是下面写的这样。网关和 Discord 都换成 `common::MockServer`（本机假服务），测试里不连任何真实的 Discord。
 //!
-//! 管理员命令（`/open /limit /ban /unban /slots /revoke`）和 @奶妹 的自动回复已删除（docs/v3-deviations.md #73），
-//! `/quota` 不再显示服务状态（#74），所以这里没有它们；`/反馈` 见 `feedback_text.rs`。
+//! 管理员命令（`/open /limit /ban /unban /slots /revoke`）和 @奶妹 的自动回复已删除，
+//! `/quota` 不再显示服务状态，所以这里没有它们；`/反馈` 见 `feedback_text.rs`。
 
 mod common;
 

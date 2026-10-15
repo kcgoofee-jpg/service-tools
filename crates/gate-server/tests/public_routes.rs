@@ -227,7 +227,7 @@ async fn terms_and_privacy_pages() {
     ] {
         assert!(privacy.contains(kept), "隐私政策缺：{kept}");
     }
-    // 图片保留期与线上一致（168 小时 = 7 天）；机器人不私信、也不做「防多人共用」的行为统计（docs/v3-deviations.md #79）
+    // 图片保留期与线上一致（168 小时 = 7 天）；机器人不私信、也不做「防多人共用」的行为统计
     assert!(privacy.contains("生成的图片 7 天后自动删除"));
     for gone in ["防多人共用", "行为统计", "私信通知", "默认保留数天"] {
         assert!(!privacy.contains(gone), "隐私政策还有「{gone}」");
@@ -321,13 +321,13 @@ async fn public_live_shape_and_key_order() {
     assert_eq!(v["auth"], json!({"requests": 2, "rejected": 1}));
     assert_eq!(
         keys(&v["quota"]),
-        // 节约模式折算的 units_today 已删除（docs/v3-deviations.md #67）
+        // 节约模式折算的 units_today 已删除（weight 恒为 1）
         ["images_today", "images_cap", "v5_today", "v5_cap"]
     );
     assert_eq!(v["quota"]["images_today"], 0);
     assert_eq!(v["quota"]["images_cap"], 1000);
     assert_eq!(v["queue"], json!({"waiting": 0, "running": 0}));
-    // 10 分钟突发窗口已删除：没有 burst_cap / burst_wait（docs/v3-deviations.md #64）
+    // 10 分钟突发窗口已删除：没有 burst_cap / burst_wait
     assert_eq!(
         keys(&v["guard"]),
         [
@@ -343,7 +343,7 @@ async fn public_live_shape_and_key_order() {
     assert_eq!(v["members"], json!({"max": 10, "active": 0, "open": false}));
     // 测试环境 IMAGE_MIN_INTERVAL=0：`float(x or 15)` → 15；interval = 15 + 抖动 5 / 2
     assert_eq!(v["interval"], json!(17.5));
-    // 保底 `base`、空闲借用 `borrow_open`、Anlas 自动分配占位 `anlas` 已删除（docs/v3-deviations.md #61）
+    // 保底 `base`、空闲借用 `borrow_open`、Anlas 自动分配占位 `anlas` 已删除
     assert_eq!(
         keys(&v["rules"]),
         [
@@ -374,10 +374,7 @@ async fn public_live_shape_and_key_order() {
     assert_eq!(v["discord_invite"], "https://discord.gg/abc");
     assert_eq!(v["has_announcement"], false);
     assert_eq!(v["key_inactivity_delete_days"], 3);
-    assert_eq!(
-        v["web_login"], true,
-        "网页登录常开（docs/v3-deviations.md #92）"
-    );
+    assert_eq!(v["web_login"], true, "网页登录常开");
     assert!(
         v.get("home_join_open").is_none(),
         "首页加入按钮跟着 registration.open"
@@ -511,7 +508,7 @@ async fn public_live_me_for_logged_in_member_only() {
     assert_eq!(off["me"], Value::Null);
 }
 
-/// `/v1/live/me` 已删除（docs/v3-deviations.md #103）：首页一直用 `/public/live` 里的 `me`。
+/// `/v1/live/me` 已删除：首页一直用 `/public/live` 里的 `me`。
 #[tokio::test]
 async fn live_me_route_is_gone() {
     let e = setup(&[]).await;
@@ -564,7 +561,7 @@ async fn public_status_exposes_only_safe_fields() {
     );
     assert_eq!(
         v["limits"],
-        // 保底 `base_daily_images` 已删除（docs/v3-deviations.md #61）
+        // 保底 `base_daily_images` 已删除
         json!({"key_image_queue": 1, "quiet_start": 0, "quiet_end": 0, "quiet": false})
     );
     assert_eq!(v["image_jobs"], 0);

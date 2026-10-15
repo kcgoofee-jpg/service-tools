@@ -3,7 +3,7 @@
 //! 鉴权：`Authorization: Bearer <REGISTRATION_BRIDGE_SECRET>`；成员网页接口见 `member.rs`。
 //! 错误一律是 `{"detail": ...}`；请求体的校验错误沿用 FastAPI（pydantic v2）的 422 形状。
 //! 次序与旧版一致：先校验请求体（422），再鉴权（503 / 401），再校验服务器（403）。
-//! 机器人只有成员命令（/register /quota /resetkey /反馈）；管理员命令 `ops` / `slots` / `revoke` 已删除（docs/v3-deviations.md #73）。
+//! 机器人只有成员命令（/register /quota /resetkey /反馈）；管理员命令 `ops` / `slots` / `revoke` 已删除（管理都在网页后台）。
 
 use crate::action_log::log_action;
 use crate::auth::{client_ip, header_str};
@@ -225,7 +225,7 @@ async fn global_flags(state: &AppState) -> Result<features::Flags, ApiError> {
 // ------------------------------------------------------------------ 接口
 
 /// 机器人 /help 与 /quota 使用：领 Key 是否开放、公告（记录声明）、上游限流冷却剩余秒数。
-/// 机器人不用的字段（名额、默认额度、默认功能、上游状态）已删除（docs/v3-deviations.md #74）。
+/// 机器人不用的字段（名额、默认额度、默认功能、上游状态）已删除。
 async fn info(State(state): State<AppState>, req: Request) -> ApiResult {
     let (parts, body) = req.into_parts();
     let mut m = read_model(&parts, body).await?;
@@ -405,7 +405,7 @@ async fn feedback_submit(State(state): State<AppState>, req: Request) -> ApiResu
 }
 
 /// 机器人每分钟上报一次心跳，后台「机器人状态」据此显示在线 / 离线。
-/// 3.0 起只收 `status`（`event`、`ai_ready` 之类旧字段会被忽略）：docs/v3-deviations.md #54。
+/// 3.0 起只收 `status`（`event`、`ai_ready` 之类旧字段会被忽略）。
 async fn bot_report(State(state): State<AppState>, req: Request) -> ApiResult {
     let (parts, body) = req.into_parts();
     let mut m = read_model(&parts, body).await?;

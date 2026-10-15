@@ -94,7 +94,7 @@ impl Db {
             };
             // 只数成员（不含测试号、站长号）被拦的记录，按原因码数（不依赖中文文案）。
             // 旧版每小时上限按 `detail LIKE '%出图量已达上限%'` 数，还数了「保底」文案；保底已删除，
-            // 改成按原因码（docs/v3-deviations.md #61）
+            // 改成按原因码
             let member_rejects = "FROM usage_log u JOIN api_keys k ON k.id=u.key_id WHERE u.ts>=? AND u.ts<? \
                                   AND u.status='rejected' AND k.is_test=0 AND k.is_admin=0 AND u.reason=?";
             let hourly_block_hours: Vec<i64> = {
@@ -229,7 +229,7 @@ impl Db {
     // ------------------------------------------------------------------ 自动驾驶（autopilot.run）
 
     /// 熔断统计：`since` 之后上游真正出错的次数与出图请求总数（没有行时 SUM 为 NULL），
-    /// 以及这些失败来自多少把不同的非测试 Key（docs/v3-deviations.md #58）。
+    /// 以及这些失败来自多少把不同的非测试 Key。
     pub async fn autopilot_breaker_rows(&self, since: f64) -> Result<BreakerRows> {
         const FAIL: &str = "status='error' AND (up_status>=500 OR up_status BETWEEN 200 AND 299)";
         self.read(move |c| {

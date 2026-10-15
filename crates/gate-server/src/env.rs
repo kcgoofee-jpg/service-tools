@@ -1,7 +1,7 @@
 //! 环境变量：只放密钥和基础设施（地址、ID、网络、数据目录）。启动时解析一次，之后只读。
 //!
 //! 配置只有两层：环境变量（这里）和后台可改的数据库设置（`site_settings`，没设过时用代码里的常量）。
-//! 运行时可调的参数不再有环境变量（docs/v3-deviations.md #91～#95），也不再有私密参数文件 `private_params.json`；
+//! 运行时可调的参数不再有环境变量，也不再有私密参数文件 `private_params.json`；
 //! 没有后台入口、只是代码常量的几个数（排队超时、登录限流……）在下面的 `pub const` 里，
 //! [`EnvConfig`] 里对应的字段只是方便测试和 `cargo xtask dev` 覆盖，生产不读环境变量。
 //!
@@ -57,7 +57,7 @@ pub const AUTH_BLOCK_SECONDS: i64 = 900;
 pub const LOGIN_MAX_ATTEMPTS: i64 = 5;
 pub const LOGIN_WINDOW_SECONDS: i64 = 300;
 
-/// 3.0 删掉的上游相关环境变量与替代做法（docs/v3-deviations.md #86 #87 #88）。
+/// 3.0 删掉的上游相关环境变量与替代做法。
 pub const REMOVED_UPSTREAM_VARS: [(&str, &str); 7] = [
     ("NAI_TOKEN", "改用 NAI_TOKENS（只有一把也用这个名字）"),
     (
@@ -347,7 +347,7 @@ mod tests {
         assert!(c.registration.is_none());
     }
 
-    /// 删掉的变量不再读：`NAI_TOKEN` 不再是 `NAI_TOKENS` 的别名（docs/v3-deviations.md #88）。
+    /// 删掉的变量不再读：`NAI_TOKEN` 不再是 `NAI_TOKENS` 的别名。
     #[test]
     fn removed_upstream_vars_are_ignored() {
         let c = EnvConfig::load(&env(&[
@@ -361,7 +361,7 @@ mod tests {
 
     #[test]
     fn code_constants_ignore_the_environment() {
-        // 这几个原来是环境变量，现在是代码常量：环境里设了也不读（docs/v3-deviations.md #93 #95）
+        // 这几个原来是环境变量，现在是代码常量：环境里设了也不读
         let c = EnvConfig::load(&env(&[
             ("QUEUE_TIMEOUT", "5"),
             ("IMAGE_MIN_INTERVAL", "0"),

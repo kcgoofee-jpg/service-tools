@@ -1,5 +1,5 @@
 //! 成员接口的鉴权与准入前检查（旧版 `main.authenticate` / `require_feature` / `check_rpm` /
-//! `check_image_cooldown`；`limit_inflight` 随文本接口删除，docs/v3-deviations.md #64）。
+//! `check_image_cooldown`；`limit_inflight` 随文本接口删除）。
 
 use crate::error::{ApiError, GateError, InternalError};
 use crate::key::Key;

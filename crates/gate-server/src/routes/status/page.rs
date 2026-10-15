@@ -1,6 +1,6 @@
 //! `/status` 页面（旧版 `status_page.render`）：版式 / 类名 / 文案照搬旧页（Atlassian Statuspage 模板）。
 //!
-//! 与旧页的差异（都记在 docs/v3-deviations.md）：样式与脚本改成同源外链（CSP 不再 `'unsafe-inline'`），
+//! 与旧页的差异：样式与脚本改成同源外链（CSP 不再 `'unsafe-inline'`），
 //! 所以所有 `style="..."` 换成类名；过去事件的标题有了真正的链接；增加「返回首页」；对比度达标的配色。
 
 use super::feed::{status_label, worst_active_impact};

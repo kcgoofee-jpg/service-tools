@@ -453,7 +453,7 @@ fn truth(raw: &str) -> bool {
 }
 
 /// 没在后台设置过时的记录开关与保留天数（2.x 取环境变量 `AUDIT_PROMPTS` / `AUDIT_THUMBS` / `AUDIT_RETENTION_DAYS`，
-/// 3.0 删除，只剩后台设置，docs/v3-deviations.md #93）：默认都不记，提示词保留 7 天。
+/// 3.0 删除，只剩后台设置）：默认都不记，提示词保留 7 天。
 pub const DEFAULT_PROMPTS: bool = false;
 pub const DEFAULT_THUMBS: bool = false;
 pub const DEFAULT_RETENTION_DAYS: i64 = 7;

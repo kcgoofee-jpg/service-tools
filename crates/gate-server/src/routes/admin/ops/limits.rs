@@ -46,7 +46,7 @@ async fn get_settings(State(state): State<AppState>, _s: AdminSession) -> ApiRes
 async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Request) -> ApiResult {
     let (parts, body) = req.into_parts();
     let body = read_json_body(&parts.headers, body, BODY_LIMIT).await?;
-    // 全站 V5 归动态额度管：开着时不能手改（docs/v3-deviations.md #70）
+    // 全站 V5 归动态额度管：开着时不能手改
     let managed: Vec<&str> = [GLOBAL_DAILY_V5.key]
         .into_iter()
         .filter(|k| body.contains_key(*k))
@@ -118,7 +118,7 @@ async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Requ
 // ------------------------------------------------------------------ 排队与冷却
 
 /// 当前生效的三个运行期限制（取整，与旧版 `int(getattr(settings, name))` 一致；
-/// 每 Key 出图间隔 `key_image_min_interval` 已删除，docs/v3-deviations.md #64）。
+/// 每 Key 出图间隔 `key_image_min_interval` 已删除，与排队重复）。
 fn runtime_limits_snapshot(state: &AppState) -> Value {
     let l = state.limits();
     json!({

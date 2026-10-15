@@ -43,7 +43,7 @@ async fn ready_reg() -> (Env, Admin, MockDiscord) {
     (e, a, d)
 }
 
-/// 机器人不私信成员（docs/v3-deviations.md #76）：假 Discord 上不能出现「开私信频道」或「发消息」的请求。
+/// 机器人不私信成员：假 Discord 上不能出现「开私信频道」或「发消息」的请求。
 fn assert_no_dm(d: &MockDiscord) {
     let dm: Vec<_> = d
         .calls()
@@ -207,7 +207,7 @@ async fn keys_list_shape_roles_and_counters() {
         k["used"],
         json!({"images": 3, "generated_images_total": 6, "legacy_free_images": 1, "anlas": 1.24, "v5": 2,
                "requests": 4}),
-        "不再返回文本 token 计数（docs/v3-deviations.md #81）"
+        "不再返回文本 token 计数"
     );
     assert_eq!(keys[1]["role"], "invite");
     assert_eq!(keys[1]["role_label"], "邀请");
@@ -323,7 +323,7 @@ async fn create_key_validates_then_stores_manual_quota() {
     );
 }
 
-/// 每日文本额度不再读也不再写（docs/v3-deviations.md #81）：创建 / 修改里带这个字段被忽略（不校验范围），
+/// 每日文本额度不再读也不再写：创建 / 修改里带这个字段被忽略（不校验范围），
 /// 返回的 Key 没有这个字段；新建的 Key 在列里写 0（列保留，只增不减），已有的 Key 的列原样不动。
 #[tokio::test]
 async fn daily_text_tokens_is_ignored_and_never_returned() {
@@ -368,7 +368,7 @@ async fn invite_keys_are_numbered_and_tagged() {
     let key = &r.json()["key"];
     assert_eq!(key["name"], "邀请-5");
     // 额度、模型范围、有效期读后台「领 Key」的设置（没设过：30 张 / 0 张 V5 / 仅 V4.5 及更低 / 不过期），
-    // 有没有配注册服务都一样（docs/v3-deviations.md #94）
+    // 有没有配注册服务都一样
     assert_eq!(key["daily_images"], 30);
     assert_eq!(key["daily_v5"], 0);
     assert_eq!(key["image_model_scope"], "legacy");
@@ -587,7 +587,7 @@ async fn patch_key_updates_fields_and_quota_ownership() {
     // features：列表按功能顺序规整，null = 不限
     let r = a.patch(&url, json!({"features": ["vibe", "image"]})).await;
     assert_eq!(r.json()["key"]["features"], json!(["image", "vibe"]));
-    // 文本生成 / 语音已不是功能（docs/v3-deviations.md #81）：和别的未知名字一样 422
+    // 文本生成 / 语音已不是功能：和别的未知名字一样 422
     a.patch(&url, json!({"features": ["image", "text"]}))
         .await
         .assert_detail(
@@ -667,7 +667,7 @@ async fn patch_quota_auto_hands_the_key_to_the_algorithm() {
     );
     // 立即重算了一次：算法给这把 Key 定了额度，并留下系统的「动态额度」操作记录
     // （每人上限没变，所以是「应用」而不是「调整」；旧版还会因为保底 100 → 150 记一条「调整」，
-    // 保底已删除，docs/v3-deviations.md #61）
+    // 保底已删除）
     let acts = a.actions().await;
     assert!(
         acts.iter().any(|(act, ..)| act == "动态额度应用"),
@@ -1286,7 +1286,7 @@ async fn members_view_shape_and_dropped_fields() {
             "key_count",
             "all_key_ids"
         ],
-        "3.0 已删除的 anlas_auto / anlas_mode / v5_pinned / last_client 不再返回（#50：旧日志里的 client 也不露出来）"
+        "3.0 已删除的 anlas_auto / anlas_mode / v5_pinned / last_client 不再返回（旧日志里的 client 也不露出来）"
     );
     assert_eq!(m[1]["discord_id"], "900000000000000002");
     assert_eq!(m[1]["tags"][0]["tag"], "观察");

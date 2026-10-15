@@ -247,7 +247,7 @@ async fn settings_get_put_and_stored_strings() {
         (200, SETTINGS_DEFAULT.to_string())
     );
 
-    // 动态额度开着（默认）：全站 V5 归算法管，带上它就 400、什么都不写（docs/v3-deviations.md #70）
+    // 动态额度开着（默认）：全站 V5 归算法管，带上它就 400、什么都不写
     let before = settings(&e).await;
     assert_eq!(
         api.text(
@@ -431,7 +431,7 @@ async fn settings_get_put_and_stored_strings() {
 
 #[tokio::test]
 async fn global_daily_anlas_pool_is_editable() {
-    // Vibe 用的全站每日 Anlas 池（docs/v3-deviations.md #92：以前后台没有写入口，默认值取环境变量）
+    // Vibe 用的全站每日 Anlas 池（以前后台没有写入口，默认值取环境变量）
     let e = setup(&[]).await;
     let api = Api::login(&e).await;
     assert_eq!(
@@ -482,7 +482,7 @@ async fn global_daily_anlas_pool_is_editable() {
 async fn runtime_limits_validate_apply_and_persist() {
     let e = setup(&[]).await;
     let api = Api::login(&e).await;
-    // 每 Key 出图间隔 key_image_min_interval 已删除（docs/v3-deviations.md #64）：只剩三项，传它算未知设置
+    // 每 Key 出图间隔 key_image_min_interval 已删除：只剩三项，传它算未知设置
     assert_eq!(
         api.text("GET", "/runtime-limits", None).await,
         (
@@ -602,7 +602,7 @@ async fn guard_get_put() {
     let e = setup(&[]).await;
     let api = Api::login(&e).await;
     let defaults = r#"{"account_daily_cap":1000,"daily_burst":150,"account_hourly_cap":150,"quiet_start":0,"quiet_end":0,"quiet_hourly_cap":20,"interval_jitter":5,"post_jitter_min":1,"post_jitter_max":3,"key_image_queue":1,"queue_per_account":5,"hourly_min":100,"hourly_max":160,"hourly_step":10}"#;
-    // 节约模式折算的 today_units 已删除（docs/v3-deviations.md #67）
+    // 节约模式折算的 today_units 已删除（weight 恒为 1）
     let acct0 = r#"[{"position":1,"usable":true,"today":0,"this_hour":0}]"#;
     assert_eq!(
         api.text("GET", "/guard", None).await,
@@ -668,7 +668,7 @@ async fn guard_get_put() {
         && r.4));
 }
 
-/// 出图后静默（docs/v3-deviations.md #87）：后台可调，0～30 秒，保存后上游客户端立即按新值静默。
+/// 出图后静默：后台可调，0～30 秒，保存后上游客户端立即按新值静默。
 #[tokio::test]
 async fn guard_post_jitter_is_adjustable() {
     let e = setup(&[]).await;
@@ -713,7 +713,7 @@ async fn guard_post_jitter_is_adjustable() {
 #[tokio::test]
 async fn guard_hourly_adjust_bounds_are_settings() {
     // 每小时上限自动调整的下限 / 上限 / 步长：以前是私密参数文件 private_params.json 的 capacity.hourly_*，
-    // 现在和别的保护字段一样在后台改、存 site_settings（docs/v3-deviations.md #91）
+    // 现在和别的保护字段一样在后台改、存 site_settings
     let e = setup(&[]).await;
     let api = Api::login(&e).await;
     let v = api.get("/guard").await;
@@ -816,7 +816,7 @@ async fn discord_bot_corrupt_store_is_a_server_error() {
     assert_eq!(api.text("GET", "/discord-bot", None).await.0, 500);
 }
 
-/// 后台只剩「机器人状态」：跑图分享设置和最近动作删了（docs/v3-deviations.md #54），
+/// 后台只剩「机器人状态」：跑图分享设置和最近动作删了（机器人从未实现），
 /// 库里残留的 `bot_gallery_*` / `bot_events` 行不再被读（哪怕是坏的），也没有写设置的接口。
 #[tokio::test]
 async fn discord_bot_status_only() {
@@ -894,7 +894,7 @@ async fn ops_snapshot_defaults() {
         ops_fixed(&v),
         json!({
             "registration": {"configured": false, "open": false, "max_users": 0, "features": null, "daily_images": 30,
-                // 新 Key 默认不过期（docs/v3-deviations.md #70）
+                // 新 Key 默认不过期
                 "daily_v5": 0, "image_scope": "legacy", "expires_days": 0, "role_guild": "", "role_id": "", "role_note": "",
                 "active": 0},
             "features": {
@@ -903,7 +903,7 @@ async fn ops_snapshot_defaults() {
                     "tags": "标签补全"},
                 "new_key": ["image"],
             },
-            // 后台「新建 Key」弹窗里没有数据库设置的默认值（docs/v3-deviations.md #94）
+            // 后台「新建 Key」弹窗里没有数据库设置的默认值
             "new_key": {"rpm": 10, "daily_anlas": 0.0, "monthly_anlas": 2500.0},
             "audit": {"prompts": false, "thumbs": false, "retention_days": 7, "image_cap_mb": 8192,
                 "image_bytes": 0, "image_keep_hours": 24, "announce_configured": false},
@@ -960,7 +960,7 @@ async fn ops_registration_put() {
         map(&[("register_open", "1")])
     );
 
-    // 动态额度开着（默认）：新 Key 的每日张数 / V5 / 模型范围归算法管，400、什么都不写（#70）
+    // 动态额度开着（默认）：新 Key 的每日张数 / V5 / 模型范围归算法管，400、什么都不写
     let before = settings(&e).await;
     let (s, v) = api
         .json(
@@ -1001,7 +1001,7 @@ async fn ops_registration_put() {
             ("register_image_scope", "all"),
         ])
     );
-    // 名额 20 × 每人 V5 15 = 300 > 全站 V5 日限 150：不再有「超卖」提示（docs/v3-deviations.md #69），
+    // 名额 20 × 每人 V5 15 = 300 > 全站 V5 日限 150：不再有「超卖」提示，
     // 注册设置和预算接口都不带 v5_capacity
     assert!(reg(&v).get("v5_capacity").is_none());
     assert!(api.get("/settings").await.get("v5_capacity").is_none());
@@ -1023,7 +1023,7 @@ async fn ops_registration_put() {
         )
     );
     assert_eq!(settings(&e).await["register_features"], "image,vibe,tags");
-    // 文本生成 / 语音已不是功能（docs/v3-deviations.md #81）：和别的未知名字一样 422，库里的值不变
+    // 文本生成 / 语音已不是功能：和别的未知名字一样 422，库里的值不变
     api.fails(
         "PUT",
         "/ops/registration",
@@ -1173,8 +1173,8 @@ async fn ops_registration_defaults_are_constants_not_env() {
         ("REGISTRATION_BRIDGE_SECRET", &secret),
         ("DISCORD_GUILD_ID", "900000000000000001"),
         ("SITE_URL", "https://owl.example"),
-        // 这些环境变量 3.0 已删除（每日张数 / 模型范围归动态额度管，docs/v3-deviations.md #70；
-        // 名额 / 有效期 / 功能只在后台「领 Key」里设，#93）：设了也不读
+        // 这些环境变量 3.0 已删除（每日张数 / 模型范围归动态额度管；
+        // 名额 / 有效期 / 功能只在后台「领 Key」里设）：设了也不读
         ("REGISTER_MAX_USERS", "12"),
         ("REGISTER_DAILY_IMAGES", "40"),
         ("REGISTER_DAILY_V5", "5"),
@@ -1265,7 +1265,7 @@ async fn ops_features_put() {
         json!({"flags": {}}),
         json!({"flags": {"bogus": true}}),
         json!({"flags": {"upscale": 1}}),
-        // 文本生成 / 语音已不是功能（docs/v3-deviations.md #81）
+        // 文本生成 / 语音已不是功能
         json!({"flags": {"text": false}}),
         json!({"flags": {"voice": true}}),
         json!({"flags": [1]}),
@@ -1380,7 +1380,7 @@ async fn ops_audit_put() {
 
 #[tokio::test]
 async fn home_join_switch_is_gone() {
-    // 首页「加入 Discord」按钮跟着领 Key 开关（registration.open），不再有独立开关（docs/v3-deviations.md #92）
+    // 首页「加入 Discord」按钮跟着领 Key 开关（registration.open），不再有独立开关
     let e = setup(&[]).await;
     let api = Api::login(&e).await;
     for method in ["GET", "POST"] {
@@ -2632,7 +2632,7 @@ async fn overview_reports_today_week_pool_and_feature_usage() {
                "today": {"ok": 2, "error": 1, "rejected": 1, "images": 3, "tokens": 0, "anlas": 0.0},
                "week": {"ok": 2, "error": 1, "rejected": 1, "images": 3, "tokens": 0, "anlas": 0.0}})
     );
-    // 旧的文本记录不再归到任何功能下（文本生成 / 语音已删，docs/v3-deviations.md #81），总览的今日合计里照旧有
+    // 旧的文本记录不再归到任何功能下（文本生成 / 语音已删），总览的今日合计里照旧有
     let ids: Vec<&str> = v["feature_usage"]
         .as_array()
         .unwrap()
@@ -2640,7 +2640,7 @@ async fn overview_reports_today_week_pool_and_feature_usage() {
         .map(|f| f["id"].as_str().unwrap())
         .collect();
     assert_eq!(ids, ["image", "upscale", "augment", "vibe", "tags"]);
-    // 全站预算改了（全站 V5 要先关掉动态额度才能手改，#70），总览跟着变
+    // 全站预算改了（全站 V5 要先关掉动态额度才能手改），总览跟着变
     e.state
         .db
         .set_setting("quota_auto_enabled", "0")
@@ -2737,7 +2737,7 @@ async fn status_codes_distribution() {
 
 #[tokio::test]
 async fn server_status_reports_alerts_audit_protection_disk() {
-    // 防爆破的几个数是代码常量（原来是环境变量，docs/v3-deviations.md #95）：环境里设了也不读
+    // 防爆破的几个数是代码常量（原来是环境变量）：环境里设了也不读
     let e = setup(&[("AUTH_FAIL_MAX", "7"), ("LOGIN_MAX_ATTEMPTS", "9")]).await;
     let api = Api::login(&e).await;
     let v = api.get("/status").await;

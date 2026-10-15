@@ -209,7 +209,7 @@ pub async fn run(base: &str, key: Option<&str>, timeout: Duration) -> Result<Rep
         }
     })
     .await;
-    // 出图队列的公开状态（原来检查的 /v1/models 随文本接口一起删除了，docs/v3-deviations.md #81）
+    // 出图队列的公开状态（原来检查的 /v1/models 随文本接口一起删除了）
     s.check_json("queue-status", "/queue-status", None, 200, |v| {
         if v.get("global").is_some_and(Value::is_object) {
             Ok(())

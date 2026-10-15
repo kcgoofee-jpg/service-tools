@@ -61,11 +61,11 @@ pub const HAS_IMAGE: &str = "(image IS NOT NULL OR image_file IS NOT NULL)";
 pub const IMAGE_SIZE: &str = "COALESCE(image_size, LENGTH(image), 0)";
 
 /// 后台用量日志列表读出的列：usage_log 除 `client` 以外的全部列，顺序同 schema.sql。
-/// `client` 列还留在表里（2.x 能读），但 3.0 不再写、也不再读出：docs/v3-deviations.md #50。
+/// `client` 列还留在表里（2.x 能读），但 3.0 不再写、也不再读出（客户端识别已删除）。
 pub(crate) const LOG_COLUMNS: &str = "id, ts, key_id, key_name, kind, model, status, images, anlas, tokens, \
 unconfirmed_anlas, detail, reason, wait_ms, dur_ms, up_status, rid, src, ver";
 /// 成功记账写 usage_log（不带 reason 列，与旧版 `_INSERT_LOG` 一致）。
-/// `src`（来源网段）/ `ver`（网关版本）两列还在表里，3.0 不再写（取默认值 `''`）：docs/v3-deviations.md #104。
+/// `src`（来源网段）/ `ver`（网关版本）两列还在表里，3.0 不再写（取默认值 `''`），也没有人读。
 pub(crate) const INSERT_LOG: &str = "INSERT INTO usage_log (ts, key_id, key_name, kind, model, status, \
 images, anlas, tokens, detail, unconfirmed_anlas, wait_ms, dur_ms, up_status, rid) \
 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";

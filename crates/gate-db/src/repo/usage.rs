@@ -91,8 +91,8 @@ pub struct ImageTiming {
 }
 
 /// 真正出图（`image` / `image_stream`）成功才刷新 last_image_at：闲置回收只认它。
-/// 查额度、文本聊天、标签补全不算；放大、导演工具、Vibe 编码也不算（docs/v3-deviations.md #65：
-/// 旧版前缀匹配 `image*` 并把这三种算进去，只用它们「保活」的 Key 不会被回收）。
+/// 查额度、文本聊天、标签补全不算；放大、导演工具、Vibe 编码也不算
+/// （旧版前缀匹配 `image*` 并把这三种算进去，只用它们「保活」的 Key 不会被回收）。
 fn is_image_kind(kind: &str) -> bool {
     matches!(kind, "image" | "image_stream")
 }
@@ -242,7 +242,7 @@ impl Db {
     }
 
     /// 每个时间段 `[from, to)` 里全站成功出图的条数（与 `ranges` 一一对应）。
-    /// 闲置回收用它判断「站点那天有没有在正常出图」（docs/v3-deviations.md #55）。
+    /// 闲置回收用它判断「站点那天有没有在正常出图」。
     pub async fn ok_image_counts(&self, ranges: Vec<(f64, f64)>) -> Result<Vec<i64>> {
         self.read(move |c| {
             let mut stmt = c.prepare(

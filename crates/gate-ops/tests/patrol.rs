@@ -696,7 +696,7 @@ async fn red_is_deduplicated_by_check_key_and_recovery_is_announced_once() {
 async fn alert_goes_to_owner_dm() {
     let dir = tempfile::tempdir().unwrap();
     let (mock, log) = discord_mock(DiscordScript::default()).await;
-    // 频道 ID 不再读（docs/v3-deviations.md #102）：配了也只私信站长
+    // 频道 ID 不再读：配了也只私信站长
     let mut config = alert_env(
         dir.path(),
         "ALERT_CHANNEL_ID=900000000000000010\nALERT_USER_ID=900000000000000011\n",

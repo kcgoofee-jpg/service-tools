@@ -6,9 +6,9 @@
 //! - 服务器 ID / 身份组 / 站点地址全部来自环境变量（`EnvConfig::registration`），这里不写死任何 ID。
 //! - Discord REST 的基地址来自 `DISCORD_API_BASE`（默认官方 v10），测试里指向本机假服务。
 //! - 机器人不私信成员：发 Key 的结果只在 /register 的临时回复里给本人看，后台「重新生成 Key」「奖励成员」
-//!   把新 Key 展示给站长手动转交（Discord 应用曾被标记，错误码 680009，docs/v3-deviations.md #76）。
+//!   把新 Key 展示给站长手动转交（Discord 应用曾被标记，错误码 680009）。
 //! - 后台循环不在这里起：见文件末尾的 [`registrar_jobs`]，由任务调度方安排。
-//!   每日清空自助注册（旧的 `REGISTER_RESET_AT`）已删除（docs/v3-deviations.md #77）。
+//!   每日清空自助注册（旧的 `REGISTER_RESET_AT`）已删除（线上从来没配过）。
 
 use crate::action_log::log_action;
 use crate::defaults;
@@ -28,9 +28,9 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Duration;
 
-/// 身份组同步每轮最多摘几个（docs/v3-deviations.md #78）。
+/// 身份组同步每轮最多摘几个（不制造突发请求）。
 pub const SYNC_ROLES_PER_RUN: usize = 5;
-/// 邀请 Key 持有人退群后，多久再核对一次（docs/v3-deviations.md #57）。
+/// 邀请 Key 持有人退群后，多久再核对一次。
 const INVITE_RECHECK_SECS: f64 = 30.0 * 86400.0;
 
 // ------------------------------------------------------------------ 错误
@@ -141,7 +141,7 @@ pub struct Welcome<'a> {
 
 /// 领取成功的欢迎语：Key + 一步步配置教程 + 规则。控制在 Discord 2000 字以内。
 ///
-/// 额度是全站共用的池子、先到先得，每人的数字只是上限（docs/v3-deviations.md #75）。
+/// 额度是全站共用的池子、先到先得，每人的数字只是上限。
 pub fn welcome_message(w: &Welcome) -> String {
     let site = w.site.trim_end_matches('/');
     let mut cap = if w.daily_images == 0 {
@@ -514,7 +514,7 @@ impl RegistrationService {
     /// 或任何其他情况一律跳过、下轮再查，宁可漏收也不误删。返回本次回收人数。
     ///
     /// 邀请 Key 只由站长手动删（与每日清空 / 全站重置同一口径）：持有人退群时不删 Key，只写一条操作日志
-    /// 「退群（邀请 Key 保留）」提醒站长，并把下次核对推到 30 天后（每月最多提醒一条）（docs/v3-deviations.md #57）。
+    /// 「退群（邀请 Key 保留）」提醒站长，并把下次核对推到 30 天后（每月最多提醒一条）。
     pub async fn sweep_departed(&self, now: f64, batch: i64) -> Result<usize, DbError> {
         if !self.flag(&site_flags::MEMBER_SWEEP).await? {
             return Ok(0);

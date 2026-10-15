@@ -6,7 +6,7 @@
 //! - `prepare_tool`：放大 / 导演工具的参数与费用按官方前端计算，不信客户端给的尺寸或费用。
 //!
 //! 与旧版的差异：小图送导演工具前的 LANCZOS 放大由 image crate 完成，像素与 Pillow 不逐位相同
-//! （尺寸、费用、拒绝条件一致）。见 docs/v3-deviations.md。
+//! （尺寸、费用、拒绝条件一致）。
 
 use base64::Engine;
 use image::{ImageFormat, ImageReader, Limits};

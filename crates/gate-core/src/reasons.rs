@@ -15,7 +15,7 @@ pub const QUIET_CAP: &str = "quiet_cap"; // 安静时段的每小时上限
 /// 短说明（`LABELS`）和单 Key 限流的排除名单（[`crate::autopilot::KEY_GUARD_SKIP_REASONS`]）仍然认它，
 /// 所以常量保留（`reason_label("cap_3h")` 的结果依赖它）。
 pub const CAP_3H: &str = "cap_3h";
-/// 账号每 10 分钟突发窗口。这个功能 3.0 已删除（docs/v3-deviations.md #64），与 [`CAP_3H`] 一样只为
+/// 账号每 10 分钟突发窗口。这个功能 3.0 已删除（账号出图间隔下到不了），与 [`CAP_3H`] 一样只为
 /// `usage_log.reason` 里的历史记录保留（短说明、回填、单 Key 限流的排除项都还认它）。
 pub const BURST_CAP: &str = "burst_cap";
 pub const DAILY_CAP: &str = "daily_cap"; // 账号每日上限
