@@ -7,7 +7,7 @@ use gate_core::quota::{self, Effect, QuotaInputs};
 use serde_json::{Value, json};
 
 /// 2030-03-15 08:00（Asia/Shanghai，服务日 7 点切换）。
-const NOW: f64 = 1_899_781_200.0;
+const NOW: f64 = 1_899_763_200.0;
 
 fn clock() -> Clock {
     Clock::new("Asia/Shanghai", 7)
@@ -179,4 +179,163 @@ fn someone_reaching_a_raises_it_by_a_step() {
             .unwrap()
             .contains("V4.5 每人 175 张/天（每日 7 点重置）")
     );
+}
+
+// ---------------------------------------------------------------- #63 V5 公式
+
+/// 没有恢复速度读数：按保守的 5%/天 → G = ⌊5 × 14.2⌋ = 71。
+const G: i64 = 71;
+
+fn v5_of(out: &quota::QuotaOutputs) -> Value {
+    out.result.as_ref().unwrap()["v5"].clone()
+}
+
+#[test]
+fn each_is_pool_over_active_people_without_clamp() {
+    for (active, each) in [
+        (0, 7),   // 不到 10 人按 10 人：⌊71 ÷ 10⌋
+        (10, 7),  //
+        (20, 3),  // ⌊71 ÷ 20⌋
+        (35, 2),  // 旧版会夹到 3
+        (75, 1),  // ⌊71 ÷ 75⌋ = 0 → 至少 1（旧版夹到 3）
+        (500, 1), //
+    ] {
+        let mut v = base_inputs();
+        v["active_v5"] = json!(active);
+        let out = run(v);
+        let v5 = v5_of(&out);
+        assert_eq!(
+            (v5["global"].as_i64(), v5["each"].as_i64()),
+            (Some(G), Some(each)),
+            "active={active}"
+        );
+        assert_eq!(v5["people"], std::cmp::max(10, active));
+        assert!(v5.get("k").is_none(), "不再有电量系数");
+        // 新 Key 的默认值和下发用同一个数
+        assert_eq!(
+            setting(&out, "register_daily_v5"),
+            Some(each.to_string().as_str())
+        );
+        assert_eq!(
+            setting(&out, "global_daily_v5"),
+            Some(G.to_string().as_str())
+        );
+        assert!(
+            out.effects.contains(&Effect::UpdateKeys {
+                daily_images: 150,
+                daily_v5: each
+            }) || each == 3
+        );
+    }
+}
+
+#[test]
+fn battery_level_no_longer_changes_the_pool() {
+    // 旧版：剩余 ≥ 85% 时全站至少 260、每人至少 10，首页写「当前电池充沛…额度放宽」；剩余低时乘 0.3～0.6
+    for percent in [95, 50, 5] {
+        let mut v = base_inputs();
+        v["accounts"] = json!([{"percent": percent, "recharge_per_day": null}]);
+        let out = run(v);
+        let v5 = v5_of(&out);
+        assert_eq!(
+            (v5["global"].as_i64(), v5["each"].as_i64()),
+            (Some(G), Some(7))
+        );
+        assert_eq!(v5["percent"], json!(percent as f64), "剩余只用于显示");
+        let notice = setting(&out, "algo_notice").unwrap();
+        assert!(!notice.contains("额度放宽"), "{notice}");
+    }
+}
+
+#[test]
+fn todays_plan_is_fixed_for_the_whole_day() {
+    // 早上 07:00 后第一次计算时定下（这里是 G = 71、每人 7），写进当天方案
+    let out = run(base_inputs());
+    let plan = setting(&out, quota::V5_DAY_KEY)
+        .expect("第一次计算要写当天方案")
+        .to_string();
+    let plan_v: Value = serde_json::from_str(&plan).unwrap();
+    assert_eq!(plan_v["day"], "2030-03-15");
+    assert_eq!(plan_v["plan"]["each"], 7);
+    // 白天读数变了（电量满了、活跃人数变了）：沿用早上的方案，不放宽也不收紧、不重写
+    let mut v = base_inputs();
+    v["now"] = json!(NOW + 6.0 * 3600.0);
+    v["settings"]["quota_algo_day"] = json!("2030-03-15");
+    v["settings"][quota::V5_DAY_KEY] = json!(plan);
+    v["accounts"] = json!([{"percent": 99, "recharge_per_day": null}]);
+    v["active_v5"] = json!(40);
+    let out = run(v);
+    let v5 = v5_of(&out);
+    assert_eq!(
+        (v5["global"].as_i64(), v5["each"].as_i64()),
+        (Some(G), Some(7))
+    );
+    assert!(setting(&out, quota::V5_DAY_KEY).is_none(), "当天不再改");
+    // 第二天 07:00 后重新定（昨天的方案作废）
+    let mut v = base_inputs();
+    v["now"] = json!(NOW + 86400.0);
+    v["settings"][quota::V5_DAY_KEY] = json!(plan);
+    v["active_v5"] = json!(40);
+    let out = run(v);
+    assert_eq!(v5_of(&out)["each"], 1, "⌊71 ÷ 40⌋ = 1");
+    assert!(
+        setting(&out, quota::V5_DAY_KEY)
+            .unwrap()
+            .contains("2030-03-16")
+    );
+}
+
+#[test]
+fn oversell_is_judged_by_active_people_not_all_keys() {
+    // 200 把算法管理的 Key，但前 3 天只有 20 人用过 V5：每人 3 × 20 = 60 ≤ 71，不算超卖
+    let mut v = base_inputs();
+    v["members"] = json!(200);
+    v["active_v5"] = json!(20);
+    let out = run(v);
+    let v5 = v5_of(&out);
+    assert_eq!(v5["oversell"], Value::Null);
+    assert!(!setting(&out, "algo_notice").unwrap().contains("先到先得"));
+    // 100 人用过 V5：每人至少 1 张，1 × 100 > 71 → 先到先得
+    let mut v = base_inputs();
+    v["members"] = json!(200);
+    v["active_v5"] = json!(100);
+    let out = run(v);
+    let v5 = v5_of(&out);
+    assert_eq!(
+        v5["oversell"],
+        json!({"each": 1, "members": 100, "global": G})
+    );
+    assert!(
+        setting(&out, "algo_notice")
+            .unwrap()
+            .contains("V5 每人 1 张（全站今日共 71 张，先到先得）")
+    );
+}
+
+#[test]
+fn active_people_are_counted_over_the_previous_three_full_service_days() {
+    let ck = clock();
+    // 2030-03-15 08:00：服务日是 03-15，前 3 个完整服务日是 12～14 日
+    assert_eq!(
+        quota::active_v5_days(&ck, NOW, quota::V5_ACTIVE_DAYS),
+        ["2030-03-12", "2030-03-13", "2030-03-14"]
+    );
+    // 03-15 06:00 还属于 03-14 这个服务日：前 3 个完整服务日是 11～13 日（旧版按自然日会数进 15 日）
+    assert_eq!(
+        quota::active_v5_days(&ck, NOW - 2.0 * 3600.0, 3),
+        ["2030-03-11", "2030-03-12", "2030-03-13"]
+    );
+}
+
+#[test]
+fn removed_v5_settings_are_not_read() {
+    // quota_v5_min / quota_v5_max（3～30 夹取）不再读
+    let mut v = base_inputs();
+    v["settings"]["quota_v5_min"] = json!("20");
+    v["settings"]["quota_v5_max"] = json!("2");
+    v["active_v5"] = json!(75);
+    let out = run(v);
+    assert_eq!(v5_of(&out)["each"], 1);
+    assert!(!quota::SETTING_KEYS_READ.contains(&"quota_v5_min"));
+    assert!(!quota::SETTING_KEYS_READ.contains(&"quota_v5_max"));
 }

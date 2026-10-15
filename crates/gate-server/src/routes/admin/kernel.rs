@@ -113,15 +113,14 @@ async fn quota_algo_put(
 ) -> Result<Response, ApiError> {
     let (parts, body) = req.into_parts();
     let body = read_json_body(&parts.headers, body, BODY_LIMIT).await?;
-    // 极简模式（2026-10-11）：每人一个数 N；保底一层 3.0 已删除（docs/v3-deviations.md #61）
-    const BOUNDS: [(&str, i64, i64); 7] = [
+    // 极简模式（2026-10-11）：每人一个数 N；保底一层 3.0 已删除（docs/v3-deviations.md #61）。
+    // V5 每人上限由公式算出、没有可调的范围（`quota_v5_min` / `quota_v5_max` 已删除，#63）：传了也忽略
+    const BOUNDS: [(&str, i64, i64); 5] = [
         ("quota_auto_enabled", 0, 1),
         ("quota_target_avg", 10, 2000),
         ("quota_ceiling_max", 10, 5000),
         ("quota_base_min_fair", 1, 2000),
         ("quota_step", 1, 500),
-        ("quota_v5_min", 0, 500),
-        ("quota_v5_max", 1, 500),
     ];
     let mut updates: Vec<(String, String)> = Vec::new();
     for (k, v) in &body {

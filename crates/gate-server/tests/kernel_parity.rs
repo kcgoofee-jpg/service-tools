@@ -502,6 +502,10 @@ mod v3 {
     /// 期望一侧的改写；跨步骤记住每个设置最后一次（改写后）的值，用来改写最后的表行差异。
     pub struct Expect {
         last_written: HashMap<String, String>,
+        /// 旧版这一步写下的全站 V5 池（`global_daily_v5`）。V5 按新公式算出来的数不同（#63），而第二天的
+        /// V4.5 复盘拿它算「可分 = 账号日上限 − 全站 V5」：每步跑完把旧版的值写回库里，让多步场景后面的
+        /// 步骤与旧版从同一个起点继续，V4.5 的部分照样逐位对拍。
+        resync: Vec<(String, String)>,
         /// 种子里只有原因码 `hourly_cap`、没有「出图量已达上限」文案的拒绝记录的时间戳：
         /// 旧版的复盘按文案 LIKE 数不到它们，3.0 按原因码数得到（#61）
         code_only_hourly: Vec<f64>,
@@ -509,6 +513,166 @@ mod v3 {
 
     /// 3.0 不再写的设置（#61：保底）。
     const DROPPED_SETTINGS: [&str; 2] = ["guard_base_daily_images", "quota_base_now"];
+
+    /// 整个场景测的是 3.0 已经删掉的规则，没有可比的东西。
+    pub const REMOVED_SCENARIOS: [(&str, &str); 1] = [(
+        "v24_zero_min_people",
+        "私密参数把 V5 人数下限设成 0、没人用过 V5 时旧版抛 ZeroDivisionError；\
+         3.0 的人数下限固定为 10、不读这个参数（docs/v3-deviations.md #63）",
+    )];
+
+    /// V5 的结果按新公式算（#63），与旧版无从对拍：两边都换成这个占位，V5 本身由 gate-core 的
+    /// `quota_golden`（按新规则核对每个夹具用例）和 `quota_v3` 测试。
+    const MASK: &str = "<V5：按新公式另行核对>";
+
+    /// 首页文案里的 V5 段（「 · V5 每人 …」到「 · Anlas」或结尾）。
+    fn mask_notice(text: &str) -> String {
+        let Some(i) = text.find(" · V5 每人 ") else {
+            return text.to_string();
+        };
+        let rest = &text[i..];
+        let tail = rest.find(" · Anlas").map_or("", |j| &rest[j..]);
+        format!("{} · {MASK}{tail}", &text[..i])
+    }
+
+    /// `quota_run` 的返回值 / `quota_algo_last`：`v5` 与「同步了几把 Key」取决于 V5 结果。
+    fn mask_quota(v: &mut Value) {
+        if let Some(m) = v.as_object_mut()
+            && m.contains_key("v5")
+        {
+            m.insert("v5".into(), json!(MASK));
+            m.insert("changed_keys".into(), json!(MASK));
+        }
+    }
+
+    /// `kernel_last`：分配模块的摘要「每人 V4.5 a 张 · V5 e 张（全站 V5 g）」里的 V5 段；
+    /// 风险检查「全站今日 V5 合计 n / 日额度 g（p%）」里的日额度（就是当天的全站 V5 池）。
+    /// 夹具里这条检查的级别新旧公式下都一样（都没用到或都超了），级别照比。
+    fn mask_kernel_last(v: &mut Value) {
+        if let Some(Value::String(s)) = v.get_mut("allocation").and_then(|a| a.get_mut("summary"))
+            && let Some(i) = s.find(" · V5 ")
+        {
+            *s = format!("{} · {MASK}", &s[..i]);
+        }
+        let checks = v
+            .get_mut("risk")
+            .and_then(|r| r.get_mut("checks"))
+            .and_then(Value::as_array_mut);
+        for c in checks.into_iter().flatten() {
+            for e in c
+                .get_mut("evidence")
+                .and_then(Value::as_array_mut)
+                .into_iter()
+                .flatten()
+            {
+                if let Value::String(s) = e
+                    && let Some(i) = s.find(" / 日额度 ")
+                    && s.starts_with("全站今日 V5 合计 ")
+                {
+                    *s = format!("{} / 日额度 {MASK}", &s[..i]);
+                }
+            }
+        }
+    }
+
+    fn mask_setting(key: &str, value: &str) -> String {
+        match key {
+            "global_daily_v5" | "register_daily_v5" => MASK.to_string(),
+            "algo_notice" => mask_notice(value),
+            "quota_algo_last" => match jsondump::loads(value) {
+                Some(mut v) => {
+                    mask_quota(&mut v);
+                    jsondump::dumps(&v)
+                }
+                None => value.to_string(),
+            },
+            "kernel_last" => {
+                let mut v: Value = serde_json::from_str(value).expect("kernel_last 是 JSON");
+                mask_kernel_last(&mut v);
+                v.to_string()
+            }
+            _ => value.to_string(),
+        }
+    }
+
+    /// 两边都做（#63）：设置写入里取决于 V5 结果的部分——当天方案（3.0 只在当天第一次计算时写）去掉，
+    /// 全站 V5 / 新 Key 的 V5 默认值 / 首页文案的 V5 段 / `quota_algo_last` 的 V5 换成占位。
+    pub fn mask_writes(writes: &mut Vec<Value>) {
+        let mut out = Vec::new();
+        for w in writes.drain(..) {
+            match w[0].as_str() {
+                Some("set") => {
+                    let key = w[1].as_str().unwrap();
+                    if key == "quota_v5_day_plan" {
+                        continue;
+                    }
+                    out.push(json!([
+                        "set",
+                        key,
+                        mask_setting(key, w[2].as_str().unwrap())
+                    ]));
+                }
+                Some("bulk") => {
+                    let pairs: Vec<Value> = w[1]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .filter(|kv| kv[0] != "quota_v5_day_plan")
+                        .map(|kv| {
+                            let key = kv[0].as_str().unwrap();
+                            json!([key, mask_setting(key, kv[1].as_str().unwrap())])
+                        })
+                        .collect();
+                    if !pairs.is_empty() {
+                        out.push(json!(["bulk", pairs]));
+                    }
+                }
+                _ => out.push(w),
+            }
+        }
+        *writes = out;
+    }
+
+    /// 两边都做（#63）：一步的返回值里取决于 V5 结果的部分。
+    pub fn mask_result(op: &str, v: &mut Value) {
+        match op {
+            "quota_run" => mask_quota(v),
+            "tick_all" => mask_kernel_last(v),
+            "snapshot" => {
+                for m in v.as_array_mut().into_iter().flatten() {
+                    let name = m["name"].as_str().unwrap_or("").to_string();
+                    if let Some(last) = m.get_mut("last") {
+                        let mut wrap = json!({ name.as_str(): last.clone() });
+                        mask_kernel_last(&mut wrap);
+                        *last = wrap[name.as_str()].take();
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// 改写后 added / removed 里完全相同的行互相抵消（多重集差）。
+    fn cancel_pairs(t: &mut Value) {
+        let (Some(added), Some(removed)) = (
+            t.get("added").and_then(Value::as_array).cloned(),
+            t.get("removed").and_then(Value::as_array).cloned(),
+        ) else {
+            return;
+        };
+        let mut left = removed.clone();
+        let mut kept_added = Vec::new();
+        for a in added {
+            match left.iter().position(|r| *r == a) {
+                Some(i) => {
+                    left.remove(i);
+                }
+                None => kept_added.push(a),
+            }
+        }
+        t["added"] = Value::Array(kept_added);
+        t["removed"] = Value::Array(left);
+    }
 
     /// 复盘：`from` / `to` 只留每人上限 A，去掉 `base_blocks`（#61）。
     fn review(r: &mut Map<String, Value>) {
@@ -577,8 +741,13 @@ mod v3 {
                 .collect();
             Self {
                 last_written: HashMap::new(),
+                resync: Vec::new(),
                 code_only_hourly,
             }
+        }
+
+        pub fn take_resync(&mut self) -> Vec<(String, String)> {
+            std::mem::take(&mut self.resync)
         }
 
         /// 复盘的 `hourly_blocks`：加上旧版按文案数不到、3.0 按原因码数到的小时（#61）。
@@ -627,6 +796,9 @@ mod v3 {
         fn setting(&mut self, key: &str, value: &str, drop_note: bool) -> Option<String> {
             if DROPPED_SETTINGS.contains(&key) {
                 return None;
+            }
+            if key == "global_daily_v5" {
+                self.resync.push((key.to_string(), value.to_string()));
             }
             let fixed = match key {
                 "quota_algo_last" => reparse(value, |v| self.quota_result(v)),
@@ -690,6 +862,7 @@ mod v3 {
                     }
                 }
                 *writes = out;
+                mask_writes(writes);
             }
             if let Some(result) = want.get_mut("result") {
                 match op {
@@ -700,6 +873,20 @@ mod v3 {
                             .and_then(Value::as_object_mut)
                         {
                             g.shift_remove("base_daily_images");
+                        }
+                    }
+                    // 分配模块的面板参数「V5 每人范围 3～30 张」换成新公式的说明（#63）
+                    "snapshot" => {
+                        for m in result.as_array_mut().into_iter().flatten() {
+                            if m["name"] == "allocation" {
+                                let p = &mut m["params"][3];
+                                assert_eq!(p["name"], "V5 每人范围");
+                                *p = json!({
+                                    "name": "V5 每人",
+                                    "value": gate_core::modules::allocation_v5_rule_text(),
+                                    "note": "每天 7 点按恢复速度定全站池，再按前 3 天用过 V5 的人数分，当天不变",
+                                });
+                            }
                         }
                     }
                     _ => {}
@@ -756,11 +943,14 @@ mod v3 {
         }
     }
 
-    /// 两边都做：操作日志不比自增 id（期望一侧删掉的日志会让后面的 id 错位）。
+    /// 两边都做：操作日志不比自增 id（期望一侧删掉的日志会让后面的 id 错位）；
+    /// 取决于 V5 结果的行换成占位或去掉（#63：成员 Key 的 `daily_v5`、V5 相关设置、「动态额度应用」日志——
+    /// 是否下发取决于每人 V5）。
     pub fn normalize_diff(diff: &mut Value) {
         if let Some(t) = diff.get_mut("admin_actions").and_then(Value::as_object_mut) {
             for side in ["added", "removed"] {
                 if let Some(rows) = t.get_mut(side).and_then(Value::as_array_mut) {
+                    rows.retain(|r| r["action"] != "动态额度应用");
                     for r in rows {
                         if let Some(o) = r.as_object_mut() {
                             o.shift_remove("id");
@@ -768,6 +958,37 @@ mod v3 {
                     }
                 }
             }
+        }
+        if let Some(t) = diff.get_mut("api_keys") {
+            for side in ["added", "removed"] {
+                for r in t
+                    .get_mut(side)
+                    .and_then(Value::as_array_mut)
+                    .into_iter()
+                    .flatten()
+                {
+                    if r.get("daily_v5").is_some() {
+                        r["daily_v5"] = json!(MASK);
+                    }
+                }
+            }
+            cancel_pairs(t);
+        }
+        if let Some(t) = diff.get_mut("site_settings") {
+            for side in ["added", "removed"] {
+                if let Some(rows) = t.get_mut(side).and_then(Value::as_array_mut) {
+                    rows.retain(|r| r["key"] != "quota_v5_day_plan");
+                    for r in rows.iter_mut() {
+                        let key = r["key"].as_str().unwrap_or("").to_string();
+                        match &mut r["value"] {
+                            Value::String(s) => *s = mask_setting(&key, s),
+                            v if key == "kernel_last" => mask_kernel_last(v),
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            cancel_pairs(t);
         }
         if let Some(t) = diff
             .get_mut("sqlite_sequence")
@@ -1079,7 +1300,8 @@ async fn run_case(case: &Value) -> Result<(), String> {
         let alerts = settle(&state, &mock).await;
         let new_alerts: Vec<String> = alerts[seen_alerts.min(alerts.len())..].to_vec();
         seen_alerts = alerts.len();
-        let raw_writes = actual_writes(state.db.take_setting_writes());
+        let mut raw_writes = actual_writes(state.db.take_setting_writes());
+        v3::mask_writes(&mut raw_writes);
         let shape = |ws: &[Value]| -> Vec<String> {
             ws.iter()
                 .map(|w| {
@@ -1133,6 +1355,8 @@ async fn run_case(case: &Value) -> Result<(), String> {
                 }
             }
             let mut expected = want.get("result").cloned().unwrap_or(Value::Null);
+            v3::mask_result(op, &mut v);
+            v3::mask_result(op, &mut expected);
             if loose {
                 loosen_errors(&mut v);
                 loosen_errors(&mut expected);
@@ -1166,6 +1390,14 @@ async fn run_case(case: &Value) -> Result<(), String> {
             return Err(format!(
                 "{ctx}: 告警不同：实际 {new_alerts:?}，期望 {expected_alerts:?}"
             ));
+        }
+        // 把旧版这一步写下的全站 V5 池写回库里，后面的步骤从同一个起点继续（见 v3::Expect::resync）
+        for (k, v) in v3_expect.take_resync() {
+            state
+                .db
+                .set_setting(&k, &v)
+                .await
+                .map_err(|e| e.to_string())?;
         }
     }
 
@@ -1263,6 +1495,10 @@ async fn kernel_replays_match_python() {
     for case in &cases {
         let name = case["name"].as_str().unwrap();
         if only.as_deref().is_some_and(|o| !name.contains(o)) {
+            continue;
+        }
+        if let Some((_, why)) = v3::REMOVED_SCENARIOS.iter().find(|(n, _)| *n == name) {
+            eprintln!("[{name}] 跳过：{why}");
             continue;
         }
         ran += 1;

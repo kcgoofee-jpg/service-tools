@@ -7,6 +7,12 @@
 //!   操作日志不再写「保底」；每小时上限被拦的小时数按原因码数（查询参数只比时间窗口）。
 //! - docs/v3-deviations.md #62：每人注水删除——`free_paced_cap` 不再对拍；首页文案去掉
 //!   「每小时自动恢复 4 张，当天最多约 N 张，」。
+//! - docs/v3-deviations.md #63：V5 改成「全站池 G = ⌊恢复速度 × 14.2⌋，每人 = max(1, ⌊G ÷ max(10, N)⌋)，
+//!   N = 前 3 个完整服务日用过 V5 的人数，当天不变」。旧公式的结果无从对拍：`v5_factor` 跳过；`v5_plan` 只比
+//!   恢复速度与剩余，全站池 / 人数 / 每人按新公式核对；`_cfg` 没有 `quota_v5_min` / `quota_v5_max`；
+//!   首页文案去掉「当前电池充沛…额度放宽」；`_active_v5_days` 按「今天之前的 3 个服务日」核对。
+//!   `run` 里凡是取决于 V5 结果的写入（当天方案、全站 V5 / 新 Key 的 V5 默认值、下发、首页文案的 V5 段、
+//!   结果里的 `v5` / `changed_keys`、「动态额度应用」日志）两边都遮住后逐位对拍，再单独按新规则核对 Rust 的输出。
 
 use gate_core::clock::Clock;
 use gate_core::quota::{self, *};
@@ -31,10 +37,6 @@ fn ints(v: &Value) -> Vec<i64> {
         .collect()
 }
 
-fn params(v: &Value) -> QuotaParams {
-    serde_json::from_value(v.clone()).unwrap()
-}
-
 fn clock(rh: i64) -> Clock {
     Clock::new("Asia/Shanghai", rh)
 }
@@ -56,8 +58,82 @@ mod expect {
         format!("{}（{}", &text[..i], &rest[k..])
     }
 
-    /// `_cfg` 里 3.0 删掉的键（#61）。
-    pub const REMOVED_CFG: [&str; 3] = ["quota_base", "quota_base_min", "quota_base_step"];
+    /// `_cfg` 里 3.0 删掉的键（#61 保底、#63 V5 夹取）。
+    pub const REMOVED_CFG: [&str; 5] = [
+        "quota_base",
+        "quota_base_min",
+        "quota_base_step",
+        "quota_v5_min",
+        "quota_v5_max",
+    ];
+
+    /// 首页文案去掉 V5 洪峰放宽那一句（#63）。
+    pub fn notice_v5(text: &str) -> String {
+        let Some(i) = text.find("（当前电池充沛 ") else {
+            return text.to_string();
+        };
+        let j = text[i..].find("额度放宽）").expect("洪峰文案") + i + "额度放宽）".len();
+        format!("{}{}", &text[..i], &text[j..])
+    }
+
+    const MASK: &str = "<V5：按新公式另行核对>";
+
+    /// 首页文案里的 V5 段（「 · V5 每人 …」到「 · Anlas」或结尾）遮住。
+    fn mask_notice(text: &str) -> String {
+        let Some(i) = text.find(" · V5 每人 ") else {
+            return text.to_string();
+        };
+        let rest = &text[i..];
+        let tail = rest.find(" · Anlas").map_or("", |j| &rest[j..]);
+        format!("{} · {MASK}{tail}", &text[..i])
+    }
+
+    /// 结果 / `quota_algo_last` 里取决于 V5 结果的字段遮住（#63）。
+    pub fn mask_result(v: &Value) -> Value {
+        let mut v = v.clone();
+        if let Some(m) = v.as_object_mut()
+            && m.contains_key("v5")
+        {
+            m.insert("v5".into(), Value::String(MASK.into()));
+            m.insert("changed_keys".into(), Value::String(MASK.into()));
+        }
+        v
+    }
+
+    /// 写入序列里取决于 V5 结果的部分遮住（两边都做，#63）：当天方案、下发（是否发生取决于每人 V5）、
+    /// 「动态额度应用」日志去掉；全站 V5 / 新 Key 的 V5 默认值、首页文案的 V5 段、结果里的 V5 换成占位。
+    pub fn mask_v5(effects: &Value) -> Value {
+        let mut out = Vec::new();
+        for e in effects.as_array().unwrap() {
+            let mut e = e.clone();
+            match e["op"].as_str().unwrap() {
+                "update_keys" => continue,
+                "log" if e["action"] == "动态额度应用" => continue,
+                "set" => match e["key"].as_str().unwrap() {
+                    "quota_v5_day_plan" => continue,
+                    "algo_notice" => {
+                        let t = mask_notice(e["value"].as_str().unwrap());
+                        e["value"] = Value::String(t);
+                    }
+                    "quota_algo_last" => {
+                        let v = jsondump::loads(e["value"].as_str().unwrap()).unwrap();
+                        e["value"] = Value::String(jsondump::dumps(&mask_result(&v)));
+                    }
+                    _ => {}
+                },
+                "bulk" => {
+                    for p in e["pairs"].as_array_mut().unwrap() {
+                        if p[0] == "global_daily_v5" || p[0] == "register_daily_v5" {
+                            p[1] = Value::String(MASK.into());
+                        }
+                    }
+                }
+                _ => {}
+            }
+            out.push(e);
+        }
+        Value::Array(out)
+    }
 
     /// 旧版会因 3.0 不再读的保底设置抛异常（在任何写入之前）：`_cfg` 里的 `quota_base*` 是 `inf`，
     /// 或 `quota_base_now` 不是数字（#61）。
@@ -81,6 +157,10 @@ mod expect {
             .and_then(Value::as_object_mut)
         {
             y.shift_remove("base_blocks");
+        }
+        // 私密参数只剩 min_coverage_hours（#63：V5 的系数表 / 人数下限 / 洪峰 / 收紧都随旧公式删除）
+        if let Some(p) = v.get_mut("params").and_then(Value::as_object_mut) {
+            p.retain(|k, _| k == "min_coverage_hours");
         }
         v
     }
@@ -167,7 +247,7 @@ mod expect {
                         } else {
                             0
                         };
-                        notice(&raw[i..])
+                        notice_v5(&notice(&raw[i..]))
                     } else {
                         setting_value(&key, &raw)
                     };
@@ -273,29 +353,43 @@ fn pure_golden() {
             }
             // 随每人注水删除（#62）
             "free_paced_cap" => continue,
-            "v5_factor" => f(v5_factor(opt_f(c.arg(0)), &params(c.arg(1)))),
+            // 电量系数随旧 V5 公式删除（#63）
+            "v5_factor" => continue,
             "v5_plan" => {
-                let plan = v5_plan(
-                    opt_f(c.arg(0)),
-                    opt_f(c.arg(1)),
-                    c.arg(2).as_i64().unwrap(),
-                    c.arg(3).as_i64().unwrap(),
-                    c.arg(4).as_i64().unwrap(),
-                    &params(c.arg(5)),
-                )
-                .unwrap();
-                Value::Object(plan.to_map())
+                // 只比与公式无关的恢复速度和剩余；全站池 / 人数 / 每人按新公式核对（#63）
+                let (rate, active) = (opt_f(c.arg(1)), c.arg(2).as_i64().unwrap());
+                let plan = v5_plan(opt_f(c.arg(0)), rate, active);
+                let m = plan.to_map();
+                assert_eq!(
+                    m.keys().collect::<Vec<_>>(),
+                    ["rate", "percent", "global", "people", "each"],
+                    "第 {} 行",
+                    c.line
+                );
+                assert_eq_py(&c, &m["rate"], &c.out()["rate"]);
+                assert_eq_py(&c, &m["percent"], &c.out()["percent"]);
+                let used = rate.filter(|r| *r > 0.0).unwrap_or(quota::V5_FALLBACK_RATE);
+                let g = (used * quota::V5_IMAGES_PER_PERCENT).floor() as i64;
+                let people = active.max(10);
+                assert_eq!(
+                    (plan.global, plan.people, plan.each),
+                    (g, people, (g / people).max(1)),
+                    "第 {} 行",
+                    c.line
+                );
+                continue;
             }
             "quota_notice" => {
                 let kw = |k: &str| c.kwarg(k).unwrap();
-                let want = json!(expect::notice(c.out().as_str().unwrap()));
+                let want = json!(expect::notice_v5(&expect::notice(
+                    c.out().as_str().unwrap()
+                )));
                 let got = json!(
                     quota_notice(
                         c.arg(0).as_i64().unwrap(),
                         c.arg(1),
                         c.arg(2).as_i64().unwrap(),
                         kw("today").as_str().unwrap(),
-                        opt_f(kw("pct")),
                         Some(kw("review")).filter(|v| !v.is_null()),
                         kw("reset_hour").as_i64().unwrap(),
                         kw("anlas").as_i64().unwrap(),
@@ -448,12 +542,15 @@ fn sqlmath_golden() {
                 assert_eq_py(&c, &json!([fv(pct), fv(rate)]), c.out());
             }
             "_active_v5_days" => {
-                let days = active_v5_days(
-                    &clock(7),
-                    as_f64(c.arg(0)).unwrap(),
-                    c.arg(1).as_u64().unwrap() as usize,
-                );
-                assert_eq_py(&c, &json!(days), c.out());
+                // 3.0：今天之前的 n 个完整服务日，从旧到新（旧版是含今天的 n 个自然日，#63）
+                let ck = clock(7);
+                let now = as_f64(c.arg(0)).unwrap();
+                let n = c.arg(1).as_u64().unwrap() as usize;
+                let want: Vec<String> = (1..=n)
+                    .rev()
+                    .map(|i| ck.day(now - 86400.0 * i as f64))
+                    .collect();
+                assert_eq!(active_v5_days(&ck, now, n), want, "第 {} 行", c.line);
             }
             other => panic!("未知函数 {other}"),
         }
@@ -477,6 +574,7 @@ fn run_golden() {
     let mut adjusted = 0;
     let mut applied = 0;
     let mut no_base_error = 0;
+    let (mut fresh_plans, mut stored_plans, mut no_zero_div) = (0, 0, 0);
     for c in load(M, "quota/run") {
         let rh = c.raw["reset_hour"].as_i64().unwrap();
         let ck = clock(rh);
@@ -488,6 +586,24 @@ fn run_golden() {
         let want_err = c.raw["err"].as_str();
         let effects = expect::actual_effects(&serde_json::to_value(&out.effects).unwrap());
         let want_effects = expect::effects(&c.raw["effects"]);
+        // 取决于 V5 结果的写入两边都遮住（#63），V5 另按新规则核对
+        let (effects, want_effects) = (expect::mask_v5(&effects), expect::mask_v5(&want_effects));
+        if want_err.is_none() || out.error.is_none() {
+            match v5_rule(&c, &inp, &out, &ck) {
+                Some(true) => stored_plans += 1,
+                Some(false) => fresh_plans += 1,
+                None => {}
+            }
+        }
+        if want_err == Some("ZeroDivisionError") && out.error.is_none() {
+            // 旧版私密参数把人数下限设成 0、又没人用过 V5 时 `G // 0` 抛异常；3.0 人数下限固定为 10（#63）。
+            // 异常之前的写入必须一致
+            let n = want_effects.as_array().unwrap().len();
+            let got = effects.as_array().unwrap();
+            assert_eq_py_ordered(&c, &Value::Array(got[..n].to_vec()), &want_effects);
+            no_zero_div += 1;
+            continue;
+        }
         // 旧版在第一笔写入之前就因保底设置抛了异常：3.0 照常往下算（可能在后面别处才报错），无从对拍
         if want_err.is_some()
             && out.error.as_deref() != want_err
@@ -511,7 +627,11 @@ fn run_golden() {
         assert_eq!(out.error.as_deref(), want_err, "第 {} 行异常类型", c.line);
         assert_eq_py_ordered(&c, &effects, &want_effects);
         match (&out.result, want_err) {
-            (Some(got), None) => assert_eq_py_ordered(&c, got, &expect::result(c.out())),
+            (Some(got), None) => assert_eq_py_ordered(
+                &c,
+                &expect::mask_result(got),
+                &expect::mask_result(&expect::result(c.out())),
+            ),
             (None, Some(_)) => {}
             other => panic!("第 {} 行：结果与异常不匹配 {other:?}", c.line),
         }
@@ -551,13 +671,7 @@ fn run_golden() {
                 c.line
             );
         }
-        for q in queries(&c, "active_v5") {
-            let want: Vec<Value> = active_v5_days(&ck, now, 3)
-                .into_iter()
-                .map(|d| json!(d))
-                .collect();
-            assert_eq!(*q, want, "第 {} 行 active_v5 日期", c.line);
-        }
+        // `active_v5` 的日期参数 3.0 换成了前 3 个完整服务日（#63），夹具里记的是旧版的自然日：不再比
         for q in queries(&c, "snaps") {
             assert_eq!(*q, vec![f(quiet_snaps_since(now))]);
         }
@@ -574,13 +688,10 @@ fn run_golden() {
         if let Some(r) = &out.result
             && r["enabled"] == true
         {
-            let want = vec![r["ceiling"].clone(), r["v5"]["each"].clone()];
-            assert_eq!(
-                queries(&c, "count_managed"),
-                vec![&want],
-                "第 {} 行",
-                c.line
-            );
+            // 参数 (A, 每人 V5)：每人 V5 按新公式（#63），只比 A
+            let q = queries(&c, "count_managed");
+            assert_eq!(q.len(), 1, "第 {} 行", c.line);
+            assert_eq!(q[0][0], r["ceiling"], "第 {} 行", c.line);
         }
         let _: Option<&Map<String, Value>> = None;
     }
@@ -590,4 +701,111 @@ fn run_golden() {
     );
     assert!(adjusted > 200, "每日微调用例太少: {adjusted}");
     assert!(applied > 100, "下发用例太少: {applied}");
+    assert!(
+        fresh_plans > 100 && stored_plans > 50,
+        "V5 新规则核对的用例太少：当天新定 {fresh_plans}，沿用 {stored_plans}（旧版人数下限为 0 的 {no_zero_div}）"
+    );
+}
+
+/// 按 3.0 的 V5 规则（docs/v3-deviations.md #63）核对 Rust 的输出；返回 `Some(是否沿用了当天已定的方案)`，
+/// 没有结果（出错 / 算法关着）返回 None。
+fn v5_rule(c: &Case, inp: &QuotaInputs, out: &quota::QuotaOutputs, ck: &Clock) -> Option<bool> {
+    let r = out.result.as_ref()?;
+    if r["enabled"] != true {
+        return None;
+    }
+    let today = ck.day(inp.now);
+    let v5 = &r["v5"];
+    let num = |v: &Value| as_f64(v).unwrap_or_else(|| panic!("第 {} 行：不是数字 {v}", c.line));
+    let (each, global) = (num(&v5["each"]) as i64, num(&v5["global"]) as i64);
+    let stored = inp
+        .settings
+        .get(quota::V5_DAY_KEY)
+        .and_then(|s| gate_core::jsondump::loads(s))
+        .filter(|v| v["day"] == today.as_str() && gate_core::pyval::truthy(&v["plan"]))
+        .map(|v| v["plan"].clone());
+    let plan_writes: Vec<&Effect> = out
+        .effects
+        .iter()
+        .filter(|e| matches!(e, Effect::Set { key, .. } if key == quota::V5_DAY_KEY))
+        .collect();
+    let reused = match &stored {
+        // 当天已定的方案原样沿用，不再改（旧版白天会放宽 / 收紧）
+        Some(p) => {
+            assert_eq!(
+                (num(&p["each"]) as i64, num(&p["global"]) as i64),
+                (each, global),
+                "第 {} 行：当天方案被改了",
+                c.line
+            );
+            assert!(plan_writes.is_empty(), "第 {} 行：沿用方案不该重写", c.line);
+            true
+        }
+        // 新定：每人 = max(1, ⌊G ÷ max(10, N)⌋)，没有夹取、没有电量系数
+        None => {
+            let people = inp.active_v5.max(10);
+            assert_eq!(v5["people"], people, "第 {} 行", c.line);
+            assert_eq!(each, (global / people).max(1), "第 {} 行", c.line);
+            assert!(global >= 1 && v5.get("k").is_none(), "第 {} 行", c.line);
+            assert_eq!(plan_writes.len(), 1, "第 {} 行：当天方案要写一次", c.line);
+            false
+        }
+    };
+    // 超卖按活跃人数（前 3 个完整服务日用过 V5 的人）判断
+    let over = global != 0 && each * inp.active_v5.max(1) > global;
+    assert_eq!(!v5["oversell"].is_null(), over, "第 {} 行 oversell", c.line);
+    if over {
+        assert_eq!(v5["oversell"]["members"], inp.active_v5, "第 {} 行", c.line);
+    }
+    // 下发、默认值、首页文案都用同一组数
+    let a = r["ceiling"].as_i64().unwrap();
+    let changed = inp
+        .managed_keys
+        .iter()
+        .filter(|k| k.daily_images != a || k.daily_v5 != each || k.image_model_scope != "all")
+        .count() as i64;
+    assert_eq!(r["changed_keys"], changed, "第 {} 行", c.line);
+    let updates: Vec<&Effect> = out
+        .effects
+        .iter()
+        .filter(|e| matches!(e, Effect::UpdateKeys { .. }))
+        .collect();
+    if changed > 0 {
+        assert_eq!(
+            updates,
+            [&Effect::UpdateKeys {
+                daily_images: a,
+                daily_v5: each
+            }],
+            "第 {} 行",
+            c.line
+        );
+    } else {
+        assert!(updates.is_empty(), "第 {} 行", c.line);
+    }
+    let bulk = out
+        .effects
+        .iter()
+        .find_map(|e| match e {
+            Effect::Bulk { pairs } if pairs[0].0 == "global_daily_v5" => Some(pairs.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("第 {} 行：没写全站 V5", c.line));
+    assert_eq!(bulk[0].1, global.to_string(), "第 {} 行", c.line);
+    assert_eq!(bulk[2], ("register_daily_v5".into(), each.to_string()));
+    let notice = out
+        .effects
+        .iter()
+        .find_map(|e| match e {
+            Effect::Set { key, value } if key == quota::NOTICE_KEY => Some(value.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let mut v5_text = format!(" · V5 每人 {each} 张");
+    if over {
+        v5_text.push_str(&format!("（全站今日共 {global} 张，先到先得）"));
+    }
+    assert!(notice.contains(&v5_text), "第 {} 行：{notice}", c.line);
+    assert!(!notice.contains("额度放宽"), "第 {} 行：{notice}", c.line);
+    Some(reused)
 }

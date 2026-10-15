@@ -293,7 +293,7 @@ pub(super) async fn param_values(state: &AppState, name: &str) -> Vec<Value> {
                 ceiling,
                 Value::String(gm::allocation_rule_text()),
                 Value::String(gm::allocation_range_text()),
-                Value::String(gm::allocation_v5_range_text()),
+                Value::String(gm::allocation_v5_rule_text()),
             ]
         }
         "autopilot" => vec![

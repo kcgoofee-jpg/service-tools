@@ -5,7 +5,7 @@
 //! # 结构
 //!
 //! 旧版 `run(state)` 把数据库查询和决策混在一起。这里拆成：
-//! - 纯函数（`water_fill` / `simple` / `choose_rate` / `v5_factor` / `v5_plan` / `quota_notice` /
+//! - 纯函数（`water_fill` / `simple` / `choose_rate` / `v5_plan` / `quota_notice` /
 //!   `day_coverage` / `yesterday_stats` / `v5_used_equiv` / `quiet_recovery` / `allowance_summary` …），
 //!   每个都有 golden 对拍；
 //! - 决策核心 [`decide`]：`QuotaInputs`（`run` 读到的一切）→ `QuotaOutputs`（`run` 做的每一次写入，
@@ -34,7 +34,7 @@
 //! | `accounts` | 上游账号 V5 缓存快照（`allowance.snapshot(pool)["accounts"]`：每个账号的 `percent`、`recharge_per_day`）。刚重启、全部账号都没有 `percent` 时，旧版会对每个 usable 账号主动读一次订阅信息再取一次快照，这一步在服务层做 | — |
 //! | `quiet.snaps` | `SELECT ts, v5_percent FROM upstream_snapshots WHERE ts>? AND fresh=1 AND v5_percent IS NOT NULL ORDER BY ts` | `(now - 72*3600)` |
 //! | `quiet.counts[i]` | `SELECT COUNT(*) FROM usage_log WHERE ts>? AND ts<=? AND status='ok' AND model LIKE '%diffusion-5%'`（相邻两条快照之间；间隔 > 3 小时的旧版不查，值任意） | `(snaps[i].ts, snaps[i+1].ts)` |
-//! | `active_v5` | `SELECT COUNT(DISTINCT c.key_id) FROM counters c JOIN api_keys k ON k.id=c.key_id WHERE c.v5>0 AND k.is_test=0 AND k.is_admin=0 AND c.day IN (?,?,?)` | [`active_v5_days`]`(clock, now, 3)`（**自然日**，不是服务日；与旧版一致） |
+//! | `active_v5` | `SELECT COUNT(DISTINCT c.key_id) FROM counters c JOIN api_keys k ON k.id=c.key_id WHERE c.v5>0 AND k.is_test=0 AND k.is_admin=0 AND c.day IN (?,?,?)` | [`active_v5_days`]`(clock, now, 3)`：今天之前的 3 个**完整服务日**（旧版是含今天的 3 个自然日，docs/v3-deviations.md #63） |
 //! | `managed_keys` | `SELECT daily_images, daily_v5, image_model_scope FROM api_keys WHERE quota_auto=1 AND is_admin=0 AND is_test=0`（旧版直接 `COUNT(*)` 带 `daily_images<>? OR daily_v5<>? OR image_model_scope<>'all'`，这里改成取出行再在 Rust 里数，三列都是 NOT NULL，结果相同） | — |
 //! | `settings` | `SELECT value FROM site_settings WHERE key=?`，读到的键见 [`SETTING_KEYS_READ`] | — |
 //! | `guard` / `pool_len` / `global_daily_v5_default` | 内存里的 Guard（`values["account_daily_cap"]`）、上游账号池大小、`site_flags.default_of(GLOBAL_DAILY_V5, settings)`（= `Settings.global_daily_v5` 钳到 0..100000，解析失败为 0） | — |
@@ -56,6 +56,14 @@
 //!
 //! `allocation.*` 等参数来自 `data/private_params.json`（见 `app/params.py`），由服务层解析后填进 [`QuotaParams`]：
 //! `P(name, default)` 的类型跟起点值一致（int 默认值 → `int(v)`；float → `float(v)`；转换失败回退起点值）。
+//! 3.0 只剩 `allocation.min_coverage_hours`；V5 的系数表 / 洪峰 / 收紧 / 人数下限参数随旧的 V5 公式删除，
+//! 文件里残留的键读到也不用（docs/v3-deviations.md #63）。
+//!
+//! # V5（docs/v3-deviations.md #63）
+//!
+//! 全站 V5 池 G = ⌊恢复速度 × [`V5_IMAGES_PER_PERCENT`]⌋，每人上限 = max(1, ⌊G ÷ max(10, N)⌋)，
+//! N = 前 3 个完整服务日里用过 V5 的人数。两者都在服务日第一次计算时（07:00 后）定下，当天不再改。
+//! 每人上限只是上限：全站池先到先得。
 
 use crate::clock::Clock;
 use crate::{jsondump, pyc, pyval};
@@ -85,25 +93,22 @@ pub const NOTICE_KEY: &str = "algo_notice";
 pub const V5_DAY_KEY: &str = "quota_v5_day_plan";
 
 /// `quota_algo.DEFAULTS`（键名 → 起点值），顺序与旧版一致。
-pub const DEFAULTS: [(&str, i64); 7] = [
+/// V5 的 `quota_v5_min` / `quota_v5_max`（3～30 夹取）随旧 V5 公式删除（docs/v3-deviations.md #63）。
+pub const DEFAULTS: [(&str, i64); 5] = [
     ("quota_auto_enabled", 1),
     ("quota_target_avg", 150),
     ("quota_ceiling_max", 300),
     ("quota_base_min_fair", 10),
     ("quota_step", 25),
-    ("quota_v5_min", 3),
-    ("quota_v5_max", 30),
 ];
 
 /// `decide` 会读的 `site_settings` 键（服务层据此取 `QuotaInputs::settings`，缺失的键不放进 map）。
-pub const SETTING_KEYS_READ: [&str; 13] = [
+pub const SETTING_KEYS_READ: [&str; 11] = [
     "quota_auto_enabled",
     "quota_target_avg",
     "quota_ceiling_max",
     "quota_base_min_fair",
     "quota_step",
-    "quota_v5_min",
-    "quota_v5_max",
     "quota_ceiling",
     DAY_KEY,
     HISTORY_KEY,
@@ -355,8 +360,6 @@ pub struct QuotaCfg {
     pub quota_ceiling_max: i64,
     pub quota_base_min_fair: i64,
     pub quota_step: i64,
-    pub quota_v5_min: i64,
-    pub quota_v5_max: i64,
 }
 
 impl Default for QuotaCfg {
@@ -367,8 +370,6 @@ impl Default for QuotaCfg {
             quota_ceiling_max: 300,
             quota_base_min_fair: 10,
             quota_step: 25,
-            quota_v5_min: 3,
-            quota_v5_max: 30,
         }
     }
 }
@@ -410,45 +411,29 @@ pub fn simple(prev_a: Option<i64>, usage: &[i64], budget: i64, cfg: &QuotaCfg) -
 }
 
 // ---------------------------------------------------------------------------
-// V5：恢复速度、系数、全站 / 每人额度
+// V5：恢复速度、全站 / 每人额度
 // ---------------------------------------------------------------------------
 
 /// 私密参数（`P("allocation.*", 起点值)`）的当前值。`Default` = 代码里的公开起点值。
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct QuotaParams {
-    /// `allocation.v5_k_table`：`[[剩余%下限, 系数], …]`，从上往下第一个满足的生效。
-    pub v5_k_table: Vec<(f64, f64)>,
-    /// `allocation.v5_k_floor`：都不满足时的系数。
-    pub v5_k_floor: f64,
-    /// `allocation.min_people`
-    pub min_people: i64,
     /// `allocation.min_coverage_hours`
     pub min_coverage_hours: i64,
-    /// `allocation.v5_flood_pct`
-    pub v5_flood_pct: i64,
-    /// `allocation.v5_flood_min_each`
-    pub v5_flood_min_each: i64,
-    /// `allocation.v5_flood_global`
-    pub v5_flood_global: i64,
-    /// `allocation.v5_tighten_below`
-    pub v5_tighten_below: i64,
 }
 
 impl Default for QuotaParams {
     fn default() -> Self {
         Self {
-            v5_k_table: vec![(90.0, 1.3), (70.0, 1.1), (40.0, 0.9), (20.0, 0.6)],
-            v5_k_floor: 0.3,
-            min_people: 10,
             min_coverage_hours: 20,
-            v5_flood_pct: 85,
-            v5_flood_min_each: 10,
-            v5_flood_global: 260,
-            v5_tighten_below: 40,
         }
     }
 }
+
+/// 每人 V5 上限的人数下限：前 3 个完整服务日里用过 V5 的人少于这个数时按它算（站长 10-15 批准的公式）。
+pub const V5_MIN_PEOPLE: i64 = 10;
+/// 统计「用过 V5 的人」的完整服务日个数（不含今天）。
+pub const V5_ACTIVE_DAYS: usize = 3;
 
 /// 决定用哪个恢复速度。返回 `(速度, 说明)`；说明显示在后台，并给观测模块做自检。
 pub fn choose_rate(api_rate: Option<f64>, measured: Option<f64>) -> (f64, Map<String, Value>) {
@@ -508,24 +493,14 @@ pub fn choose_rate(api_rate: Option<f64>, measured: Option<f64>) -> (f64, Map<St
     (rate, info)
 }
 
-/// 账号 V5 剩余越多，发得越大方；剩得越少，越保守。未知时按 0.9。
-pub fn v5_factor(percent: Option<f64>, params: &QuotaParams) -> f64 {
-    let Some(p) = percent else { return 0.9 };
-    for &(floor, k) in &params.v5_k_table {
-        if p >= floor {
-            return k;
-        }
-    }
-    params.v5_k_floor
-}
-
-/// `v5_plan` 的返回值。字段顺序即字典顺序：rate, percent, k, global, people, each。
+/// `v5_plan` 的返回值。字段顺序即字典顺序：rate, percent, global, people, each。
 #[derive(Debug, Clone, PartialEq)]
 pub struct V5Plan {
     pub rate: f64,
+    /// 定方案时账号 V5 剩余 %（只用于显示，不参与计算）。
     pub percent: Option<f64>,
-    pub k: f64,
     pub global: i64,
+    /// max(10, N)：分池子用的人数。
     pub people: i64,
     pub each: i64,
 }
@@ -535,7 +510,6 @@ impl V5Plan {
         let mut m = Map::new();
         m.insert("rate".into(), pyval::float(self.rate));
         m.insert("percent".into(), opt_f(self.percent));
-        m.insert("k".into(), pyval::float(self.k));
         m.insert("global".into(), json!(self.global));
         m.insert("people".into(), json!(self.people));
         m.insert("each".into(), json!(self.each));
@@ -543,65 +517,47 @@ impl V5Plan {
     }
 }
 
-/// 全站 V5 上限 G 与每人 D5。`rate` = 实测恢复 %/天（`None` / ≤ 0 用保守的 5）。
-/// 返回的 `rate` 已 `round(rate, 1)`。
-pub fn v5_plan(
-    percent: Option<f64>,
-    rate: Option<f64>,
-    active: i64,
-    lo: i64,
-    hi: i64,
-    params: &QuotaParams,
-) -> Result<V5Plan, DecideError> {
-    // `rate if rate and rate > 0 else FALLBACK`：None / 0 / 负数 / NaN 都回退
+/// 全站 V5 池 G 与每人上限（docs/v3-deviations.md #63）：
+/// G = ⌊恢复速度 × 每 1% 的张数⌋，每人 = max(1, ⌊G ÷ max(10, N)⌋)。
+/// `rate` = 采用的恢复 %/天（`None` / ≤ 0 / NaN 用保守的 5）；`active` = N（前 3 个完整服务日用过 V5 的人数）。
+/// 返回的 `rate` 已 `round(rate, 1)`。旧版的电量系数、3～30 夹取、洪峰放宽都已删除。
+pub fn v5_plan(percent: Option<f64>, rate: Option<f64>, active: i64) -> V5Plan {
     let rate = match rate {
-        Some(r) if r != 0.0 && r > 0.0 => r,
+        Some(r) if r > 0.0 => r,
         _ => V5_FALLBACK_RATE,
     };
-    let k = v5_factor(percent, params);
-    let pool = (rate * V5_IMAGES_PER_PERCENT * k).trunc() as i64;
-    let people = std::cmp::max(params.min_people, active);
-    if people == 0 {
-        // 私密参数把 min_people 设成 0、又没有活跃成员时，旧版 `pool // people` 抛 ZeroDivisionError
-        return Err(DecideError::ZeroDivision("integer division by zero".into()));
-    }
-    let each = std::cmp::max(lo, std::cmp::min(hi, pyc::floordiv(pool, people)));
-    Ok(V5Plan {
+    let pool = (rate * V5_IMAGES_PER_PERCENT).floor() as i64;
+    let people = std::cmp::max(V5_MIN_PEOPLE, active);
+    let each = std::cmp::max(1, pool.div_euclid(people));
+    V5Plan {
         rate: pyc::round(rate, 1),
         percent,
-        k,
         global: pool,
         people,
         each,
-    })
+    }
 }
 
-/// 首页那句「今日额度」。文案与旧版逐字节一致。
+/// 首页那句「今日额度」。
 ///
-/// `v5` 是 V5 方案字典（读 `each` / `global`），`review` 是当天的复盘字典（读 `from` / `to` / `reasons`）。
-#[allow(clippy::too_many_arguments)]
+/// `v5` 是 V5 方案字典（读 `each` / `global`），`people` 是前 3 个完整服务日用过 V5 的人数
+/// （超卖判定按活跃人数，不按全部 Key，docs/v3-deviations.md #63），
+/// `review` 是当天的复盘字典（读 `from` / `to` / `reasons`）。
 pub fn quota_notice(
     a: i64,
     v5: &Value,
-    members: i64,
+    people: i64,
     today: &str,
-    pct: Option<f64>,
     review: Option<&Value>,
     reset_hour: i64,
     anlas: i64,
 ) -> Result<String, DecideError> {
     let each = int_or0(pyval::get(v5, "each"));
     let global_v5 = int_or0(pyval::get(v5, "global"));
-    let oversell = global_v5 != 0 && each * std::cmp::max(1, members) > global_v5;
+    let oversell = global_v5 != 0 && each * std::cmp::max(1, people) > global_v5;
     let mut v5_status = format!(" · V5 每人 {each} 张");
     if oversell {
         v5_status.push_str(&format!("（全站今日共 {global_v5} 张，先到先得）"));
-    } else if let Some(p) = pct
-        && p != 0.0
-        && p >= 85.0
-        && each >= 10
-    {
-        v5_status.push_str(&format!("（当前电池充沛 {}%，额度放宽）", fmt_prec(p, 0)));
     }
     if anlas > 0 {
         v5_status.push_str(&format!(" · Anlas 每人 {anlas}/天"));
@@ -966,20 +922,13 @@ pub fn allowance_summary(accounts: &[AccountAllowance]) -> (Option<f64>, Option<
     (Some(pct), rate)
 }
 
-/// `_active_v5` 的日期参数：最近 `days` 个**自然日**（本地日期，不按重置点偏移；与旧版一致），从今天往前。
+/// `_active_v5` 的日期参数：今天之前的 `days` 个**完整服务日**（从旧到新，不含今天）。
+/// 旧版是含今天的 `days` 个自然日（本地日期，不按重置点偏移），今天还没过完、人数一天里会变；
+/// 3.0 只看已经过完的服务日，人数当天不变（docs/v3-deviations.md #63）。
 pub fn active_v5_days(clock: &Clock, now: f64, days: usize) -> Vec<String> {
-    let today: jiff::civil::Date = clock
-        .format(now, "%Y-%m-%d")
-        .parse()
-        .expect("strftime 输出合法日期");
-    (0..days)
-        .map(|i| {
-            today
-                .checked_sub(jiff::Span::new().days(i as i64))
-                .map(|d| d.strftime("%Y-%m-%d").to_string())
-                .unwrap_or_default()
-        })
-        .collect()
+    let mut all = clock.last_days(now, days + 1);
+    all.pop(); // 今天
+    all
 }
 
 /// 今天是否还没做过每日微调（`get_setting(DAY_KEY, None) != today`）。
@@ -1089,14 +1038,12 @@ impl Cx {
 /// `_cfg`：把 `DEFAULTS` 里的每个键读成整数（解析失败回到起点值；`inf` 抛 OverflowError，与旧版一致）。
 pub fn quota_cfg(settings: &HashMap<String, String>) -> Result<QuotaCfg, DecideError> {
     let mut cfg = QuotaCfg::default();
-    let slots: [&mut i64; 7] = [
+    let slots: [&mut i64; 5] = [
         &mut cfg.quota_auto_enabled,
         &mut cfg.quota_target_avg,
         &mut cfg.quota_ceiling_max,
         &mut cfg.quota_base_min_fair,
         &mut cfg.quota_step,
-        &mut cfg.quota_v5_min,
-        &mut cfg.quota_v5_max,
     ];
     for (slot, (name, default)) in slots.into_iter().zip(DEFAULTS) {
         // `_cfg`：except (TypeError, ValueError) → 起点值；OverflowError（inf）不在其中，会抛出
@@ -1291,58 +1238,22 @@ fn run_inner(inp: &QuotaInputs, clock: &Clock, cx: &mut Cx) -> Result<Value, Dec
             )));
         }
     };
-    let mut v5_min = cfg.quota_v5_min;
-    let flood = pct.is_some_and(|p| p >= params.v5_flood_pct as f64);
-    if flood {
-        v5_min = std::cmp::max(v5_min, params.v5_flood_min_each);
-    }
-    let plan = v5_plan(
-        pct,
-        Some(rate),
-        inp.active_v5,
-        v5_min,
-        cfg.quota_v5_max,
-        params,
-    )?;
-    let mut fresh = plan.to_map();
-    if flood {
-        let g = std::cmp::max(plan.global, params.v5_flood_global);
-        let e = std::cmp::max(plan.each, v5_min);
-        fresh.insert("global".into(), json!(g));
-        fresh.insert("each".into(), json!(e));
-    }
-    fresh.insert("rate_info".into(), Value::Object(rate_info.clone()));
-    let fresh_each = fresh["each"].as_i64().unwrap_or(0);
-
-    let store_plan = |cx: &mut Cx, plan: &Map<String, Value>| {
-        let v = json!({"day": today, "plan": Value::Object(plan.clone())});
-        cx.set(V5_DAY_KEY, jsondump::dumps(&v));
-    };
+    // 当天的方案在服务日第一次计算时（07:00 后）定下，当天不再改（docs/v3-deviations.md #63）：
+    // 旧版的电量系数、3～30 夹取、电量 ≥ 85% 的洪峰放宽、白天的放宽 / 收紧都已删除。
     let stored_plan = match (stored.get("day"), stored.get("plan")) {
         (Some(Value::String(d)), Some(p)) if *d == today && pyval::truthy(p) => Some(p.clone()),
         _ => None,
     };
-    let mut v5: Map<String, Value> = if let Some(sp) = stored_plan {
-        let Value::Object(sp) = sp else {
-            return Err(DecideError::Type("V5 方案不是 dict".into()));
-        };
-        let stored_each = num(sp
-            .get("each")
-            .ok_or_else(|| DecideError::Key("'each'".into()))?)?;
-        // 新方案更大 → 当天放宽；账号剩余跌破收紧线且新方案更小 → 当天收紧（安全优先）；否则沿用早上定的
-        let loosen = (fresh_each as f64) > stored_each;
-        let tighten = !loosen
-            && pct.is_some_and(|p| p < params.v5_tighten_below as f64)
-            && (fresh_each as f64) < stored_each;
-        if loosen || tighten {
-            store_plan(cx, &fresh);
+    let mut v5: Map<String, Value> = match stored_plan {
+        Some(Value::Object(sp)) => sp,
+        Some(_) => return Err(DecideError::Type("V5 方案不是 dict".into())),
+        None => {
+            let mut fresh = v5_plan(pct, Some(rate), inp.active_v5).to_map();
+            fresh.insert("rate_info".into(), Value::Object(rate_info.clone()));
+            let v = json!({"day": today, "plan": Value::Object(fresh.clone())});
+            cx.set(V5_DAY_KEY, jsondump::dumps(&v));
             fresh
-        } else {
-            sp
         }
-    } else {
-        store_plan(cx, &fresh);
-        fresh
     };
 
     // 当天的方案一天只定一次，但显示用的剩余要用实时值；核对状态每 10 分钟更新
@@ -1381,12 +1292,15 @@ fn run_inner(inp: &QuotaInputs, clock: &Clock, cx: &mut Cx) -> Result<Value, Dec
         ("register_daily_v5".into(), each.to_string()),
         ("register_image_scope".into(), "all".into()),
     ]);
-    // 每人 V5 额度 × 参与人数 > 全站 V5 上限时，个人额度是「先到先得」的上限而不是承诺
-    let oversell = global != 0 && each * std::cmp::max(1, members as i64) > global;
+    // 每人 V5 额度 × 活跃人数 > 全站 V5 池时，个人额度是「先到先得」的上限而不是承诺。
+    // 人数按前 3 个完整服务日用过 V5 的人算，不按全部算法管理的 Key（docs/v3-deviations.md #63）；
+    // 键名 `members` 沿用（后台显示「每人 × 人数」）
+    let people = inp.active_v5;
+    let oversell = global != 0 && each * std::cmp::max(1, people) > global;
     v5.insert(
         "oversell".into(),
         if oversell {
-            json!({"each": each, "members": members, "global": global})
+            json!({"each": each, "members": people, "global": global})
         } else {
             Value::Null
         },
@@ -1397,9 +1311,8 @@ fn run_inner(inp: &QuotaInputs, clock: &Clock, cx: &mut Cx) -> Result<Value, Dec
     let note = quota_notice(
         a,
         &v5_value,
-        members as i64,
+        people,
         &today,
-        pct,
         review_value.as_ref(),
         reset_hour,
         member_anlas,

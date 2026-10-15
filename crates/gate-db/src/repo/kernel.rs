@@ -188,7 +188,7 @@ impl Db {
         .await
     }
 
-    /// `_active_v5`：这些**自然日**里用过 V5 的成员数（不含测试 / 站长 Key）。
+    /// `_active_v5`：这些服务日里用过 V5 的成员数（不含测试 / 站长 Key）；日期见 `quota::active_v5_days`。
     pub async fn quota_active_v5(&self, days: &[String]) -> Result<i64> {
         let days = days.to_vec();
         self.read(move |c| {

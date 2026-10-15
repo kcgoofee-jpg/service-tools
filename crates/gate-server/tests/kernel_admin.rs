@@ -92,12 +92,13 @@ async fn quota_algo_get_shape_and_put_validation() {
     let api = Api::login(&e).await;
 
     // 什么都没存过：params 是代码里的起点值（整数）；last 是 {}，history 是 []
-    // （保底的 quota_base / quota_base_min / quota_base_step 已删除，docs/v3-deviations.md #61）
+    // （保底的 quota_base / quota_base_min / quota_base_step 已删除，docs/v3-deviations.md #61；
+    // V5 的 quota_v5_min / quota_v5_max 随 3～30 夹取删除，#63）
     let (status, text) = api.call("GET", "/quota-algo", None).await;
     assert_eq!(status, 200);
     assert_eq!(
         text,
-        r#"{"last":{},"history":[],"params":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25,"quota_v5_min":3,"quota_v5_max":30}}"#
+        r#"{"last":{},"history":[],"params":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25}}"#
     );
 
     // 校验失败：422 + 旧版文案，不写任何东西

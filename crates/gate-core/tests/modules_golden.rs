@@ -37,6 +37,19 @@ const REMOVED_MODULES: usize = 1;
 /// 夹具元数据里的 `report_bugs`：3.0 的模块校验不记 Bug，字段已删除。
 const REMOVED_META_FIELDS: [&str; 1] = ["report_bugs"];
 
+/// 3.0 额度改动对模块元数据的影响（期望一侧改写）。
+fn v3_meta(name: &str, want: &mut Value) {
+    if name == "allocation" {
+        // V5 每人上限改成公式、没有 3～30 的范围（docs/v3-deviations.md #63）
+        let p = &mut want["params"][3];
+        assert_eq!(p[0], "V5 每人范围");
+        *p = json!([
+            "V5 每人",
+            "每天 7 点按恢复速度定全站池，再按前 3 天用过 V5 的人数分，当天不变"
+        ]);
+    }
+}
+
 #[test]
 fn meta_golden() {
     let cases = load(M, "modules/meta");
@@ -58,6 +71,7 @@ fn meta_golden() {
         for field in REMOVED_META_FIELDS {
             want.as_object_mut().unwrap().shift_remove(field);
         }
+        v3_meta(name, &mut want);
         assert_eq_py_ordered(c, &got, &want);
         names.push(name.to_string());
     }
@@ -278,7 +292,12 @@ fn params_golden() {
             "allocation_params" => {
                 assert_eq!(json!(allocation_rule_text()), out["规则"]);
                 assert_eq!(json!(allocation_range_text()), out["范围"]);
-                assert_eq!(json!(allocation_v5_range_text()), out["V5 每人范围"]);
+                // 旧版是「V5 每人范围」3～30 张；3.0 换成公式说明（#63）
+                assert_eq!(out["V5 每人范围"], "3～30 张");
+                assert_eq!(
+                    allocation_v5_rule_text(),
+                    "全站池 ÷ max(10, 前 3 天用过 V5 的人数)，至少 1 张"
+                );
             }
             "autopilot_params" => {
                 assert_eq!(json!(AUTOPILOT_BREAKER_TEXT), out["全站熔断"]);

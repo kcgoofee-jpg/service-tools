@@ -134,7 +134,10 @@ pub const MODULES: [ModuleMeta; 6] = [
             ("今天每人 V4.5", "每天服务日起点后按昨天的用量重算"),
             ("规则", ""),
             ("范围", ""),
-            ("V5 每人范围", "按账号 V5 剩余和恢复速度分"),
+            (
+                "V5 每人",
+                "每天 7 点按恢复速度定全站池，再按前 3 天用过 V5 的人数分，当天不变",
+            ),
         ],
     },
     ModuleMeta {
@@ -344,10 +347,13 @@ pub fn allocation_range_text() -> String {
     format!("{}～{} 张", c.quota_base_min_fair, c.quota_ceiling_max)
 }
 
-/// 面板参数「V5 每人范围」。
-pub fn allocation_v5_range_text() -> String {
-    let c = quota::QuotaCfg::default();
-    format!("{}～{} 张", c.quota_v5_min, c.quota_v5_max)
+/// 面板参数「V5 每人」：3.0 的公式（docs/v3-deviations.md #63；旧版是「V5 每人范围」3～30 张）。
+pub fn allocation_v5_rule_text() -> String {
+    format!(
+        "全站池 ÷ max({}, 前 {} 天用过 V5 的人数)，至少 1 张",
+        quota::V5_MIN_PEOPLE,
+        quota::V5_ACTIVE_DAYS
+    )
 }
 
 /// `quota_algo_last` 解析结果里服务层要用的查询参数。

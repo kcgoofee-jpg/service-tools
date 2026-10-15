@@ -8,9 +8,7 @@ use super::KernelError;
 use crate::action_log::log_action;
 use crate::state::AppState;
 use gate_core::params::Params;
-use gate_core::quota::{
-    DecideError, Effect, GuardInfo, QuietInputs, QuotaInputs, QuotaParams, quota_cfg,
-};
+use gate_core::quota::{Effect, GuardInfo, QuietInputs, QuotaInputs, QuotaParams, quota_cfg};
 use gate_core::site_flags::{self, GLOBAL_DAILY_V5};
 use gate_core::{autopilot, pyval, quota};
 use serde_json::Value;
@@ -38,47 +36,13 @@ fn global_daily_v5_default(state: &AppState) -> i64 {
 
 /// 私密参数 `allocation.*` → [`QuotaParams`]（`P(name, 起点值)`：类型跟起点值一致，转不了回到起点值）。
 ///
-/// 已知差异：`allocation.v5_k_table` 被写成不是「[[下限, 系数], …]」的形状时，旧版只在读到有 V5 剩余读数
-/// 且迭代到坏条目时才抛 TypeError；这里在取参时就报错（私密参数文件写坏才会碰到）。
-fn quota_params(p: &Params) -> Result<QuotaParams, DecideError> {
+/// 3.0 的 V5 公式不再读 `allocation.v5_k_table` / `v5_k_floor` / `min_people` / `v5_flood_*` /
+/// `v5_tighten_below`（docs/v3-deviations.md #63）；文件里残留的这些键直接忽略，不报错。
+fn quota_params(p: &Params) -> QuotaParams {
     let d = QuotaParams::default();
-    let v5_k_table = match p.as_map().get("allocation.v5_k_table") {
-        None => d.v5_k_table.clone(),
-        Some(Value::Array(rows)) => {
-            let mut table = Vec::new();
-            for row in rows {
-                let pair = row.as_array().filter(|a| a.len() == 2).ok_or_else(|| {
-                    DecideError::Type("allocation.v5_k_table 的条目必须是 [下限, 系数]".into())
-                })?;
-                let floor = pyval::number_like(&pair[0]).ok_or_else(|| {
-                    DecideError::Type("allocation.v5_k_table 的下限必须是数字".into())
-                })?;
-                let k = match &pair[1] {
-                    Value::String(s) => gate_core::pyc::parse_float(s).ok_or_else(|| {
-                        DecideError::Value("allocation.v5_k_table 的系数不是数字".into())
-                    })?,
-                    other => pyval::number_like(other).ok_or_else(|| {
-                        DecideError::Type("allocation.v5_k_table 的系数必须是数字".into())
-                    })?,
-                };
-                table.push((floor, k));
-            }
-            table
-        }
-        Some(_) => {
-            return Err(DecideError::Type("allocation.v5_k_table 必须是列表".into()));
-        }
-    };
-    Ok(QuotaParams {
-        v5_k_table,
-        v5_k_floor: p.float("allocation.v5_k_floor", d.v5_k_floor),
-        min_people: p.int("allocation.min_people", d.min_people),
+    QuotaParams {
         min_coverage_hours: p.int("allocation.min_coverage_hours", d.min_coverage_hours),
-        v5_flood_pct: p.int("allocation.v5_flood_pct", d.v5_flood_pct),
-        v5_flood_min_each: p.int("allocation.v5_flood_min_each", d.v5_flood_min_each),
-        v5_flood_global: p.int("allocation.v5_flood_global", d.v5_flood_global),
-        v5_tighten_below: p.int("allocation.v5_tighten_below", d.v5_tighten_below),
-    })
+    }
 }
 
 /// `_allowance(state)`：账号 V5 剩余 % 与恢复 %/天（多个账号取平均）。刚重启时缓存里还没有读数，主动读一次。
@@ -202,7 +166,7 @@ pub async fn run_quota(state: &AppState) -> Result<Value, KernelError> {
         inp.pool_len = Some(state.nai.tokens().await.len());
         inp.global_daily_v5_default = global_daily_v5_default(state);
         inp.members = db.quota_member_count().await?;
-        inp.params = quota_params(&state.params.get())?;
+        inp.params = quota_params(&state.params.get());
         let today = clock.day(now);
         if quota::daily_adjust_due(inp.settings.get(quota::DAY_KEY).map(String::as_str), &today) {
             let yday = clock.day(now - 86400.0);
@@ -213,7 +177,7 @@ pub async fn run_quota(state: &AppState) -> Result<Value, KernelError> {
         inp.accounts = allowance_accounts(state).await?;
         inp.quiet = db.quota_quiet_inputs(now).await?;
         inp.active_v5 = db
-            .quota_active_v5(&quota::active_v5_days(clock, now, 3))
+            .quota_active_v5(&quota::active_v5_days(clock, now, quota::V5_ACTIVE_DAYS))
             .await?;
         inp.managed_keys = db.quota_managed_keys().await?;
     }
