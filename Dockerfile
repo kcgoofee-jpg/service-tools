@@ -13,7 +13,7 @@ RUN pnpm vite build
 
 # ---------- Rust 依赖缓存（cargo-chef） ----------
 FROM rust:1.99-bookworm AS chef
-# BoringSSL（wreq 的 Chrome TLS 指纹）需要 cmake / clang
+# BoringSSL（wreq 的 Chrome TLS 指纹）需要 cmake / clang；nai-gate 的分配器 mimalloc 也在这里用 C 编译器编
 RUN apt-get update && apt-get install -y --no-install-recommends cmake clang libclang-dev \
  && rm -rf /var/lib/apt/lists/* \
  && cargo install cargo-chef --locked --version 0.1.78
