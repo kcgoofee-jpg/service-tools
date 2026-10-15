@@ -1691,6 +1691,109 @@ async fn departed_sweep_only_revokes_confirmed_departures() {
     );
 }
 
+/// 邀请 Key 只由站长手动删：持有人退群时不回收，只留一条操作日志提醒（docs/v3-deviations.md #57）。
+#[tokio::test]
+async fn departed_sweep_keeps_invite_keys_and_logs_a_reminder() {
+    let (e, d) = setup_reg(&[("REGISTER_MAX_USERS", "0")]).await;
+    open_registration(&e).await;
+    let invited = "900000000000000211";
+    let regular = "900000000000000212";
+    for id in [invited, regular] {
+        assert_eq!(issue(&e, id).await.0, 200);
+        d.script(
+            "GET",
+            &format!("/guilds/{GUILD}/members/{id}"),
+            404,
+            json!({"code": 10007, "message": "Unknown Member"}),
+        );
+    }
+    let key = e
+        .state
+        .db
+        .key_row_for_discord(invited)
+        .await
+        .unwrap()
+        .unwrap();
+    let (key_id, key_name) = (
+        key["id"].as_i64().unwrap(),
+        key["name"].as_str().unwrap().to_string(),
+    );
+    e.state
+        .db
+        .run_script(vec![format!(
+            "INSERT INTO key_tags (key_id, tag, note, by, ts) VALUES ({key_id}, '邀请', '', '站长', 1.0)"
+        )])
+        .await
+        .unwrap();
+    let now = e.state.now();
+    let mut removed = 0;
+    for _ in 0..3 {
+        removed += svc(&e).sweep_departed(now, 5).await.unwrap();
+    }
+    assert_eq!(removed, 1, "只回收普通成员");
+    assert!(
+        e.state
+            .db
+            .key_row_for_discord(regular)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let kept = e
+        .state
+        .db
+        .key_row_for_discord(invited)
+        .await
+        .unwrap()
+        .expect("邀请 Key 和领取记录都留着");
+    assert_eq!(kept["id"].as_i64(), Some(key_id));
+    assert_eq!(kept["enabled"].as_i64(), Some(1));
+    assert!(e.state.db.list_bans("").await.unwrap().is_empty());
+    // 提醒只有一条（核对时间已记下，同一天的后几轮不再查它）
+    let log: Vec<_> = actions(&e).await.iter().map(action_tuple).collect();
+    let reminders: Vec<_> = log
+        .iter()
+        .filter(|a| a.1 == "退群（邀请 Key 保留）")
+        .collect();
+    assert_eq!(
+        reminders,
+        vec![&(
+            "系统".to_string(),
+            "退群（邀请 Key 保留）".to_string(),
+            format!("Key #{key_id} {key_name}"),
+            format!("Discord:{invited} Alice 已不在服务器；邀请 Key 只由站长手动删除，未回收"),
+            1
+        )]
+    );
+    assert!(
+        log.iter()
+            .any(|a| a.1 == "退群回收 Key" && a.2 == format!("Discord:{regular} Alice"))
+    );
+    assert!(
+        !log.iter()
+            .any(|a| a.1 == "退群回收 Key" && a.2.contains(invited))
+    );
+    let checked: f64 = e
+        .state
+        .db
+        .read(move |c| {
+            c.query_row(
+                "SELECT member_checked_at FROM discord_registrations WHERE discord_id=?",
+                [invited],
+                |r| r.get(0),
+            )
+        })
+        .await
+        .unwrap();
+    assert_eq!(checked, now, "记下核对时间，明天再查");
+    let gets = d
+        .calls()
+        .iter()
+        .filter(|c| *c == &format!("GET /guilds/{GUILD}/members/{invited}"))
+        .count();
+    assert_eq!(gets, 1, "同一天只查一次");
+}
+
 #[tokio::test]
 async fn sweep_treats_unreadable_404_as_unknown() {
     let (e, d) = setup_reg(&[]).await;

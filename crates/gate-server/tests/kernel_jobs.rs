@@ -277,6 +277,68 @@ async fn idle_recycle_negative_days_is_off_too() {
     assert!(key_exists(&e, 1).await);
 }
 
+// ------------------------------------------------------------------ 自动驾驶熔断
+
+/// 熔断要求失败来自 ≥ 2 把不同的非测试 Key：一个成员反复发畸形请求、测试 Key 出错都停不了全站
+/// （docs/v3-deviations.md #58）。
+#[tokio::test]
+async fn breaker_needs_upstream_failures_from_two_member_keys() {
+    let e = setup(&[]).await;
+    let s = &e.state;
+    s.db.set_setting("autopilot_breaker", "enforce")
+        .await
+        .unwrap();
+    key(&e, 1, 10.0, &[]).await;
+    key(&e, 2, 10.0, &[]).await;
+    key(&e, 3, 10.0, &[("is_test", json!(1))]).await;
+    let (m1, m2, t) = (db_id(&e, 1).await, db_id(&e, 2).await, db_id(&e, 3).await);
+    let now = s.now();
+    let log = |key_id: i64, status: &str, up: i64, n: usize| {
+        (0..n)
+            .map(|i| {
+                format!(
+                    "INSERT INTO usage_log (ts, key_id, key_name, kind, status, up_status) \
+                     VALUES ({}, {key_id}, '', 'image', '{status}', {up})",
+                    now - 60.0 - i as f64
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    // 一个成员 8 次上游 502（占比 8/12），另有 4 次成功
+    let mut sql = log(m1, "error", 502, 8);
+    sql.extend(log(m2, "ok", 200, 4));
+    s.db.run_script(sql).await.unwrap();
+    let rows = s.db.autopilot_breaker_rows(now - 900.0).await.unwrap();
+    assert_eq!(
+        (rows.fails, rows.total, rows.fail_keys),
+        (Some(8), Some(12), 1)
+    );
+    let tripped = |s: &gate_server::AppState| s.guard.with(|g| g.breaker_until) > s.now();
+    let r = gate_server::kernel::run_autopilot_checked(s).await.unwrap();
+    assert_eq!(r["rules"]["breaker"]["value"], json!(false), "{r}");
+    assert!(!tripped(s), "一把 Key 停不了全站");
+
+    // 测试 Key 的失败不算
+    s.db.run_script(log(t, "error", 500, 6)).await.unwrap();
+    let rows = s.db.autopilot_breaker_rows(now - 900.0).await.unwrap();
+    assert_eq!((rows.fails, rows.fail_keys), (Some(14), 1));
+    gate_server::kernel::run_autopilot_checked(s).await.unwrap();
+    assert!(!tripped(s), "测试 Key 的失败不算第二把 Key");
+
+    // 第二个成员也遇到上游失败：这才像上游故障
+    s.db.run_script(log(m2, "error", 503, 1)).await.unwrap();
+    assert_eq!(
+        s.db.autopilot_breaker_rows(now - 900.0)
+            .await
+            .unwrap()
+            .fail_keys,
+        2
+    );
+    let r = gate_server::kernel::run_autopilot_checked(s).await.unwrap();
+    assert_eq!(r["rules"]["breaker"]["applied"], json!(true), "{r}");
+    assert!(tripped(s));
+}
+
 // ------------------------------------------------------------------ 维护循环一轮
 
 #[tokio::test]

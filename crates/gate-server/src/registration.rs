@@ -494,12 +494,16 @@ impl RegistrationService {
     /// 维护循环每 5 分钟调一次、每次只查 1 人 → 约 49 次读取 / 天，均匀分散，不发私信（申诉期间不制造突发请求）。
     /// 只有 Discord 明确回复「不是成员」（404 + code 10007）才回收；网络错误、限流、机器人不在服务器（10004）
     /// 或任何其他情况一律跳过、下轮再查，宁可漏收也不误删。返回本次回收人数。
+    ///
+    /// 邀请 Key 只由站长手动删（与每日清空 / 全站重置同一口径）：持有人退群时不删 Key，只写一条操作日志
+    /// 「退群（邀请 Key 保留）」提醒站长，并照常记下核对时间（明天再查），不会每轮重复（docs/v3-deviations.md #57）。
     pub async fn sweep_departed(&self, now: f64, batch: i64) -> Result<usize, DbError> {
         if !self.flag(&site_flags::MEMBER_SWEEP).await? {
             return Ok(0);
         }
         let mut removed = 0;
-        for discord_id in self.db.departed_candidates(now, batch).await? {
+        for cand in self.db.departed_candidates(now, batch).await? {
+            let discord_id = cand.discord_id;
             let path = format!("/guilds/{}/members/{discord_id}", self.cfg.guild_id);
             // 查不清（网络错误 / 404 的响应体读不出 code）都当作「没有响应」
             let answer: Option<(u16, Option<Value>)> = match self
@@ -517,12 +521,28 @@ impl RegistrationService {
                 && pyval::number_like(code) == Some(10007.0)
             {
                 let label = self.registration_profile(&discord_id).await?;
+                let who = ["display_name", "username"]
+                    .iter()
+                    .find_map(|k| label.get(k).filter(|v| pyval::truthy(v)))
+                    .map(pyext::py_str)
+                    .unwrap_or_else(|| discord_id.clone());
+                if let Some((key_id, key_name)) = &cand.invite_key {
+                    log_action(
+                        &self.db,
+                        "系统",
+                        "退群（邀请 Key 保留）",
+                        &format!("Key #{key_id} {key_name}"),
+                        &format!(
+                            "Discord:{discord_id} {who} 已不在服务器；邀请 Key 只由站长手动删除，未回收"
+                        ),
+                        true,
+                        now,
+                    )
+                    .await;
+                    self.db.set_member_checked(&discord_id, now).await?;
+                    continue;
+                }
                 if self.revoke(&discord_id, false).await? {
-                    let who = ["display_name", "username"]
-                        .iter()
-                        .find_map(|k| label.get(k).filter(|v| pyval::truthy(v)))
-                        .map(pyext::py_str)
-                        .unwrap_or_else(|| discord_id.clone());
                     log_action(
                         &self.db,
                         "系统",
