@@ -2,16 +2,15 @@
 //!
 //! 鉴权：`Authorization: Bearer <REGISTRATION_BRIDGE_SECRET>`；成员网页接口见 `member.rs`。
 //! 错误一律是 `{"detail": ...}`；请求体的校验错误沿用 FastAPI（pydantic v2）的 422 形状。
-//! 次序与旧版一致：先校验请求体（422），再鉴权（503 / 401），再校验服务器 / 管理员（403）。
+//! 次序与旧版一致：先校验请求体（422），再鉴权（503 / 401），再校验服务器（403）。
+//! 机器人只有成员命令（/register /quota /resetkey /反馈）；管理员命令 `ops` / `slots` / `revoke` 已删除（docs/v3-deviations.md #73）。
 
 use crate::action_log::log_action;
 use crate::auth::{client_ip, header_str};
-use crate::body::JsonObject;
 use crate::error::{ApiError, ApiResult, HttpError, InternalError, ok_json};
 use crate::feedback;
 use crate::key::Key;
 use crate::multipart::read_bounded_body;
-use crate::ops;
 use crate::registration::{DiscordUser, Issued, RegErr, RegistrationService, is_decimal};
 use crate::state::AppState;
 use axum::Router;
@@ -21,7 +20,7 @@ use axum::http::request::Parts;
 use axum::response::Response;
 use axum::routing::post;
 use gate_core::pyc::take_chars;
-use gate_core::{bot_config, features, pyext};
+use gate_core::{bot_config, features};
 use serde_json::{Map, Value, json};
 use std::net::SocketAddr;
 use subtle::ConstantTimeEq;
@@ -29,11 +28,8 @@ use subtle::ConstantTimeEq;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/self-register/info", post(info))
-        .route("/self-register/ops", post(admin_ops))
         .route("/self-register/quota", post(quota))
         .route("/self-register/resetkey", post(resetkey))
-        .route("/self-register/revoke", post(revoke))
-        .route("/self-register/slots", post(slots))
         .route("/self-register/issue", post(issue))
         .route("/self-register/feedback", post(feedback_submit))
         .route("/self-register/bot/report", post(bot_report))
@@ -152,7 +148,6 @@ pub(super) async fn read_model(parts: &Parts, body: axum::body::Body) -> Result<
 struct Who {
     discord_id: String,
     guild_id: String,
-    actor_id: String,
 }
 
 impl Who {
@@ -160,7 +155,6 @@ impl Who {
         Self {
             discord_id: m.string("discord_id", None),
             guild_id: m.string("guild_id", None),
-            actor_id: m.string("actor_id", Some("")),
         }
     }
 }
@@ -199,14 +193,6 @@ fn checked<'a>(svc: &RegistrationService, who: &'a Who) -> Result<&'a str, HttpE
     Ok(&who.discord_id)
 }
 
-/// 管理类操作需要「发起者」在管理员白名单（ADMIN_DISCORD_IDS）里；白名单为空则一律拒绝（默认安全）。
-fn admin_actor(svc: &RegistrationService, who: &Who) -> Result<(), HttpError> {
-    if svc.admin_ids().is_empty() || !svc.admin_ids().contains(&who.actor_id) {
-        return Err(HttpError::new(403, "没有管理员权限。"));
-    }
-    Ok(())
-}
-
 pub(super) fn no_store(mut resp: Response) -> Response {
     resp.headers_mut()
         .insert("cache-control", HeaderValue::from_static("no-store"));
@@ -238,7 +224,8 @@ async fn global_flags(state: &AppState) -> Result<features::Flags, ApiError> {
 
 // ------------------------------------------------------------------ 接口
 
-/// 机器人 /help 与 /quota 使用：注册是否开放、新成员默认功能、记录声明、上游状态。
+/// 机器人 /help 与 /quota 使用：领 Key 是否开放、公告（记录声明）、上游限流冷却剩余秒数。
+/// 机器人不用的字段（名额、默认额度、默认功能、上游状态）已删除（docs/v3-deviations.md #74）。
 async fn info(State(state): State<AppState>, req: Request) -> ApiResult {
     let (parts, body) = req.into_parts();
     let mut m = read_model(&parts, body).await?;
@@ -247,232 +234,11 @@ async fn info(State(state): State<AppState>, req: Request) -> ApiResult {
     let svc = authorize(&state, &parts, true)?;
     checked(svc, &who)?;
     let cfg = svc.settings().await?;
-    let flags = global_flags(&state).await?;
-    let defaults: Vec<String> = match &cfg.features {
-        Some(f) => f.clone(),
-        None => features::FEATURES
-            .iter()
-            .filter(|(n, _)| flags[n])
-            .map(|(n, _)| (*n).to_string())
-            .collect(),
-    };
-    let default_features: Vec<Value> = defaults
-        .iter()
-        .filter_map(|n| {
-            features::FEATURES
-                .iter()
-                .find(|(k, _)| k == n)
-                .map(|(k, label)| json!({"id": k, "label": label, "on": flags[k]}))
-        })
-        .collect();
-    let (status, recent, failed) = state.health.status(state.now());
     Ok(no_store(ok_json(&json!({
-        "open": cfg.open, "active": svc.count_active().await?, "max": cfg.max_users,
-        "default_features": default_features,
-        "daily_images": cfg.daily_images, "daily_v5": cfg.daily_v5,
+        "open": cfg.open,
         "notice": crate::audit::audit_disclosure(&state.db, &state.env).await?,
-        "upstream": {
-            "status": status, "recent": recent, "failed": failed,
-            "image_cooldown_seconds": state.cooldown.remaining(state.now()),
-        },
+        "upstream": {"image_cooldown_seconds": state.cooldown.remaining(state.now())},
     }))))
-}
-
-/// 管理员命令（Discord 端已限制为「管理服务器」权限）：开关注册、名额、授权功能、记录开关。
-async fn admin_ops(State(state): State<AppState>, req: Request) -> ApiResult {
-    let (parts, body) = req.into_parts();
-    let mut m = read_model(&parts, body).await?;
-    let who = Who::read(&mut m);
-    let action = m.string("action", None);
-    let value = m.string("value", Some(""));
-    let target = m.string("target", Some(""));
-    let feature = m.string("feature", Some(""));
-    m.finish()?;
-    let svc = authorize(&state, &parts, true)?;
-    checked(svc, &who)?;
-    admin_actor(svc, &who)?;
-    let on = matches!(value.to_lowercase().as_str(), "1" | "on" | "true" | "开");
-    let log_target = if target.is_empty() {
-        String::new()
-    } else {
-        format!("Discord:{target}")
-    };
-    let params = [feature.as_str(), value.as_str()]
-        .iter()
-        .filter(|x| !x.is_empty())
-        .copied()
-        .collect::<Vec<_>>()
-        .join(" ");
-    let op = Op {
-        action: &action,
-        value: &value,
-        target: &target,
-        feature: &feature,
-        on,
-    };
-    match run_op(&state, svc, &op).await {
-        Ok(resp) => {
-            log_bot(
-                &state,
-                &who.actor_id,
-                &format!("机器人·{action}"),
-                &log_target,
-                &params,
-            )
-            .await;
-            Ok(resp)
-        }
-        Err(ApiError::Http(e)) => {
-            let detail = format!("失败（{}）：{}", e.status, pyext::py_str(&e.detail));
-            log_action(
-                &state.db,
-                &format!("Discord:{}", who.actor_id),
-                &format!("机器人·{action}"),
-                &log_target,
-                take_chars(&detail, 200),
-                false,
-                state.now(),
-            )
-            .await;
-            Err(ApiError::Http(e))
-        }
-        Err(other) => Err(other),
-    }
-}
-
-struct Op<'a> {
-    action: &'a str,
-    value: &'a str,
-    target: &'a str,
-    feature: &'a str,
-    on: bool,
-}
-
-async fn run_op(state: &AppState, svc: &RegistrationService, op: &Op<'_>) -> ApiResult {
-    let message = |text: String| Ok(ok_json(&json!({"message": text})));
-    match op.action {
-        "open" => {
-            let body: JsonObject = [("open".to_string(), Value::Bool(op.on))]
-                .into_iter()
-                .collect();
-            ops::set_registration(state, &body).await?;
-            message(
-                if op.on {
-                    "已开放领 Key。"
-                } else {
-                    "已关闭领 Key（已领取的人不受影响）。"
-                }
-                .to_string(),
-            )
-        }
-        "limit" => {
-            if !is_decimal(op.value) {
-                return Err(HttpError::new(422, "请输入数字").into());
-            }
-            let n = pyext::py_int_str(op.value).map_err(|e| internal(e.to_string()))?;
-            // 超大数字也走范围检查（`set_registration` 会拒绝并给出原因）
-            let body: JsonObject = [(
-                "max_users".to_string(),
-                json!(n.min(i128::from(i64::MAX)) as i64),
-            )]
-            .into_iter()
-            .collect();
-            // 旧版这里的校验失败是未捕获的 ValueError（500）；`ops` 回 422 + 原因，机器人把 detail 原样转给管理员
-            ops::set_registration(state, &body).await?;
-            let cap = ops::v5_capacity(state).await?;
-            let tip = if cap["short"].as_bool().unwrap_or(false) {
-                format!(
-                    "\n⚠ {}（全站 V5 在网页后台「设置」修改）",
-                    cap["message"].as_str().unwrap_or("")
-                )
-            } else {
-                String::new()
-            };
-            let shown = if n == 0 {
-                "不限".to_string()
-            } else {
-                n.to_string()
-            };
-            message(format!("名额上限已设为 {shown}。{tip}"))
-        }
-        "grant" => {
-            let Some((_, label)) = features::FEATURES.iter().find(|(n, _)| *n == op.feature) else {
-                let names: Vec<&str> = features::FEATURES.iter().map(|(n, _)| *n).collect();
-                return Err(HttpError::new(422, format!("未知功能：{}", names.join(","))).into());
-            };
-            let Some(key) = svc.key_row_for(op.target).await? else {
-                return Err(HttpError::new(404, "该成员还没有领取 Key。").into());
-            };
-            let current = features::key_features(&key.0);
-            let mut names: Vec<String> = match current {
-                None => features::FEATURES
-                    .iter()
-                    .map(|(n, _)| (*n).to_string())
-                    .collect(),
-                Some(c) => c,
-            };
-            if op.on {
-                names.push(op.feature.to_string());
-            } else {
-                names.retain(|n| n != op.feature);
-            }
-            let mut fields = Map::new();
-            fields.insert(
-                "features".into(),
-                features::dump(Some(names)).map_or(Value::Null, Value::String),
-            );
-            state.db.update_key(key.id(), &fields).await?;
-            message(format!(
-                "已{}：{label}。",
-                if op.on { "开通" } else { "关闭" }
-            ))
-        }
-        "ban" => {
-            if !is_decimal(op.target) {
-                return Err(HttpError::new(422, "缺少目标成员").into());
-            }
-            svc.ban(op.target, "", "").await?;
-            message("已永久禁止该账号领取，并撤销其 Key 与身份组。".into())
-        }
-        "unban" => {
-            let done = svc.unban(op.target).await?;
-            message(
-                if done {
-                    "已解除禁止。"
-                } else {
-                    "该账号不在禁止名单中。"
-                }
-                .into(),
-            )
-        }
-        "audit" => {
-            let body: JsonObject = [
-                ("prompts".to_string(), Value::Bool(op.on)),
-                ("thumbs".to_string(), Value::Bool(op.on)),
-                ("notify".to_string(), Value::Bool(true)),
-            ]
-            .into_iter()
-            .collect();
-            let result = ops::set_audit(state, &body).await?;
-            let mut out = Map::new();
-            out.insert(
-                "message".into(),
-                Value::String(
-                    if op.on {
-                        "已开启生成记录并通知成员。"
-                    } else {
-                        "已关闭生成记录并通知成员。"
-                    }
-                    .into(),
-                ),
-            );
-            if let Value::Object(r) = result {
-                out.extend(r);
-            }
-            Ok(ok_json(&Value::Object(out)))
-        }
-        _ => Err(HttpError::new(422, "未知操作").into()),
-    }
 }
 
 async fn quota(State(state): State<AppState>, req: Request) -> ApiResult {
@@ -495,12 +261,13 @@ async fn quota(State(state): State<AppState>, req: Request) -> ApiResult {
     };
     let counter = state.db.get_counter(key.id(), &state.day()).await?;
     let now = state.now();
-    let (reset_hour, quiet_now, start, end) = state.guard.with(|g| {
+    let (reset_hour, quiet_now, start, end, quiet_cap) = state.guard.with(|g| {
         (
             g.reset_hour,
             g.in_quiet(now),
             g.values.get("quiet_start").copied().unwrap_or(0),
             g.values.get("quiet_end").copied().unwrap_or(0),
+            g.values.get("quiet_hourly_cap").copied().unwrap_or(0),
         )
     });
     let feature_rows: Vec<Value> = features::FEATURES
@@ -518,6 +285,8 @@ async fn quota(State(state): State<AppState>, req: Request) -> ApiResult {
         "reset_hour": reset_hour,
         "quiet_now": quiet_now,
         "quiet_window": if quiet_now { format!("{start}:00–{end}:00") } else { String::new() },
+        // 安静时段每小时上限：0 = 完全暂停出图，大于 0 = 只是放慢（机器人据此选「暂停」还是「放慢」的说法）
+        "quiet_cap": quiet_cap,
         "features": feature_rows,
     }))))
 }
@@ -543,43 +312,6 @@ async fn resetkey(State(state): State<AppState>, req: Request) -> ApiResult {
     )
     .await;
     Ok(no_store(ok_json(&json!({"key": token}))))
-}
-
-async fn revoke(State(state): State<AppState>, req: Request) -> ApiResult {
-    let (parts, body) = req.into_parts();
-    let mut m = read_model(&parts, body).await?;
-    let who = Who::read(&mut m);
-    m.finish()?;
-    let svc = authorize(&state, &parts, true)?;
-    checked(svc, &who)?;
-    admin_actor(svc, &who)?;
-    if !svc.revoke(&who.discord_id, true).await? {
-        return Err(HttpError::new(404, "该用户没有已领取的 Key。").into());
-    }
-    log_bot(
-        &state,
-        &who.actor_id,
-        "机器人·revoke（撤销 Key、释放名额）",
-        &format!("Discord:{}", who.discord_id),
-        "",
-    )
-    .await;
-    Ok(no_store(ok_json(&json!({"ok": true}))))
-}
-
-async fn slots(State(state): State<AppState>, req: Request) -> ApiResult {
-    let (parts, body) = req.into_parts();
-    let mut m = read_model(&parts, body).await?;
-    let who = Who::read(&mut m);
-    m.finish()?;
-    let svc = authorize(&state, &parts, true)?;
-    checked(svc, &who)?;
-    admin_actor(svc, &who)?;
-    let cfg = svc.settings().await?;
-    Ok(no_store(ok_json(&json!({
-        "active": svc.count_active().await?, "max": cfg.max_users,
-        "open": cfg.open, "reset_at": svc.reset_at(),
-    }))))
 }
 
 /// /register 直发 Key：斜杠命令已验明身份，直接发 Key（不走 OAuth、不私信），临时消息里回给本人。

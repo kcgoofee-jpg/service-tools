@@ -291,9 +291,6 @@ impl RegistrationService {
     pub fn command_guild(&self) -> &str {
         &self.cfg.guild_id
     }
-    pub fn admin_ids(&self) -> &[String] {
-        &self.cfg.admin_ids
-    }
     /// `REGISTER_RESET_AT`（HH:MM，空 = 不每日清空）。
     pub fn reset_at(&self) -> &str {
         &self.cfg.reset_at

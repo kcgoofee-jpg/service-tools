@@ -16,7 +16,6 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
 const GUILD: &str = "900000000000000001";
-const ADMIN: &str = "900000000000000010";
 const MEMBER: &str = "900000000000000005";
 const OTHER: &str = "900000000000000006";
 const SECRET: &str = "contract-secret-contract-secret-0001";
@@ -189,7 +188,6 @@ async fn setup_reg(extra: &[(&str, &str)]) -> (Env, Discord) {
         ("DISCORD_GUILD_ID", GUILD),
         ("SITE_URL", "https://gate.test"),
         ("DISCORD_API_BASE", &base),
-        ("ADMIN_DISCORD_IDS", ADMIN),
         ("REGISTER_RESET_AT", "07:00"),
     ];
     vars.extend_from_slice(extra);
@@ -316,21 +314,22 @@ async fn bridge_checks_body_first_then_secret_then_guild() {
     );
     assert_eq!(wrong.0, 401);
     // 请求体错误先于鉴权（旧版 FastAPI 先校验请求体）：缺字段的 422 用 pydantic 的形状
+    let partial = json!({"discord_id": MEMBER});
     let miss = parse(
-        Call::new("POST", "/self-register/ops")
+        Call::new("POST", "/self-register/quota")
             .bearer("nope")
-            .json(who(ADMIN, ADMIN))
+            .json(partial.clone())
             .send(&e.state)
             .await,
     );
     assert_eq!(miss.0, 422);
     assert_eq!(
         miss.2,
-        json!({"detail": [{"type": "missing", "loc": ["body", "action"], "msg": "Field required",
-                           "input": who(ADMIN, ADMIN)}]})
+        json!({"detail": [{"type": "missing", "loc": ["body", "guild_id"], "msg": "Field required",
+                           "input": partial}]})
     );
     let no_body = parse(
-        Call::new("POST", "/self-register/ops")
+        Call::new("POST", "/self-register/quota")
             .bearer(SECRET)
             .send(&e.state)
             .await,
@@ -339,7 +338,7 @@ async fn bridge_checks_body_first_then_secret_then_guild() {
         no_body.2,
         json!({"detail": [{"type": "missing", "loc": ["body"], "msg": "Field required", "input": null}]})
     );
-    let list = bridge(&e, "/self-register/ops", json!([1])).await;
+    let list = bridge(&e, "/self-register/quota", json!([1])).await;
     assert_eq!(
         list.2,
         json!({"detail": [{"type": "model_attributes_type", "loc": ["body"],
@@ -348,8 +347,8 @@ async fn bridge_checks_body_first_then_secret_then_guild() {
     );
     let num = bridge(
         &e,
-        "/self-register/ops",
-        json!({"discord_id": 5, "guild_id": GUILD, "action": "open"}),
+        "/self-register/quota",
+        json!({"discord_id": 5, "guild_id": GUILD}),
     )
     .await;
     assert_eq!(
@@ -401,235 +400,32 @@ async fn wrong_bridge_secret_counts_toward_auth_block() {
     assert_eq!(e.state.auth_guard.blocked("203.0.113.10", e.state.now()), 0);
 }
 
-// ------------------------------------------------------------------ 桥接：info / ops / slots
+// ------------------------------------------------------------------ 桥接：info / 封禁
 
 #[tokio::test]
-async fn info_ops_slots_match_legacy() {
-    let (e, d) = setup_reg(&[("REGISTER_MAX_USERS", "10")]).await;
+async fn info_has_only_what_the_bot_reads() {
+    let (e, _d) = setup_reg(&[("REGISTER_MAX_USERS", "10")]).await;
     let info = bridge(&e, "/self-register/info", who(MEMBER, MEMBER)).await;
     assert_eq!(info.0, 200);
     assert_eq!(info.1["cache-control"], "no-store");
+    // 名额、默认额度、默认功能、上游状态机器人都不读，已删除（docs/v3-deviations.md #74）
     assert_eq!(
         info.2,
-        json!({"open": false, "active": 0, "max": 10,
-               "default_features": [{"id": "image", "label": "文生图", "on": true}],
-               "daily_images": 30, "daily_v5": 0, "notice": "",
-               "upstream": {"status": "idle", "recent": 0, "failed": 0, "image_cooldown_seconds": 0}})
+        json!({"open": false, "notice": "", "upstream": {"image_cooldown_seconds": 0}})
     );
-    assert_eq!(
-        keys(&info.2),
-        [
-            "open",
-            "active",
-            "max",
-            "default_features",
-            "daily_images",
-            "daily_v5",
-            "notice",
-            "upstream"
-        ]
-    );
-    // 管理命令
-    let adm = who(ADMIN, ADMIN);
-    let op = |a: Value| bridge(&e, "/self-register/ops", merge(adm.clone(), a));
-    assert_eq!(
-        op(json!({"action": "open", "value": "on"})).await.2,
-        json!({"message": "已开放领 Key。"})
-    );
-    assert_eq!(
-        e.state
-            .db
-            .get_setting("register_open")
-            .await
-            .unwrap()
-            .as_deref(),
-        Some("1")
-    );
-    let limit = op(json!({"action": "limit", "value": "5"})).await;
-    assert_eq!(limit.2, json!({"message": "名额上限已设为 5。"}));
-    assert!(
-        limit.1.get("cache-control").is_none(),
-        "ops 回复没有 no-store"
-    );
-    assert_eq!(
-        e.state
-            .db
-            .get_setting("register_max_users")
-            .await
-            .unwrap()
-            .as_deref(),
-        Some("5")
-    );
-    let abc = op(json!({"action": "limit", "value": "abc"})).await;
-    assert_eq!((abc.0, abc.2), (422, json!({"detail": "请输入数字"})));
-    // 旧版对超过 1000 的名额是未捕获的 ValueError（500）；这里回 422 + 原因（见 docs/v3-deviations.md）
-    let big = op(json!({"action": "limit", "value": "5000"})).await;
-    assert_eq!(
-        (big.0, big.2),
-        (422, json!({"detail": "max_users 超出范围 0～1000"}))
-    );
-    let unknown = op(json!({"action": "zzz"})).await;
-    assert_eq!((unknown.0, unknown.2), (422, json!({"detail": "未知操作"})));
-    let no_target = op(json!({"action": "ban"})).await;
-    assert_eq!(
-        (no_target.0, no_target.2),
-        (422, json!({"detail": "缺少目标成员"}))
-    );
-    // 非管理员
-    for (path, extra) in [
-        (
-            "/self-register/ops",
-            json!({"action": "open", "value": "on"}),
-        ),
-        ("/self-register/slots", json!({})),
-        ("/self-register/revoke", json!({})),
-    ] {
-        let r = bridge(&e, path, merge(who(MEMBER, MEMBER), extra)).await;
-        assert_eq!(
-            (r.0, r.2),
-            (403, json!({"detail": "没有管理员权限。"})),
-            "{path}"
-        );
-    }
-    // actor_id 缺省 = 空串，也不是管理员
-    let no_actor = bridge(
-        &e,
-        "/self-register/slots",
-        json!({"discord_id": ADMIN, "guild_id": GUILD}),
-    )
-    .await;
-    assert_eq!(no_actor.0, 403);
-    let slots = bridge(&e, "/self-register/slots", adm.clone()).await;
-    assert_eq!(slots.1["cache-control"], "no-store");
-    assert_eq!(
-        slots.2,
-        json!({"active": 0, "max": 5, "open": true, "reset_at": "07:00"})
-    );
-    assert_eq!(
-        op(json!({"action": "limit", "value": "0"})).await.2,
-        json!({"message": "名额上限已设为 不限。"})
-    );
-    assert_eq!(
-        op(json!({"action": "open", "value": "off"})).await.2,
-        json!({"message": "已关闭领 Key（已领取的人不受影响）。"})
-    );
-    // 操作日志：成功记「机器人·<action>」，失败记失败原因
-    let log: Vec<_> = actions(&e).await.iter().map(action_tuple).collect();
-    let me = format!("Discord:{ADMIN}");
-    assert_eq!(
-        log[0],
-        (
-            me.clone(),
-            "机器人·open".into(),
-            String::new(),
-            "on".into(),
-            1
-        )
-    );
-    assert_eq!(
-        log[1],
-        (
-            me.clone(),
-            "机器人·limit".into(),
-            String::new(),
-            "5".into(),
-            1
-        )
-    );
-    assert_eq!(
-        log[2],
-        (
-            me.clone(),
-            "机器人·limit".into(),
-            String::new(),
-            "失败（422）：请输入数字".into(),
-            0
-        )
-    );
-    assert!(d.seen().is_empty(), "管理命令不碰 Discord");
+    assert_eq!(keys(&info.2), ["open", "notice", "upstream"]);
+    open_registration(&e).await;
+    let open = bridge(&e, "/self-register/info", who(MEMBER, MEMBER)).await;
+    assert_eq!(open.2["open"], true);
 }
 
 #[tokio::test]
-async fn ops_is_denied_for_everyone_when_no_admin_ids_configured() {
-    let (e, _d) = setup_reg(&[("ADMIN_DISCORD_IDS", "")]).await;
-    let r = bridge(
-        &e,
-        "/self-register/ops",
-        merge(who(ADMIN, ADMIN), json!({"action": "open", "value": "on"})),
-    )
-    .await;
-    assert_eq!((r.0, r.2), (403, json!({"detail": "没有管理员权限。"})));
-}
-
-#[tokio::test]
-async fn ops_grant_ban_unban_audit() {
+async fn ban_revokes_the_key_and_blocks_reissue_until_unban() {
+    // 机器人的管理员命令（/ban /unban）已删除（docs/v3-deviations.md #73）：封禁只剩后台和服务方法
     let (e, _d) = setup_reg(&[]).await;
     open_registration(&e).await;
     assert_eq!(issue(&e, MEMBER).await.0, 200);
-    let adm = who(ADMIN, ADMIN);
-    let op = |a: Value| bridge(&e, "/self-register/ops", merge(adm.clone(), a));
-    let grant =
-        op(json!({"action": "grant", "target": MEMBER, "feature": "upscale", "value": "on"})).await;
-    assert_eq!(grant.2, json!({"message": "已开通：放大。"}));
-    let key = e
-        .state
-        .db
-        .key_row_for_discord(MEMBER)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(key["features"], "image,upscale");
-    let off =
-        op(json!({"action": "grant", "target": MEMBER, "feature": "image", "value": "off"})).await;
-    assert_eq!(off.2, json!({"message": "已关闭：文生图。"}));
-    let key = e
-        .state
-        .db
-        .key_row_for_discord(MEMBER)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(key["features"], "upscale");
-    let bad =
-        op(json!({"action": "grant", "target": MEMBER, "feature": "zzz", "value": "on"})).await;
-    assert_eq!(
-        (bad.0, bad.2),
-        (
-            422,
-            json!({"detail": "未知功能：image,upscale,augment,vibe,tags,text,voice"})
-        )
-    );
-    let nobody =
-        op(json!({"action": "grant", "target": OTHER, "feature": "image", "value": "on"})).await;
-    assert_eq!(
-        (nobody.0, nobody.2),
-        (404, json!({"detail": "该成员还没有领取 Key。"}))
-    );
-    // 生成记录开关
-    let on = op(json!({"action": "audit", "value": "on"})).await;
-    assert_eq!(
-        on.2,
-        json!({"message": "已开启生成记录并通知成员。", "prompts": true, "thumbs": true,
-               "retention_days": 7, "image_cap_mb": 8192, "image_keep_hours": 24})
-    );
-    assert_eq!(
-        e.state
-            .db
-            .get_setting("audit_prompts")
-            .await
-            .unwrap()
-            .as_deref(),
-        Some("1")
-    );
-    let off = op(json!({"action": "audit", "value": "0"})).await;
-    assert_eq!(off.2["message"], "已关闭生成记录并通知成员。");
-    assert_eq!(off.2["prompts"], false);
-    // 封禁：撤销 Key、写黑名单；之后领不了；解除后恢复
-    let ban = op(json!({"action": "ban", "target": MEMBER})).await;
-    assert_eq!(
-        ban.2,
-        json!({"message": "已永久禁止该账号领取，并撤销其 Key 与身份组。"})
-    );
+    svc(&e).ban(MEMBER, "", "").await.unwrap();
     assert!(
         e.state
             .db
@@ -649,14 +445,8 @@ async fn ops_grant_ban_unban_audit() {
         (again.0, detail(&again)),
         (403, "这个 Discord 账号已被站长停用，无法领取 Key。")
     );
-    assert_eq!(
-        op(json!({"action": "unban", "target": MEMBER})).await.2,
-        json!({"message": "已解除禁止。"})
-    );
-    assert_eq!(
-        op(json!({"action": "unban", "target": MEMBER})).await.2,
-        json!({"message": "该账号不在禁止名单中。"})
-    );
+    assert!(svc(&e).unban(MEMBER).await.unwrap());
+    assert!(!svc(&e).unban(MEMBER).await.unwrap());
     assert_eq!(issue(&e, MEMBER).await.0, 200);
 }
 
@@ -783,22 +573,10 @@ async fn issue_enforces_capacity_age_hourly_cap_and_expiry_rotation() {
         )
     );
     // 撤销释放名额
-    let revoke = bridge(
-        &e,
-        "/self-register/revoke",
-        merge(who(MEMBER, ADMIN), json!({})),
-    )
-    .await;
-    assert_eq!((revoke.0, revoke.2), (200, json!({"ok": true})));
-    let again = bridge(
-        &e,
-        "/self-register/revoke",
-        merge(who(MEMBER, ADMIN), json!({})),
-    )
-    .await;
-    assert_eq!(
-        (again.0, again.2),
-        (404, json!({"detail": "该用户没有已领取的 Key。"}))
+    assert!(svc(&e).revoke(MEMBER, true).await.unwrap());
+    assert!(
+        !svc(&e).revoke(MEMBER, true).await.unwrap(),
+        "没有 Key 可撤销"
     );
     assert_eq!(issue(&e, OTHER).await.0, 200);
     // Key 过期：释放名额，成员可以重新领
@@ -1156,6 +934,7 @@ async fn quota_and_resetkey_match_legacy() {
             "reset_hour",
             "quiet_now",
             "quiet_window",
+            "quiet_cap",
             "features"
         ]
     );
@@ -1166,7 +945,7 @@ async fn quota_and_resetkey_match_legacy() {
         got,
         json!({"enabled": true, "expires_at": "<ts>", "daily_images": 30, "images": 0, "legacy": 0,
                "anlas": 0, "daily_anlas": 50, "daily_v5": 0, "v5": 0, "image_model_scope": "legacy",
-               "reset_hour": 7, "quiet_now": false, "quiet_window": "",
+               "reset_hour": 7, "quiet_now": false, "quiet_window": "", "quiet_cap": 20,
                "features": [
                    {"id": "image", "label": "文生图", "on": true},
                    {"id": "upscale", "label": "放大", "on": false},
@@ -1253,6 +1032,15 @@ async fn quota_shows_quiet_window_and_member_default_anlas() {
     let q = bridge(&e, "/self-register/quota", who(MEMBER, MEMBER)).await;
     assert_eq!(q.2["quiet_now"], true);
     assert_eq!(q.2["quiet_window"], format!("{start}:00–{end}:00"));
+    // 安静时段上限：默认 20（放慢）；站长设成 0 就是完全暂停，机器人据此选说法（docs/v3-deviations.md #74）
+    assert_eq!(q.2["quiet_cap"], 20);
+    e.state
+        .guard
+        .save(json!({"quiet_hourly_cap": 0}).as_object().unwrap())
+        .await
+        .unwrap();
+    let q = bridge(&e, "/self-register/quota", who(MEMBER, MEMBER)).await;
+    assert_eq!(q.2["quiet_cap"], 0);
     // Key 手动设置的 Anlas 日额度优先于全站默认
     let row = e
         .state
@@ -2588,8 +2376,6 @@ fn obj(v: Value) -> serde_json::Map<String, Value> {
 #[tokio::test]
 async fn registration_settings_ops_match_legacy() {
     let (e, _d) = setup_reg(&[]).await;
-    let adm = who(ADMIN, ADMIN);
-    let op = |a: Value| bridge(&e, "/self-register/ops", merge(adm.clone(), a));
     e.state.db.set_setting("register_open", "1").await.unwrap();
     e.state
         .db
@@ -2601,15 +2387,26 @@ async fn registration_settings_ops_match_legacy() {
         .set_setting("register_daily_v5", "3")
         .await
         .unwrap();
-    // 名额 × 每人 V5 超过全站 V5 日限（150）：回复里带提醒
+    // 名额 × 每人 V5 超过全站 V5 日限（150）：后台设置页带提醒（机器人的 /limit 命令已删除，docs/v3-deviations.md #73）
+    let cap_after = |max_users: i64| {
+        let st = e.state.clone();
+        async move {
+            gate_server::ops::set_registration(
+                &st,
+                &obj(json!({"max_users": max_users, "notify": false})),
+            )
+            .await
+            .unwrap();
+            gate_server::ops::v5_capacity(&st).await.unwrap()
+        }
+    };
+    let cap = cap_after(60).await;
+    assert_eq!(cap["short"], true);
     assert_eq!(
-        op(json!({"action": "limit", "value": "60"})).await.2,
-        json!({"message": "名额上限已设为 60。\n⚠ 名额 60 × 每人 V5 3 = 180 张/天，超过全站 V5 日限 150：先用的人用满后，后面的人当天没有 V5。建议把全站 V5 调到 180，或降低每人 V5。（全站 V5 在网页后台「设置」修改）"})
+        cap["message"],
+        "名额 60 × 每人 V5 3 = 180 张/天，超过全站 V5 日限 150：先用的人用满后，后面的人当天没有 V5。建议把全站 V5 调到 180，或降低每人 V5。"
     );
-    assert_eq!(
-        op(json!({"action": "limit", "value": "50"})).await.2,
-        json!({"message": "名额上限已设为 50。"})
-    );
+    assert_eq!(cap_after(50).await["short"], false);
     // 校验（旧版抛 ValueError，消息原样）
     let set = |b: Value| {
         let st = e.state.clone();
