@@ -268,7 +268,6 @@ async fn server_status(State(state): State<AppState>, _s: AdminSession) -> ApiRe
             "prompts": prompts,
             "thumbs": thumbs,
             "retention_days": days,
-            "image_retention_days": crate::audit::audit_image_days(&state.db).await?,
             "image_cap_mb": crate::audit::audit_image_cap_mb(&state.db).await?,
             "image_bytes": state.db.audit_image_bytes().await?,
             "image_keep_hours": crate::audit::audit_image_keep_hours(&state.db).await?,

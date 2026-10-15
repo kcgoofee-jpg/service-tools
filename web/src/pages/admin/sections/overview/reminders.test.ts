@@ -51,7 +51,6 @@ const status = (p: Partial<StatusResp> = {}): StatusResp => ({
     prompts: false,
     thumbs: false,
     retention_days: 7,
-    image_retention_days: 0,
     image_cap_mb: 0,
     image_bytes: 0,
     image_keep_hours: 0,

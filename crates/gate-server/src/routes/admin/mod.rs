@@ -100,7 +100,6 @@ async fn target_of(state: &AppState, template: &str, path: &str) -> String {
     }
     let tail: &[(&str, &str)] = &[
         ("/modules/run", "全部模块"),
-        ("/discord-bot", "Discord 机器人设置"),
         ("/announcement", "站点公告"),
         ("/password", "后台登录密码"),
     ];

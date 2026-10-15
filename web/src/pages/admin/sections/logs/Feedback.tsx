@@ -1,27 +1,28 @@
-/** 成员反馈：Discord /反馈 弹窗收集的 5 道单选题。汇总数字 + 明细表，可搜索、按评价筛选、导出 CSV。 */
+/** 成员反馈：Discord /反馈 弹窗收集的一段话。一条一行：时间 · 成员 · 内容，可按成员或内容搜索、导出 CSV。 */
 import { Download } from "lucide-preact";
 import { useState } from "preact/hooks";
 import { fullTime } from "../../../../lib/format";
-import { Badge, Button, Skeleton } from "../../../../ui";
+import { Button, Skeleton } from "../../../../ui";
 import { useAdmin } from "../../Admin";
-import { LoadError, Stat } from "../_kit";
+import { LoadError } from "../_kit";
 import { downloadFile, Empty, NARROW, TableScroll, useDebounced, useMedia } from "../members/shared";
-import { feedbackStats, filterFeedback, type ScoreFilter, scoreTone } from "./feedbackStats";
-import { useQueryState } from "./query";
+import { filterFeedback, splitTail } from "./feedbackStats";
 import type { FeedbackItem, FeedbackResp } from "./types";
 
 const PAGE = 50;
 
-function Answer(props: { q: string; v: string | undefined }) {
-  const { q, v } = props;
-  if (!v) return <span class="muted">—</span>;
-  if (q === "score") {
-    const tone = scoreTone(v);
-    return <Badge {...(tone ? { tone } : {})}>{v}</Badge>;
-  }
-  if (q === "pain" && v === "出图失败或报错") return <Badge tone="danger">{v}</Badge>;
-  if (q === "pain" && v.startsWith("排队太久")) return <Badge tone="warn">{v}</Badge>;
-  return <>{v}</>;
+/** 内容：成员写的话（保留换行）；旧版选择题的记录是一行摘要，用弱化色；什么都没有显示「—」。
+ * 末尾 4 个字绑在一起不折行：不管成员写多长，最后一行都不会只剩一两个字（排版硬规则，见 e2e/layout.spec.ts）。 */
+function Text(props: { it: FeedbackItem }) {
+  const { it } = props;
+  if (!it.text) return <span class="muted">—</span>;
+  const [head, tail] = splitTail(it.text, 4);
+  return (
+    <div class={it.legacy ? "lg-fbtext muted" : "lg-fbtext"}>
+      {head}
+      {tail && <span class="lg-fbtail">{tail}</span>}
+    </div>
+  );
 }
 
 function Who(props: { it: FeedbackItem }) {
@@ -37,10 +38,8 @@ function Who(props: { it: FeedbackItem }) {
 }
 
 export function Feedback() {
-  const { query, set } = useQueryState();
   const narrow = useMedia(NARROW);
   const { data, error } = useAdmin<FeedbackResp>("/admin/api/feedback");
-  const score: ScoreFilter = query.score === "good" || query.score === "bad" ? query.score : "";
   const [search, setSearch] = useState("");
   const dq = useDebounced(search, 200);
   const [limit, setLimit] = useState(PAGE);
@@ -50,52 +49,21 @@ export function Feedback() {
   if (!data) return <Skeleton h="240px" />;
 
   const items = data.items ?? [];
-  const qs = data.questions ?? [];
-  const s = feedbackStats(items);
-  const rows = filterFeedback(items, score, dq);
+  const rows = filterFeedback(items, dq);
   const shown = rows.slice(0, limit);
 
   return (
     <div class="stack">
-      {s.total > 0 && (
-        <div class="stats">
-          <Stat label="问卷总数" value={s.total} hint="全部历史提交" />
-          <Stat
-            label="好评满意率"
-            value={`${s.satRate}%`}
-            hint={`${s.satisfied}/${s.total} 人选了「非常满意」或「满意」`}
-          />
-          <Stat
-            label="主要困扰 Top 1"
-            value={<span class="lg-statv">{s.topPain ? s.topPain[0] : "暂无"}</span>}
-            hint={s.topPain ? `${s.topPain[1]} 人提到` : ""}
-          />
-          <Stat
-            label="优先期望 Top 1"
-            value={<span class="lg-statv">{s.topWish ? s.topWish[0] : "暂无"}</span>}
-            hint={s.topWish ? `${s.topWish[1]} 人希望` : ""}
-          />
-        </div>
-      )}
-
       <div class="xa-toolbar">
         <label class="field-inline">
           <span class="field-inline__k">搜索</span>
           <input
             class="input"
             type="search"
-            placeholder="成员或选项"
+            placeholder="成员或内容"
             value={search}
             onInput={(e) => setSearch(e.currentTarget.value)}
           />
-        </label>
-        <label class="field-inline">
-          <span class="field-inline__k">评价</span>
-          <select class="select" value={score} onChange={(e) => set({ score: e.currentTarget.value })}>
-            <option value="">全部评价</option>
-            <option value="good">满意 / 好评</option>
-            <option value="bad">一般 / 不满</option>
-          </select>
         </label>
         <span class="spacer" />
         <Button
@@ -115,7 +83,7 @@ export function Feedback() {
       <div class="card lg-listcard">
         {rows.length === 0 ? (
           <Empty title={items.length ? "未找到符合条件的反馈" : "还没有反馈"}>
-            {items.length ? "换个关键字或评价试试。" : "成员在 Discord 里用 /反馈 提交后会出现在这里。"}
+            {items.length ? "换个关键字试试。" : "成员在 Discord 里用 /反馈 写几句话后会出现在这里。"}
           </Empty>
         ) : narrow ? (
           <ul class="lg-cards" aria-label="成员反馈">
@@ -127,16 +95,7 @@ export function Feedback() {
                   </b>
                   <span class="small muted">{fullTime(it.ts)}</span>
                 </div>
-                <dl class="lg-qa">
-                  {qs.map((q) => (
-                    <div key={q.id}>
-                      <dt class="small muted">{q.label}</dt>
-                      <dd>
-                        <Answer q={q.id} v={it.answers?.[q.id]} />
-                      </dd>
-                    </div>
-                  ))}
-                </dl>
+                <Text it={it} />
               </li>
             ))}
           </ul>
@@ -148,11 +107,7 @@ export function Feedback() {
                 <tr>
                   <th scope="col">时间</th>
                   <th scope="col">成员</th>
-                  {qs.map((q) => (
-                    <th scope="col" key={q.id}>
-                      {q.label}
-                    </th>
-                  ))}
+                  <th scope="col">内容</th>
                 </tr>
               </thead>
               <tbody>
@@ -162,11 +117,9 @@ export function Feedback() {
                     <td>
                       <Who it={it} />
                     </td>
-                    {qs.map((q) => (
-                      <td key={q.id} class="lg-ans">
-                        <Answer q={q.id} v={it.answers?.[q.id]} />
-                      </td>
-                    ))}
+                    <td class="lg-fbcell">
+                      <Text it={it} />
+                    </td>
                   </tr>
                 ))}
               </tbody>

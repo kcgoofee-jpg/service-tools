@@ -173,7 +173,6 @@ pub struct Log1 {
     pub images: i64,
     pub wait_ms: i64,
     pub reason: &'static str,
-    pub client: &'static str,
     pub up_status: i64,
     pub detail: &'static str,
     pub model: &'static str,
@@ -189,7 +188,6 @@ impl Log1 {
             images: 1,
             wait_ms: 0,
             reason: "",
-            client: "",
             up_status: 200,
             detail: "",
             model: "",
@@ -199,9 +197,9 @@ impl Log1 {
 
 pub fn add_log(c: &Connection, l: &Log1) {
     c.execute(
-        "INSERT INTO usage_log(ts, key_id, key_name, kind, model, status, images, wait_ms, reason, client, up_status, detail) \
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-        rusqlite::params![l.ts, l.key_id, "synthetic", l.kind, l.model, l.status, l.images, l.wait_ms, l.reason, l.client, l.up_status, l.detail],
+        "INSERT INTO usage_log(ts, key_id, key_name, kind, model, status, images, wait_ms, reason, up_status, detail) \
+         VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        rusqlite::params![l.ts, l.key_id, "synthetic", l.kind, l.model, l.status, l.images, l.wait_ms, l.reason, l.up_status, l.detail],
     )
     .unwrap();
 }

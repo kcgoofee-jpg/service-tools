@@ -1,4 +1,4 @@
-/** 生成记录：是否记录提示词 / 保存原图、保留时长与容量上限、成员打包下载。 */
+/** 生成记录：是否记录提示词 / 保存原图、保留时长与容量上限。 */
 import { useMemo, useState } from "preact/hooks";
 import { Card, Meter } from "../../../../ui";
 import { act } from "../../Admin";
@@ -21,7 +21,7 @@ export default function AuditCard(props: { ops: Ops }) {
   };
   const usedMb = a.image_bytes / 1048576;
   return (
-    <Card title="生成记录" sub="用来排查问题和找回误删的图。提示词和原图分开设置；清空原图在「系统」页。">
+    <Card title="生成记录" sub="用来防滥用和排查问题。提示词和原图分开设置；清空原图在「系统」页。">
       <form {...form.formProps} onSubmit={(e) => e.preventDefault()}>
         <SwitchRow
           title="记录提示词"
@@ -33,12 +33,6 @@ export default function AuditCard(props: { ops: Ops }) {
           desc="到保存时长就删，另外超过容量上限时删最旧的"
           checked={form.raw("thumbs") === true}
           onChange={(v) => form.set("thumbs", v)}
-        />
-        <SwitchRow
-          title="成员打包下载原图"
-          desc="开了以后，成员在首页能打包自己最近的原图（受保存时长限制），用来找回误删的图"
-          checked={form.raw("member_download") === true}
-          onChange={(v) => form.set("member_download", v)}
         />
         <div class="form-grid" style={{ marginTop: "var(--sp-4)" }}>
           <NumField form={form} name="image_keep_hours" />

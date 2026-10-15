@@ -159,7 +159,7 @@ async fn member_page_aggregates() {
         ),
     )
     .await;
-    assert_eq!(db.share_pause_rows().await.unwrap(), [(a, 5.0)]);
+    assert_eq!(db.pause_rows().await.unwrap(), [(a, 5.0)]);
     assert_eq!(
         db.counter_rows("2026-09-22").await.unwrap(),
         [(a, 3, 2, 1.5, 7, 4)]
@@ -238,7 +238,7 @@ async fn reset_all_keys_spares_admins_and_invites() {
         !tags.contains(&(999, "孤儿".into())),
         "没有对应 Key 的孤儿标签也清掉（旧版如此）"
     );
-    assert!(db.share_pause_rows().await.unwrap().is_empty());
+    assert!(db.pause_rows().await.unwrap().is_empty());
     // 再来一次：没有可失效的了（已经失效的算在内——UPDATE 命中的行数）
     assert_eq!(db.reset_all_keys().await.unwrap(), (1, 1));
 }
@@ -301,38 +301,6 @@ async fn action_log_filters() {
 }
 
 #[tokio::test]
-async fn client_export_rows() {
-    let (db, _d) = open().await;
-    let a = key(&db, "甲").await;
-    sql(
-        &db,
-        &format!(
-            "             INSERT INTO discord_registrations(discord_id, key_id, created_at, username, display_name) VALUES ('9', {a}, 1.0, 'u', '甲');\
-             INSERT INTO key_tags(key_id, tag, note, by, ts) VALUES ({a}, '观察', '备注', '站长', 1.0);\
-             INSERT INTO usage_log(ts, key_id, key_name, kind, model, status, images, anlas, wait_ms, dur_ms, up_status, client, detail, reason, rid) VALUES \
-               (10.0, {a}, '甲', 'image', 'm', 'ok', 2, 0.0, 1, 2, 200, 'ua', '', '', 'r1'), (3.0, NULL, '', 'image', 'm', 'rejected', 0, 0.0, 0, 0, 0, '', 'd', 'key_invalid', '');"
-        ),
-    )
-    .await;
-    let d = db.client_export_data(5.0).await.unwrap();
-    assert_eq!(d.keys.len(), 1);
-    assert_eq!(d.keys[0][..2], [json!(a), json!("甲")]);
-    assert_eq!(d.keys[0][5], 1, "quota_auto");
-    assert_eq!(
-        d.registrations,
-        [vec![json!(a), json!("9"), json!("u"), json!("甲")]]
-    );
-    assert_eq!(d.usage.len(), 1, "since 之前的不要");
-    assert_eq!(
-        d.usage[0][..4],
-        [json!(10.0), json!(a), json!("甲"), json!("image")]
-    );
-    assert_eq!(d.usage[0][7], json!(0.0), "REAL 列保持浮点");
-    assert_eq!(d.tags, [(a, "观察".to_string(), "备注".to_string())]);
-    assert_eq!(db.client_export_data(0.0).await.unwrap().usage.len(), 2);
-}
-
-#[tokio::test]
 async fn audit_queries_bind_the_key_id_as_text_like_the_old_gateway() {
     let (db, _d) = open().await;
     let a = key(&db, "甲 乙").await;
@@ -383,6 +351,4 @@ async fn audit_queries_bind_the_key_id_as_text_like_the_old_gateway() {
             .unwrap()
             .is_empty()
     );
-    // 整数版本不变
-    assert_eq!(db.audit_images_for(a, 0, 0.0).await.unwrap().len(), 1);
 }

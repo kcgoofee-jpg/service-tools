@@ -62,6 +62,7 @@ describe("自动驾驶", () => {
     expect(autopilotValue("slots", 15)).toBe("名额上限 → 15");
     expect(autopilotValue("breaker", false)).toBe("正常");
     expect(autopilotValue("key_guard", [{ name: "小明", action: "pause" }])).toBe("小明：暂停");
-    expect(autopilotValue("alt_link", [])).toBe("无");
+    expect(autopilotValue("key_guard", [])).toBe("无");
+    expect(autopilotValue("key_guard", [{ name: "甲" }, { name: "乙" }])).toBe("甲：暂停；乙：暂停");
   });
 });

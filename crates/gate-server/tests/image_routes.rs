@@ -87,6 +87,40 @@ async fn generate_image_ok_records_usage() {
     assert_eq!((c.images, c.legacy_free_images), (1, 1));
 }
 
+/// 不识别客户端、不记设备（docs/v3-deviations.md #50）：不管 User-Agent、启动器请求头还是请求体长什么样，
+/// 用量日志的 client 列都是空串，后台日志接口也不返回这个字段。
+#[tokio::test]
+async fn usage_log_never_records_a_client() {
+    let e = setup(&[]).await;
+    let mut body = image_body("nai-diffusion-4-5-full", 1);
+    body["parameters"]["ucPresetId"] = json!(1);
+    let req = Request::builder()
+        .method("POST")
+        .uri("/ai/generate-image")
+        .header("authorization", format!("Bearer {TOKEN}"))
+        .header("content-type", "application/json")
+        .header("user-agent", "DSH-Tavern-Image/1.2 (Windows NT 10.0)")
+        .header("x-correlation-id", "synthetic")
+        .header("x-initiated-at", "1")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+    let resp = gate_server::app(e.state.clone())
+        .oneshot(req)
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let rows = logs(&e.state).await;
+    assert_eq!(rows.len(), 1);
+    assert!(rows[0].get("client").is_none(), "{}", rows[0]);
+    let stored = e
+        .state
+        .db
+        .execute_fetchall_compat("SELECT client FROM usage_log", &[])
+        .await
+        .unwrap();
+    assert_eq!(stored, [json!({"client": ""})]);
+}
+
 #[tokio::test]
 async fn auth_errors_have_novelai_shape() {
     let e = setup(&[]).await;
@@ -181,6 +215,55 @@ async fn disabled_key_message_depends_on_reason() {
         msg(&body).ends_with("该 Key 已被站长停用，有疑问请联系站长。"),
         "{}",
         msg(&body)
+    );
+    assert!(e.mock.requests().is_empty());
+}
+
+/// 被临时暂停的 Key：没写原因时只说「已被临时暂停，到点自动恢复」（防分享体系已删，不再提「异常多地使用」）；
+/// 写了原因（自动驾驶的限流）就用原因。
+#[tokio::test]
+async fn paused_key_message_without_reason_is_neutral() {
+    let e = setup(&[]).await;
+    let msg = |body: &[u8]| -> String {
+        let v: Value = serde_json::from_slice(body).unwrap();
+        v["error"]["message"]
+            .as_str()
+            .or(v["message"].as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+    let request = || {
+        call(
+            &e.state,
+            "POST",
+            "/ai/generate-image",
+            Some(TOKEN),
+            Some(image_body("x", 1)),
+        )
+    };
+    let until = e.state.now() + 600.0;
+
+    e.state.pauses.set(1, until, String::new());
+    let (status, _, body) = request().await;
+    assert_eq!(status, 403);
+    let m = msg(&body);
+    assert!(
+        m.contains("这把 Key 已被临时暂停，") && m.ends_with(" 自动恢复。"),
+        "{m}"
+    );
+    assert!(!m.contains("多地") && !m.contains("仅限本人"), "{m}");
+
+    e.state.pauses.set(
+        1,
+        until,
+        "你的 Key 短时间内被大量拒绝，已暂停 1 小时".into(),
+    );
+    let (status, _, body) = request().await;
+    assert_eq!(status, 403);
+    let m = msg(&body);
+    assert!(
+        m.contains("你的 Key 短时间内被大量拒绝，已暂停 1 小时，") && m.ends_with(" 自动恢复。"),
+        "{m}"
     );
     assert!(e.mock.requests().is_empty());
 }
@@ -369,7 +452,8 @@ async fn generation_audit_records_prompt_and_image() {
     .await;
     assert_eq!(status, 200);
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    assert_eq!(e.state.db.audit_image_count(1, 0.0).await.unwrap(), 1);
+    let (_, total) = e.state.db.list_audit(10, 0, Some(1)).await.unwrap();
+    assert_eq!(total, 1);
     assert!(e.state.db.audit_image_bytes().await.unwrap() > 0);
 }
 

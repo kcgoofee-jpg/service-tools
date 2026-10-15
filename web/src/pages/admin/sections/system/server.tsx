@@ -13,7 +13,6 @@ export type ServerStatus = {
     prompts: boolean;
     thumbs: boolean;
     retention_days: number;
-    image_retention_days: number;
     image_cap_mb: number;
     image_bytes: number;
     image_keep_hours: number;
@@ -167,7 +166,6 @@ export function StorageCard() {
                 ? `保存中（${a.image_keep_hours > 0 ? `保存 ${a.image_keep_hours} 小时` : "不按时间删"}，超出容量上限时删最旧的）`
                 : "不保存",
             ],
-            ["成员下载原图", a.image_retention_days > 0 ? "开" : "关"],
           ]}
         />
         {a.image_cap_mb > 0 ? (
@@ -209,7 +207,7 @@ export function StorageCard() {
       >
         <Notice tone="danger">
           将删除服务器上的全部原图（当前占用 {bytesText(a.image_bytes)}
-          ），成员也就打包不到了，且无法恢复。提示词和参数保留。
+          ），且无法恢复。提示词和参数保留。
         </Notice>
       </ConfirmDialog>
     </Card>

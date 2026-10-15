@@ -13,7 +13,7 @@ use axum::Router;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::post;
 use gate_discord::bridge::{Bridge, BridgeError, who_payload};
 use gate_discord::events::Interaction;
 use gate_discord::handlers::{self, Backend};
@@ -215,43 +215,23 @@ async fn issue(State(s): State<Shared>, h: HeaderMap, Json(body): Json<Value>) -
     Json(json!({"message": "领取成功！你的 Key：nai-contract", "key_id": 7})).into_response()
 }
 
-async fn feedback_questions(
-    State(s): State<Shared>,
-    h: HeaderMap,
-    Json(body): Json<Value>,
-) -> Response {
-    gate!(s, "POST", "/self-register/feedback/questions", h, body);
-    Json(json!({"questions": [
-        {"id": "score", "label": "整体用下来感觉怎么样？", "options": ["非常满意", "满意"]},
-        {"id": "freq", "label": "你多久用一次公益站？", "options": ["每天都用", "偶尔用"]},
-    ]}))
-    .into_response()
-}
-
+/// `/self-register/feedback`（docs/v3-deviations.md #52）：一段文字，去掉首尾空白后不到 2 个字回 400「写点什么再提交吧～」。
 async fn feedback(State(s): State<Shared>, h: HeaderMap, Json(body): Json<Value>) -> Response {
     gate!(s, "POST", "/self-register/feedback", h, body);
     if let Err(r) = checked(&body) {
         return r;
     }
-    let answers = body.get("answers").and_then(Value::as_object);
-    if answers
-        .is_none_or(|a| a.len() < 2 || a.values().any(|v| v.as_str().is_none_or(str::is_empty)))
-    {
-        return detail(400, "有题目没选，请重新打开 /反馈 选完再提交。");
+    let text = body.get("text").and_then(Value::as_str).unwrap_or("");
+    if text.trim().chars().count() < 2 {
+        return detail(400, "写点什么再提交吧～");
     }
     Json(json!({"message": "收到啦，谢谢你的反馈～奶妹会转给站长 ✨"})).into_response()
 }
 
-async fn bot_config(State(s): State<Shared>, h: HeaderMap) -> Response {
-    gate!(s, "GET", "/self-register/bot/config", h, Value::Null);
-    Json(json!({"gallery_forum": "跑图分享", "gallery_like": 0, "gallery_ai": 0, "gallery_ai_daily": 30,
-                "gallery_ai_model": "LongCat-2.5-Preview"}))
-    .into_response()
-}
-
+/// 心跳。3.0 起只有 `status`（`event` 和 `/self-register/bot/config` 随跑图分享设置一起删了：docs/v3-deviations.md #54）。
 async fn bot_report(State(s): State<Shared>, h: HeaderMap, Json(body): Json<Value>) -> Response {
     gate!(s, "POST", "/self-register/bot/report", h, body);
-    // BotReport：status / event 都可选
+    // BotReport：status 可选
     Json(json!({"ok": true})).into_response()
 }
 
@@ -266,11 +246,6 @@ async fn gateway() -> (Bridge, Shared, String) {
         .route("/self-register/ops", post(ops))
         .route("/self-register/issue", post(issue))
         .route("/self-register/feedback", post(feedback))
-        .route(
-            "/self-register/feedback/questions",
-            post(feedback_questions),
-        )
-        .route("/self-register/bot/config", get(bot_config))
         .route("/self-register/bot/report", post(bot_report))
         .with_state(seen.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -485,39 +460,23 @@ async fn register_issue_contract() {
 #[tokio::test]
 async fn feedback_contract() {
     let (bridge, seen, _) = gateway().await;
-    let payload = who_payload(&interaction(MEMBER, GUILD), None, &[]).unwrap();
-    let q = bridge
-        .command("/self-register/feedback/questions", &payload)
-        .await
-        .unwrap();
-    assert!(q.is_ok());
-    let questions = handlers::parse_questions(&q.data).unwrap();
-    assert_eq!(questions.len(), 2);
-    assert_eq!(questions[0].options, ["非常满意", "满意"]);
-
-    // 答案缺一题 → 网关 400 + 中文原因，机器人原样转述
-    let partial = call(
+    // 太短 → 网关 400 + 中文原因，机器人原样转述
+    let short = call(
         &bridge,
         "/self-register/feedback",
         MEMBER,
         None,
-        &[
-            ("answers", json!({"score": "满意", "freq": ""})),
-            ("username", json!("alice")),
-        ],
+        &[("text", json!(" 好 ")), ("username", json!("alice"))],
     )
     .await;
-    assert_eq!(
-        handlers::feedback_receipt(&partial),
-        "有题目没选，请重新打开 /反馈 选完再提交。"
-    );
+    assert_eq!(handlers::feedback_receipt(&short), "写点什么再提交吧～");
     let full = call(
         &bridge,
         "/self-register/feedback",
         MEMBER,
         None,
         &[
-            ("answers", json!({"score": "满意", "freq": "偶尔用"})),
+            ("text", json!("排队有点久，希望快一点")),
             ("username", json!("alice")),
         ],
     )
@@ -528,26 +487,27 @@ async fn feedback_contract() {
     );
 
     let seen = seen.lock().unwrap();
+    // 不再向网关要题目
+    assert!(
+        seen.requests
+            .iter()
+            .all(|(_, p, _)| p == "/self-register/feedback")
+    );
     let (_, _, body) = seen
         .requests
         .iter()
         .rfind(|(_, p, _)| p == "/self-register/feedback")
         .unwrap();
     assert_eq!(body["username"], "alice");
-    assert_eq!(body["answers"], json!({"score": "满意", "freq": "偶尔用"}));
+    assert_eq!(body["text"], "排队有点久，希望快一点");
+    assert!(body.get("answers").is_none());
 }
 
 #[tokio::test]
 async fn bot_endpoints_contract() {
     let (bridge, seen, _) = gateway().await;
-    let cfg = bridge
-        .bot(reqwest::Method::GET, "/config", None)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(cfg["gallery_like"], 0);
-    let status = json!({"status": {"user": "naimei", "guild": "测试服", "latency_ms": 42, "ready_at": 1.5,
-                                   "ai_ready": false, "ai_today": 0}});
+    let status =
+        json!({"status": {"user": "naimei", "guild": "测试服", "latency_ms": 42, "ready_at": 1.5}});
     let ack = bridge
         .bot(reqwest::Method::POST, "/report", Some(&status))
         .await
@@ -556,16 +516,11 @@ async fn bot_endpoints_contract() {
     assert_eq!(ack, json!({"ok": true}));
 
     let seen = seen.lock().unwrap();
+    assert_eq!(seen.requests.len(), 1, "机器人只报心跳，不再拉配置");
     assert_eq!(
         seen.requests[0],
-        (
-            "GET".into(),
-            "/self-register/bot/config".into(),
-            Value::Null
-        )
+        ("POST".into(), "/self-register/bot/report".into(), status)
     );
-    assert_eq!(seen.requests[1].0, "POST");
-    assert_eq!(seen.requests[1].2, status);
 }
 
 #[tokio::test]
@@ -578,7 +533,9 @@ async fn missing_secret_sends_nothing_and_errors() {
         Err(BridgeError::NoSecret)
     ));
     assert!(matches!(
-        bridge.bot(reqwest::Method::GET, "/config", None).await,
+        bridge
+            .bot(reqwest::Method::POST, "/report", Some(&json!({})))
+            .await,
         Err(BridgeError::NoSecret)
     ));
     assert!(seen.lock().unwrap().requests.is_empty());
@@ -597,7 +554,7 @@ async fn unreachable_or_hanging_gateway_degrades_like_python() {
     );
     assert_eq!(down.issue(SECRET, &json!({})).await, None);
     assert_eq!(
-        down.bot(reqwest::Method::GET, "/config", None)
+        down.bot(reqwest::Method::POST, "/report", Some(&json!({})))
             .await
             .unwrap(),
         None

@@ -7,81 +7,10 @@ export type BotStatus = {
   guild?: string;
   latency_ms?: number | null;
   ready_at?: number;
-  ai_ready?: boolean;
-  ai_today?: number;
   version?: string;
   seen_at?: number;
 };
-export type BotEvent = {
-  at: number;
-  kind: string;
-  title: string;
-  author: string;
-  detail: string;
-  url: string;
-};
-export type BotData = {
-  config: {
-    gallery_forum: string;
-    gallery_like: number;
-    gallery_ai: number;
-    gallery_ai_daily: number;
-    gallery_ai_model: string;
-  };
-  status: BotStatus;
-  events: BotEvent[];
-  kinds: Record<string, string>;
-};
-
-export const BOT_SPECS: Record<string, FieldSpec> = {
-  gallery_like: { kind: "bool", label: "新帖自动点赞" },
-  gallery_ai: { kind: "bool", label: "看图写评论" },
-  gallery_forum: {
-    kind: "text",
-    label: "论坛频道名包含",
-    min: 1,
-    max: 50,
-    hint: "名字里含这几个字的论坛频道才会被监听",
-  },
-  gallery_ai_daily: {
-    kind: "int",
-    label: "AI 评论每天最多",
-    min: 0,
-    max: 500,
-    unit: "条",
-    hint: "超出后只点赞不评论；0 = 不评论",
-  },
-  gallery_ai_model: { kind: "text", label: "模型标识", min: 1, max: 80, hint: "例如 LongCat-2.5-Preview" },
-};
-const BOOL_FIELDS = new Set(["gallery_like", "gallery_ai"]);
-
-/** 表单改动 → 接口请求体（开关在接口里是 0 / 1） */
-export function botBody(changes: Record<string, number | string | boolean>): Record<string, number | string> {
-  const out: Record<string, number | string> = {};
-  for (const [k, v] of Object.entries(changes))
-    out[k] = BOOL_FIELDS.has(k) ? Number(v) : (v as number | string);
-  return out;
-}
-
-export const EVENT_TONE: Record<string, "ok" | "warn" | "danger" | undefined> = {
-  like: undefined,
-  comment: "ok",
-  shy: "warn",
-  skip: undefined,
-  error: "danger",
-};
-
-/** 只允许 Discord 官方域名的链接（接口里的 url 来自机器人上报，不能当可信链接直接放进 href） */
-export function safeDiscordUrl(url: string): string | null {
-  try {
-    const u = new URL(url);
-    return u.protocol === "https:" && (u.hostname === "discord.com" || u.hostname.endsWith(".discord.com"))
-      ? u.href
-      : null;
-  } catch {
-    return null;
-  }
-}
+export type BotData = { status: BotStatus };
 
 /** Discord 头像只接受官方 CDN */
 export function safeAvatar(url: string | null | undefined): string | null {

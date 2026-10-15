@@ -24,7 +24,6 @@ use reqwest::Method;
 use serde_json::{Value, json};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
-use std::sync::atomic::AtomicI64;
 use std::time::Duration;
 
 /// 开启时也限速：10 分钟最多 3 条、24 小时最多 20 条。
@@ -1237,27 +1236,11 @@ pub fn configured_service(env: &EnvConfig, db: Db) -> Option<RegistrationService
 
 // ------------------------------------------------------------------ 成员网页的进程内状态
 
-/// 成员网页接口的进程内限流状态（重启清零）：捐赠 Key 提交、原图打包。
+/// 成员网页接口的进程内限流状态（重启清零）：捐赠 Key 提交。
+#[derive(Default)]
 pub struct MemberWeb {
     /// 每 IP 每小时最多 5 次捐赠提交。
     pub donate_hits: Mutex<HashMap<String, Vec<f64>>>,
-    /// 每人上次打包时间：打包较重，限 1 次 / 60 秒。
-    pub export_at: Mutex<HashMap<String, f64>>,
-    /// 全站同时只打包 1 份：2GB 内存的机器，两个人同时打包几百 MB 原图会被撑爆（审查 F3）。
-    pub export_lock: tokio::sync::Mutex<()>,
-    /// 单次打包的原图总字节上限（默认 200 MB；字段是为了让测试能调小，线上不改）。
-    pub export_max_bytes: AtomicI64,
-}
-
-impl Default for MemberWeb {
-    fn default() -> Self {
-        Self {
-            donate_hits: Mutex::default(),
-            export_at: Mutex::default(),
-            export_lock: tokio::sync::Mutex::new(()),
-            export_max_bytes: AtomicI64::new(crate::routes::EXPORT_MAX_BYTES),
-        }
-    }
 }
 
 // ------------------------------------------------------------------ 后台任务（由任务调度方安排）

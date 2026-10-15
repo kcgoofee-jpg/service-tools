@@ -6,6 +6,8 @@
 //!
 //! 时间是进程级冻结的，所以这个文件里只放这一个测试（独占一个测试进程）。
 //! 不比的东西：`api_keys.anlas_auto` / `v5_pinned` 两列（3.0 已删除功能，见 docs/v3-deviations.md）、
+//! 客户端 / 设备识别的痕迹（用量日志每行的 `client`、成员页的 `last_client`、导出 zip 里的 `user_agent` /
+//! `client_kinds` 两列：docs/v3-deviations.md #50）、
 //! 新建 Key 的随机串（统一成 nai-<rand>）、缩略图字节（编码器不同，只比是不是 JPEG）。
 
 mod admin_util;
@@ -209,15 +211,30 @@ fn drop_rust_added_error_fields(text: &str) -> String {
     v.to_string()
 }
 
-/// 旧版成员页里 3.0 已删除功能的字段（自动分配 Anlas、V5 基础值）：新版不再返回，比较时从旧版结果里去掉。
+/// 旧版成员页里 3.0 已删除功能的字段（自动分配 Anlas、V5 基础值、最近一次的客户端）：新版不再返回，比较时从旧版结果里去掉。
 fn drop_deleted_member_fields(text: &str) -> String {
     let mut v: Value = serde_json::from_str(text).expect("旧版成员页是 JSON");
     if let Some(members) = v["members"].as_array_mut() {
         for m in members {
             if let Some(o) = m.as_object_mut() {
-                for k in ["anlas_auto", "anlas_mode", "v5_pinned"] {
+                // last_client：3.0 删除了客户端 / 设备识别（docs/v3-deviations.md #50）
+                for k in ["anlas_auto", "anlas_mode", "v5_pinned", "last_client"] {
                     o.shift_remove(k);
                 }
+            }
+        }
+    }
+    v.to_string()
+}
+
+/// 旧版用量日志列表每行的 `client`（UA 摘要）：3.0 不再记录也不再返回（docs/v3-deviations.md #50），
+/// 比较时从旧版结果里去掉；与成员页一样经 serde 重新序列化后比结构、键顺序和数值类型。
+fn drop_legacy_log_client(text: &str) -> String {
+    let mut v: Value = serde_json::from_str(text).expect("旧版日志列表是 JSON");
+    if let Some(rows) = v.get_mut("logs").and_then(Value::as_array_mut) {
+        for r in rows {
+            if let Some(o) = r.as_object_mut() {
+                o.shift_remove("client");
             }
         }
     }
@@ -315,6 +332,32 @@ async fn run_variant(lines: &[Value], variant: &str, diffs: &mut Vec<String>) ->
         if let Some(at) = l["at"].as_f64() {
             gate_server::time::freeze(Some(at));
         }
+        if let Some(p) = l["path"]
+            .as_str()
+            .filter(|p| p.starts_with(REMOVED_CLIENT_EXPORT))
+        {
+            if l["status"] == 200 {
+                // 旧版：days 缺省 30，0 当 90，夹到 1..=90；操作者是后台登录的打码 IP
+                let days = p
+                    .split_once("days=")
+                    .and_then(|(_, d)| d.split('&').next()?.parse::<i64>().ok())
+                    .unwrap_or(30);
+                let days = if days == 0 { 90 } else { days.clamp(1, 90) };
+                state
+                    .db
+                    .add_admin_action(
+                        "后台 *.*.0.1",
+                        "导出客户端日志",
+                        &format!("{days}天"),
+                        "",
+                        true,
+                        state.now(),
+                    )
+                    .await
+                    .unwrap();
+            }
+            continue;
+        }
         if let Some(d) = &discord {
             d.set_closed(l["registrar"]["dm"] == "closed");
             d.clear();
@@ -346,13 +389,24 @@ async fn run_variant(lines: &[Value], variant: &str, diffs: &mut Vec<String>) ->
                 );
             }
         }
-        if let Some(want) = l["text"].as_str() {
+        // /反馈 在 3.0 改成一段文字（docs/v3-deviations.md #52）：冻结的旧版列表带 5 道选择题的 `questions` 和 `answers`、
+        // 导出按题目一题一列，响应原文不再相同。这两步照常重放（会留下「导出成员反馈」的操作记录，后面的步骤要用），
+        // 但不比响应原文；新格式的断言在 admin_records.rs 的 `feedback_list_and_csv_export`。
+        let v3_feedback = l["path"]
+            .as_str()
+            .is_some_and(|p| p == "/admin/api/feedback" || p == "/admin/api/feedback/export");
+        if let Some(want) = l["text"].as_str().filter(|_| !v3_feedback) {
             let got = norm_text(&String::from_utf8_lossy(&body));
             let is_errors_list = l["path"]
                 .as_str()
                 .is_some_and(|p| p == "/admin/api/errors" || p.starts_with("/admin/api/errors?"));
+            let is_logs_list = l["path"]
+                .as_str()
+                .is_some_and(|p| p == "/admin/api/logs" || p.starts_with("/admin/api/logs?"));
             let want = if l["path"] == "/admin/api/members" {
                 drop_deleted_member_fields(want)
+            } else if is_logs_list {
+                drop_legacy_log_client(want)
             } else if is_errors_list {
                 serde_json::from_str::<Value>(want).map_or(want.to_string(), |v| v.to_string())
             } else {
@@ -368,7 +422,7 @@ async fn run_variant(lines: &[Value], variant: &str, diffs: &mut Vec<String>) ->
             } else {
                 (want, got)
             };
-            let got = if l["path"] == "/admin/api/members" {
+            let got = if l["path"] == "/admin/api/members" || is_logs_list {
                 // 与上面同样经 serde 重新序列化，只比结构、键顺序和数值类型
                 serde_json::from_str::<Value>(&got).map_or(got, |v| v.to_string())
             } else if is_errors_list {
@@ -415,6 +469,10 @@ async fn run_variant(lines: &[Value], variant: &str, diffs: &mut Vec<String>) ->
     }
     steps
 }
+
+/// 3.0 删了「客户端日志导出」（docs/v3-deviations.md #53）：夹具里的这几步不发请求，
+/// 只按旧版的写法补记成功导出时的那条操作日志，后面的操作日志编号、列表才能对上。
+const REMOVED_CLIENT_EXPORT: &str = "/admin/api/logs/export";
 
 fn compare_snap(name: &str, want: &Value, got: &Value, diffs: &mut Vec<String>) {
     for t in SNAP_TABLES.iter().copied().chain([ERRORS_TABLE]) {

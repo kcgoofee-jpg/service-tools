@@ -48,7 +48,7 @@ Discord（/register 等）──▶ nai-bots naimei ──(桥接密钥)──�
 ## 成员怎么接入
 
 在 Discord 里 `/register` 领 Key，然后在客户端里填：接口地址填站点域名（NovelAI 客户端），或 `https://<域名>/v1`（OpenAI 兼容客户端）；
-Key 填领到的 `nai-…`。首页用 Discord 登录后能看到自己的额度、排队位置和作品备份。
+Key 填领到的 `nai-…`。首页用 Discord 登录后能看到自己的额度和排队位置。
 
 ## 开发
 

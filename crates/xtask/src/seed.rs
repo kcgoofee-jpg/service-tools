@@ -73,7 +73,6 @@ const PROMPTS: [(&str, &str); 4] = [
         "lowres, text",
     ),
 ];
-const CLIENTS: [&str; 4] = ["柏宝绘", "柏宝绘", "智绘姬", "SillyTavern"];
 
 pub struct SeededKey {
     pub id: i64,
@@ -116,7 +115,7 @@ pub async fn seed(db: &Db, clock: &Clock, now: f64) -> Result<Seeded> {
     let thumb =
         gate_server::audit::make_thumbnail(&gate_testkit::tiny_png()).context("生成缩略图失败")?;
     seed_usage(db, clock, now, &keys, &thumb, &mut rng).await?;
-    seed_member_extras(db, now, &keys, &mut rng).await?;
+    seed_member_extras(db, now, &keys).await?;
     seed_records(db, now, &keys, &mut rng).await?;
     seed_site(db, now).await?;
     Ok(Seeded { keys })
@@ -268,7 +267,6 @@ async fn seed_usage(
             key.name.to_string(),
             e.kind.to_string(),
             model.to_string(),
-            pick(rng, &CLIENTS).to_string(),
             rid(rng),
             "203.0.*.*".to_string(),
         );
@@ -288,10 +286,9 @@ async fn seed_usage(
                         legacy_free_images: i64::from(image && v5 == 0),
                         wait_ms: rng.random_range(0..20000),
                         dur_ms: rng.random_range(3000..9000),
-                        client: common.4,
                         up_status: 200,
-                        rid: common.5,
-                        src: common.6,
+                        rid: common.4,
+                        src: common.5,
                         ..Default::default()
                     },
                     e.ts,
@@ -330,9 +327,8 @@ async fn seed_usage(
                         detail: detail.into(),
                         reason: reason.into(),
                         wait_ms: rng.random_range(0..3000),
-                        client: common.4,
-                        rid: common.5,
-                        src: common.6,
+                        rid: common.4,
+                        src: common.5,
                         ..Default::default()
                     },
                     e.ts,
@@ -351,10 +347,9 @@ async fn seed_usage(
                         detail: detail.into(),
                         wait_ms: rng.random_range(0..20000),
                         dur_ms: rng.random_range(3000..9000),
-                        client: common.4,
                         up_status: up,
-                        rid: common.5,
-                        src: common.6,
+                        rid: common.4,
+                        src: common.5,
                         ..Default::default()
                     },
                     e.ts,
@@ -368,7 +363,7 @@ async fn seed_usage(
 
 // ------------------------------------------------------------------ 成员相关：券 / 黑名单 / 反馈 / 问卷 / 捐赠
 
-async fn seed_member_extras(db: &Db, now: f64, keys: &[SeededKey], rng: &mut StdRng) -> Result<()> {
+async fn seed_member_extras(db: &Db, now: f64, keys: &[SeededKey]) -> Result<()> {
     // 重置券：给白鸟、Kestrel 各一张。月见草（会话成员）不发，首页用例自己用 page.route 造券
     db.add_coupon(keys[1].id, "reset", 5.0, "补偿 10-13", "后台", now - 3600.0)
         .await?;
@@ -400,18 +395,29 @@ async fn seed_member_extras(db: &Db, now: f64, keys: &[SeededKey], rng: &mut Std
     )
     .await?;
 
-    // /反馈：4 份（答案取真实题目的真实选项）
-    for (n, who) in [1usize, 2, 3, 6].into_iter().enumerate() {
-        let answers: serde_json::Map<String, serde_json::Value> = gate_server::feedback::QUESTIONS
-            .iter()
-            .map(|q| (q.id.to_string(), (*pick(rng, q.options)).into()))
-            .collect();
+    // /反馈：4 份。前三份是成员写的话（`{"text": …}`），最后一份是旧版选择题的记录（看后台怎么显示旧记录）
+    let feedback = [
+        (
+            1usize,
+            r#"{"text": "晚上八点左右排队有点久，希望能快一点。"}"#,
+        ),
+        (
+            2,
+            r#"{"text": "教程写得很清楚，已经在 ComfyUI 里配好了，谢谢站长！\n另外想问一下，V5 的额度以后会不会再多一点？每天三张有时候不太够用，想多试几个提示词。"}"#,
+        ),
+        (3, r#"{"text": "一切正常，没有问题。"}"#),
+        (
+            6,
+            r#"{"score": "满意", "pain": "排队太久 / 经常提示人多", "wish": "多给一些 V5", "client": "手机 App", "freq": "每天都用"}"#,
+        ),
+    ];
+    for (n, (who, answers)) in feedback.into_iter().enumerate() {
         db.insert_feedback(
             now - DAY * (n as f64 + 0.5),
             &keys[who].discord_id,
             &format!("user{who}"),
             Some(keys[who].id),
-            &serde_json::to_string(&answers)?,
+            answers,
         )
         .await?;
     }

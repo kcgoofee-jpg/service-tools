@@ -1,4 +1,4 @@
-//! 站点公告、Discord 公告频道发送、测试告警、Discord 机器人（奶妹）配置。
+//! 站点公告、Discord 公告频道发送、测试告警、Discord 机器人（奶妹）在线状态。
 
 use crate::action_log::log_action;
 use crate::body::read_json_body;
@@ -10,8 +10,7 @@ use axum::extract::{Request, State};
 use axum::routing::{get, post};
 use gate_core::bot_config::{self, BotConfigError};
 use gate_core::{pyc, pyext};
-use serde_json::{Map, Value, json};
-use std::collections::BTreeMap;
+use serde_json::json;
 
 const BODY_LIMIT: usize = 1024 * 1024;
 /// 站点公告 HTML 的长度上限（字符）。
@@ -29,10 +28,7 @@ pub(super) fn router() -> Router<AppState> {
         )
         .route("/admin/api/announcement/send", post(announcement_send))
         .route("/admin/api/alerts/test", post(alerts_test))
-        .route(
-            "/admin/api/discord-bot",
-            get(discord_bot_get).put(discord_bot_put),
-        )
+        .route("/admin/api/discord-bot", get(discord_bot_get))
 }
 
 // ------------------------------------------------------------------ 站点公告
@@ -133,51 +129,13 @@ async fn alerts_test(State(state): State<AppState>, _s: AdminSession) -> ApiResu
 
 // ------------------------------------------------------------------ Discord 机器人
 
-/// 库里存的机器人配置（`bot_*`）。
-async fn bot_stored(state: &AppState) -> Result<BTreeMap<String, String>, gate_db::DbError> {
-    let mut stored = BTreeMap::new();
-    for f in bot_config::FIELDS {
-        let key = bot_config::setting_key(f.name);
-        if let Some(v) = state.db.get_setting(&key).await? {
-            stored.insert(key, v);
-        }
-    }
-    Ok(stored)
-}
-
 fn bot_internal(e: BotConfigError) -> InternalError {
     InternalError(e.to_string())
 }
 
-/// 机器人：配置、在线状态（心跳）、最近 50 条点赞 / 评论记录。
+/// 机器人在线状态（心跳）。跑图分享设置和最近动作已删除：docs/v3-deviations.md #54。
 async fn discord_bot_get(State(state): State<AppState>, _s: AdminSession) -> ApiResult {
-    let config = bot_config::load_from(&bot_stored(&state).await?);
     let status = state.db.get_setting(bot_config::STATUS_KEY).await?;
-    let events = state.db.get_setting(bot_config::EVENTS_KEY).await?;
-    let snapshot = bot_config::snapshot(config, status.as_deref(), events.as_deref(), state.now())
-        .map_err(bot_internal)?;
+    let snapshot = bot_config::snapshot(status.as_deref(), state.now()).map_err(bot_internal)?;
     Ok(ok_json(&snapshot))
-}
-
-/// 修改机器人配置；机器人一分钟内生效。
-async fn discord_bot_put(
-    State(state): State<AppState>,
-    _s: AdminSession,
-    req: Request,
-) -> ApiResult {
-    let (parts, body) = req.into_parts();
-    let body = read_json_body(&parts.headers, body, BODY_LIMIT).await?;
-    let values: Map<String, Value> = match bot_config::validate(&body) {
-        Ok(v) => v,
-        Err(BotConfigError::Invalid(msg)) => return Err(HttpError::new(400, msg).into()),
-        Err(e) => return Err(bot_internal(e).into()),
-    };
-    if !values.is_empty() {
-        state
-            .db
-            .set_settings_bulk(&bot_config::to_settings(&values))
-            .await?;
-    }
-    let config = bot_config::load_from(&bot_stored(&state).await?);
-    Ok(ok_json(&json!({"ok": true, "config": config})))
 }

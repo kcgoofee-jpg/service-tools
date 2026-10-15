@@ -107,20 +107,38 @@ fn audit_prompts_match_python() {
 
 // ------------------------------------------------------------------ 披露文案
 
+/// 3.0 删了成员自助导出原图（docs/v3-deviations.md #49），披露文案里不再有「在这之前可在首页打包下载最近 N 的，
+/// 用来找回误删的图」这一段。冻结夹具里还有，比较前从期望值里去掉；其余文字逐字节一致。
+fn without_download_clause(text: &str) -> String {
+    const HEAD: &str = "；在这之前可在首页打包下载最近 ";
+    const TAIL: &str = "的，用来找回误删的图";
+    let Some(start) = text.find(HEAD) else {
+        return text.to_string();
+    };
+    let tail = text[start..]
+        .find(TAIL)
+        .expect("夹具里的打包下载提示不完整");
+    format!("{}{}", &text[..start], &text[start + tail + TAIL.len()..])
+}
+
 #[test]
 fn audit_notice_matches_python() {
     let cases = load("audit_notice");
     assert!(cases.len() > 500);
     for c in &cases {
         let a = c.args();
+        // a[3] 是旧版的 image_days（成员能下载几天的原图），3.0 没有这个参数了
         let got = audit::audit_notice(
             a[0].as_bool().unwrap(),
             a[1].as_bool().unwrap(),
             a[2].as_i64().unwrap(),
-            a[3].as_i64().unwrap(),
             a[4].as_i64().unwrap(),
         );
-        check(c, Ok(json!(got)));
+        assert_eq_py(
+            c,
+            &json!(got),
+            &json!(without_download_clause(c.out().as_str().unwrap())),
+        );
     }
 }
 
@@ -169,7 +187,6 @@ async fn audit_settings_match_python() {
             let out = c.out();
             assert_eq!(out["IMAGE_RETENTION_KEY"], audit::IMAGE_RETENTION_KEY);
             assert_eq!(out["IMAGE_CAP_KEY"], audit::IMAGE_CAP_KEY);
-            assert_eq!(out["MEMBER_DOWNLOAD_DAYS"], audit::MEMBER_DOWNLOAD_DAYS);
             assert_eq!(out["THUMB_SIDE"], audit::THUMB_SIDE);
             assert_eq!(out["THUMB_QUALITY"], audit::THUMB_QUALITY);
             assert_eq!(out["MAX_IMAGE_BYTES"], audit::MAX_IMAGE_BYTES);
@@ -189,10 +206,8 @@ async fn audit_settings_match_python() {
                 .await
                 .map(|(p, t, d)| json!([p, t, d]))
                 .map_err(|e| db_err(&e)),
-            "audit_image_days" => audit::audit_image_days(&db)
-                .await
-                .map(|v| json!(v))
-                .map_err(|e| db_err(&e)),
+            // 已删除：成员能下载几天的原图（docs/v3-deviations.md #49），夹具里的用例跳过
+            "audit_image_days" => continue,
             "audit_image_keep_hours" => audit::audit_image_keep_hours(&db)
                 .await
                 .map(|v| json!(v))
@@ -201,10 +216,19 @@ async fn audit_settings_match_python() {
                 .await
                 .map(|v| json!(v))
                 .map_err(|e| db_err(&e)),
-            "audit_disclosure" => audit::audit_disclosure(&db, &env)
-                .await
-                .map(|v| json!(v))
-                .map_err(|e| db_err(&e)),
+            "audit_disclosure" => {
+                let got = audit::audit_disclosure(&db, &env)
+                    .await
+                    .map(|v| json!(v))
+                    .map_err(|e| db_err(&e));
+                if let (None, Ok(v)) = (c.err(), &got) {
+                    // 期望值里去掉已删除的「打包下载」一段，见 `without_download_clause`
+                    let want = json!(without_download_clause(c.out().as_str().unwrap()));
+                    assert_eq_py(c, v, &want);
+                    continue;
+                }
+                got
+            }
             other => panic!("未知函数 {other}"),
         };
         if got.is_err() {

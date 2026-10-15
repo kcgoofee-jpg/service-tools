@@ -190,22 +190,16 @@ test("额度与保护：每小时上限填 0 要确认；动态额度推算过�
   await page.getByRole("button", { name: "撤销修改" }).first().click();
 });
 
-test("Discord：改机器人设置并保存；离线角标；公告发送要确认（不真发）", async ({ page }) => {
+test("Discord：机器人只有状态卡（离线角标）；公告发送要确认（不真发）", async ({ page }) => {
   await visit(page, "discord", "Discord");
   await expect(
     page.locator(".admin-nav__item", { hasText: "Discord" }).locator(".admin-nav__badge"),
   ).toContainText("!");
-  const field = page.getByLabel("AI 评论每天最多");
-  const original = await field.inputValue();
-  const next = String(Number(original) + 1);
-  await field.fill(next);
-  await page.getByRole("button", { name: "保存", exact: true }).first().click();
-  await expect(page.getByText("已保存，机器人一分钟内生效")).toBeVisible();
-  await page.reload();
-  await expect(page.getByLabel("AI 评论每天最多")).toHaveValue(next);
-  await page.getByLabel("AI 评论每天最多").fill(original);
-  await page.getByRole("button", { name: "保存", exact: true }).first().click();
-  await expect(page.getByText("已保存，机器人一分钟内生效").first()).toBeVisible();
+  await expect(page.getByText("机器人状态")).toBeVisible();
+  await expect(page.getByText("离线", { exact: true })).toBeVisible();
+  // 跑图分享设置、AI 评论、最近动作已删除（docs/v3-deviations.md #54）
+  for (const gone of ["跑图分享设置", "AI 评论", "最近动作"])
+    await expect(page.getByText(gone)).toHaveCount(0);
 
   // 发送公告：先看到确认框，取消
   await page.getByLabel("公告内容", { exact: true }).fill("测试公告，不会真的发出");

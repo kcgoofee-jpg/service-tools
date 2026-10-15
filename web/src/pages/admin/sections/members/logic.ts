@@ -81,11 +81,10 @@ export function memberIssues(m: Member, now: number): Issue[] {
       actions: [{ kind: "edit" }, { kind: "ack" }],
     });
   }
-  // 自动标签：算法标记「只观察」或单纯客户端短时连点「请求过快」不升级为要处理
+  // 自动标签：单纯客户端短时连点「请求过快」不升级为要处理
   for (const t of m.auto_tags as AutoTag[]) {
-    const observe = t.tag === "疑似同一人" || !!t.note?.includes("只观察");
     const rateLimit = t.tag === "请求过快";
-    const loud = !observe && !rateLimit && (!!t.note || t.count >= 50);
+    const loud = !rateLimit && (!!t.note || t.count >= 50);
     out.push({
       id: `auto:${t.tag}`,
       level: loud ? "warn" : "info",
@@ -190,7 +189,6 @@ export type FilterSet = {
   autoTags: FilterDef[];
 };
 
-const ALT_TAGS = ["疑似小号", "疑似同一人"];
 const collator = new Intl.Collator(["zh-Hans-CN", "en"], { numeric: true, sensitivity: "base" });
 export const compareText = (a: string, b: string): number => collator.compare(a, b);
 
@@ -224,17 +222,9 @@ export function buildFilters(everyone: Member[], now: number, idleDays: number):
     { id: "role:regular", label: "身份组：普通", test: (m) => roleOf(m) === "regular" },
     { id: "role:test", label: "身份组：测试", test: (m) => roleOf(m) === "test", allKeys: true },
     { id: "role:admin", label: "身份组：站长", test: (m) => roleOf(m) === "admin", allKeys: true },
-    {
-      id: "alt",
-      label: "疑似小号 / 同一人",
-      test: (m) =>
-        userTags(m).some((x) => ALT_TAGS.includes(x.tag)) ||
-        m.auto_tags.some((x) => ALT_TAGS.includes(x.tag)),
-      allKeys: true,
-    },
   );
   const builtin = new Set(
-    [...main, ...more].map((f) => f.label.replace(/\s*[（(].*$/, "")).concat(["站长", "邀请", ...ALT_TAGS]),
+    [...main, ...more].map((f) => f.label.replace(/\s*[（(].*$/, "")).concat(["站长", "邀请"]),
   );
   const userSet = [...new Set(everyone.flatMap((m) => userTags(m).map((t) => t.tag)))]
     .filter((t) => !builtin.has(t))

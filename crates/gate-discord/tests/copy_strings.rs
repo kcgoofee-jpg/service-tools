@@ -11,6 +11,19 @@ use std::collections::HashSet;
 
 use gate_discord::handlers;
 
+/// 3.0 新写的面向成员的文案，不在旧 Python 里：`/反馈` 改成一段文字（docs/v3-deviations.md #52）。
+/// 冻结夹具不改，这几句在这里补进「允许出现」的集合；旧版 `/反馈` 的文案（选择题弹窗标题等）已不再出现在源码里。
+const V3_COPY: &[&str] = &[
+    // 命令描述
+    "写几句话给站长（只有你能看到，不会私信你）",
+    // 弹窗：标题、Label、占位符
+    "猫头鹰公益站 · 反馈",
+    "想对站长说的话",
+    "遇到的问题、建议都可以写。只有站长能看到，回执只有你自己可见。",
+    // /help 的命令清单（`/反馈` 的说明换了）
+    "`/register` 领取 Key（结果仅你可见，含配置教程）· `/quota` 额度和服务状态 · `/resetkey` 换新 Key · `/反馈` 写几句话给站长",
+];
+
 fn python_strings() -> HashSet<String> {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -23,6 +36,7 @@ fn python_strings() -> HashSet<String> {
         .unwrap()
         .iter()
         .map(|s| s.as_str().unwrap().to_owned())
+        .chain(V3_COPY.iter().map(|s| (*s).to_owned()))
         .collect()
 }
 

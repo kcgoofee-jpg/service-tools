@@ -12,11 +12,6 @@ mod text;
 use crate::AppState;
 use axum::Router;
 
-/// 成员自助打包：单次最多打包最新的 200MB 原图。
-pub const EXPORT_MAX_BYTES: i64 = 200 * 1024 * 1024;
-/// 成员自助打包：每人两次打包的最短间隔（秒）。
-pub const EXPORT_PER_MEMBER_SECS: f64 = 60.0;
-
 pub fn router(state: AppState) -> Router {
     Router::new()
         .merge(pages::router())

@@ -198,6 +198,25 @@ const DOC_FIXES: [(&str, &str); 1] = [(
     "网页 Discord 登录暂停（Discord 回调修复 / 审核期间）。网页只有 Discord 登录，暂停期间成员只能在 Discord 里用 /quota 看额度",
 )];
 
+/// 3.0 删掉的设置（docs/v3-deviations.md #49：成员自助导出原图）。冻结夹具里还有它的用例，登记表里已经没有，
+/// 逐个用例跳过；`all_keys` / `facts_table` 在期望值一侧去掉它。
+const REMOVED_KEY: &str = "member_image_download";
+
+/// 夹具用例的 Spec 引用的是不是已删除的设置。
+fn removed_spec(c: &Case) -> bool {
+    c.raw["spec"]["ref"].as_str() == Some(REMOVED_KEY)
+}
+
+/// 期望值一侧去掉已删除设置的 `facts_table` 行。
+fn drop_removed_row(table: &str) -> String {
+    let prefix = format!("| `{REMOVED_KEY}` |");
+    let rows: Vec<&str> = table
+        .split('\n')
+        .filter(|l| !l.starts_with(&prefix))
+        .collect();
+    rows.join("\n")
+}
+
 fn fix_docs(v: &Value) -> Value {
     let mut text = v.to_string();
     for (old, new) in DOC_FIXES {
@@ -213,16 +232,24 @@ fn site_registry_golden() {
         match c.raw["fn"].as_str().unwrap() {
             "spec" => {
                 let key = c.out()["key"].as_str().unwrap();
+                if key == REMOVED_KEY {
+                    continue;
+                }
                 let s = ALL.iter().find(|s| s.key == key).expect("缺少这个键");
                 assert_eq_py(&c, &spec_json(s), &fix_docs(c.out()));
                 n += 1;
             }
             "all_keys" => {
                 let keys: Vec<Value> = ALL.iter().map(|s| json!(s.key)).collect();
-                assert_eq_py(&c, &Value::Array(keys), c.out());
+                let mut want = c.out().clone();
+                want.as_array_mut()
+                    .unwrap()
+                    .retain(|k| k.as_str() != Some(REMOVED_KEY));
+                assert_eq_py(&c, &Value::Array(keys), &want);
             }
             "facts_table" => {
-                assert_eq_py(&c, &json!(site_flags::facts_table()), &fix_docs(c.out()))
+                let want = json!(drop_removed_row(c.out().as_str().unwrap()));
+                assert_eq_py(&c, &json!(site_flags::facts_table()), &fix_docs(&want))
             }
             other => panic!("未知 {other}"),
         }
@@ -235,6 +262,9 @@ fn site_parse_golden() {
     let cases = load(M, "flags/site_parse");
     assert!(cases.len() > 10000);
     for c in cases {
+        if removed_spec(&c) {
+            continue;
+        }
         let spec = spec_of(&c.raw["spec"]);
         let got = site_flags::parse(&spec, c.arg(0), c.arg(1).clone());
         check(&c, Ok(got), false, false);
@@ -244,6 +274,9 @@ fn site_parse_golden() {
 #[test]
 fn site_default_of_golden() {
     for c in load(M, "flags/site_default_of") {
+        if removed_spec(&c) {
+            continue;
+        }
         let spec = spec_of(&c.raw["spec"]);
         let env = c.raw.get("env").filter(|e| !e.is_null());
         check(&c, Ok(site_flags::default_of(&spec, env)), false, false);
@@ -253,6 +286,9 @@ fn site_default_of_golden() {
 #[test]
 fn site_get_golden() {
     for c in load(M, "flags/site_get") {
+        if removed_spec(&c) {
+            continue;
+        }
         let spec = spec_of(&c.raw["spec"]);
         let env = c.raw.get("env").filter(|e| !e.is_null());
         let raw = c.raw["present"]
@@ -271,6 +307,9 @@ fn site_get_golden() {
 #[test]
 fn site_encode_golden() {
     for c in load(M, "flags/site_encode") {
+        if removed_spec(&c) {
+            continue;
+        }
         let spec = spec_of(&c.raw["spec"]);
         let got = site_flags::encode(&spec, c.arg(0))
             .map(Value::String)
@@ -416,41 +455,26 @@ fn features_check_golden() {
 }
 
 // ---------------------------------------------------------------- bot_config
+//
+// 3.0 删了「跑图分享设置」和「最近动作」，机器人只剩心跳（docs/v3-deviations.md #54）。冻结夹具照旧留着：
+// `bot_validate` / `bot_load` / `bot_save`（设置的校验与读写）整组不再有对应的函数，不测；
+// `bot_constants` / `bot_report` / `bot_snapshot` 里还和心跳有关的部分，在期望值一侧去掉设置、事件和 AI 字段再比。
+
+/// 心跳白名单里 3.0 删掉的字段（AI 评论的计数）。
+const REMOVED_STATUS_FIELDS: [&str; 2] = ["ai_ready", "ai_today"];
 
 #[test]
 fn bot_constants_golden() {
-    for c in load(M, "flags/bot_constants") {
-        let fields: Vec<Value> = bot_config::FIELDS
-            .iter()
-            .map(|f| {
-                json!([
-                    f.name,
-                    f.default.to_value(),
-                    match f.kind {
-                        bot_config::FieldKind::Int => "int",
-                        bot_config::FieldKind::Str => "str",
-                    },
-                    f.lo,
-                    f.hi
-                ])
-            })
-            .collect();
-        assert_eq_py(
-            &c,
-            &json!({
-                "FIELDS": fields,
-                "STATUS_KEY": bot_config::STATUS_KEY,
-                "EVENTS_KEY": bot_config::EVENTS_KEY,
-                "EVENT_KINDS": pairs(&bot_config::EVENT_KINDS),
-            }),
-            c.out(),
-        );
+    let cases = load(M, "flags/bot_constants");
+    assert_eq!(cases.len(), 1);
+    for c in cases {
+        // 夹具里还有 FIELDS / EVENTS_KEY / EVENT_KINDS，3.0 都删了；只剩心跳存放的键
+        assert_eq!(json!(bot_config::STATUS_KEY), c.out()["STATUS_KEY"]);
     }
 }
 
 fn bot_err(e: BotConfigError) -> (&'static str, String) {
     match e {
-        BotConfigError::Invalid(m) => ("ValueError", m),
         BotConfigError::BadJson(m) => ("JSONDecodeError", m),
         BotConfigError::WrongType(m) => ("AttributeError", m),
         BotConfigError::Type(m) => ("TypeError", m),
@@ -458,16 +482,37 @@ fn bot_err(e: BotConfigError) -> (&'static str, String) {
 }
 
 #[test]
-fn bot_validate_golden() {
-    let mut n_err = 0;
-    for c in load(M, "flags/bot_validate") {
-        let got = bot_config::validate(&obj(c.arg(0)))
-            .map(Value::Object)
-            .map_err(bot_err);
-        n_err += usize::from(c.err().is_some());
-        check(&c, got, true, true);
+fn bot_report_golden() {
+    let (mut n_exact, mut n_trimmed) = (0, 0);
+    for c in load(M, "flags/bot_report") {
+        match c.raw["fn"].as_str().unwrap() {
+            "report_status" => {
+                let status = obj(c.arg(0));
+                let got = bot_config::status_to_store(&status, c.arg(1).as_f64().unwrap());
+                if REMOVED_STATUS_FIELDS
+                    .iter()
+                    .any(|f| status.contains_key(*f))
+                {
+                    // 旧版会把 ai_ready / ai_today 一起存下；3.0 不存。期望值解析后去掉这两个键，
+                    // 再连键的顺序一起比（解析比较，不依赖我们自己的 JSON 写法）
+                    let mut want: Value = serde_json::from_str(c.out().as_str().unwrap()).unwrap();
+                    for f in REMOVED_STATUS_FIELDS {
+                        want.as_object_mut().unwrap().shift_remove(f);
+                    }
+                    let got: Value = serde_json::from_str(&got).unwrap();
+                    assert_eq_py_ordered(&c, &got, &want);
+                    n_trimmed += 1;
+                } else {
+                    assert_eq_py(&c, &json!(got), c.out());
+                    n_exact += 1;
+                }
+            }
+            // 事件（点赞 / 评论记录）3.0 没有了
+            "report_event" => {}
+            other => panic!("未知 {other}"),
+        }
     }
-    assert!(n_err > 500);
+    assert!(n_exact > 100 && n_trimmed > 100, "{n_exact} {n_trimmed}");
 }
 
 fn stored_of(v: &Value) -> BTreeMap<String, String> {
@@ -478,65 +523,41 @@ fn stored_of(v: &Value) -> BTreeMap<String, String> {
 }
 
 #[test]
-fn bot_load_save_golden() {
-    for c in load(M, "flags/bot_load") {
-        let got = bot_config::load_from(&stored_of(c.arg(0)));
-        check(&c, Ok(Value::Object(got)), true, false);
-    }
-    for c in load(M, "flags/bot_save") {
-        let writes: Vec<Value> = bot_config::to_settings(&obj(c.arg(0)))
-            .into_iter()
-            .map(|(k, v)| json!([k, v]))
-            .collect();
-        assert_eq_py(&c, &Value::Array(writes), c.out());
-    }
-}
-
-#[test]
-fn bot_report_golden() {
-    let (mut n_written, mut n_skipped) = (0, 0);
-    for c in load(M, "flags/bot_report") {
-        match c.raw["fn"].as_str().unwrap() {
-            "report_status" => {
-                let got = bot_config::status_to_store(&obj(c.arg(0)), c.arg(1).as_f64().unwrap());
-                assert_eq_py(&c, &json!(got), c.out());
-            }
-            "report_event" => {
-                let pre = c.arg(0).as_str();
-                let got = bot_config::append_event(pre, &obj(c.arg(1)), c.arg(2).as_f64().unwrap())
-                    .map(|o| o.map_or(Value::Null, Value::String))
-                    .map_err(bot_err);
-                if let Ok(v) = &got {
-                    if v.is_null() {
-                        n_skipped += 1;
-                    } else {
-                        n_written += 1;
-                    }
-                }
-                check(&c, got, false, false);
-            }
-            other => panic!("未知 {other}"),
-        }
-    }
-    assert!(n_written > 200 && n_skipped > 50, "{n_written} {n_skipped}");
-}
-
-#[test]
 fn bot_snapshot_golden() {
-    let mut n_ok = 0;
+    let (mut n_ok, mut n_status_err, mut n_events_err) = (0, 0, 0);
     for c in load(M, "flags/bot_snapshot") {
         let kv = stored_of(c.arg(0));
         let now = c.arg(1).as_f64().unwrap();
-        let config = bot_config::load_from(&kv);
-        let got = bot_config::snapshot(
-            config,
-            kv.get(bot_config::STATUS_KEY).map(String::as_str),
-            kv.get(bot_config::EVENTS_KEY).map(String::as_str),
-            now,
-        )
-        .map_err(bot_err);
-        n_ok += usize::from(got.is_ok());
-        check(&c, got, true, false);
+        let got = bot_config::snapshot(kv.get(bot_config::STATUS_KEY).map(String::as_str), now);
+        match (c.err(), got) {
+            (None, Ok(v)) => {
+                // 旧版快照是 {config, status, events, kinds}，3.0 只剩 status
+                let want = json!({"status": c.out()["status"]});
+                assert_eq_py_ordered(&c, &v, &want);
+                n_ok += 1;
+            }
+            (Some(ty), Err(e)) => {
+                assert_eq!(bot_err(e).0, ty, "第 {} 行：异常类型不同", c.line);
+                n_status_err += 1;
+            }
+            // 旧版还会解析 bot_events（坏 JSON / 不能倒序的类型）而报错；3.0 不再读事件，状态本身没问题就成功
+            (Some(ty), Ok(_)) => {
+                assert!(
+                    matches!(ty, "JSONDecodeError" | "TypeError") && kv.contains_key("bot_events"),
+                    "第 {} 行：Python 抛 {ty}，Rust 却成功了\n{}",
+                    c.line,
+                    c.raw
+                );
+                n_events_err += 1;
+            }
+            (None, Err(e)) => {
+                let (t, m) = bot_err(e);
+                panic!("第 {} 行：Python 成功，Rust 报 {t}: {m}\n{}", c.line, c.raw)
+            }
+        }
     }
-    assert!(n_ok > 200);
+    assert!(
+        n_ok > 100 && n_status_err > 50 && n_events_err > 10,
+        "{n_ok} {n_status_err} {n_events_err}"
+    );
 }

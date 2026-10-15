@@ -87,7 +87,7 @@ pub fn ctx_of(parts: &Parts) -> ReqCtx {
         .extensions
         .get::<ReqCtx>()
         .cloned()
-        .unwrap_or_else(|| ReqCtx::new(String::new()))
+        .unwrap_or_else(ReqCtx::new)
 }
 
 /// `Authorization: Bearer <key>` 里的 Key（大小写不敏感；没有为空串）。
@@ -145,7 +145,7 @@ pub async fn authenticate(state: &AppState, parts: &Parts, passive: bool) -> Res
     if let Some((until, reason)) = state.pauses.paused(key.id(), now) {
         let until = state.clock.format(until, "%m-%d %H:%M");
         let msg = if reason.is_empty() {
-            format!("检测到异常多地使用，Key 已临时暂停至 {until}，仅限本人使用。")
+            format!("这把 Key 已被临时暂停，{until} 自动恢复。")
         } else {
             format!("{reason}，{until} 自动恢复。")
         };

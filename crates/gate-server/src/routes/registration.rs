@@ -19,9 +19,9 @@ use axum::extract::{ConnectInfo, Request, State};
 use axum::http::HeaderValue;
 use axum::http::request::Parts;
 use axum::response::Response;
-use axum::routing::{get, post};
+use axum::routing::post;
 use gate_core::pyc::take_chars;
-use gate_core::{features, pyext};
+use gate_core::{bot_config, features, pyext};
 use serde_json::{Map, Value, json};
 use std::net::SocketAddr;
 use subtle::ConstantTimeEq;
@@ -36,11 +36,6 @@ pub fn router() -> Router<AppState> {
         .route("/self-register/slots", post(slots))
         .route("/self-register/issue", post(issue))
         .route("/self-register/feedback", post(feedback_submit))
-        .route(
-            "/self-register/feedback/questions",
-            post(feedback_questions),
-        )
-        .route("/self-register/bot/config", get(bot_config_get))
         .route("/self-register/bot/report", post(bot_report))
 }
 
@@ -114,23 +109,6 @@ impl Model {
                 }
                 default.unwrap_or("").to_string()
             }
-        }
-    }
-
-    /// `name: dict = {}`
-    fn dict(&mut self, name: &str) -> Map<String, Value> {
-        match self.get(name) {
-            Some(Value::Object(m)) => m,
-            Some(other) => {
-                self.fail(
-                    "dict_type",
-                    vec![name],
-                    "Input should be a valid dictionary",
-                    &other,
-                );
-                Map::new()
-            }
-            None => Map::new(),
         }
     }
 
@@ -666,13 +644,13 @@ async fn issue(State(state): State<AppState>, req: Request) -> ApiResult {
     }
 }
 
-/// /反馈 表单提交（机器人转来）。没领 Key 的成员也能提交。
+/// /反馈 表单提交（机器人转来）：一段文字，2–1000 字。没领 Key 的成员也能提交。
 async fn feedback_submit(State(state): State<AppState>, req: Request) -> ApiResult {
     let (parts, body) = req.into_parts();
     let mut m = read_model(&parts, body).await?;
     let who = Who::read(&mut m);
     let username = m.string("username", Some(""));
-    let answers = m.dict("answers");
+    let text = m.string("text", Some(""));
     m.finish()?;
     let svc = authorize(&state, &parts, true)?;
     let discord_id = checked(svc, &who)?;
@@ -682,7 +660,7 @@ async fn feedback_submit(State(state): State<AppState>, req: Request) -> ApiResu
         discord_id,
         &username,
         key.as_ref().map(Key::id),
-        &answers,
+        &text,
         state.now(),
     )
     .await
@@ -694,34 +672,22 @@ async fn feedback_submit(State(state): State<AppState>, req: Request) -> ApiResu
     Ok(ok_json(&json!({"message": message})))
 }
 
-/// 机器人启动时来读问卷题目（改题目不用改机器人代码）。
-async fn feedback_questions(State(state): State<AppState>, req: Request) -> ApiResult {
-    let (parts, _body) = req.into_parts();
-    authorize(&state, &parts, true)?;
-    Ok(ok_json(&json!({"questions": feedback::questions_json()})))
-}
-
-/// 机器人每分钟来读一次配置（后台「Discord」页可改，不用重启机器人）。
-async fn bot_config_get(State(state): State<AppState>, req: Request) -> ApiResult {
-    let (parts, _body) = req.into_parts();
-    authorize(&state, &parts, true)?;
-    let cfg = crate::bot_config::load(&state.db).await?;
-    Ok(no_store(ok_json(&Value::Object(cfg))))
-}
-
-/// 机器人上报心跳和动作（点赞 / 评论），后台显示在线状态和最近记录。
+/// 机器人每分钟上报一次心跳，后台「机器人状态」据此显示在线 / 离线。
+/// 3.0 起只收 `status`（`event`、`ai_ready` 之类旧字段会被忽略）：docs/v3-deviations.md #54。
 async fn bot_report(State(state): State<AppState>, req: Request) -> ApiResult {
     let (parts, body) = req.into_parts();
     let mut m = read_model(&parts, body).await?;
     let status = m.opt_dict("status");
-    let event = m.opt_dict("event");
     m.finish()?;
     authorize(&state, &parts, true)?;
-    crate::bot_config::report(&state.db, status.as_ref(), event.as_ref(), state.now())
-        .await
-        .map_err(|e| match e {
-            crate::bot_config::BotConfigError::Db(e) => ApiError::from(e),
-            other => internal(other),
-        })?;
+    if let Some(status) = &status {
+        state
+            .db
+            .set_setting(
+                bot_config::STATUS_KEY,
+                &bot_config::status_to_store(status, state.now()),
+            )
+            .await?;
+    }
     Ok(ok_json(&json!({"ok": true})))
 }

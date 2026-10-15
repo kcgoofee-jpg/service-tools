@@ -250,6 +250,30 @@ fn set_mtime(p: &Path, secs: f64) {
 /// 3.0 新增、冻结的 2.x 夹具里没有的列（docs/v3-deviations.md #47）：比较前从 Rust 这一侧去掉。
 const RUST_ONLY_COLUMNS: [&str; 1] = ["disabled_reason"];
 
+/// 3.0 删除了客户端识别（docs/v3-deviations.md #50）：`usage_log.client` 列还在（2.x 能读），但不再写入、也不再从
+/// `list_logs` 读出。冻结夹具里旧版写进这一列的客户端名，两边都不比：整表内容里把这一列按空串比较。
+fn blank_usage_client(tables: &mut Value) {
+    let rows = tables.get_mut("usage_log").and_then(Value::as_array_mut);
+    for row in rows.into_iter().flatten() {
+        if let Some(o) = row.as_object_mut()
+            && o.contains_key("client")
+        {
+            o.insert("client".into(), json!(""));
+        }
+    }
+}
+
+/// 同上：`list_logs` 的旧版返回值每行带 `client`，新版没有这个键，比较前从旧版一侧去掉。
+fn drop_expected_client(out: &Value) -> Value {
+    let mut out = out.clone();
+    for row in out.as_array_mut().into_iter().flatten() {
+        if let Some(o) = row.as_object_mut() {
+            o.shift_remove("client");
+        }
+    }
+    out
+}
+
 fn strip_rust_only(v: &mut Value) {
     match v {
         Value::Object(m) => {
@@ -620,7 +644,6 @@ async fn call(db: &Db, c: &Case) -> Out {
                 unconfirmed_anlas: num(c.kwarg("unconfirmed_anlas"), 0.0),
                 wait_ms: int(c.kwarg("wait_ms"), 0),
                 dur_ms: int(c.kwarg("dur_ms"), 0),
-                client: s(c.kwarg("client"), ""),
                 up_status: int(c.kwarg("up_status"), 0),
                 rid: s(c.kwarg("rid"), ""),
                 src: s(c.kwarg("src"), ""),
@@ -642,7 +665,6 @@ async fn call(db: &Db, c: &Case) -> Out {
                 unconfirmed_anlas: num(a(9, "unconfirmed_anlas"), 0.0),
                 wait_ms: int(a(10, "wait_ms"), 0),
                 dur_ms: int(a(11, "dur_ms"), 0),
-                client: s(a(12, "client"), ""),
                 up_status: int(a(13, "up_status"), 0),
                 rid: s(a(14, "rid"), ""),
                 src: s(a(15, "src"), ""),
@@ -677,7 +699,6 @@ async fn call(db: &Db, c: &Case) -> Out {
             db.member_milestones(num(a(0, "since"), 0.0), &reason_label)
                 .await?,
         ),
-        "latest_member_clients" => int_map(db.latest_member_clients().await?),
         "image_perf_rows" => json!(
             db.image_perf_rows(num(a(0, "since"), 0.0))
                 .await?
@@ -782,9 +803,11 @@ async fn call(db: &Db, c: &Case) -> Out {
             let (data, ty) = db.audit_image(int(a(0, "audit_id"), 0)).await?;
             json!([blob(data), ty])
         }
+        // 成员自助导出删了（docs/v3-deviations.md #49），整数绑定的 `audit_images_for` 没有了，只剩后台导出的文本绑定版；
+        // 夹具里的 key_id 都是整数，换成文本绑定，SQLite 的列亲和性转回整数，结果相同
         "audit_images_for" => json!(
-            db.audit_images_for(
-                int(a(0, "key_id"), 0),
+            db.audit_images_for_text(
+                &int(a(0, "key_id"), 0).to_string(),
                 int(a(1, "max_bytes"), 0),
                 num(a(2, "since"), 0.0)
             )
@@ -800,10 +823,6 @@ async fn call(db: &Db, c: &Case) -> Out {
                 blob(Some(i.image))
             ]))
             .collect::<Vec<_>>()
-        ),
-        "audit_image_count" => json!(
-            db.audit_image_count(int(a(0, "key_id"), 0), num(a(1, "since"), 0.0))
-                .await?
         ),
         "audit_image_bytes" => json!(db.audit_image_bytes().await?),
         "purge_audit_images_to_cap" => json!(
@@ -836,6 +855,10 @@ fn brief(case: &Case) -> Case {
 }
 
 async fn run_case(case: &Case) {
+    // 「每把 Key 最近一次请求的客户端」整个方法已删除（docs/v3-deviations.md #50）
+    if case.get("method").and_then(Value::as_str) == Some("latest_member_clients") {
+        return;
+    }
     let dir = tempfile::tempdir().unwrap();
     let db = Db::open(dir.path().join("gate.db"), 0.0, &[]).unwrap();
     db.set_rule_version(case.get("rule_version").unwrap().as_str().unwrap());
@@ -852,13 +875,20 @@ async fn run_case(case: &Case) {
         (None, Err(e)) => panic!("golden 第 {} 行：Rust 报错 {e}\n{brief:?}", case.line),
         (None, Ok(mut v)) => {
             strip_rust_only(&mut v);
-            assert_eq_py_ordered(&brief, &v, case.out())
+            if case.get("method").and_then(Value::as_str) == Some("list_logs") {
+                assert_eq_py_ordered(&brief, &v, &drop_expected_client(case.out()))
+            } else {
+                assert_eq_py_ordered(&brief, &v, case.out())
+            }
         }
     }
 
     let mut tables = dump_tables(&db).await;
     strip_rust_only(&mut tables);
-    assert_eq_py(&brief, &tables, case.get("tables_after").unwrap());
+    blank_usage_client(&mut tables);
+    let mut want_tables = case.get("tables_after").unwrap().clone();
+    blank_usage_client(&mut want_tables);
+    assert_eq_py(&brief, &tables, &want_tables);
     let (files, dirs) = snap_files(db.image_dir(), &extra);
     assert_eq_py(&brief, &files, case.get("files_after").unwrap());
     assert_eq_py(&brief, &dirs, case.get("dirs_after").unwrap());
@@ -868,6 +898,10 @@ async fn run_area(area: &str) {
     let cases = load(env!("CARGO_MANIFEST_DIR"), area);
     assert!(!cases.is_empty());
     for case in &cases {
+        // `audit_image_count` 只给成员自助导出的保留天数用，已随导出一起删除（docs/v3-deviations.md #49）
+        if case.get("method").and_then(Value::as_str) == Some("audit_image_count") {
+            continue;
+        }
         run_case(case).await;
     }
 }

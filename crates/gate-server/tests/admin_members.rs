@@ -1244,12 +1244,11 @@ async fn members_view_shape_and_dropped_fields() {
             "reset_today",
             "tags",
             "auto_tags",
-            "last_client",
             "hours24",
             "key_count",
             "all_key_ids"
         ],
-        "3.0 已删除的 anlas_auto / anlas_mode / v5_pinned 不再返回"
+        "3.0 已删除的 anlas_auto / anlas_mode / v5_pinned / last_client 不再返回（#50：旧日志里的 client 也不露出来）"
     );
     assert_eq!(m[1]["discord_id"], "900000000000000002");
     assert_eq!(m[1]["tags"][0]["tag"], "观察");
@@ -1261,7 +1260,6 @@ async fn members_view_shape_and_dropped_fields() {
             .map(|p| p > e.state.now()),
         Some(true)
     );
-    assert_eq!(m[1]["last_client"], "柏宝绘");
     assert_eq!(m[1]["hours24"].as_array().unwrap().len(), 24);
     assert_eq!(
         m[1]["hours24"]

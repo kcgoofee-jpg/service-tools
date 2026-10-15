@@ -72,7 +72,7 @@ const PAGES: Array<{ name: string; path: string; ready: (p: Page) => ReturnType<
   {
     name: "logs-usage",
     path: "/admin/logs/usage",
-    ready: (p) => p.getByText("暂无记录").or(p.getByRole("button", { name: "导出客户端日志" })),
+    ready: (p) => p.getByText("暂无记录").or(p.locator(".lg-listcard")),
   },
   { name: "logs-actions", path: "/admin/logs/actions", ready: (p) => p.getByLabel("操作者") },
   {
@@ -378,6 +378,32 @@ test.describe("已登录", () => {
     await off.getByRole("button", { name: "停用", exact: true }).click();
     await expect(off).toBeHidden();
     await expect(tmp).toHaveCount(0);
+    expect(errs).toEqual([]);
+  });
+
+  test("日志：成员反馈一条一行（时间 · 成员 · 内容），旧版选择题的记录显示成一行摘要，可搜索", async ({
+    page,
+  }) => {
+    const errs = watch(page);
+    await open(page, "/admin/logs/feedback", PAGES[6]?.ready as never);
+    await expect(page.getByRole("columnheader")).toHaveText(["时间", "成员", "内容"]);
+    // 评价筛选和选择题统计已经去掉
+    await expect(page.getByLabel("评价")).toHaveCount(0);
+    await expect(page.getByText("好评满意率")).toHaveCount(0);
+    // 新记录是成员写的话；旧记录（种子里有一条）是一行摘要
+    await expect(page.getByText("晚上八点左右排队有点久，希望能快一点。")).toBeVisible();
+    await expect(page.getByText(/^（旧版选择题）整体：满意；困扰：排队太久/)).toBeVisible();
+    await axe(page, "feedback");
+    // 按内容搜；换成找不到的关键字显示空状态
+    const box = page.getByRole("searchbox", { name: "搜索" });
+    await box.fill("ComfyUI");
+    await expect(page.getByText("教程写得很清楚")).toBeVisible();
+    await expect(page.getByText("晚上八点左右排队有点久")).toHaveCount(0);
+    await box.fill("旧版选择题");
+    await expect(page.getByText(/^（旧版选择题）/)).toBeVisible();
+    await expect(page.getByText("教程写得很清楚")).toHaveCount(0);
+    await box.fill("没有人会写这句话");
+    await expect(page.getByText("未找到符合条件的反馈")).toBeVisible();
     expect(errs).toEqual([]);
   });
 

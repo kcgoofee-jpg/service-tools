@@ -186,7 +186,6 @@ const ENDPOINTS: &[(&str, &str)] = &[
     ("GET", "/guard"),
     ("PUT", "/guard"),
     ("GET", "/discord-bot"),
-    ("PUT", "/discord-bot"),
     ("GET", "/home/join"),
     ("POST", "/home/join"),
     ("GET", "/reconciliation"),
@@ -611,104 +610,54 @@ async fn guard_accounts_show_usage() {
 async fn discord_bot_corrupt_store_is_a_server_error() {
     let e = setup(&[]).await;
     let api = Api::login(&e).await;
-    // 库里的心跳 / 事件不是合法 JSON：旧版 json.loads 抛异常没人接，500
+    // 库里的心跳不是合法 JSON：旧版 json.loads 抛异常没人接，500
     e.state
         .db
         .set_setting(gate_core::bot_config::STATUS_KEY, "not json")
         .await
         .unwrap();
     assert_eq!(api.text("GET", "/discord-bot", None).await.0, 500);
+    // 是 JSON 但不是对象
     e.state
         .db
-        .set_setting(gate_core::bot_config::STATUS_KEY, "{}")
+        .set_setting(gate_core::bot_config::STATUS_KEY, "[1]")
         .await
         .unwrap();
-    e.state
-        .db
-        .set_setting(gate_core::bot_config::EVENTS_KEY, "{\"a\": 1}")
-        .await
-        .unwrap();
-    // 事件是对象：list(reversed(dict)) 会取出键，不是错误
-    let v = api.get("/discord-bot").await;
-    assert_eq!(v["events"], json!(["a"]));
+    assert_eq!(api.text("GET", "/discord-bot", None).await.0, 500);
 }
 
+/// 后台只剩「机器人状态」：跑图分享设置和最近动作删了（docs/v3-deviations.md #54），
+/// 库里残留的 `bot_gallery_*` / `bot_events` 行不再被读（哪怕是坏的），也没有写设置的接口。
 #[tokio::test]
-async fn discord_bot_config_and_status() {
+async fn discord_bot_status_only() {
     let e = setup(&[]).await;
     let api = Api::login(&e).await;
-    let kinds = r#""kinds":{"like":"点赞","comment":"AI 评论","shy":"捂眼睛（露骨）","skip":"跳过","error":"出错"}"#;
     assert_eq!(
         api.text("GET", "/discord-bot", None).await,
-        (
-            200,
-            format!(
-                r#"{{"config":{{"gallery_forum":"跑图分享","gallery_like":0,"gallery_ai":0,"gallery_ai_daily":30,"gallery_ai_model":"LongCat-2.5-Preview"}},"status":{{"online":false}},"events":[],{kinds}}}"#
-            )
-        )
+        (200, r#"{"status":{"online":false}}"#.to_string())
     );
 
-    let before = settings(&e).await;
-    let (s, t) = api
-        .text(
-            "PUT",
-            "/discord-bot",
-            Some(json!({"gallery_like": 1, "gallery_ai": true, "gallery_ai_daily": 40, "gallery_forum": " 作品 ", "gallery_ai_model": "m1"})),
-        )
-        .await;
-    assert_eq!(
-        (s, t.as_str()),
-        (
-            200,
-            r#"{"ok":true,"config":{"gallery_forum":"作品","gallery_like":1,"gallery_ai":1,"gallery_ai_daily":40,"gallery_ai_model":"m1"}}"#
-        )
-    );
-    assert_eq!(
-        changed(&before, &settings(&e).await),
-        map(&[
-            ("bot_gallery_forum", "作品"),
-            ("bot_gallery_like", "1"),
-            ("bot_gallery_ai", "1"),
-            ("bot_gallery_ai_daily", "40"),
-            ("bot_gallery_ai_model", "m1"),
-        ])
-    );
-    // 空请求体 / 不认识的字段：不写库，原样返回
-    let frozen = settings(&e).await;
-    for body in [json!({}), json!({"zzz": 1})] {
-        let (s, t) = api.text("PUT", "/discord-bot", Some(body)).await;
-        assert_eq!((s, t.contains(r#""gallery_ai_model":"m1""#)), (200, true));
-    }
-    assert_eq!(settings(&e).await, frozen);
-    // 校验失败是 400（不是 422）
-    for (body, detail) in [
-        (
-            json!({"gallery_like": 2}),
-            "gallery_like 需要是 0～1 的整数",
-        ),
-        (
-            json!({"gallery_like": 1.0}),
-            "gallery_like 需要是 0～1 的整数",
-        ),
-        (
-            json!({"gallery_ai_daily": -1}),
-            "gallery_ai_daily 需要是 0～500 的整数",
-        ),
-        (
-            json!({"gallery_ai_daily": "5"}),
-            "gallery_ai_daily 需要是 0～500 的整数",
-        ),
-        (
-            json!({"gallery_forum": ""}),
-            "gallery_forum 长度需要 1～50 个字",
-        ),
+    for (key, value) in [
+        ("bot_gallery_like", "1"),
+        ("bot_gallery_forum", "作品"),
+        ("bot_events", "not json"),
     ] {
-        api.fails("PUT", "/discord-bot", Some(body), 400, detail)
-            .await;
+        e.state.db.set_setting(key, value).await.unwrap();
     }
+    assert_eq!(
+        api.text("GET", "/discord-bot", None).await,
+        (200, r#"{"status":{"online":false}}"#.to_string())
+    );
+
+    // 修改设置的接口没有了
+    let frozen = settings(&e).await;
+    let (s, _) = api
+        .text("PUT", "/discord-bot", Some(json!({"gallery_like": 1})))
+        .await;
+    assert_eq!(s, 405);
     assert_eq!(settings(&e).await, frozen);
 
-    // 机器人心跳 + 事件：在线判断、事件新→旧
+    // 机器人心跳：在线判断
     let now = e.state.now();
     let status = gate_core::bot_config::status_to_store(
         json!({"user": "奶妹", "guild": "测试服", "latency_ms": 42})
@@ -721,25 +670,10 @@ async fn discord_bot_config_and_status() {
         .set_setting(gate_core::bot_config::STATUS_KEY, &status)
         .await
         .unwrap();
-    let mut events = None;
-    for (i, kind) in ["like", "comment"].iter().enumerate() {
-        let ev: Map<String, Value> = json!({"kind": kind, "title": format!("## 帖{i}")})
-            .as_object()
-            .unwrap()
-            .clone();
-        events =
-            gate_core::bot_config::append_event(events.as_deref(), &ev, now + i as f64).unwrap();
-    }
-    e.state
-        .db
-        .set_setting(gate_core::bot_config::EVENTS_KEY, &events.unwrap())
-        .await
-        .unwrap();
     let v = api.get("/discord-bot").await;
     assert_eq!(v["status"]["online"], true);
     assert_eq!(v["status"]["user"], "奶妹");
-    assert_eq!(v["events"][0]["kind"], "comment");
-    assert_eq!(v["events"][1]["title"], "帖0");
+    assert_eq!(v.as_object().unwrap().len(), 1, "只有 status：{v}");
     // 3 分钟没心跳 → 离线
     e.state
         .db
@@ -750,12 +684,6 @@ async fn discord_bot_config_and_status() {
         .await
         .unwrap();
     assert_eq!(api.get("/discord-bot").await["status"]["online"], false);
-
-    let rows = actions(&e).await;
-    assert!(
-        rows.iter()
-            .any(|r| r.1 == "修改 Discord 机器人设置" && r.2 == "Discord 机器人设置" && r.4)
-    );
 }
 
 // ------------------------------------------------------------------ 领 Key / 功能 / 记录
@@ -783,7 +711,7 @@ async fn ops_snapshot_defaults() {
                     "tags": "标签补全", "text": "文本生成 / OpenAI 兼容聊天", "voice": "语音合成"},
                 "new_key": ["image"],
             },
-            "audit": {"prompts": false, "thumbs": false, "retention_days": 7, "image_retention_days": 0, "image_cap_mb": 8192,
+            "audit": {"prompts": false, "thumbs": false, "retention_days": 7, "image_cap_mb": 8192,
                 "image_bytes": 0, "image_keep_hours": 24, "announce_configured": false},
         })
     );
@@ -1166,16 +1094,15 @@ async fn ops_audit_put() {
             ("audit_retention_days", "7"),
             ("audit_image_cap_mb", "8192"),
             ("audit_image_keep_hours", "24"),
-            ("member_image_download", "0"),
         ])
     );
-    // 夹到范围内；浮点取整；member_download 决定 image_retention_days
+    // 夹到范围内；浮点取整
     let (_, v) = api
-        .json("PUT", "/ops/audit", Some(json!({"thumbs": 1, "retention_days": 99999, "image_cap_mb": -5, "image_keep_hours": 100000, "member_download": true})))
+        .json("PUT", "/ops/audit", Some(json!({"thumbs": 1, "retention_days": 99999, "image_cap_mb": -5, "image_keep_hours": 100000})))
         .await;
     assert_eq!(
         audit(&v),
-        json!({"prompts": true, "thumbs": true, "retention_days": 3650, "image_retention_days": 2, "image_cap_mb": 0,
+        json!({"prompts": true, "thumbs": true, "retention_days": 3650, "image_cap_mb": 0,
                "image_bytes": 0, "image_keep_hours": 8760, "announce_configured": false})
     );
     let s = settings(&e).await;
@@ -1184,24 +1111,22 @@ async fn ops_audit_put() {
             &s["audit_retention_days"],
             &s["audit_image_cap_mb"],
             &s["audit_image_keep_hours"],
-            &s["member_image_download"]
         ],
-        ["3650", "0", "8760", "1"]
+        ["3650", "0", "8760"]
     );
     api.json(
         "PUT",
         "/ops/audit",
-        Some(json!({"image_cap_mb": 10.9, "member_download": false, "prompts": 0})),
+        Some(json!({"image_cap_mb": 10.9, "prompts": 0})),
     )
     .await;
     let s = settings(&e).await;
     assert_eq!(
         (
             s["audit_image_cap_mb"].as_str(),
-            s["audit_prompts"].as_str(),
-            s["member_image_download"].as_str()
+            s["audit_prompts"].as_str()
         ),
-        ("10", "0", "0")
+        ("10", "0")
     );
 
     let frozen = settings(&e).await;
@@ -2624,7 +2549,7 @@ async fn server_status_reports_alerts_audit_protection_disk() {
     assert_eq!(v["alerts"], json!({"configured": false, "sent": 0}));
     assert_eq!(
         v["audit"],
-        json!({"prompts": false, "thumbs": false, "retention_days": 7, "image_retention_days": 0, "image_cap_mb": 8192,
+        json!({"prompts": false, "thumbs": false, "retention_days": 7, "image_cap_mb": 8192,
                "image_bytes": 0, "image_keep_hours": 24})
     );
     assert_eq!(
@@ -2656,20 +2581,10 @@ async fn server_status_reports_alerts_audit_protection_disk() {
     );
     assert!((88..=90).contains(&v["upstream"]["image_cooldown_seconds"].as_i64().unwrap()));
     // 记录开关改了，状态里跟着变
-    api.json(
-        "PUT",
-        "/ops/audit",
-        Some(json!({"prompts": true, "member_download": true})),
-    )
-    .await;
+    api.json("PUT", "/ops/audit", Some(json!({"prompts": true})))
+        .await;
     let v = api.get("/status").await;
-    assert_eq!(
-        (
-            v["audit"]["prompts"].clone(),
-            v["audit"]["image_retention_days"].clone()
-        ),
-        (json!(true), json!(2))
-    );
+    assert_eq!(v["audit"]["prompts"], json!(true));
 }
 
 #[tokio::test]

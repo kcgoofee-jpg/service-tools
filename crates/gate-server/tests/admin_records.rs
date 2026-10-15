@@ -42,7 +42,6 @@ async fn every_endpoint_requires_login_and_same_origin() {
     let (e, a) = ready().await;
     let table: Vec<(&str, &str)> = vec![
         ("GET", "/logs"),
-        ("GET", "/logs/export"),
         ("GET", "/actions"),
         ("GET", "/errors"),
         ("POST", "/errors/abc/resolve"),
@@ -666,120 +665,65 @@ fn hex_bytes(h: &str) -> Vec<u8> {
 }
 
 #[tokio::test]
-async fn client_log_export_is_a_zip_with_csvs_and_rate_limited() {
-    let (e, a) = ready().await;
-    a.sql(&format!(
-        "INSERT INTO discord_registrations(discord_id, key_id, created_at, username, display_name) VALUES ('900000000000000001', 1, 1.0, 'u1', '甲');\
-         INSERT INTO key_tags(key_id, tag, note, by, ts) VALUES (1, '观察', '备注', '站长', 1.0), (1, '常驻', '', '站长', 2.0);\
-         INSERT INTO usage_log(ts, key_id, key_name, kind, model, status, images, anlas, wait_ms, dur_ms, up_status, client, detail, reason, rid) VALUES \
-         ({0}, 1, '旧名', 'image', 'm', 'ok', 2, 0.0, 10, 20, 200, '柏宝绘', '', '', 'r1'), \
-         ({2}, 1, '旧名', 'image', 'm', 'ok', 1, 0.0, 10, 20, 200, 'SillyTavern', '=SUM(A1)', '', 'r2'), \
-         ({1}, 1, '旧名', 'image', 'm', 'rejected', 0, 0.0, 0, 0, 0, '', '含,逗号\"引号\"', 'key_rate', 'r3');",
-        e.state.now() - 3600.0,
-        e.state.now() - 40.0 * 86400.0,
-        e.state.now() - 3000.0
-    ))
-    .await;
-    let r = a.get(&format!("{A}/logs/export?days=abc")).await;
-    assert_eq!(
-        (r.status, r.json()["detail"][0]["loc"].clone()),
-        (422, json!(["query", "days"]))
-    );
-    let r = a.get(&format!("{A}/logs/export?days=7")).await;
-    assert_eq!(r.status, 200, "{}", r.text());
-    assert_eq!(r.headers["content-type"], "application/zip");
-    let disp = r.headers["content-disposition"].to_str().unwrap();
-    assert!(
-        disp.starts_with("attachment; filename=\"owl-client-logs-") && disp.ends_with(".zip\""),
-        "{disp}"
-    );
-    let files = zip_files(&r.body);
-    let names: Vec<&str> = files.iter().map(|(n, _)| n.as_str()).collect();
-    assert_eq!(names, ["README.txt", "requests.csv", "keys.csv"]);
-    let readme = String::from_utf8(files[0].1.clone()).unwrap();
-    assert!(
-        readme.starts_with("猫头鹰公益站 · 客户端日志导出\n导出时间："),
-        "{readme}"
-    );
-    assert!(readme.contains("（UTC+8）  范围：最近 7 天\n"), "{readme}");
-    let req = String::from_utf8(files[1].1.clone()).unwrap();
-    let lines: Vec<&str> = req.trim_end().split("\r\n").collect();
-    assert!(
-        lines[0].starts_with('\u{feff}')
-            && lines[0].ends_with("wait_ms,dur_ms,up_status,user_agent,detail,reason,rid")
-    );
-    assert_eq!(lines.len(), 3, "只有最近 7 天的 2 条请求：{req}");
-    assert!(
-        lines[1]
-            .contains(",1,测试成员,900000000000000001,u1,image,m,ok,2,0.0,10,20,200,柏宝绘,,,r1"),
-        "{}",
-        lines[1]
-    );
-    assert!(
-        lines[2].contains(",'=SUM(A1),"),
-        "公式开头的文本前加 '：{}",
-        lines[2]
-    );
-    let keys = String::from_utf8(files[2].1.clone()).unwrap();
-    let k1 = keys.lines().nth(1).unwrap();
-    assert!(
-        k1.starts_with("1,测试成员,900000000000000001,u1,甲,1,0,0,1,"),
-        "{k1}"
-    );
-    assert!(
-        k1.ends_with(",3,2,观察（备注）；常驻"),
-        "成功出图 3 张、客户端 2 种、标签：{k1}"
-    );
-    // 全站每分钟 1 次
-    a.get(&format!("{A}/logs/export"))
-        .await
-        .assert_detail(429, "导出太频繁，请 1 分钟后再试");
-    assert!(
-        a.actions()
-            .await
-            .iter()
-            .any(|(act, t, ..)| act == "导出客户端日志" && t == "7天")
-    );
-    let r2 = a.get(&format!("{A}/logs/export?days=0")).await;
-    assert_eq!(r2.status, 429);
-}
-
-#[tokio::test]
 async fn feedback_list_and_csv_export() {
     let (_e, a) = ready().await;
+    // docs/v3-deviations.md #52：/反馈 现在是一段文字；旧版选择题的记录（id 2）照常显示成一行摘要
     a.sql(
-        "INSERT INTO api_keys(id, name, token, created_at) VALUES (2, '乙', 'nai-t-2', 1.0);\
-         INSERT INTO feedback(ts, discord_id, username, key_id, answers) VALUES \
-         (200.0, '900000000000000002', '=cmd,\"x\"', 2, '{\"score\":\"一般\",\"pain\":\"没什么困扰\"}'), \
-         (100.0, '900000000000000001', 'user1', 1, '{\"score\":\"满意\",\"freq\":\"每天都用\"}'), \
-         (300.0, '900000000000000099', 'gone', 99, '{}');",
+        r#"INSERT INTO api_keys(id, name, token, created_at) VALUES (2, '乙', 'nai-t-2', 1.0);
+         INSERT INTO feedback(ts, discord_id, username, key_id, answers) VALUES
+         (200.0, '900000000000000002', 'plain', 2, '{"text": "排队有点久,\n\"希望\"快一点"}'),
+         (100.0, '900000000000000001', 'user1', 1, '{"score": "满意", "pain": "排队太久 / 经常提示人多", "wish": "多给一些 V5", "freq": "每天都用"}'),
+         (300.0, '900000000000000099', '=cmd,"x"', 99, '{}'),
+         (400.0, '900000000000000004', 'u4', NULL, '{"text": "=HYPERLINK(1)"}');"#,
     )
     .await;
     let v = a.get(&format!("{A}/feedback")).await.json();
-    let qs = v["questions"].as_array().unwrap();
-    assert_eq!(
-        qs.iter()
-            .map(|q| q["id"].as_str().unwrap())
-            .collect::<Vec<_>>(),
-        ["score", "pain", "wish", "client", "freq"]
-    );
-    assert_eq!(qs[0]["label"], "整体用下来感觉怎么样？");
-    assert_eq!(qs[0]["options"].as_array().unwrap().len(), 5);
+    assert!(v.get("questions").is_none(), "题目已经去掉: {v}");
     let items = v["items"].as_array().unwrap();
     assert_eq!(
         items
             .iter()
             .map(|i| i["id"].as_i64().unwrap())
             .collect::<Vec<_>>(),
-        [3, 1, 2],
+        [4, 3, 1, 2],
         "最新在前"
     );
-    assert_eq!(items[1]["key_name"], "乙");
-    assert_eq!(items[0]["key_name"], "");
+    // 只有这几个字段（不再带 answers）
     assert_eq!(
-        items[2]["answers"],
-        json!({"score": "满意", "freq": "每天都用"})
+        items[0]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        [
+            "id",
+            "ts",
+            "discord_id",
+            "username",
+            "key_id",
+            "key_name",
+            "text",
+            "legacy"
+        ]
     );
+    assert_eq!(items[0]["text"], "=HYPERLINK(1)");
+    assert_eq!(items[0]["legacy"], false);
+    assert_eq!(items[0]["key_name"], "");
+    assert!(items[0]["key_id"].is_null());
+    assert_eq!(items[1]["text"], "", "什么都没有的记录文字为空");
+    assert_eq!(items[1]["legacy"], false);
+    assert_eq!(items[2]["text"], "排队有点久,\n\"希望\"快一点");
+    assert_eq!(items[2]["legacy"], false);
+    assert_eq!(items[2]["key_name"], "乙");
+    // 旧版选择题：缺的题目跳过，其余拼成一行
+    assert_eq!(
+        items[3]["text"],
+        "（旧版选择题）整体：满意；困扰：排队太久 / 经常提示人多；希望：多给一些 V5；频率：每天都用"
+    );
+    assert_eq!(items[3]["legacy"], true);
+    assert_eq!(items[3]["key_name"], "测试成员");
+
     let r = a.get(&format!("{A}/feedback/export")).await;
     assert_eq!(r.status, 200);
     assert_eq!(r.headers["content-type"], "text/csv; charset=utf-8");
@@ -791,21 +735,33 @@ async fn feedback_list_and_csv_export() {
     assert!(disp.contains("; filename*=UTF-8''owl-feedback-"), "{disp}");
     let text = r.text();
     assert!(text.starts_with('\u{feff}'));
+    // 行尾是 \r\n，单元格里的换行只有 \n，所以按 \r\n 切就是按记录切
     let lines: Vec<&str> = text.trim_start_matches('\u{feff}').split("\r\n").collect();
-    assert_eq!(
-        lines[0],
-        "time,discord_id,username,key_id,key_name,整体用下来感觉怎么样？,目前最困扰你的是？,最希望优先改进哪一项？,你主要用什么来出图？,你多久用一次公益站？"
-    );
+    assert_eq!(lines[0], "time,member,text");
     assert!(
-        lines[1].ends_with(",900000000000000001,user1,1,测试成员,满意,,,,每天都用"),
-        "按时间升序: {}",
+        lines[1].starts_with("1970-01-01 ")
+            && lines[1].ends_with(
+                ",测试成员,（旧版选择题）整体：满意；困扰：排队太久 / 经常提示人多；希望：多给一些 V5；频率：每天都用"
+            ),
+        "按时间升序，旧记录同一行摘要: {}",
         lines[1]
     );
     assert!(
-        lines[2].contains(",900000000000000002,\"'=cmd,\"\"x\"\"\",2,乙,一般,没什么困扰,,,"),
-        "公式防注入 + CSV 转义: {}",
+        lines[2].ends_with(",乙,\"排队有点久,\n\"\"希望\"\"快一点\""),
+        "成员取 Key 名，文字里的逗号 / 换行 / 引号按 CSV 转义: {}",
         lines[2]
     );
+    assert!(
+        lines[3].ends_with(",\"'=cmd,\"\"x\"\"\","),
+        "没有 Key 名用用户名；公式防注入 + CSV 转义；空文字: {}",
+        lines[3]
+    );
+    assert!(
+        lines[4].ends_with(",u4,'=HYPERLINK(1)"),
+        "文字也防公式注入: {}",
+        lines[4]
+    );
+    assert_eq!(lines.len(), 6, "表头 + 4 条 + 末尾空串");
     assert!(
         a.actions()
             .await

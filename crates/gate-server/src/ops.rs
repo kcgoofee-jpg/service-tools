@@ -6,7 +6,7 @@
 //! 另外放几个后台接口共用的「按数据库区分的单例」（旧版是模块级全局变量）：
 //! 测试告警的 10 秒节流、运行期限制的写锁、Anlas 核对的互斥锁。
 
-use crate::audit::{audit_flags, audit_image_cap_mb, audit_image_days, audit_image_keep_hours};
+use crate::audit::{audit_flags, audit_image_cap_mb, audit_image_keep_hours};
 use crate::auth::site_flag;
 use crate::env::RegistrationEnv;
 use crate::error::{ApiError, HttpError, InternalError};
@@ -400,7 +400,6 @@ pub async fn set_audit(state: &AppState, body: &Map<String, Value>) -> Result<Va
     let (mut prompts, mut thumbs, mut days) = audit_flags(db, &state.env).await?;
     let mut cap_mb = audit_image_cap_mb(db).await?;
     let mut keep_hours = audit_image_keep_hours(db).await?;
-    let mut download = audit_image_days(db).await? != 0;
     // 旧版：int(...) 失败（ValueError / TypeError）统一回 422「参数无效」
     let bad = |_: PyErr| OpsError::Invalid("参数无效".into());
     let clamped = |v: &Value, hi: i64| -> Result<i64, OpsError> {
@@ -422,17 +421,11 @@ pub async fn set_audit(state: &AppState, body: &Map<String, Value>) -> Result<Va
     if let Some(v) = body.get("image_keep_hours") {
         keep_hours = clamped(v, 8760)?; // 0 = 只按容量上限
     }
-    if let Some(v) = body.get("member_download") {
-        download = pyval::truthy(v);
-    }
     // site_flags.put(spec, value)：写 encode 之后的串
-    for (spec, v) in [
-        (&site_flags::IMAGE_KEEP_HOURS, Value::from(keep_hours)),
-        (&site_flags::MEMBER_DOWNLOAD, Value::Bool(download)),
-    ] {
-        let text = site_flags::encode(spec, &v).map_err(|e| OpsError::Invalid(e.0))?;
-        db.set_setting(spec.key, &text).await?;
-    }
+    let spec = &site_flags::IMAGE_KEEP_HOURS;
+    let text =
+        site_flags::encode(spec, &Value::from(keep_hours)).map_err(|e| OpsError::Invalid(e.0))?;
+    db.set_setting(spec.key, &text).await?;
     db.set_settings_bulk(&[
         (
             "audit_prompts".into(),
@@ -443,11 +436,9 @@ pub async fn set_audit(state: &AppState, body: &Map<String, Value>) -> Result<Va
         (site_flags::IMAGE_CAP_MB.key.into(), cap_mb.to_string()),
     ])
     .await?;
-    let image_days = audit_image_days(db).await?;
     Ok(json!({
         "prompts": prompts, "thumbs": thumbs, "retention_days": days,
-        "image_retention_days": image_days, "image_cap_mb": cap_mb,
-        "image_keep_hours": keep_hours, "member_download": download,
+        "image_cap_mb": cap_mb, "image_keep_hours": keep_hours,
     }))
 }
 

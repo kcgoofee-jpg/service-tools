@@ -33,16 +33,9 @@ pub fn strip_v1_alias(mut req: Request<Body>) -> Request<Body> {
     req
 }
 
-/// 第 2 步：请求上下文。客户端名按 User-Agent 归类（gate_core::client_views::client_name 等）。
+/// 第 2 步：请求上下文（请求编号、计时）。不识别客户端：docs/v3-deviations.md #50。
 pub async fn request_context(mut req: Request, next: Next) -> Response {
-    let ua = req
-        .headers()
-        .get("user-agent")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-    let aalice = req.headers().contains_key("x-correlation-id")
-        || req.headers().contains_key("x-initiated-at");
-    let ctx = ReqCtx::new(crate::clients::classify(ua, aalice));
+    let ctx = ReqCtx::new();
     req.extensions_mut().insert(ctx.clone());
     let rid = ctx.rid();
     let mut resp = ctx.clone().scope(next.run(req)).await;

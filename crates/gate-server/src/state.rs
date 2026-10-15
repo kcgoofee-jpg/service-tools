@@ -113,7 +113,7 @@ pub struct Inner {
     pub live: crate::live::Hub,
     /// Discord 自助领 Key（`env.registration` 配齐才有；否则 `/self-register/*` 回 503）。
     pub registration: Option<Arc<RegistrationService>>,
-    /// 成员网页接口的进程内限流状态（捐赠提交、原图打包）。
+    /// 成员网页接口的进程内限流状态（捐赠提交）。
     pub member_web: MemberWeb,
     /// 自适应内核：模块运行记录 + 外部钩子（注册服务、私信函数）。
     pub kernel: crate::kernel::Kernel,

@@ -1,10 +1,7 @@
 mod common;
 
-use common::bytes_of;
 use gate_core::client_views::{SubscriptionData, SubscriptionError, subscription_payload};
-use gate_core::request_timing::{
-    classify_client, client_name, model_label, refine_client_from_payload, snapshot_ms,
-};
+use gate_core::request_timing::{model_label, snapshot_ms};
 use gate_golden::{as_f64, assert_eq_py, assert_eq_py_ordered, load};
 use serde_json::{Value, json};
 
@@ -13,39 +10,13 @@ const M: &str = env!("CARGO_MANIFEST_DIR");
 #[test]
 fn request_timing_golden() {
     let mut counts = std::collections::BTreeMap::<String, usize>::new();
-    let mut changed = 0;
     for c in load(M, "client/name") {
         let name = c.raw["fn"].as_str().unwrap().to_string();
         *counts.entry(name.clone()).or_default() += 1;
         match name.as_str() {
-            "client_name" => {
-                // 参数可能是 None（旧版 `user_agent or ""`）
-                let ua = c.arg(0).as_str().unwrap_or("");
-                assert_eq_py(&c, &json!(client_name(ua)), c.out());
-            }
-            "begin_client" => {
-                let headers: Vec<(Vec<u8>, Vec<u8>)> = c.raw["headers"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|h| (bytes_of(&h[0]), bytes_of(&h[1])))
-                    .collect();
-                let refs: Vec<(&[u8], &[u8])> = headers
-                    .iter()
-                    .map(|(a, b)| (a.as_slice(), b.as_slice()))
-                    .collect();
-                assert_eq_py(&c, &json!(classify_client(&refs)), &c.raw["out"]);
-            }
-            "refine" => {
-                let current = c.raw["current"].as_str().unwrap();
-                let got = refine_client_from_payload(current, &c.raw["body"]);
-                changed += usize::from(got.is_some());
-                assert_eq_py(
-                    &c,
-                    &json!(got.unwrap_or_else(|| current.to_string())),
-                    &c.raw["out"],
-                );
-            }
+            // 客户端识别（User-Agent 摘要 / 请求头 / 请求体指纹）3.0 整块删除，对应的冻结用例不再比：
+            // docs/v3-deviations.md #50。
+            "client_name" | "begin_client" | "refine" => {}
             "snapshot_ms" => {
                 let sent = c.raw["sent"].as_f64();
                 let (wait, dur) = snapshot_ms(
@@ -73,14 +44,7 @@ fn request_timing_golden() {
             other => panic!("未知函数 {other}"),
         }
     }
-    assert!(changed > 300, "refine 里被改写的用例太少：{changed}");
-    for (name, want) in [
-        ("client_name", 300),
-        ("begin_client", 400),
-        ("refine", 1500),
-        ("snapshot_ms", 300),
-        ("model_label", 5),
-    ] {
+    for (name, want) in [("snapshot_ms", 300), ("model_label", 5)] {
         assert!(
             counts.get(name).copied().unwrap_or(0) >= want,
             "{name} 用例太少：{counts:?}"
@@ -129,13 +93,4 @@ fn subscription_payload_golden() {
         "{ok} / {missing} / {admin}"
     );
     let _: Option<Value> = None;
-}
-
-#[test]
-fn constants_golden() {
-    let c = &load(M, "analysis/consts")[0];
-    assert_eq!(
-        gate_core::request_timing::CLIENT_MAX as u64,
-        c.raw["request_timing"]["CLIENT_MAX"].as_u64().unwrap()
-    );
 }

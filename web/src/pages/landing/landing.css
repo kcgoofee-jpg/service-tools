@@ -108,7 +108,7 @@ a.btn:hover {
   gap: var(--sp-3);
 }
 
-/* 登录成员：手机上按 额度 → 状态 → Key → 券 → 备份 → 问卷 排；桌面分两列，各列内部顺序不变 */
+/* 登录成员：手机上按 额度 → 状态 → Key → 券 → 问卷 排；桌面分两列，各列内部顺序不变 */
 .lp-grid {
   display: flex;
   flex-direction: column;
@@ -132,11 +132,8 @@ a.btn:hover {
 .lp-o5 {
   order: 5;
 }
-.lp-o6 {
-  order: 6;
-}
 
-/* 某块没有内容（例如没有可打包的图）时它的外壳不占位，否则会多出一道间距 */
+/* 某块没有内容时它的外壳不占位，否则会多出一道间距 */
 .lp-col > div:empty {
   display: none;
 }
@@ -275,14 +272,6 @@ a.btn:hover {
 .lp-coupon__body {
   flex: 1;
   min-width: 0;
-}
-.lp-export {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-2);
-}
-.lp-export__hint {
-  margin-top: var(--sp-3);
 }
 
 /* ---------- 公告 / 捐赠 ---------- */

@@ -120,7 +120,7 @@
 |---|---|---|
 | `slots` 名额 | enforce | 只加不减：空位 ≤ 2、名额 < 100、昨天用量 < 60%、账号 V5 ≥ 50%、昨天被每小时上限拦的小时数 < 3、排队拥挤（某小时 `queue_full` ≥ 5 次）的小时数 < 3、昨天日志覆盖 ≥ 20 小时 → 名额 +5；最多每 24 小时一次。名额为 0（不限）时不动——**线上就是不限，已核对**（`autopilot_last` 写「名额不限（站长设定），不调整」） |
 | `breaker` 熔断 | enforce | 最近 15 分钟图片请求里「上游失败」≥ 5 次且 ≥ 30% → 全站暂停出图 300 秒（`breaker`）。只算上游 5xx 和流中途断开；本地拦截、上游 429、4xx 不算；只看上次熔断结束之后的数据 |
-| `key_guard` 单 Key 限流 | enforce | 1 小时内同一把 Key 被拒 ≥ 60 次 → 暂停该 Key 1 小时（回 403，`key_paused`）。统计不含站点层面的拒绝（排队满、各类账号上限、熔断、冷却、`v5_exhausted`、`queue_timeout`、`site_quota`、`over_base`、`key_paused` 本身）。换网段 / 多客户端两条规则在 3.0 已没有事件来源，不会触发 |
+| `key_guard` 单 Key 限流 | enforce | 1 小时内同一把 Key 被拒 ≥ 60 次 → 暂停该 Key 1 小时（回 403，`key_paused`）。统计不含站点层面的拒绝（排队满、各类账号上限、熔断、冷却、`v5_exhausted`、`queue_timeout`、`site_quota`、`over_base`、`key_paused` 本身）。提示「{原因}，{到期时间} 自动恢复。」（2.x 留下的旧行原因为空，写「这把 Key 已被临时暂停，{到期时间} 自动恢复。」）。2.x 还有「换网段」「多客户端全天在用」两条规则，输入来自早已删除的防分享证据、恒为空，3.0 已删除（`docs/v3-deviations.md` #51）；数据库表 `share_state` 原样保留，现在只存每把 Key 的临时暂停 |
 
 ## 4. 内核模块（6 个，每 10 分钟 tick + 交叉校验）
 
@@ -177,7 +177,6 @@
 |---|---|---|
 | 提示词 | 开关 `audit_prompts`（线 1 = 记录）；保留天数 `audit_retention_days`（线 0 = 长期保留；环境变量 `AUDIT_RETENTION_DAYS` 默认 7，被站点设置压过；范围 0～3650） | 线 / 码 |
 | 原图 | 开关 `audit_thumbs`（线 1 = 保存成功结果的原图，设置名沿用旧名）；`audit_image_keep_hours`（码 24，线 0 = 只按容量上限删）；`audit_image_cap_mb`（码 8192，线 8192）：超过后从最旧的开始删到约 90%；没有记录指向的原图文件（崩溃残留）超过 1 小时清掉 | 线 / 码 |
-| 成员下载原图 | `member_image_download`（线 0 = 关）；开启时可打包最近 2 天（`MEMBER_DOWNLOAD_DAYS`），单次最多 200 MB，全站同一时刻只打包一份，每人每 60 秒一次 | 线 / 码 |
 | 用量日志 | `USAGE_LOG_RETENTION_DAYS` 默认 0 = 长期保留；大于 0 时按 max(7, N) 天清理。线上未核对。每日计数器和账本不受影响 | 码 |
 | 后台操作日志 | 180 天 | 码 |
 | 状态码统计 / 已处理的 Bug | 状态码统计保留 30 天；已处理的 Bug 超过 30 天没再出现才清理 | 码 |
@@ -237,7 +236,7 @@
 
 ## 9. 共用站点设置（登记表 `site_flags.rs`）
 
-读写只走 `site_flags::get / put`；缺失或格式不对一律回到默认值（默认值按 fail-closed 选）。下表是登记表的全部 17 项：前 16 项是 `ALL`，第 17 项 `member_daily_anlas` 已登记在表里但没列进 `ALL`（所以 `facts_table()` 不会生成它）。各模块自己的参数组不在此表，见表后。
+读写只走 `site_flags::get / put`；缺失或格式不对一律回到默认值（默认值按 fail-closed 选）。下表是登记表的全部 16 项：前 15 项是 `ALL`，第 16 项 `member_daily_anlas` 已登记在表里但没列进 `ALL`（所以 `facts_table()` 不会生成它）。各模块自己的参数组不在此表，见表后。
 
 | 键 | 类型 | 默认 | 范围 | 说明 | 线上当前值（2026-10-15） |
 |---|---|---|---|---|---|
@@ -256,8 +255,7 @@
 | `audit_image_retention_days` | int | 3 | 0–365 | 已停用（原图按容量上限和保存小时数清理） | 未设置 |
 | `audit_image_cap_mb` | int | 8192 | 0–500000 | 原图占用上限（MB）：超过后自动删掉最旧的；0 = 不限 | 8192 |
 | `audit_image_keep_hours` | int | 24 | 0–8760 | 原图在服务器上保存几小时；0 = 只按容量上限删 | 0 |
-| `member_image_download` | flag | False | | 成员在首页打包下载自己最近的原图 | 0 |
-| `member_daily_anlas`（第 17 项） | int | 50 | 0–100000 | 每人每日 Anlas 上限（仅对未手动设置 Anlas 日额度的 Key 生效；0 = 不限） | 未设置，按默认（首页文案核对为 50） |
+| `member_daily_anlas`（第 16 项） | int | 50 | 0–100000 | 每人每日 Anlas 上限（仅对未手动设置 Anlas 日额度的 Key 生效；0 = 不限） | 未设置，按默认（首页文案核对为 50） |
 
 其他参数组（都存在 `site_settings`，键名带前缀）：
 
@@ -269,10 +267,10 @@
 | `autopilot_*` | `autopilot_slots` / `autopilot_breaker` / `autopilot_key_guard`（`off` / `observe` / `enforce`，缺省 `observe`） | 线 enforce / enforce / enforce |
 | `register_*` | `register_open`、`register_max_users`、`register_daily_images`、`register_daily_v5`、`register_image_scope`、`register_expires_days`、`register_features`、`register_role_guild` / `register_role_id` / `register_role_note` | 线 1 / 未设（环境变量 0）/ 95 / 3 / all / 30 / `image,vibe,tags` / 空 |
 | `audit_*` | `audit_prompts`、`audit_thumbs`、`audit_retention_days`（见 §7） | 线 1 / 1 / 0 |
-| `bot_*` | `bot_gallery_forum`（默认「跑图分享」）、`bot_gallery_like`（默认 0）、`bot_gallery_ai`（默认 0）、`bot_gallery_ai_daily`（默认 30）、`bot_gallery_ai_model` | 线 `gallery_like` = 0、`gallery_ai` = 0（均关） |
+| `bot_*` | `bot_status`（机器人心跳，奶妹每分钟经桥接接口写一次：账号 / 服务器 / 网关延迟 / 启动时间 / `seen_at`；3 分钟没更新算离线，后台 Discord 页的「机器人状态」读它） | 随机器人上报 |
 | 其他 | `features_global`（JSON，缺省全开）、`v5_alert_threshold`（默认 20，范围 1～100）、模块开关（`module_<名字>`，默认开；「领 Key」模块的开关就是 `register_open`） | 线 `v5_alert_threshold` = 20 |
 
-线上库里还有一些代码已不再读取的残留键，看到不要当真：`anlas_pool_last`、`anlas_member_daily_cap`、`anlas_min_key_age_days`、`economy_mode`、`autopilot_economy`、`guard_daily_cap_fallback`、`guard_account_3h_cap`、`guard_account_10m_cap`、`ack_*`、`quota_shadow_*`。
+线上库里还有一些代码已不再读取的残留键，看到不要当真：`anlas_pool_last`、`anlas_member_daily_cap`、`anlas_min_key_age_days`、`economy_mode`、`autopilot_economy`、`guard_daily_cap_fallback`、`guard_account_3h_cap`、`guard_account_10m_cap`、`ack_*`、`quota_shadow_*`，以及 `bot_gallery_*`（跑图分享设置）、`bot_events`（机器人最近动作）——后两者随功能一起删除，见 `docs/v3-deviations.md` #54。
 
 ## 10. 拒绝原因码（`usage_log.reason`，`reasons.rs`）
 

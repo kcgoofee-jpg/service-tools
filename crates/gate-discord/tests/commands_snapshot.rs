@@ -10,12 +10,25 @@ use gate_discord::commands::{self, NAIMEI_INTENTS, WARDEN_INTENTS};
 use gate_discord::warden;
 use serde_json::Value;
 
+/// `/反馈` 在 3.0 改成一段文字（docs/v3-deviations.md #52）：冻结夹具里它的描述还写着「5 道选择题」，
+/// 比较前把期望里的这一句换成 3.0 的。命令名、选项、权限不变，其余命令逐字节照旧。
+const FEEDBACK_DESCRIPTION_V3: &str = "写几句话给站长（只有你能看到，不会私信你）";
+
 fn golden() -> Value {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/tests/golden/discord_commands.json"
     );
-    serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+    let mut v: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let defs = v["sync_request"]["json"].as_array_mut().unwrap();
+    let mut replaced = 0;
+    for d in defs.iter_mut().filter(|d| d["name"] == "反馈") {
+        assert!(d["description"].as_str().unwrap().contains("5 道选择题"));
+        d["description"] = FEEDBACK_DESCRIPTION_V3.into();
+        replaced += 1;
+    }
+    assert_eq!(replaced, 1, "夹具里应该正好有一条 /反馈");
+    v
 }
 
 #[test]

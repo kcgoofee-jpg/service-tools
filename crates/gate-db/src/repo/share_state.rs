@@ -1,4 +1,5 @@
-//! Key 暂停闸门（`share_state` 表）：自动驾驶等模块对单把 Key 的临时暂停。旧版 `app/share_guard.py`。
+//! Key 临时暂停（`share_state` 表）：自动驾驶等模块对单把 Key 的暂停，只用 `paused_until` / `pause_reason` 两列。
+//! 表名与风险分等旧列是 2.x 防分享（`app/share_guard.py`）留下的，兼容旧库原样保留，3.0 不读不写。
 
 use crate::{Db, Result};
 

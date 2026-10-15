@@ -14,9 +14,8 @@
 //! | `breaker` | `SELECT SUM(CASE WHEN status='error' AND (up_status>=500 OR up_status BETWEEN 200 AND 299) THEN 1 ELSE 0 END), COUNT(*) FROM usage_log WHERE ts>=? AND kind LIKE 'image%' AND status IN ('ok','error')`（SUM 可能为 NULL） | `(since)`，见 [`breaker_since`] |
 //! | `rejects` | `SELECT key_id, COUNT(*) FROM usage_log WHERE ts>=? AND status='rejected' AND key_id IS NOT NULL AND reason NOT IN (<`[`KEY_GUARD_SKIP_REASONS`]`>) GROUP BY key_id` | `(now - 3600)` |
 //! | `keys` | `SELECT id, name FROM api_keys WHERE enabled=1 AND is_admin=0 AND is_test=0`（**保持数据库返回顺序**：决定 `decisions` 的顺序） | — |
-//! | `events` | 内存里的 `state.sources.events`（`share_guard` 记的 `(时间, key_id, 种类)`，种类 `alternate` / `clients` / `allday`） | — |
 //! | `guard` | 内存里的 Guard：`breaker_until`；没有 Guard 传 `None` | — |
-//! | `share` | 内存里的 ShareGuard：`paused`（`key_id → 暂停到期时间`）；没有传 `None` | — |
+//! | `pauses` | 内存里的 Key 暂停表（`state.pauses`）：`paused`（`key_id → 暂停到期时间`）；没有传 `None`。夹具里这个字段叫 `share`（2.x 的 ShareGuard），冻结不改，解析时当别名收 | — |
 //!
 //! # `effects` 的执行方式（按顺序）
 //!
@@ -24,17 +23,22 @@
 //! - `SetRegistrationMaxUsers`：`ops.set_registration(db, {"max_users": n, "notify": False}, state, registrar)`
 //!   （= `set_settings_bulk({"register_max_users": n})`，不发公告）；
 //! - `TripBreaker`：`guard.trip_breaker(seconds, reason, now)`（内存态，`breaker_until = now + seconds`）；
-//! - `PauseKey`：`share.pause_key(key_id, seconds, reason, now)`（写 `share_state` 表并更新内存）。
+//! - `PauseKey`：暂停单把 Key（旧版 `share.pause_key(key_id, seconds, reason, now)`）：写 `share_state` 表
+//!   （现在它只是每把 Key 的临时暂停存储，表名为兼容旧库保留）并更新内存暂停表。
 //!   旧版只有 `pause_key` 返回 True（此前不在暂停中）才记日志、标 `applied`；这一步已在 `decide` 里
-//!   用 `share.paused` 提前判过，只有会成功的才会产出 `PauseKey` 与对应日志。
+//!   用 `pauses.paused` 提前判过，只有会成功的才会产出 `PauseKey` 与对应日志。
 //!
 //! # 与旧版一致的怪癖
 //!
 //! - 上一轮复盘里 `queue_full` 的统计窗口是 `day` 的**本地 0 点起 24 小时**（`time.mktime(strptime(day))`），
 //!   而复盘本身统计的是服务日（7 点到次日 7 点）：两者错开 7 小时。
-//! - `key_guard_rule` 里 `clients and allday` 只要各出现过 **1 次**事件就触发 `reset`（注释写的是「≥3 种客户端、≥20 小时」，
-//!   阈值在产生事件的 `share_guard` 里）；`reset` 与「换网段」都只观察不执行，只有 `pause 3600` 会真的暂停。
 //! - 没有注册服务时 `max_users` 视为 0，走「名额不限」分支。
+//!
+//! # 已删除的规则
+//!
+//! 2.x 的单 Key 守护还有「24 小时内多次来回切换网段 → 暂停 24 小时」「3 种以上客户端且几乎全天在用 → 重置 Key」
+//! 两条，输入来自防分享证据（`events`）。防分享体系在 2.x 就删了，输入恒为空，这两条永远不会触发；3.0 连同
+//! `events` 输入一起删除（docs/v3-deviations.md #51）。现在 `key_guard` 只剩「1 小时被拒 ≥ 60 次 → 暂停 1 小时」。
 
 use crate::clock::Clock;
 use crate::quota::{Cx, DecideError, Effect, fmt_prec, hget, loads_setting, num, py_max, site_int};
@@ -161,35 +165,15 @@ pub fn breaker_rule(fails: i64, total: i64) -> (bool, String) {
     (false, format!("最近 15 分钟上游失败 {fails}/{total}：正常"))
 }
 
-/// 返回 `(动作, 时长秒, 原因)` 或 `None`。动作：`pause` / `reset`。
-pub fn key_guard_rule(
-    alternate: i64,
-    clients: i64,
-    allday: i64,
-    rejects_1h: i64,
-) -> Option<(&'static str, i64, String)> {
-    if clients != 0 && allday != 0 {
-        return Some((
-            "reset",
-            0,
-            "24 小时内用了 3 种以上客户端、且几乎全天在用：重置 Key（新 Key 私信本人）".to_string(),
-        ));
-    }
-    if alternate >= 2 {
-        return Some((
-            "pause",
-            86400,
-            format!("24 小时内 {alternate} 次在 10 分钟内来回切换网段：暂停 24 小时"),
-        ));
-    }
-    if rejects_1h >= 60 {
-        return Some((
-            "pause",
-            3600,
-            format!("1 小时内被拒绝 {rejects_1h} 次（多半是客户端在死循环重试）：暂停 1 小时"),
-        ));
-    }
-    None
+/// 单 Key 限流：1 小时内被拒 ≥ 这个次数，多半是客户端在死循环重试。
+pub const KEY_GUARD_REJECTS: i64 = 60;
+/// 触发后暂停这把 Key 的秒数。
+pub const KEY_GUARD_PAUSE_SECS: i64 = 3600;
+
+/// 单 Key 限流：1 小时内被拒 ≥ [`KEY_GUARD_REJECTS`] 次 → 返回暂停的原因；否则 `None`。
+pub fn key_guard_rule(rejects_1h: i64) -> Option<String> {
+    (rejects_1h >= KEY_GUARD_REJECTS)
+        .then(|| format!("1 小时内被拒绝 {rejects_1h} 次（多半是客户端在死循环重试）：暂停 1 小时"))
 }
 
 /// 熔断统计的下界参数：`max(now - 900, float(autopilot_breaker_until or 0))`——只看上次熔断结束之后的数据。
@@ -278,14 +262,10 @@ pub struct GuardState {
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ShareState {
-    /// `share.paused`：`key_id → 暂停到期时间`
+pub struct PausedKeys {
+    /// 当前的暂停表：`key_id → 暂停到期时间`
     pub paused: HashMap<i64, f64>,
 }
-
-/// `state.sources.events` 的一项：`(时间, key_id, 种类)`。
-#[derive(Debug, Clone, PartialEq, Deserialize)]
-pub struct Event(pub f64, pub i64, pub String);
 
 /// `run` 读到的一切。
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -298,8 +278,9 @@ pub struct AutopilotInputs {
     pub queue_hours: i64,
     pub breaker: BreakerRows,
     pub guard: Option<GuardState>,
-    pub share: Option<ShareState>,
-    pub events: Vec<Event>,
+    /// 夹具里叫 `share`（2.x 的 ShareGuard），冻结不改。
+    #[serde(alias = "share")]
+    pub pauses: Option<PausedKeys>,
     /// `(key_id, 被拒次数)`，查询返回顺序。
     pub rejects: Vec<(i64, i64)>,
     /// `(id, name)`，查询返回顺序。
@@ -533,25 +514,13 @@ fn run_inner(inp: &AutopilotInputs, clock: &Clock, cx: &mut Cx) -> Result<Value,
         }
     }
     for (kid, name) in &keys {
-        let mine: Vec<&str> = inp
-            .events
-            .iter()
-            .filter(|e| e.1 == *kid && e.0 >= now - 86400.0)
-            .map(|e| e.2.as_str())
-            .collect();
-        let count = |k: &str| mine.iter().filter(|x| **x == k).count() as i64;
-        if let Some(d) = key_guard_rule(
-            count("alternate"),
-            count("clients"),
-            count("allday"),
-            rejects.get(kid).copied().unwrap_or(0),
-        ) {
+        if let Some(why) = key_guard_rule(rejects.get(kid).copied().unwrap_or(0)) {
             let mut m = Map::new();
             m.insert("key".into(), json!(kid));
             m.insert("name".into(), json!(name));
-            m.insert("action".into(), json!(d.0));
-            m.insert("seconds".into(), json!(d.1));
-            m.insert("why".into(), json!(d.2));
+            m.insert("action".into(), json!("pause"));
+            m.insert("seconds".into(), json!(KEY_GUARD_PAUSE_SECS));
+            m.insert("why".into(), json!(why));
             decisions.push(m);
         }
     }
@@ -563,19 +532,14 @@ fn run_inner(inp: &AutopilotInputs, clock: &Clock, cx: &mut Cx) -> Result<Value,
     };
     if !decisions.is_empty() && kg_mode == "enforce" {
         for d in decisions.iter_mut() {
-            // 只执行「1 小时内被拒 ≥60 次」这一条（客户端死循环限流，seconds==3600）；
-            // 换网段(86400) / 重置 Key 仍只观察——重置会私信本人，申诉期间避免任何群发私信。
             let kid = d["key"].as_i64().unwrap_or(0);
-            let is_pause_1h = d["action"] == "pause" && d["seconds"] == 3600;
-            if let Some(share) = &inp.share
-                && is_pause_1h
-            {
-                // share.pause_key：已在暂停中则不重复，返回 False
-                let already = share.paused.get(&kid).copied().unwrap_or(0.0) > now;
+            if let Some(pauses) = &inp.pauses {
+                // 已在暂停中则不重复（旧版 pause_key 返回 False）
+                let already = pauses.paused.get(&kid).copied().unwrap_or(0.0) > now;
                 if !already {
                     cx.effects.push(Effect::PauseKey {
                         key_id: kid,
-                        seconds: 3600,
+                        seconds: KEY_GUARD_PAUSE_SECS,
                         reason: "你的 Key 短时间内被大量拒绝，疑似客户端在反复重试，已暂停 1 小时"
                             .to_string(),
                         now,

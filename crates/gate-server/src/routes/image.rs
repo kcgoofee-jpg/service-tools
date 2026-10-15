@@ -326,7 +326,6 @@ async fn prepare(
         _ => String::new(),
     };
     ctx.set_model(&model_str(&body));
-    ctx.refine_client_from_payload(&body);
     let reject = |model: &str, detail: &str| {
         state.record(
             ctx,

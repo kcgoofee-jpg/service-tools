@@ -178,7 +178,6 @@ function AuditSettings(props: { onClose: () => void; onSaved: () => void }) {
   const [f, setF] = useState<{
     prompts: boolean;
     thumbs: boolean;
-    download: boolean;
     keep: string;
     days: string;
     cap: string;
@@ -198,7 +197,6 @@ function AuditSettings(props: { onClose: () => void; onSaved: () => void }) {
         const next = {
           prompts: a.prompts,
           thumbs: a.thumbs,
-          download: a.image_retention_days > 0,
           keep: String(a.image_keep_hours ?? 24),
           days: String(a.retention_days),
           cap: String(a.image_cap_mb ?? 8192),
@@ -236,7 +234,6 @@ function AuditSettings(props: { onClose: () => void; onSaved: () => void }) {
       retention_days: days.value,
       image_cap_mb: cap.value,
       image_keep_hours: keep.value,
-      member_download: f.download,
     });
     setPending(false);
     if (!r.ok) return setFormErr(r.error);
@@ -312,19 +309,6 @@ function AuditSettings(props: { onClose: () => void; onSaved: () => void }) {
                   保存原图<small>到保存时长就删，另外超过容量上限时删最旧的</small>
                 </span>
               </label>
-              <label class="xa-check">
-                <input
-                  type="checkbox"
-                  checked={f.download}
-                  onChange={(e) => set("download", e.currentTarget.checked)}
-                />
-                <span>
-                  成员打包下载原图
-                  <small>
-                    开了以后，成员在首页能打包自己最近 2 天的原图（受保存时长限制），用来找回误删的图
-                  </small>
-                </span>
-              </label>
             </div>
             <div class="xa-form__grid">
               <Field label="原图保存小时数" hint={err("keep") ?? "到点自动删；0 = 只按容量上限删"}>
@@ -376,7 +360,7 @@ function AuditSettings(props: { onClose: () => void; onSaved: () => void }) {
               <Button variant="danger" onClick={() => setPurge(true)}>
                 清空服务器上的全部原图
               </Button>
-              <span class="small muted">只删原图，提示词和参数保留；成员就打包不到了</span>
+              <span class="small muted">只删原图，提示词和参数保留</span>
             </div>
           </form>
         )}
@@ -396,7 +380,7 @@ function AuditSettings(props: { onClose: () => void; onSaved: () => void }) {
             return undefined;
           }}
         >
-          <p>确定清空服务器上的全部原图？只删原图，提示词和参数保留。删掉后成员就打包不到了，不能恢复。</p>
+          <p>确定清空服务器上的全部原图？只删原图，提示词和参数保留。删掉后不能恢复。</p>
         </ConfirmDialog>
       )}
     </>

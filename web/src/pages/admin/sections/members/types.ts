@@ -49,7 +49,6 @@ export type Member = {
   reset_today: { count: number; last_ts: number } | null;
   tags: Tag[];
   auto_tags: AutoTag[];
-  last_client: string;
   hours24: number[];
   key_count: number;
   all_key_ids: number[];
@@ -115,7 +114,6 @@ export type OpsSnapshot = {
     prompts: boolean;
     thumbs: boolean;
     retention_days: number;
-    image_retention_days: number;
     image_cap_mb: number;
     image_bytes: number;
     image_keep_hours: number;

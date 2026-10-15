@@ -753,36 +753,6 @@ pub fn check_members(rep: &mut Report, conn: &Connection, now: f64) -> rusqlite:
         [now - 86400.0],
     )?;
     rep.set("active_members_24h", num0(&active));
-
-    // 客户端分布：能认出来的（小白盒 / 酒馆 / 启动器 / DSH…）与只有浏览器 UA 的分别有多少
-    let clients: Vec<(String, i64)> = {
-        let mut stmt = conn.prepare(
-            "SELECT substr(COALESCE(NULLIF(client,''),'(未记录)'),1,34) c, COUNT(*) FROM usage_log \
-             WHERE ts>? AND kind LIKE 'image%' GROUP BY 1 ORDER BY 2 DESC LIMIT 6",
-        )?;
-        stmt.query_map([now - 86400.0], |r| {
-            Ok((sv_str(&r.get::<_, Sv>(0)?), num0(&r.get(1)?)))
-        })?
-        .collect::<rusqlite::Result<_>>()?
-    };
-    if !clients.is_empty() {
-        rep.set(
-            "clients_24h",
-            Value::Array(clients.iter().map(|(k, n)| json!([k, n])).collect()),
-        );
-        rep.add(
-            Sev::Ok,
-            "成员",
-            format!(
-                "24 小时客户端：{}",
-                clients
-                    .iter()
-                    .map(|(name, n)| format!("{name} ×{n}"))
-                    .collect::<Vec<_>>()
-                    .join("、")
-            ),
-        );
-    }
     Ok(())
 }
 

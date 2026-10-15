@@ -121,8 +121,9 @@ impl Interaction {
     }
 }
 
-/// 弹窗提交里各组件的取值：`custom_id` → 选中的值列表。
-/// 组件树是 `Label(18){ component: Select(3){ custom_id, values } }`，旧式 `ActionRow(1){ components: [...] }` 也认。
+/// 弹窗提交里各组件的取值：`custom_id` → 值列表。
+/// 组件树是 `Label(18){ component: Select(3){ custom_id, values } }` 或 `Label(18){ component: TextInput(4){ custom_id, value } }`
+/// （文字框只有一个字符串 `value`，按只有一个元素的列表给出；没填是空串），旧式 `ActionRow(1){ components: [...] }` 也认。
 pub fn modal_values(components: &[Value]) -> Vec<(String, Vec<String>)> {
     fn walk(v: &Value, out: &mut Vec<(String, Vec<String>)>) {
         if let Some(inner) = v.get("component") {
@@ -134,15 +135,14 @@ pub fn modal_values(components: &[Value]) -> Vec<(String, Vec<String>)> {
             }
         }
         if let Some(id) = v.get("custom_id").and_then(Value::as_str) {
-            let values = v
-                .get("values")
-                .and_then(Value::as_array)
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|x| x.as_str().map(str::to_owned))
-                        .collect()
-                })
-                .unwrap_or_default();
+            let values = match (v.get("values").and_then(Value::as_array), v.get("value")) {
+                (Some(a), _) => a
+                    .iter()
+                    .filter_map(|x| x.as_str().map(str::to_owned))
+                    .collect(),
+                (None, Some(Value::String(text))) => vec![text.clone()],
+                _ => Vec::new(),
+            };
             out.push((id.to_owned(), values));
         }
     }
@@ -382,6 +382,30 @@ mod tests {
                 ("sel-a".to_string(), vec!["满意".to_string()]),
                 ("sel-b".to_string(), vec![]),
                 ("sel-c".to_string(), vec!["x".to_string(), "y".to_string()]),
+            ]
+        );
+    }
+
+    #[test]
+    fn modal_values_reads_text_input_value_in_label_and_action_row() {
+        // 3.0 的 /反馈：Label(18) 里包着 TextInput(4)，取值字段是 `value`
+        let comps = vec![
+            json!({"type": 18, "id": 1, "component": {"type": 4, "id": 2, "custom_id": "text", "value": "排队有点久\n希望快一点"}}),
+            // 旧式 ActionRow(1) 包着的文字框，以及没填的文字框
+            json!({"type": 1, "components": [{"type": 4, "custom_id": "row", "value": "旧式"}]}),
+            json!({"type": 18, "id": 3, "component": {"type": 4, "id": 4, "custom_id": "empty", "value": ""}}),
+            json!({"type": 18, "id": 5, "component": {"type": 4, "id": 6, "custom_id": "absent"}}),
+        ];
+        assert_eq!(
+            modal_values(&comps),
+            vec![
+                (
+                    "text".to_string(),
+                    vec!["排队有点久\n希望快一点".to_string()]
+                ),
+                ("row".to_string(), vec!["旧式".to_string()]),
+                ("empty".to_string(), vec![String::new()]),
+                ("absent".to_string(), vec![]),
             ]
         );
     }

@@ -1489,8 +1489,6 @@ async fn landing_boot_for_member_with_key() {
             "today",
             "queue",
             "coupons",
-            "images_stored",
-            "image_retention_days",
             "timing"
         ]
     );
@@ -1513,8 +1511,6 @@ async fn landing_boot_for_member_with_key() {
     );
     assert_eq!(me["queue"], json!([{"state": "waiting", "position": 1}]));
     assert_eq!(me["coupons"], json!([]));
-    assert_eq!(me["images_stored"], 0);
-    assert!(me["image_retention_days"].is_i64());
     assert_eq!(
         me["timing"],
         json!({"count": 0, "avg_dur_s": null, "avg_wait_s": null, "site_avg_dur_s": 9.0})
