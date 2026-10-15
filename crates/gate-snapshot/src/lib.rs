@@ -1,4 +1,10 @@
-//! Golden 夹具读取与 Python 语义比较。
+//! 测试用的快照与旧 golden 夹具工具。
+//!
+//! - [`snapshot`]：对当前 Rust 输出的快照（`tests/snapshots/**/*.jsonl`，`UPDATE_SNAPSHOT=1` 更新），第四批起新套件都用它；
+//! - 本文件里的 `load` / `Case` / `diff` / `assert_eq_py*` 等旧 API：读取旧 Python 生成的 golden 夹具并按 Python 语义比较，
+//!   各套件快照化之后删除。
+//!
+//! # 旧 golden 夹具
 //!
 //! 夹具由旧 Python 代码生成（3.0 上线后 Python 已整体删除，生成脚本和旧代码都在
 //! git 标签 `py-final` 里；夹具从此冻结，不再重新生成——行为有意改动时，在测试里把期望侧对应部分去掉并注明
@@ -11,6 +17,8 @@
 //! - 非有限浮点 → `{"$f": "inf" | "-inf" | "nan"}`；
 //! - bytes → `{"$b": "<base64>"}`；tuple / set / frozenset → 列表（set 已排序）；
 //! - dict 的非 str 键 → `{"$map": [[k, v], ...]}`。
+
+pub mod snapshot;
 
 use serde_json::Value;
 use std::path::{Path, PathBuf};

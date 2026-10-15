@@ -1,6 +1,6 @@
 [package]
 name = "gate-snapshot"
-description = "只在测试时用：读取旧 Python 生成的 JSONL 夹具（生成脚本见标签 py-final），并按 Python 语义比较。"
+description = "只在测试时用：对当前 Rust 输出的 JSONL 快照（UPDATE_SNAPSHOT=1 更新），以及旧 Python 夹具的读取与比较（生成脚本见标签 py-final）。"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
