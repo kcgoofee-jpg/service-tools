@@ -10,7 +10,7 @@ import { StoreCtx } from "./ctx";
 import { Donate } from "./Donate";
 import { GuestGuides, GuestHero, Steps } from "./Guest";
 import { displayName } from "./helpers";
-import { Coupons, KeyCard, NoKeyCard, QuotaCard, SurveyLink } from "./Member";
+import { Coupons, KeyCard, NoKeyCard, QuotaCard } from "./Member";
 import { StatusCard } from "./StatusCard";
 import { createStore, type Store } from "./store";
 import { SiteFooter, Topbar } from "./Topbar";
@@ -88,11 +88,6 @@ function MemberView({ me }: { me: MeMember }) {
         <div class="lp-o2">
           <StatusCard />
         </div>
-        {me.has_key && (
-          <div class="lp-o5">
-            <SurveyLink />
-          </div>
-        )}
       </div>
     </div>
   );
@@ -134,7 +129,7 @@ function Page({ store }: { store: Store }) {
           </>
         )}
       </main>
-      <SiteFooter />
+      <SiteFooter survey={!!member?.has_key} />
     </>
   );
 }

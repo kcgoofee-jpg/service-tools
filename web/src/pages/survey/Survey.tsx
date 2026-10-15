@@ -1,6 +1,6 @@
 /**
- * 成员问卷（/survey）。身份来自 Discord 登录会话：先取 /public/me，登录后用 me.key 作为 Bearer 提交到
- * /member/survey（新旧网关都认这个头）。Key 只在这一次提交里用，页面不显示。
+ * 成员问卷（/survey）。身份来自 Discord 登录会话：先取 /public/me，登录后带着会话 Cookie 提交到 /member/survey，
+ * 不再把 Key 放进请求头。
  */
 import { useEffect, useId, useRef, useState } from "preact/hooks";
 import { ApiError, getJSON } from "../../lib/api";
@@ -8,7 +8,7 @@ import { bootData } from "../../lib/boot";
 import { Button, Card, Notice, Skeleton } from "../../ui";
 import { displayName } from "../landing/helpers";
 import { SiteFooter, Topbar } from "../landing/Topbar";
-import type { Me, MeMember, Status } from "../landing/types";
+import type { Me, MeMember, Meta } from "../landing/types";
 import "../landing/landing.css";
 import "./survey.css";
 import {
@@ -53,7 +53,7 @@ function Option(props: {
   );
 }
 
-async function submit(key: string, a: Answers): Promise<void> {
+async function submit(a: Answers): Promise<void> {
   let res: Response;
   try {
     res = await fetch("/member/survey", {
@@ -62,7 +62,6 @@ async function submit(key: string, a: Answers): Promise<void> {
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
-        Authorization: `Bearer ${key}`,
       },
       body: JSON.stringify(payload(a)),
     });
@@ -77,7 +76,7 @@ async function submit(key: string, a: Answers): Promise<void> {
   } catch {
     /* 非 JSON 的错误页 */
   }
-  if (res.status === 401) msg = "登录状态已过期或 Key 已更换，请刷新页面后重新登录再提交。";
+  if (res.status === 401) msg = "登录状态已过期，请刷新页面后重新登录再提交。";
   throw new ApiError(res.status, msg);
 }
 
@@ -107,7 +106,7 @@ function Form({ me }: { me: MeMember }) {
     }
     setBusy(true);
     try {
-      await submit(me.key ?? "", a);
+      await submit(a);
       setDone(true);
     } catch (x) {
       setFail(x instanceof Error ? x.message : "提交失败");
@@ -144,7 +143,7 @@ function Form({ me }: { me: MeMember }) {
           2. 你是否理解公益站限额的原理和初衷？<span class="sv-req">（必答）</span>
         </legend>
         <p class="sv-hint" id={ids.uHint}>
-          限额是为了让一个共享账号撑住所有人：全站每日总量按时段平滑放行、每人每天有保底、超出只在空闲时放行。
+          限额是为了让一个共享账号撑住所有人：全站每日总量按时段平滑放行、每人有每日上限、先到先得。
         </p>
         {UNDERSTAND.map((c) => (
           <Option
@@ -254,7 +253,7 @@ export function Survey() {
   const boot = bootData<{ me?: unknown; status?: unknown }>();
   const [me, setMe] = useState<Me | undefined>(isMe(boot?.me) ? boot.me : undefined);
   const [webLogin, setWebLogin] = useState<boolean | undefined>(
-    (boot?.status as Status | undefined)?.web_login,
+    (boot?.status as Meta | undefined)?.web_login,
   );
 
   useEffect(() => {
@@ -264,7 +263,7 @@ export function Survey() {
         .catch(() => setMe({ logged_in: false }));
     }
     if (webLogin === undefined) {
-      getJSON<Status>("/public/status")
+      getJSON<Meta>("/public/status")
         .then((s) => setWebLogin(s.web_login === true))
         .catch(() => setWebLogin(false));
     }

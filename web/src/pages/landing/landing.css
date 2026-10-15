@@ -421,3 +421,6 @@ a.btn:hover {
   color: var(--accent-text);
   text-decoration: underline;
 }
+.lp-foot .lp-foot__nowrap {
+  white-space: nowrap; /* 链接名不拆开：不让「使用体验问卷」折出孤字 */
+}

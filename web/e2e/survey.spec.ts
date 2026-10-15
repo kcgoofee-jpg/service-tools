@@ -2,7 +2,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { type BrowserContext, expect, type Page, test } from "@playwright/test";
 import { COOKIES_FILE, readCreds } from "./devEnv";
 
-/** 问卷页端到端：用 Discord 会话识别身份，提交时带 Authorization: Bearer <me.key>。配置见 playwright.config.ts。 */
+/** 问卷页端到端：用 Discord 会话识别身份，提交时不带 Key。配置见 playwright.config.ts。 */
 
 const member = readCreds();
 const needMember = !member.member;
@@ -117,7 +117,9 @@ test.describe("登录成员", () => {
     await expect(q2.getByRole("alert")).toHaveCount(0);
   });
 
-  test("提交：Authorization 用会话里的 Key，请求体字段与旧版一致，成功后提示", async ({ page }) => {
+  test("提交：只靠 Discord 会话（不带 Authorization），请求体字段与旧版一致，成功后提示", async ({
+    page,
+  }) => {
     await page.goto("/survey");
     await page.getByLabel(/1\. 你主要用哪个客户端接入/).fill("柏宝绘 1.2");
     await page.getByLabel("基本理解，偶尔会有疑问").check();
@@ -131,7 +133,7 @@ test.describe("登录成员", () => {
     await page.getByRole("button", { name: "提交问卷" }).click();
     const req = await reqPromise;
     expect(req.method()).toBe("POST");
-    expect(await req.headerValue("authorization")).toBe(`Bearer ${member.member_key}`);
+    expect(await req.headerValue("authorization")).toBeNull();
     expect(req.postDataJSON()).toEqual({
       client: "柏宝绘 1.2",
       understand: "基本理解",
@@ -144,7 +146,7 @@ test.describe("登录成员", () => {
     await expect(page.getByRole("button", { name: "更新我的回答" })).toBeVisible();
   });
 
-  test("服务端拒绝时显示原因（401：Key 已更换）", async ({ page }) => {
+  test("服务端拒绝时显示原因（401：登录过期）", async ({ page }) => {
     await page.route("**/member/survey", (r) => r.fulfill({ status: 401, json: { detail: "Key 无效" } }));
     await page.goto("/survey");
     await page.getByLabel("完全理解，没问题").check();
