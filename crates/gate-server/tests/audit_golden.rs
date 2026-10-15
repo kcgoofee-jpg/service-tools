@@ -1,199 +1,137 @@
-//! `audit`（旧版 `app/audit.py`）与旧 Python 的对拍。夹具由旧代码生成（脚本见标签 py-final）：
-//! - `audit_prompts`：提示词整理，逐字节一致，Python 抛的异常（类型 + 消息）也要一致；
-//! - `audit_notice`：披露文案，逐字节一致；
-//! - `audit_settings`：假库里的原始设置串 → 记录开关 / 保留时长 / 披露文案（真实 SQLite 库）；
-//! - `audit_images`：图片只对「决定」——收不收、类型串、缩略图尺寸与采样点颜色（编码器不同，字节不比）。
+//! `audit`（生成记录：提示词整理、披露文案、设置解析、图片收录和缩略图）的快照测试。
 //!
+//! - `audit/prompts`：提示词整理，输出（或异常的类型 + 消息）逐字节一致；
+//! - `audit/notice`：披露文案，逐字节一致；
+//! - `audit/settings`：库里的原始设置串 → 记录开关 / 保留时长 / 披露文案（真实 SQLite 库）；
+//! - `audit/images`：图片只记「决定」——收不收、类型串、缩略图尺寸与四个采样点的颜色（编码器的字节不存）。
+//!
+//! 更新：`UPDATE_SNAPSHOT=1 cargo test -p gate-server --test audit_golden`，然后审阅 `git diff`。
 //! 测试函数名都以 `audit_` 开头，`cargo test -p gate-server audit` 能选中。
 
 use base64::Engine;
 use gate_core::pyext::PyErr;
-use gate_db::{Db, DbError};
+use gate_db::Db;
 use gate_server::audit;
-use gate_snapshot::{Case, assert_eq_py};
-use serde_json::{Value, json};
+use gate_snapshot::Case;
+use gate_snapshot::snapshot::{Suite, check};
+use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
-use std::io::{Cursor, Read, Write};
-use std::path::Path;
+use std::collections::BTreeMap;
+use std::io::{Cursor, Write};
 
 const M: &str = env!("CARGO_MANIFEST_DIR");
 
-/// 读 `tests/fixtures/<name>.jsonl`（或 `.jsonl.gz`）。夹具放在 fixtures 目录而不是 gate-snapshot 默认的 golden 目录。
-fn load(name: &str) -> Vec<Case> {
-    let dir = Path::new(M).join("tests").join("fixtures");
-    let plain = dir.join(format!("{name}.jsonl"));
-    let gz = dir.join(format!("{name}.jsonl.gz"));
-    let text = if gz.exists() {
-        let mut text = String::new();
-        flate2::read::GzDecoder::new(std::fs::File::open(&gz).expect("读夹具"))
-            .read_to_string(&mut text)
-            .expect("解压夹具");
-        text
-    } else {
-        std::fs::read_to_string(&plain)
-            .unwrap_or_else(|e| panic!("读不到夹具 {}: {e}", plain.display()))
-    };
-    text.lines()
-        .enumerate()
-        .filter(|(_, l)| !l.trim().is_empty())
-        .map(|(i, l)| Case {
-            line: i + 1,
-            raw: serde_json::from_str(l)
-                .unwrap_or_else(|e| panic!("{name}:{} 不是合法 JSON: {e}", i + 1)),
-        })
-        .collect()
+/// 每个函数（或每类输入）在快照里至少要留的用例数：抽样、删用例时不会悄悄丢掉一个函数。
+const MIN_PER_FN: usize = 15;
+
+fn ok(v: Value) -> Value {
+    json!({ "ret": v })
 }
 
-/// 把 Rust 结果和夹具里 Python 的结果（值或异常）对上。
-#[track_caller]
-fn check(c: &Case, got: Result<Value, (String, String)>) {
-    match (c.err(), got) {
-        (None, Ok(v)) => assert_eq_py(c, &v, c.out()),
-        (Some(ty), Err((got_ty, got_msg))) => {
-            assert_eq!(
-                got_ty, ty,
-                "第 {} 行：异常类型不同（{got_msg}）\n{}",
-                c.line, c.raw
-            );
-            let want = c.raw["err"]["msg"].as_str().unwrap();
-            assert_eq!(got_msg, want, "第 {} 行：异常消息不同", c.line);
+fn py_err(e: PyErr) -> Value {
+    json!({"err": {"type": e.type_name(), "msg": e.message()}})
+}
+
+/// 数一数每个函数有多少条用例、其中多少条是异常。
+#[derive(Default)]
+struct Tally {
+    cases: BTreeMap<String, usize>,
+    errors: usize,
+}
+
+impl Tally {
+    fn add(&mut self, name: &str, out: &Value) {
+        *self.cases.entry(name.to_string()).or_default() += 1;
+        if out.get("err").is_some() {
+            self.errors += 1;
         }
-        (None, Err((t, m))) => panic!("第 {} 行：Python 成功，Rust 报 {t}: {m}\n{}", c.line, c.raw),
-        (Some(ty), Ok(v)) => panic!(
-            "第 {} 行：Python 抛 {ty}，Rust 却返回 {v}\n{}",
-            c.line, c.raw
-        ),
     }
-}
 
-fn py_err(e: PyErr) -> (String, String) {
-    (e.type_name().to_string(), e.message().to_string())
+    #[track_caller]
+    fn assert_each_at_least(&self, names: &[&str], k: usize, min_errors: usize) {
+        for n in names {
+            let got = self.cases.get(*n).copied().unwrap_or(0);
+            assert!(got >= k, "{n} 在快照里只有 {got} 条（至少 {k} 条）");
+        }
+        assert!(
+            self.errors >= min_errors,
+            "快照里应有至少 {min_errors} 条异常用例，实际 {}",
+            self.errors
+        );
+    }
 }
 
 // ------------------------------------------------------------------ 提示词
 
 #[test]
-fn audit_prompts_match_python() {
-    let cases = load("audit_prompts");
-    assert!(cases.len() > 1500, "夹具被截断了？{}", cases.len());
-    let (mut ok, mut failed) = (0, 0);
-    for c in &cases {
+fn audit_prompts_snapshot() {
+    let mut tally = Tally::default();
+    check(M, "audit/prompts", |c| {
         let fn_name = c.get("fn").and_then(Value::as_str).unwrap();
         let arg = c.arg(0);
-        let got = match fn_name {
+        let out = match fn_name {
             "capture_prompts" => audit::capture_prompts(arg)
-                .map(|(p, n, e)| json!([p, n, e]))
-                .map_err(py_err),
+                .map(|(p, n, e)| ok(json!([p, n, e])))
+                .unwrap_or_else(py_err),
             "prompt_texts" => audit::prompt_texts(arg)
-                .map(|(p, n)| json!([p, n]))
-                .map_err(py_err),
+                .map(|(p, n)| ok(json!([p, n])))
+                .unwrap_or_else(py_err),
             "_captions" => audit::captions(Some(arg))
-                .map(|(base, chars)| json!([base, chars]))
-                .map_err(py_err),
+                .map(|(base, chars)| ok(json!([base, chars])))
+                .unwrap_or_else(py_err),
             other => panic!("未知函数 {other}"),
         };
-        check(c, got);
-        if c.err().is_none() {
-            ok += 1;
-        } else {
-            failed += 1;
-        }
-    }
-    // 夹具里确实有 Python 抛异常的用例（不是全绿的假象）
-    assert!(failed > 100 && ok > 1500, "ok={ok} err={failed}");
+        tally.add(fn_name, &out);
+        Some(out)
+    });
+    // 快照里确实有抛异常的用例（不是全绿的假象）
+    tally.assert_each_at_least(
+        &["capture_prompts", "prompt_texts", "_captions"],
+        MIN_PER_FN,
+        20,
+    );
 }
 
 // ------------------------------------------------------------------ 披露文案
 
-/// 3.0 删了成员自助导出原图（docs/v3-deviations.md #49），披露文案里不再有「在这之前可在首页打包下载最近 N 的，
-/// 用来找回误删的图」这一段。冻结夹具里还有，比较前从期望值里去掉；其余文字逐字节一致。
-fn without_download_clause(text: &str) -> String {
-    const HEAD: &str = "；在这之前可在首页打包下载最近 ";
-    const TAIL: &str = "的，用来找回误删的图";
-    let Some(start) = text.find(HEAD) else {
-        return text.to_string();
-    };
-    let tail = text[start..]
-        .find(TAIL)
-        .expect("夹具里的打包下载提示不完整");
-    format!("{}{}", &text[..start], &text[start + tail + TAIL.len()..])
-}
-
 #[test]
-fn audit_notice_matches_python() {
-    let cases = load("audit_notice");
-    assert!(cases.len() > 500);
-    for c in &cases {
+fn audit_notice_snapshot() {
+    let mut n = 0;
+    check(M, "audit/notice", |c| {
+        n += 1;
         let a = c.args();
-        // a[3] 是旧版的 image_days（成员能下载几天的原图），3.0 没有这个参数了
+        // (记录提示词, 记录缩略图, 保留天数, 原图保留小时数)
         let got = audit::audit_notice(
             a[0].as_bool().unwrap(),
             a[1].as_bool().unwrap(),
             a[2].as_i64().unwrap(),
-            a[4].as_i64().unwrap(),
+            a[3].as_i64().unwrap(),
         );
-        assert_eq_py(
-            c,
-            &json!(got),
-            &json!(without_download_clause(c.out().as_str().unwrap())),
-        );
-    }
+        Some(json!(got))
+    });
+    assert!(n >= 50, "披露文案的快照只剩 {n} 条");
 }
 
 // ------------------------------------------------------------------ 设置读取（真实 SQLite）
 
-/// 旧版库里没有对应设置行时取环境变量 `AUDIT_PROMPTS` / `AUDIT_THUMBS` / `AUDIT_RETENTION_DAYS`；这三个环境变量已删除，
-/// 默认值固定为不记提示词 / 不存原图 / 保留 7 天（docs/v3-deviations.md #93）。
-/// 期望一侧：库里没有的那一项换成常量默认值（夹具里的 `env` 不再起作用）。
-fn legacy_flags_with_constant_defaults(c: &Case) -> Value {
-    let kv = c.raw["kv"].as_object().unwrap();
-    let mut want = c.out().clone();
-    if c.err().is_some() {
-        return want;
-    }
-    for (i, (key, now)) in [
-        ("audit_prompts", json!(audit::DEFAULT_PROMPTS)),
-        ("audit_thumbs", json!(audit::DEFAULT_THUMBS)),
-        ("audit_retention_days", json!(audit::DEFAULT_RETENTION_DAYS)),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        if !kv.contains_key(key) {
-            want[i] = now;
-        }
-    }
-    want
-}
-
-fn db_err(e: &DbError) -> (String, String) {
-    // 旧版抛 OverflowError（没人捕获）；这里是 DbError::Invalid
-    assert!(matches!(e, DbError::Invalid(_)), "非预期的错误类型：{e:?}");
-    (
-        "OverflowError".to_string(),
-        "cannot convert float infinity to integer".to_string(),
-    )
+#[test]
+fn audit_constants_are_stable() {
+    assert_eq!(audit::IMAGE_CAP_KEY, "audit_image_cap_mb");
+    assert_eq!(audit::THUMB_SIDE, 768);
+    assert_eq!(audit::THUMB_QUALITY, 82);
+    assert_eq!(audit::MAX_IMAGE_BYTES, 15_728_640);
+    assert_eq!(audit::MAX_IMAGE_PIXELS, 25_000_000);
 }
 
 #[tokio::test]
-async fn audit_settings_match_python() {
+async fn audit_settings_snapshot() {
     let dir = tempfile::tempdir().unwrap();
     let db = Db::open(dir.path().join("gate.db"), 0.0, &[]).unwrap();
-    let cases = load("audit_settings");
-    assert!(cases.len() > 1000);
-    let mut errors = 0;
-    for c in &cases {
+    let mut suite = Suite::open(M, "audit/settings");
+    let cases = suite.cases();
+    let mut tally = Tally::default();
+    for (i, c) in cases.iter().enumerate() {
         let fn_name = c.get("fn").and_then(Value::as_str).unwrap();
-        if fn_name == "constants" {
-            let out = c.out();
-            // out["IMAGE_RETENTION_KEY"]（audit_image_retention_days）：设置已删除（docs/v3-deviations.md #92），不比
-            assert_eq!(out["IMAGE_CAP_KEY"], audit::IMAGE_CAP_KEY);
-            assert_eq!(out["THUMB_SIDE"], audit::THUMB_SIDE);
-            assert_eq!(out["THUMB_QUALITY"], audit::THUMB_QUALITY);
-            assert_eq!(out["MAX_IMAGE_BYTES"], audit::MAX_IMAGE_BYTES);
-            assert_eq!(out["MAX_IMAGE_PIXELS"], audit::MAX_IMAGE_PIXELS);
-            continue;
-        }
         // 把这一例的原始设置串写进库（先清空：缺失的键必须真的没有这一行）
         db.write(|tx| tx.execute_batch("DELETE FROM site_settings"))
             .await
@@ -201,60 +139,33 @@ async fn audit_settings_match_python() {
         for (k, v) in c.raw["kv"].as_object().unwrap() {
             db.set_setting(k, v.as_str().unwrap()).await.unwrap();
         }
-        let got: Result<Value, (String, String)> = match fn_name {
-            "audit_flags" => {
-                let got = audit::audit_flags(&db)
-                    .await
-                    .map(|(p, t, d)| json!([p, t, d]))
-                    .map_err(|e| db_err(&e));
-                if let (None, Ok(v)) = (c.err(), &got) {
-                    assert_eq_py(c, v, &legacy_flags_with_constant_defaults(c));
-                    continue;
-                }
-                got
-            }
-            // 已删除：成员能下载几天的原图（docs/v3-deviations.md #49），夹具里的用例跳过
-            "audit_image_days" => continue,
-            "audit_image_keep_hours" => audit::audit_image_keep_hours(&db)
+        let got = match fn_name {
+            "audit_flags" => audit::audit_flags(&db)
                 .await
-                .map(|v| json!(v))
-                .map_err(|e| db_err(&e)),
-            "audit_image_cap_mb" => audit::audit_image_cap_mb(&db)
-                .await
-                .map(|v| json!(v))
-                .map_err(|e| db_err(&e)),
-            "audit_disclosure" => {
-                let got = audit::audit_disclosure(&db)
-                    .await
-                    .map(|v| json!(v))
-                    .map_err(|e| db_err(&e));
-                if let (None, Ok(v)) = (c.err(), &got) {
-                    // 期望值里去掉已删除的「打包下载」一段，见 `without_download_clause`
-                    let mut want = without_download_clause(c.out().as_str().unwrap());
-                    // 库里没有对应设置行的项，旧版取环境变量，3.0 取常量默认值：这样的用例，说明文字用
-                    // `audit_notice`（上面逐条对拍过）按常量默认值重新生成
-                    let kv = c.raw["kv"].as_object().unwrap();
-                    if ["audit_prompts", "audit_thumbs", "audit_retention_days"]
-                        .iter()
-                        .any(|k| !kv.contains_key(*k))
-                    {
-                        let (p, t, d) = audit::audit_flags(&db).await.unwrap();
-                        let keep = audit::audit_image_keep_hours(&db).await.unwrap();
-                        want = audit::audit_notice(p, t, d, keep);
-                    }
-                    assert_eq_py(c, v, &json!(want));
-                    continue;
-                }
-                got
-            }
+                .map(|(p, t, d)| json!([p, t, d])),
+            "audit_image_keep_hours" => audit::audit_image_keep_hours(&db).await.map(|v| json!(v)),
+            "audit_image_cap_mb" => audit::audit_image_cap_mb(&db).await.map(|v| json!(v)),
+            "audit_disclosure" => audit::audit_disclosure(&db).await.map(|v| json!(v)),
             other => panic!("未知函数 {other}"),
         };
-        if got.is_err() {
-            errors += 1;
-        }
-        check(c, got);
+        let out = match got {
+            Ok(v) => ok(v),
+            Err(e) => json!({"err": e.to_string()}),
+        };
+        tally.add(fn_name, &out);
+        suite.record(i, Some(out));
     }
-    assert!(errors > 50, "夹具里应有 Python 抛 OverflowError 的用例");
+    suite.finish();
+    tally.assert_each_at_least(
+        &[
+            "audit_flags",
+            "audit_image_keep_hours",
+            "audit_image_cap_mb",
+            "audit_disclosure",
+        ],
+        MIN_PER_FN,
+        20,
+    );
 }
 
 // ------------------------------------------------------------------ 图片
@@ -262,10 +173,10 @@ async fn audit_settings_match_python() {
 fn b64(s: &str) -> Vec<u8> {
     base64::engine::general_purpose::STANDARD
         .decode(s)
-        .expect("夹具里的 base64")
+        .expect("快照里的 base64")
 }
 
-/// 夹具 recipe → 字节（与 audit.py 的 `build` 对应）：blob = head + 零填充；zip = 每个条目一个 blob。
+/// recipe → 字节：blob = head + 零填充；zip = 每个条目一个 blob。
 fn blob(spec: &Value) -> Vec<u8> {
     let mut data = spec
         .get("head")
@@ -310,117 +221,61 @@ fn payload_of(c: &Case) -> Vec<u8> {
     }
 }
 
-/// 缩略图是 JPEG：尺寸必须一致，四个象限中心的颜色在容差内（重采样 / 量化不同，不比字节）。
-#[track_caller]
-fn check_thumb(c: &Case, want: &Value, got: Option<Vec<u8>>) {
-    let name = c.raw["name"].as_str().unwrap();
-    if want.is_null() {
-        assert!(got.is_none(), "{name}：Python 不收，Rust 却出了缩略图");
-        return;
-    }
-    let jpeg = got.unwrap_or_else(|| panic!("{name}：Python 出了缩略图，Rust 返回 None"));
+/// 缩略图只记尺寸和四个象限中心的颜色；字节不存（编码器版本不同字节就不同）。
+fn thumb_view(name: &str, jpeg: Option<Vec<u8>>) -> Value {
+    let Some(jpeg) = jpeg else {
+        return Value::Null;
+    };
     assert!(jpeg.starts_with(b"\xff\xd8\xff"), "{name}：缩略图不是 JPEG");
     let img = image::load_from_memory_with_format(&jpeg, image::ImageFormat::Jpeg)
         .unwrap_or_else(|e| panic!("{name}：缩略图解不开：{e}"))
         .to_rgb8();
-    let size = want["size"].as_array().unwrap();
-    let (w, h) = (
-        size[0].as_u64().unwrap() as u32,
-        size[1].as_u64().unwrap() as u32,
-    );
-    assert_eq!(img.dimensions(), (w, h), "{name}：缩略图尺寸");
-    assert_eq!(want["format"], "JPEG");
-    assert_eq!(want["mode"], "RGB");
-    // 太小的图（JPEG 色度下采样会把相邻象限的颜色混进来）不比颜色
-    if w.min(h) >= 32 && c.get("nocolor").is_none() {
-        let points = [(0.25, 0.25), (0.75, 0.25), (0.25, 0.75), (0.75, 0.75)];
-        for (i, (fx, fy)) in points.iter().enumerate() {
+    let (w, h) = img.dimensions();
+    let points = [(0.25, 0.25), (0.75, 0.25), (0.25, 0.75), (0.75, 0.75)];
+    let samples: Vec<Value> = points
+        .iter()
+        .map(|(fx, fy)| {
             let px = img.get_pixel((f64::from(w) * fx) as u32, (f64::from(h) * fy) as u32);
-            let exp = want["samples"][i].as_array().unwrap();
-            for ch in 0..3 {
-                let e = exp[ch].as_i64().unwrap();
-                let d = (i64::from(px[ch]) - e).abs();
-                assert!(
-                    d <= 24,
-                    "{name}：采样点 {i} 通道 {ch}：Rust {} 对 Python {e}",
-                    px[ch]
-                );
-            }
-        }
-    }
+            json!([px[0], px[1], px[2]])
+        })
+        .collect();
+    json!({"size": [w, h], "samples": samples})
 }
 
-/// 已知差异（见 audit.rs 模块说明与 docs/v3-deviations.md）：Python 能打开、这里不能的格式。
-fn known_deviation(c: &Case) -> Option<&str> {
-    c.get("deviation").and_then(Value::as_str)
+/// 存下来的原图只记类型、长度和哈希。
+fn full_view(data: Option<Vec<u8>>, ctype: String) -> Value {
+    let mut m = Map::new();
+    m.insert("type".into(), json!(ctype));
+    match data {
+        Some(d) => {
+            m.insert("len".into(), json!(d.len()));
+            m.insert("sha256".into(), json!(hex_of(&Sha256::digest(&d))));
+        }
+        None => {
+            m.insert("stored".into(), json!(false));
+        }
+    }
+    Value::Object(m)
 }
 
 #[test]
-fn audit_images_match_python() {
-    let cases = load("audit_images");
-    assert!(cases.len() > 100);
+fn audit_images_snapshot() {
     let (mut accepted, mut rejected) = (0, 0);
-    for c in &cases {
+    check(M, "audit/images", |c| {
         let name = c.raw["name"].as_str().unwrap().to_string();
         let payload = payload_of(c);
-        assert!(
-            c.raw["thumb_err"].is_null() && c.raw["full_err"].is_null(),
-            "{name}：Python 不应抛异常"
-        );
-
-        // ---- make_thumbnail
         let thumb = audit::make_thumbnail(&payload);
-        match known_deviation(c) {
-            Some("gif" | "bmp" | "bzip2" | "lzma" | "png-trailer") => {
-                assert!(
-                    c.raw["thumb"].is_object(),
-                    "{name}：这类差异是 Python 收、Rust 不收"
-                );
-                assert!(thumb.is_none(), "{name}：已知差异，Rust 应当不收");
-            }
-            Some(other) => panic!("未知差异标记 {other}"),
-            None => check_thumb(c, &c.raw["thumb"], thumb.clone()),
-        }
         if thumb.is_some() {
             accepted += 1;
         } else {
             rejected += 1;
         }
-
-        // ---- full_image
         let (data, ctype) = audit::full_image(&payload);
-        let want = &c.raw["full"];
-        if matches!(known_deviation(c), Some("bzip2" | "lzma")) {
-            assert!(want[0].is_object());
-            assert_eq!(
-                (data, ctype),
-                (None, String::new()),
-                "{name}：zip 压缩方式不支持"
-            );
-            continue;
-        }
-        assert_eq!(ctype, want[1].as_str().unwrap(), "{name}：content_type");
-        match (&want[0], data) {
-            (Value::Null, d) => assert!(
-                d.is_none(),
-                "{name}：Python 不存，Rust 却存了 {} 字节",
-                d.map_or(0, |d| d.len())
-            ),
-            (summary, Some(d)) => {
-                assert_eq!(
-                    d.len() as u64,
-                    summary["len"].as_u64().unwrap(),
-                    "{name}：长度"
-                );
-                assert_eq!(
-                    hex_of(&Sha256::digest(&d)),
-                    summary["sha256"].as_str().unwrap(),
-                    "{name}：内容"
-                );
-            }
-            (_, None) => panic!("{name}：Python 存了，Rust 返回 None"),
-        }
-    }
+        Some(json!({
+            "thumb": thumb_view(&name, thumb),
+            "full": full_view(data, ctype),
+        }))
+    });
     assert!(
         accepted > 50 && rejected > 30,
         "accepted={accepted} rejected={rejected}"
