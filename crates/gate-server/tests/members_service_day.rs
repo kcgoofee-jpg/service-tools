@@ -15,7 +15,7 @@ const DAY_START: f64 = 1_791_932_400.0; // 2026-10-14 07:00
 #[tokio::test]
 async fn reset_today_counts_from_service_day_start_before_7am() {
     gate_server::time::freeze(Some(NOW));
-    let e = setup(&[("TZ", "Asia/Shanghai")]).await;
+    let e = setup(&[]).await;
     let a = Admin::login(&e.state).await;
     let k: NewKey = serde_json::from_value(json!({
         "name": "凌晨成员", "token": "nai-test-service-day-000000000000", "daily_images": 50,

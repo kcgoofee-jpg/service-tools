@@ -124,7 +124,7 @@ export const GUARD_COPY: Record<string, { label: string; hint: string; unit?: st
   },
   account_hourly_cap: {
     label: "每个上游账号每小时上限",
-    hint: "按最近 60 分钟（滚动窗口）计；0 = 不限。上游返回 429 时系统会自动减半，平稳一天后自动上调一档，所以手动改的值可能被自动调整接管",
+    hint: "按最近 60 分钟（滚动窗口）计；0 = 不限。上游返回 429 时系统会自动减半，平稳一天后自动上调一档（范围和步长见「更多」里的自动调整），所以手动改的值可能被自动调整接管",
     unit: "张",
   },
   quiet_start: { label: "安静时段开始", hint: "北京时间整点；与结束相同 = 不设安静时段", unit: "点" },
@@ -141,6 +141,21 @@ export const GUARD_COPY: Record<string, { label: string; hint: string; unit?: st
     unit: "张",
   },
   queue_per_account: { label: "每个账号全站排队上限", hint: "每个上游账号全站最多同时排几张图", unit: "张" },
+  hourly_min: {
+    label: "自动调整：下限",
+    hint: "上游 429 后每小时上限自动减半，但不会低于这个数",
+    unit: "张",
+  },
+  hourly_max: {
+    label: "自动调整：上限",
+    hint: "前一天顶到过上限、又没有 429，每小时上限自动上调，最高到这个数；不能低于下限",
+    unit: "张",
+  },
+  hourly_step: {
+    label: "自动调整：每次上调",
+    hint: "平稳一天后每小时上限上调多少张；0 = 不自动上调",
+    unit: "张",
+  },
 };
 export const GUARD_CORE = ["account_hourly_cap", "account_daily_cap", "daily_burst"];
 export const GUARD_ADVANCED = [
@@ -150,6 +165,9 @@ export const GUARD_ADVANCED = [
   "interval_jitter",
   "key_image_queue",
   "queue_per_account",
+  "hourly_min",
+  "hourly_max",
+  "hourly_step",
 ];
 export function guardSpecs(g: Guard): Record<string, FieldSpec> {
   const out: Record<string, FieldSpec> = {};
@@ -218,13 +236,20 @@ export const BUDGET_SPECS: Record<string, FieldSpec> = {
     unit: "张",
     hint: "0 = 不限",
   },
+  global_daily_anlas: {
+    kind: "int",
+    label: "Vibe 每日 Anlas 池",
+    min: 0,
+    max: 100_000,
+    hint: "Vibe 等会消耗 Anlas 的请求共用这个全站每日池，先到先得；0 = 不开放（0～100000）",
+  },
   v5_alert_threshold: {
     kind: "int",
-    label: "V5 官方余量告警阈值",
+    label: "V5 余量低提示线",
     min: 1,
     max: 100,
     unit: "%",
-    hint: "账号 V5 剩余低于这个百分比时告警（1～100）",
+    hint: "账号 V5 官方余量低于这个百分比时，后台标「低」，并且更勤地刷新官方余量（1～100）。不会发告警、不会限制出图",
   },
   member_daily_anlas: {
     kind: "int",

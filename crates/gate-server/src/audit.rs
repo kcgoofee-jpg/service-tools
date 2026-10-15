@@ -28,7 +28,6 @@
 //! - 动画图（APNG / 动画 WebP）取第一帧，与 Pillow 一致；
 //! - `repr` 里的未分配码点（`str(非字符串提示词)` 时才会走到）见 `gate_core::pyext::repr_str` 的说明。
 
-use crate::env::EnvConfig;
 use gate_core::pyext::{PyErr, PyResult, py_str, type_name};
 use gate_core::{jsondump, pyc, pyval, site_flags};
 use gate_db::{Db, DbError};
@@ -43,8 +42,6 @@ use std::io::{Cursor, Read};
 pub const THUMB_SIDE: u32 = 768;
 pub const THUMB_QUALITY: u8 = 82;
 pub const MAX_IMAGE_BYTES: usize = 15 * 1024 * 1024;
-/// 已停用：原图不再按天数删（2026-10-11 站长）。
-pub const IMAGE_RETENTION_KEY: &str = "audit_image_retention_days";
 /// 原图占用上限（MB）；见 [`site_flags::IMAGE_CAP_MB`]。
 pub const IMAGE_CAP_KEY: &str = "audit_image_cap_mb";
 
@@ -441,8 +438,8 @@ pub async fn audit_image_cap_mb(db: &Db) -> Result<i64, DbError> {
 }
 
 /// 所有给成员看的「本站记录了什么」都走这一个函数，避免各处文案再各写一套。
-pub async fn audit_disclosure(db: &Db, env: &EnvConfig) -> Result<String, DbError> {
-    let (prompts, thumbs, days) = audit_flags(db, env).await?;
+pub async fn audit_disclosure(db: &Db) -> Result<String, DbError> {
+    let (prompts, thumbs, days) = audit_flags(db).await?;
     let keep_hours = audit_image_keep_hours(db).await?;
     Ok(audit_notice(prompts, thumbs, days, keep_hours))
 }
@@ -455,18 +452,24 @@ fn truth(raw: &str) -> bool {
     )
 }
 
-/// 记录开关（提示词、生成结果 / 原图、提示词保留天数）：后台保存的设置优先，其次是环境变量。
+/// 没在后台设置过时的记录开关与保留天数（2.x 取环境变量 `AUDIT_PROMPTS` / `AUDIT_THUMBS` / `AUDIT_RETENTION_DAYS`，
+/// 3.0 删除，只剩后台设置，docs/v3-deviations.md #93）：默认都不记，提示词保留 7 天。
+pub const DEFAULT_PROMPTS: bool = false;
+pub const DEFAULT_THUMBS: bool = false;
+pub const DEFAULT_RETENTION_DAYS: i64 = 7;
+
+/// 记录开关（提示词、生成结果 / 原图、提示词保留天数）：后台保存的设置，没设过用上面的默认值。
 /// 第二项沿用旧设置名 `audit_thumbs`，含义已变为「保存原图」。
 ///
-/// 存着的值只要有这一行（哪怕是空串）就压过环境默认值；天数 0 = 长期保留，范围 0–3650。
-pub async fn audit_flags(db: &Db, env: &EnvConfig) -> Result<(bool, bool, i64), DbError> {
+/// 存着的值只要有这一行（哪怕是空串）就压过默认值；天数 0 = 长期保留，范围 0–3650。
+pub async fn audit_flags(db: &Db) -> Result<(bool, bool, i64), DbError> {
     let prompts = match db.get_setting("audit_prompts").await? {
         Some(raw) => truth(&raw),
-        None => env.audit_prompts,
+        None => DEFAULT_PROMPTS,
     };
     let thumbs = match db.get_setting("audit_thumbs").await? {
         Some(raw) => truth(&raw),
-        None => env.audit_thumbs,
+        None => DEFAULT_THUMBS,
     };
     let days = match db.get_setting("audit_retention_days").await? {
         // int(float(value))：ValueError（空串 / 乱码 / nan）回到 7；inf 是 OverflowError，旧版没捕获
@@ -479,7 +482,7 @@ pub async fn audit_flags(db: &Db, env: &EnvConfig) -> Result<(bool, bool, i64), 
             Some(f) if !f.is_nan() => clamp_days(f.trunc()),
             _ => 7,
         },
-        None => clamp_days(env.audit_retention_days as f64),
+        None => DEFAULT_RETENTION_DAYS,
     };
     Ok((prompts, thumbs, days))
 }
@@ -496,7 +499,6 @@ mod tests {
 
     #[test]
     fn keys_match_site_flags_registry() {
-        assert_eq!(IMAGE_RETENTION_KEY, site_flags::IMAGE_RETENTION.key);
         assert_eq!(IMAGE_CAP_KEY, site_flags::IMAGE_CAP_MB.key);
     }
 

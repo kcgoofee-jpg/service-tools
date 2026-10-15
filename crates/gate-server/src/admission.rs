@@ -306,12 +306,7 @@ pub async fn quota_image_check(
         }
     }
     if est.anlas > 0.0 {
-        let until = site_flag_f64(state, &site_flags::GLOBAL_DAILY_ANLAS_UNTIL).await?;
-        let vibe_cap = if until > 0.0 && state.now() >= until {
-            0.0
-        } else {
-            site_flag_f64(state, &site_flags::GLOBAL_DAILY_ANLAS).await?
-        };
+        let vibe_cap = site_flag_f64(state, &site_flags::GLOBAL_DAILY_ANLAS).await?;
         let global_in_flight = || gate_core::pyc::sum(pending.iter().map(|r| r.anlas));
         let pool_check = |used: f64, label: &str| -> Result<(), ApiError> {
             if used + global_in_flight() + est.anlas > vibe_cap {

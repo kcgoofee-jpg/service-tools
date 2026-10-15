@@ -345,6 +345,30 @@ fn v3_request(body: &Value) -> (Value, Option<(String, String)>) {
     (body, Some(pair))
 }
 
+/// 新建 Key 没填的字段：旧版取环境变量 `DEFAULT_*`（100 张 / 100 Anlas / 50 张 V5 / 每月 2500 / 每分钟 10 次 / 30 天）；
+/// 3.0 删了这些环境变量，改取后台「领 Key」的设置和 `defaults` 里的常量（docs/v3-deviations.md #93 #94）。
+/// 重放时把旧默认值明确写进请求，响应和库里的内容才能逐字对上旧版；新默认值另由 admin_members.rs 的
+/// `create_key_defaults_come_from_registration_settings` 断言。
+/// 返回 (旧版请求体的摘要, 改写后的摘要)，用来改写旧版操作日志里记下的请求体。
+fn legacy_new_key_defaults(body: &mut Value) -> Option<(String, String)> {
+    let before = gate_server::action_log::summarize(body, 300);
+    let obj = body.as_object_mut()?;
+    for (k, v) in [
+        ("daily_images", json!(100)),
+        ("monthly_anlas", json!(2500.0)),
+        ("daily_anlas", json!(100.0)),
+        ("daily_v5", json!(50)),
+        ("rpm", json!(10)),
+        ("expires_days", json!(30)),
+    ] {
+        if !obj.contains_key(k) {
+            obj.insert(k.into(), v);
+        }
+    }
+    let after = gate_server::action_log::summarize(body, 300);
+    (before != after).then_some((before, after))
+}
+
 /// 旧版快照（期望）改写成新版的样子：`api_keys` 去掉 `daily_text_tokens`、功能串去掉 `text` / `voice`，
 /// 操作日志里的功能名提示和请求体按 `rewrites` 改。
 fn v3_snapshot(want: &Value, rewrites: &[(String, String)]) -> Value {
@@ -361,10 +385,18 @@ fn v3_snapshot(want: &Value, rewrites: &[(String, String)]) -> Value {
     }
     if let Some(Value::Array(rows)) = out.get_mut("admin_actions") {
         for r in rows {
+            let is_create = r["action"] == "新建 Key";
             if let Some(Value::String(detail)) = r.get_mut("detail") {
                 let mut d = detail.replace(LEGACY_FEATURES_HINT, FEATURES_HINT);
                 for (old, new) in rewrites {
-                    d = d.replace(old, new);
+                    if old.is_empty() {
+                        // 旧版什么字段都没填的「新建 Key」：请求体摘要是空串
+                        if is_create && d.is_empty() {
+                            d = new.clone();
+                        }
+                    } else {
+                        d = d.replace(old, new);
+                    }
                 }
                 *detail = d;
             }
@@ -597,7 +629,53 @@ async fn run_variant(lines: &[Value], variant: &str, diffs: &mut Vec<String>) ->
             step["json"] = body;
             rewrites.extend(rewrite);
         }
+        if l["method"] == "POST" && l["path"] == "/admin/api/keys" && step["json"].is_object() {
+            rewrites.extend(legacy_new_key_defaults(&mut step["json"]));
+        }
+        // 没配注册服务时的一键邀请 Key：旧版取环境变量默认值（100 张 / 50 张 V5 / 全部模型 / 30 天），
+        // 3.0 一律读后台「领 Key」的设置（docs/v3-deviations.md #94）。这一步前临时设成旧默认值，做完立刻删掉
+        let legacy_invite = variant == "main"
+            && l["method"] == "POST"
+            && l["path"]
+                .as_str()
+                .is_some_and(|p| p.ends_with("/keys/invite"));
+        // 功能：旧版没配注册服务时不限功能（`register_features` = `*`）；种子里这个设置另有值，做完要还原
+        const INVITE_SETTINGS: [(&str, &str); 5] = [
+            ("register_daily_images", "100"),
+            ("register_daily_v5", "50"),
+            ("register_image_scope", "all"),
+            ("register_expires_days", "30"),
+            ("register_features", "*"),
+        ];
+        let saved_features = state.db.get_setting("register_features").await.unwrap();
+        if legacy_invite {
+            for (k, v) in INVITE_SETTINGS {
+                state.db.set_setting(k, v).await.unwrap();
+            }
+        }
         let (status, headers, body) = send(&state, &step, &cookie).await;
+        if legacy_invite {
+            state
+                .db
+                .write(|tx| {
+                    tx.execute_batch(
+                        "DELETE FROM site_settings WHERE key IN \
+                         ('register_daily_images','register_daily_v5','register_image_scope','register_expires_days')",
+                    )
+                })
+                .await
+                .unwrap();
+            match saved_features {
+                Some(v) => state.db.set_setting("register_features", &v).await.unwrap(),
+                None => state
+                    .db
+                    .write(|tx| {
+                        tx.execute_batch("DELETE FROM site_settings WHERE key='register_features'")
+                    })
+                    .await
+                    .unwrap(),
+            }
+        }
         let mut bad = |what: &str, want: String, got: String| {
             diffs.push(format!("[{name}] {what}\n{}", first_diff(&want, &got)));
         };

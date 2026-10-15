@@ -168,6 +168,10 @@ export function KeyDialog(props: Props) {
 
   const f = form;
   const manual = f?.quota === "manual";
+  // 新建时有效天数留空 = 「新成员默认」有效期（后台「领 Key」的设置）
+  const defaultExpiry = ops?.registration.expires_days
+    ? `默认 ${ops.registration.expires_days} 天`
+    : "不设到期";
   return (
     <Dialog
       key={guard.gen}
@@ -214,6 +218,9 @@ export function KeyDialog(props: Props) {
             void submit();
           }}
         >
+          {!editing && !ops && (
+            <Notice tone="warn">读取默认额度失败：下面的额度请手动填写，或关掉对话框稍后再试。</Notice>
+          )}
           <Field
             label="名称 / 备注"
             hint={
@@ -310,7 +317,7 @@ export function KeyDialog(props: Props) {
                 />
                 <NumField
                   label="每日 Anlas 上限"
-                  hint="0 = 不限"
+                  hint="0 = 跟随全站「每人每日 Anlas 上限」"
                   value={f.daily_anlas}
                   error={errors.daily_anlas}
                   step="any"
@@ -413,7 +420,7 @@ export function KeyDialog(props: Props) {
           <div class="xa-form__grid">
             <NumField
               label="每分钟请求数（RPM）"
-              hint={editing ? "1～600" : "1～600；留空用服务端默认值"}
+              hint={editing ? "1～600" : `1～600；留空 = 默认 ${ops?.new_key?.rpm ?? "（服务端默认）"}`}
               min={1}
               value={f.rpm}
               error={errors.rpm}
@@ -421,10 +428,10 @@ export function KeyDialog(props: Props) {
             />
             <NumField
               label="有效天数"
-              hint={editing ? "留空保持原有效期；0 = 永久" : "留空 = 不设到期；0 = 永久"}
+              hint={editing ? "留空保持原有效期；0 = 永久" : `留空 = ${defaultExpiry}；0 = 永久`}
               value={f.expires}
               error={errors.expires}
-              placeholder={editing ? "留空保持原有效期" : "不设到期"}
+              placeholder={editing ? "留空保持原有效期" : defaultExpiry}
               onInput={(v) => set("expires", v)}
             />
           </div>

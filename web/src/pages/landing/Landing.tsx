@@ -17,7 +17,7 @@ import { SiteFooter, Topbar } from "./Topbar";
 import type { MeMember } from "./types";
 import "./landing.css";
 
-/** /login/callback 失败或登录被暂停时会回到 /?login=failed|paused：提示一下并把查询参数从地址栏去掉。 */
+/** /login/callback 失败时会回到 /?login=failed：提示一下并把查询参数从地址栏去掉。 */
 function useLoginNotice() {
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -31,11 +31,6 @@ function useLoginNotice() {
           ms: 9000,
         },
       );
-    } else if (v === "paused") {
-      toast("网页登录暂时关闭，开放后再来登录。你仍然可以在 Discord 里用 /quota 查额度。", {
-        error: true,
-        ms: 9000,
-      });
     }
     params.delete("login");
     const qs = params.toString();

@@ -237,6 +237,11 @@ struct TagState {
     latest: HashMap<i64, u64>,
 }
 
+/// 标签补全同时打向 NovelAI 的全站并发数（单账号建议保持 1，太高会触发 429 甚至风控）。
+/// 出图不受它影响：出图由每把上游 Token 的出图槽位和最小间隔控制。
+/// 原来是环境变量 `GLOBAL_CONCURRENCY`（旧说明写成了「全站并发」，其实一直只管标签补全），现在是常量（docs/v3-deviations.md #95）。
+pub const TAG_CONCURRENCY: i64 = 1;
+
 /// 排队结果：放行 / 全站排队已满 / 被同一 Key 更新的查询取代。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TagAdmit {
@@ -246,7 +251,7 @@ pub enum TagAdmit {
 }
 
 impl TagQueue {
-    /// `global_concurrency` 取当前设置。被取消（超时 / 断开）时排队计数照样归还。
+    /// `global_concurrency` 传 [`TAG_CONCURRENCY`]。被取消（超时 / 断开）时排队计数照样归还。
     /// 同一把 Key 两次补全至少隔 [`TAG_MIN_INTERVAL`] 秒（旧版取它与每 Key 出图间隔的较小者；
     /// 每 Key 出图间隔已删除，docs/v3-deviations.md #64）。
     pub async fn wait(&self, key_id: i64, global_concurrency: i64) -> TagAdmit {

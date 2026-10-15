@@ -1,9 +1,9 @@
-//! 自助领 Key、全局功能开关、生成记录开关，以及首页「加入 Discord」按钮。
+//! 自助领 Key、全局功能开关、生成记录开关。
 
 use super::upstream_health;
-use crate::action_log::log_action;
 use crate::audit::{audit_flags, audit_image_cap_mb, audit_image_keep_hours};
 use crate::body::read_json_body;
+use crate::defaults;
 use crate::error::{ApiError, ApiResult, HttpError, ok_json};
 use crate::ops;
 use crate::session::AdminSession;
@@ -12,8 +12,6 @@ use axum::Router;
 use axum::extract::{Request, State};
 use axum::routing::{get, put};
 use gate_core::features::{self, FEATURES};
-use gate_core::pyval;
-use gate_core::site_flags::{self, HOME_JOIN_OPEN};
 use serde_json::{Map, Value, json};
 
 const BODY_LIMIT: usize = 1024 * 1024;
@@ -24,10 +22,6 @@ pub(super) fn router() -> Router<AppState> {
         .route("/admin/api/ops/registration", put(set_registration))
         .route("/admin/api/ops/features", put(set_features))
         .route("/admin/api/ops/audit", put(set_audit))
-        .route(
-            "/admin/api/home/join",
-            get(home_join_get).post(home_join_set),
-        )
 }
 
 /// 后台「新建 Key」弹窗的默认功能：沿用「新成员默认开通的功能」（默认只有文生图），而不是全部功能。
@@ -42,7 +36,7 @@ async fn new_key_features(state: &AppState) -> Result<Value, ApiError> {
     let names = reg
         .features
         .filter(|f| !f.is_empty())
-        .unwrap_or_else(|| vec!["image".to_string()]);
+        .unwrap_or_else(|| vec![defaults::REGISTER_FEATURES.to_string()]);
     let dumped = features::dump(Some(names)).unwrap_or_default();
     Ok(match features::parse_list(&Value::String(dumped)) {
         Some(list) => json!(list),
@@ -55,7 +49,7 @@ async fn snapshot(state: &AppState) -> Result<Value, ApiError> {
     let reg = ops::registration_settings(state).await?;
     let mut registration = reg.to_map();
     registration.insert("active".into(), json!(ops::active_count(state).await?));
-    let (prompts, thumbs, days) = audit_flags(&state.db, &state.env).await?;
+    let (prompts, thumbs, days) = audit_flags(&state.db).await?;
     let labels: Map<String, Value> = FEATURES
         .iter()
         .map(|(n, l)| ((*n).to_string(), json!(l)))
@@ -67,6 +61,13 @@ async fn snapshot(state: &AppState) -> Result<Value, ApiError> {
             "labels": labels,
             // 后台「新建 Key」弹窗的默认功能，与服务端缺省逻辑一致
             "new_key": new_key_features(state).await?,
+        },
+        // 后台「新建 Key」弹窗里没有数据库设置的默认值（每日 V4.5 / V5 张数、有效天数在上面的 registration 里）：
+        // 前端不另写一份
+        "new_key": {
+            "rpm": defaults::MANUAL_KEY_RPM,
+            "daily_anlas": defaults::MANUAL_KEY_DAILY_ANLAS,
+            "monthly_anlas": defaults::MANUAL_KEY_MONTHLY_ANLAS,
         },
         "audit": {
             "prompts": prompts,
@@ -131,46 +132,4 @@ async fn set_audit(State(state): State<AppState>, _s: AdminSession, req: Request
     let body = read_json_body(&parts.headers, body, BODY_LIMIT).await?;
     ops::set_audit(&state, &body).await?;
     Ok(ok_json(&snapshot(&state).await?))
-}
-
-// ------------------------------------------------------------------ 首页加入按钮
-
-/// 首页「加入 Discord」按钮开关（独立于领 Key 开关 register_open）。
-async fn home_join_get(State(state): State<AppState>, _s: AdminSession) -> ApiResult {
-    let open = crate::auth::site_flag(&state, &HOME_JOIN_OPEN).await?;
-    Ok(ok_json(&json!({"open": open})))
-}
-
-async fn home_join_set(State(state): State<AppState>, _s: AdminSession, req: Request) -> ApiResult {
-    let (parts, body) = req.into_parts();
-    let body = read_json_body(&parts.headers, body, BODY_LIMIT).await?;
-    let on = body.get("open").is_none_or(pyval::truthy);
-    let text = site_flags::encode(&HOME_JOIN_OPEN, &Value::Bool(on))
-        .map_err(|e| crate::error::InternalError(e.0))?;
-    state.db.set_setting(HOME_JOIN_OPEN.key, &text).await?;
-    log_action(
-        &state.db,
-        &super::super::actor(&state, &parts),
-        &format!(
-            "首页加入按钮{}",
-            if on {
-                "开放"
-            } else {
-                "关闭（置灰「关闭注册」）"
-            }
-        ),
-        "",
-        "",
-        true,
-        state.now(),
-    )
-    .await;
-    Ok(logged(ok_json(&json!({"ok": true, "open": on}))))
-}
-
-/// 处理函数已经写了一条更具体的操作日志：告诉中间件别再记一条「POST /…」。
-/// （旧版两条都记；3.0 只留这条，见 docs/v3-deviations.md。）
-fn logged(mut resp: axum::response::Response) -> axum::response::Response {
-    resp.extensions_mut().insert(super::super::ActionLogged);
-    resp
 }

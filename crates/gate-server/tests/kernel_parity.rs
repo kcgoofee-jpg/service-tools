@@ -568,7 +568,12 @@ mod v3 {
     const DROPPED_SETTINGS: [&str; 2] = ["guard_base_daily_images", "quota_base_now"];
 
     /// 整个场景测的是 3.0 已经删掉的规则，没有可比的东西。
-    pub const REMOVED_SCENARIOS: [(&str, &str); 9] = [
+    pub const REMOVED_SCENARIOS: [(&str, &str); 10] = [
+        (
+            "v19_private_params",
+            "测的就是私密参数 allocation.min_coverage_hours 把昨天数据覆盖的下限改成 10 小时：\
+             私密参数文件已取消，下限固定为 20 小时（docs/v3-deviations.md #91）",
+        ),
         (
             "k23_enforce_slots_via_tick",
             "测的就是内核 tick 里「名额 +5」生效（名额 12 → 17）：规则已删除（docs/v3-deviations.md #68）",
@@ -1018,6 +1023,10 @@ mod v3 {
                             .and_then(Value::as_object_mut)
                         {
                             g.shift_remove("base_daily_images");
+                            // 每小时上限自动调整的下限 / 上限 / 步长（原来是私密参数，docs/v3-deviations.md #91）
+                            g.insert("hourly_min".into(), json!(100));
+                            g.insert("hourly_max".into(), json!(160));
+                            g.insert("hourly_step".into(), json!(10));
                         }
                     }
                     // 分配模块的面板参数「V5 每人范围 3～30 张」换成新公式的说明（#63）
@@ -1028,6 +1037,12 @@ mod v3 {
                                 m["question"] = json!("全站熔断、单个 Key 限流");
                                 let params = m["params"].as_array_mut().unwrap();
                                 assert_eq!(params.pop().unwrap()["name"], "名额");
+                            }
+                            // 新领的 Key 的有效天数：旧版是环境变量，3.0 读后台「领 Key」的设置（没设过 = 0，不过期）
+                            if m["name"] == "registration" {
+                                let p = &mut m["params"][0];
+                                assert_eq!(p["name"], "Key 有效天数");
+                                p["value"] = json!(0);
                             }
                             if m["name"] == "allocation" {
                                 let p = &mut m["params"][3];
@@ -1261,13 +1276,6 @@ async fn run_case(case: &Value) -> Result<(), String> {
         gate_testkit::Reply::json(200, &json!({"id": "900000000000000030"})),
     );
     let dir = tempfile::tempdir().unwrap();
-    if let Some(p) = case["private_params"].as_object() {
-        std::fs::write(
-            dir.path().join("private_params.json"),
-            serde_json::to_vec(p).unwrap(),
-        )
-        .unwrap();
-    }
     let num = |k: &str| gate_core::pyc::float_repr(env[k].as_f64().unwrap());
     let int = |k: &str| env[k].as_i64().unwrap().to_string();
     let vars: HashMap<String, String> = [
@@ -1278,11 +1286,9 @@ async fn run_case(case: &Value) -> Result<(), String> {
         ("DISCORD_BOT_TOKEN", "synthetic-bot".into()),
         ("DISCORD_API_BASE", mock.url()),
         ("ALERT_USER_ID", "900000000000000031".into()),
-        ("TZ", "Asia/Shanghai".into()),
-        ("DAY_RESET_HOUR", "7".into()),
-        ("IMAGE_MIN_INTERVAL", num("image_min_interval")),
         // 夹具 env 里的 key_image_min_interval：3.0 没有每 Key 出图间隔（docs/v3-deviations.md #64），不再传
-        ("DEFAULT_KEY_EXPIRES_DAYS", int("default_expires_days")),
+        // 夹具 env 里的 default_expires_days：3.0 没有这个环境变量（新 Key 的有效天数是后台「领 Key」的设置，
+        // docs/v3-deviations.md #93 #97），「领 Key」模块面板上那一项的期望在 v3::Expect 里改写
         (
             "KEY_INACTIVITY_DELETE_DAYS",
             int("key_inactivity_delete_days"),
@@ -1300,7 +1306,10 @@ async fn run_case(case: &Value) -> Result<(), String> {
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))
     .collect();
-    let state = AppState::build(EnvConfig::load(&vars), Assets::new(None))
+    let mut env_config = EnvConfig::load(&vars);
+    // 每个上游账号的出图间隔是代码常量（docs/v3-deviations.md #95），场景里直接改
+    env_config.image_min_interval = env["image_min_interval"].as_f64().unwrap();
+    let state = AppState::build(env_config, Assets::new(None))
         .await
         .map_err(|e| format!("{name}: 建网关失败 {e}"))?;
     state

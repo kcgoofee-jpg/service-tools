@@ -42,9 +42,9 @@ pub struct UpstreamRecent {
 /// 上游失败的判定，与旧版 `_upstream_days` / `_upstream_last_hour` 一致。
 const BAD: &str = "up_status >= 500 OR up_status IN (429, 403)";
 
-/// 按天聚合时的分桶宽度（秒）。SQLite 的 `'localtime'` 依赖进程时区，而网关的时区来自 `TZ` 配置；
+/// 按天聚合时的分桶宽度（秒）。SQLite 的 `'localtime'` 依赖进程时区，而网关的时区是代码常量（`gate_core::clock::TZ`）；
 /// 所以这里只按 15 分钟桶聚合（所有现行时区的偏移都是 15 分钟的整数倍，桶不会跨日界线），
-/// 由调用方按配置的时区把桶归到「天」。
+/// 由调用方按网关的时区把桶归到「天」。
 pub const BUCKET_SECS: i64 = 900;
 
 impl Db {

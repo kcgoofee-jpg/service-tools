@@ -7,6 +7,7 @@
 use super::req::{Ctx, R, Reject, internal, sql_int};
 use crate::action_log::log_action;
 use crate::body::JsonObject;
+use crate::defaults;
 use crate::error::{HttpError, ok_json};
 use crate::ops;
 use crate::registration::{DiscordUser, Gift, RegErr};
@@ -204,7 +205,7 @@ async fn new_key_features(state: &AppState, body: &JsonObject) -> Result<Option<
     let list = reg
         .features
         .filter(|f| !f.is_empty())
-        .unwrap_or_else(|| vec!["image".to_string()]);
+        .unwrap_or_else(|| vec![defaults::REGISTER_FEATURES.to_string()]);
     Ok(features::dump(Some(list)))
 }
 
@@ -340,25 +341,15 @@ async fn create_invite_key(State(state): State<AppState>, req: Request) -> R {
     let mut cx = Ctx::new(state, req).await?;
     cx.admin().await?;
     let st = &cx.state;
-    let (daily_images, daily_v5, features_list, image_scope, expires_days) =
-        if st.registration.is_some() {
-            let cfg = ops::registration_settings(st).await?;
-            (
-                cfg.daily_images,
-                cfg.daily_v5,
-                cfg.features,
-                cfg.image_scope,
-                cfg.expires_days,
-            )
-        } else {
-            (
-                st.env.default_daily_images,
-                st.env.default_daily_v5,
-                None,
-                "all".to_string(),
-                30,
-            )
-        };
+    // 和 /register 一样读「新成员默认」（后台「领 Key」的设置，没设过用 defaults 里的常量）
+    let cfg = ops::registration_settings(st).await?;
+    let (daily_images, daily_v5, features_list, image_scope, expires_days) = (
+        cfg.daily_images,
+        cfg.daily_v5,
+        cfg.features,
+        cfg.image_scope,
+        cfg.expires_days,
+    );
     // 旧版 `re.match(r"邀请-(\d+)", name)`：只看开头，数字可以是任何 Unicode 十进制数字
     let max_no = st
         .db
@@ -383,7 +374,7 @@ async fn create_invite_key(State(state): State<AppState>, req: Request) -> R {
         daily_v5,
         monthly_anlas: 0.0,
         daily_text_tokens: 0,
-        rpm: st.env.default_rpm,
+        rpm: defaults::MANUAL_KEY_RPM,
         allow_anlas: false,
         allow_img2img: false,
         exclude_global_v5: false,
@@ -416,36 +407,42 @@ async fn create_key(State(state): State<AppState>, req: Request) -> R {
     cx.admin().await?;
     let body = cx.json().await?;
     let st = &cx.state;
-    let env = &st.env;
+    // 没填的字段用「新成员默认」（后台「领 Key」的设置）和 defaults 里的常量；弹窗从 /admin/api/ops 取同一份
+    let reg = ops::registration_settings(st).await?;
     let field = |name: &str, default: Value| body.get(name).cloned().unwrap_or(default);
 
     let daily_images = num_int(
-        &field("daily_images", json!(env.default_daily_images)),
+        &field("daily_images", json!(reg.daily_images)),
         0,
         1_000_000,
         "daily_images",
     )?;
     let monthly_anlas = num_float(
-        &field("monthly_anlas", json!(env.default_monthly_anlas)),
+        &field("monthly_anlas", json!(defaults::MANUAL_KEY_MONTHLY_ANLAS)),
         0.0,
         100_000.0,
         "monthly_anlas",
     )?;
     let daily_anlas = num_float(
-        &field("daily_anlas", json!(env.default_daily_anlas)),
+        &field("daily_anlas", json!(defaults::MANUAL_KEY_DAILY_ANLAS)),
         0.0,
         100_000.0,
         "daily_anlas",
     )?;
     let daily_v5 = num_int(
-        &field("daily_v5", json!(env.default_daily_v5)),
+        &field("daily_v5", json!(reg.daily_v5)),
         0,
         100_000,
         "daily_v5",
     )?;
-    let rpm = num_int(&field("rpm", json!(env.default_rpm)), 1, 600, "rpm")?;
+    let rpm = num_int(
+        &field("rpm", json!(defaults::MANUAL_KEY_RPM)),
+        1,
+        600,
+        "rpm",
+    )?;
     let expires_days = num_int(
-        &field("expires_days", json!(env.default_expires_days)),
+        &field("expires_days", json!(reg.expires_days)),
         0,
         3650,
         "expires_days",

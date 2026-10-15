@@ -639,7 +639,10 @@ async fn v1_alias_and_root_post_route_to_generate() {
 
 #[tokio::test]
 async fn generation_audit_records_prompt_and_image() {
-    let e = setup(&[("AUDIT_PROMPTS", "1"), ("AUDIT_THUMBS", "1")]).await;
+    // 记录开关只来自后台设置（环境变量 AUDIT_PROMPTS / AUDIT_THUMBS 已删除，docs/v3-deviations.md #93）
+    let e = setup(&[]).await;
+    e.state.db.set_setting("audit_prompts", "1").await.unwrap();
+    e.state.db.set_setting("audit_thumbs", "1").await.unwrap();
     let (status, _, _) = call(
         &e.state,
         "POST",

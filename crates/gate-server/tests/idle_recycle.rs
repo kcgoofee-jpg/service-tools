@@ -28,7 +28,7 @@ async fn clock(at: f64) -> tokio::sync::MutexGuard<'static, ()> {
 }
 
 async fn setup_recycle() -> Env {
-    setup(&[("KEY_INACTIVITY_DELETE_DAYS", "3"), ("TZ", "Asia/Shanghai")]).await
+    setup(&[("KEY_INACTIVITY_DELETE_DAYS", "3")]).await
 }
 
 /// 建一把成员 Key，返回库里的主键。`last_image` 为 None 表示从没出过图。

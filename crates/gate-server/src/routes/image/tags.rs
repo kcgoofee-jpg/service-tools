@@ -60,7 +60,7 @@ pub(super) async fn tags(state: AppState, req: Request) -> Result<Response, ApiE
     let run = async {
         let admitted = state
             .tags
-            .wait(key.id(), state.env.global_concurrency)
+            .wait(key.id(), crate::runtime::TAG_CONCURRENCY)
             .await;
         match admitted {
             // 已被同一 Key 更新的补全查询取代：回空结果，不记拒绝

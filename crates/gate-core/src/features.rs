@@ -4,8 +4,9 @@
 //! - `global_flags(db)`：`db.get_setting("features_global", None)` 读 `site_settings` 的 `features_global`（JSON 文本），
 //!   交给 [`parse_global_flags`]；
 //! - `check(db, key, name, settings)` 里的 `site_flags.get(...)`：只有 `name == "vibe"` 且前面没放行时才读
-//!   `global_daily_anlas_until`（float）和 `global_daily_anlas`（int）两个键，算法见 [`needs_vibe_site_flags`]；
-//!   取到的值交给 [`check_decision`]。判定本身（[`check_decision`]）是纯函数。
+//!   `global_daily_anlas`（int）这个键，算法见 [`needs_vibe_site_flags`]；取到的值交给 [`check_decision`]。
+//!   判定本身（[`check_decision`]）是纯函数。2.x 还读 `global_daily_anlas_until`（开放截止时间戳），
+//!   后台一直没有写入口，3.0 删除（docs/v3-deviations.md #92）。
 //!
 //! 已知边界：`features_global` 里若有 Python 才认的裸 `NaN` / `Infinity`，serde_json 会当成坏 JSON（→ 全部开启）。
 
@@ -162,8 +163,6 @@ fn py_type_name(v: &Value) -> &'static str {
 /// `site_flags.get(...)` 取到的 Vibe 全站 Anlas 设置。
 #[derive(Debug, Clone, Copy)]
 pub struct VibeAnlas {
-    /// `global_daily_anlas_until`：开放截止时间戳（0 = 不限时）
-    pub until: f64,
     /// `global_daily_anlas`：全站每日 Anlas 额度（0 = 不开放 PVP）
     pub daily_cap: i64,
 }
@@ -198,13 +197,11 @@ pub fn needs_vibe_site_flags(global_raw: Option<&str>, key: &Value, name: &str) 
 
 /// `check(db, key, name, settings)` 的判定部分：允许则 `Ok(None)`，否则 `Ok(Some(面向用户的拒绝原因))`。
 /// `global_raw` 是 `features_global` 的取值（没有这一行 = None）；管理员 Key 在读开关之前就放行了，
-/// 所以开关坏掉（旧版 AttributeError）只影响非管理员。`vibe` 只有 [`needs_vibe_site_flags`] 为真时才会被用到；
-/// `now` 是 `time.time()`。
+/// 所以开关坏掉（旧版 AttributeError）只影响非管理员。`vibe` 只有 [`needs_vibe_site_flags`] 为真时才会被用到。
 pub fn check_decision(
     global_raw: Option<&str>,
     key: &Value,
     name: &str,
-    now: f64,
     vibe: Option<VibeAnlas>,
 ) -> Result<Option<String>, FeaturesError> {
     if is_admin(key) {
@@ -221,12 +218,7 @@ pub fn check_decision(
     }
     if name == "vibe" {
         let v = vibe.ok_or(FeaturesError::MissingVibe)?;
-        let cap = if v.until > 0.0 && now >= v.until {
-            0
-        } else {
-            v.daily_cap
-        };
-        if cap > 0 {
+        if v.daily_cap > 0 {
             // 针对 Vibe 开放全站每日 Anlas PVP 抢额度（由 quota_image_check 统一校验全站池）
             return Ok(None);
         }
@@ -274,11 +266,11 @@ mod tests {
         let flags = Some(r#"{"upscale": false, "tags": "no"}"#);
         let key = json!({"features": "image", "is_admin": 0, "allow_anlas": 0});
         assert_eq!(
-            check_decision(flags, &key, "upscale", 0.0, None).unwrap(),
+            check_decision(flags, &key, "upscale", None).unwrap(),
             Some("站长暂未开放此功能：放大".into())
         );
         assert_eq!(
-            check_decision(flags, &key, "tags", 0.0, None).unwrap(),
+            check_decision(flags, &key, "tags", None).unwrap(),
             Some("你的 Key 暂无权使用：标签补全（可向站长申请）".into())
         );
         assert!(parse_global_flags(Some("[1]")).is_err());

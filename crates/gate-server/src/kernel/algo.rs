@@ -7,7 +7,6 @@
 use super::KernelError;
 use crate::action_log::log_action;
 use crate::state::AppState;
-use gate_core::params::Params;
 use gate_core::quota::{Effect, GuardInfo, QuietInputs, QuotaInputs, QuotaParams, quota_cfg};
 use gate_core::site_flags::{self, GLOBAL_DAILY_V5};
 use gate_core::{autopilot, pyval, quota};
@@ -32,17 +31,6 @@ async fn read_settings(
 fn global_daily_v5_default() -> i64 {
     let v = site_flags::default_of(&GLOBAL_DAILY_V5, None);
     pyval::number_like(&v).map_or(0, |f| f.trunc() as i64)
-}
-
-/// 私密参数 `allocation.*` → [`QuotaParams`]（`P(name, 起点值)`：类型跟起点值一致，转不了回到起点值）。
-///
-/// 3.0 的 V5 公式不再读 `allocation.v5_k_table` / `v5_k_floor` / `min_people` / `v5_flood_*` /
-/// `v5_tighten_below`（docs/v3-deviations.md #63）；文件里残留的这些键直接忽略，不报错。
-fn quota_params(p: &Params) -> QuotaParams {
-    let d = QuotaParams::default();
-    QuotaParams {
-        min_coverage_hours: p.int("allocation.min_coverage_hours", d.min_coverage_hours),
-    }
 }
 
 /// `_allowance(state)`：账号 V5 剩余 % 与恢复 %/天（多个账号取平均）。刚重启时缓存里还没有读数，主动读一次。
@@ -159,7 +147,6 @@ pub async fn run_quota(state: &AppState) -> Result<Value, KernelError> {
         inp.pool_len = Some(state.nai.tokens().await.len());
         inp.global_daily_v5_default = global_daily_v5_default();
         inp.members = db.quota_member_count().await?;
-        inp.params = quota_params(&state.params.get());
         let today = clock.day(now);
         if quota::daily_adjust_due(inp.settings.get(quota::DAY_KEY).map(String::as_str), &today) {
             let yday = clock.day(now - 86400.0);
