@@ -116,9 +116,10 @@ fn without_removed_at(v: &Value, g: Option<&GuardCore>) -> Value {
 fn fields_without_removed(v: &Value) -> Value {
     let mut m = obj(v);
     m.shift_remove(REMOVED_FIELD);
-    Value::Object(with_added(m, |fl| {
-        json!({"default": fl.default, "min": fl.min, "max": fl.max, "label": fl.label})
-    }))
+    Value::Object(with_added(
+        m,
+        |fl| json!({"default": fl.default, "min": fl.min, "max": fl.max, "label": fl.label}),
+    ))
 }
 
 /// 期望一侧：写库内容里去掉已删除字段的键。
