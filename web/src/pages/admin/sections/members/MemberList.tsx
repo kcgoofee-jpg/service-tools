@@ -126,11 +126,7 @@ export function MemberList(props: Props) {
         {rows.map((m) => {
           const open = props.open.has(m.id);
           return (
-            <li
-              key={m.id}
-              id={`mb-m-${m.id}`}
-              class={cx("mb-card", !m.enabled && "is-off", props.focusId === m.id && "is-focus")}
-            >
+            <li key={m.id} id={`mb-m-${m.id}`} class={cx("mb-card", props.focusId === m.id && "is-focus")}>
               <div class="mb-card__top">
                 <Identity m={m} />
                 <Expander m={m} open={open} onToggle={() => props.onToggle(m.id)} />
@@ -176,12 +172,7 @@ export function MemberList(props: Props) {
               <Fragment key={m.id}>
                 <tr
                   id={`mb-m-${m.id}`}
-                  class={cx(
-                    "mb-row",
-                    !m.enabled && "is-off",
-                    open && "is-open",
-                    props.focusId === m.id && "is-focus",
-                  )}
+                  class={cx("mb-row", open && "is-open", props.focusId === m.id && "is-focus")}
                   onClick={(e) => {
                     if ((e.target as HTMLElement).closest(interactive)) return;
                     if (String(getSelection?.() ?? "").length) return; // 正在选中文字时不切换

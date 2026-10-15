@@ -39,7 +39,7 @@ function mk(p: Partial<Member> = {}): Member {
     daily_anlas: 0,
     image_model_scope: "all",
     quota_auto: true,
-    today: { images: 0, v5: 0, anlas: 0, text_tokens: 0, requests: 0 },
+    today: { images: 0, v5: 0, anlas: 0, requests: 0 },
     week: { images: 0, v5: 0, anlas: 0, requests: 0 },
     total_images: 10,
     registered_at: NOW - 10 * DAY,
@@ -101,8 +101,7 @@ describe("memberIssues / needsAttention", () => {
     expect(needsAttention(loud, NOW)).toBe(true);
   });
 
-  it("停用的成员、站长不进需要处理", () => {
-    expect(needsAttention(mk({ enabled: false, expires_at: NOW - 1 }), NOW)).toBe(false);
+  it("站长不进需要处理", () => {
     expect(needsAttention(mk({ is_admin: true, role: "admin", expires_at: NOW - 1 }), NOW)).toBe(false);
   });
 
@@ -126,14 +125,13 @@ describe("memberIssues / needsAttention", () => {
 
 describe("memberVerdict / memberStatus", () => {
   it("按优先级给一句话结论", () => {
-    expect(memberVerdict(mk({ enabled: false }), NOW).title).toContain("已停用");
     expect(memberVerdict(mk({ first_image_at: null }), NOW).title).toContain("还没出过图");
-    expect(
-      memberVerdict(mk({ today: { images: 100, v5: 0, anlas: 0, text_tokens: 0, requests: 3 } }), NOW).title,
-    ).toContain("额度用完");
-    expect(
-      memberVerdict(mk({ today: { images: 7, v5: 0, anlas: 0, text_tokens: 0, requests: 3 } }), NOW).title,
-    ).toContain("今天出了 7 张");
+    expect(memberVerdict(mk({ today: { images: 100, v5: 0, anlas: 0, requests: 3 } }), NOW).title).toContain(
+      "额度用完",
+    );
+    expect(memberVerdict(mk({ today: { images: 7, v5: 0, anlas: 0, requests: 3 } }), NOW).title).toContain(
+      "今天出了 7 张",
+    );
   });
   it("正常成员没有状态徽标", () => {
     expect(memberStatus(mk(), NOW)).toBeNull();
@@ -207,9 +205,9 @@ describe("筛选", () => {
 
 describe("排序 / 身份 / 查找", () => {
   it("数字列默认倒序，同值按名称", () => {
-    const a = mk({ name: "b", today: { images: 5, v5: 0, anlas: 0, text_tokens: 0, requests: 1 } });
-    const b = mk({ name: "a", today: { images: 5, v5: 0, anlas: 0, text_tokens: 0, requests: 1 } });
-    const c = mk({ name: "c", today: { images: 9, v5: 0, anlas: 0, text_tokens: 0, requests: 1 } });
+    const a = mk({ name: "b", today: { images: 5, v5: 0, anlas: 0, requests: 1 } });
+    const b = mk({ name: "a", today: { images: 5, v5: 0, anlas: 0, requests: 1 } });
+    const c = mk({ name: "c", today: { images: 9, v5: 0, anlas: 0, requests: 1 } });
     expect(sortMembers([a, b, c], "today", "desc").map((m) => m.name)).toEqual(["c", "a", "b"]);
     expect(sortMembers([a, b, c], "name", "asc").map((m) => m.name)).toEqual(["a", "b", "c"]);
   });
