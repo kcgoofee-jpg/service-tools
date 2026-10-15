@@ -46,18 +46,17 @@ export function Card(props: {
   title?: ComponentChildren;
   sub?: ComponentChildren;
   actions?: ComponentChildren;
-  tone?: "accent" | "flat";
+  tone?: "accent";
   class?: string;
   id?: string;
   children?: ComponentChildren;
-  labelledBy?: string;
 }) {
   const hid = useId();
   return (
     <section
       id={props.id}
       class={cx("card", props.tone && `card--${props.tone}`, props.class)}
-      aria-labelledby={props.title ? hid : props.labelledBy}
+      aria-labelledby={props.title ? hid : undefined}
     >
       {(props.title || props.actions) && (
         <header class="card__head">
@@ -82,13 +81,12 @@ export function Card(props: {
 export function Badge(props: {
   tone?: "ok" | "warn" | "danger" | "info" | "accent";
   dot?: boolean;
-  pulse?: boolean;
   children: ComponentChildren;
   title?: string;
 }) {
   return (
     <span class={cx("badge", props.tone && `badge--${props.tone}`)} title={props.title}>
-      {props.dot && <span class={cx("dot", props.pulse && "dot--pulse")} aria-hidden="true" />}
+      {props.dot && <span class="dot" aria-hidden="true" />}
       {props.children}
     </span>
   );

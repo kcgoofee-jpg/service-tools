@@ -1,4 +1,4 @@
-//! `upstream_policy` / `upstream_errors` 与旧 Python 对拍：夹具由 tools/parity/golden/upstream.py 生成。
+//! `upstream_policy` / `upstream_errors` 与旧 Python 对拍：夹具由旧 Python 生成（脚本见标签 py-final）。
 //! 依赖时间的函数用夹具里记录的固定 `now`（Python 侧把 `upstream_policy.time` 打桩成同一个值）。
 
 use gate_core::pyext::PyResult;

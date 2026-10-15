@@ -393,13 +393,6 @@
 .lg-lbpos {
   align-self: center;
 }
-.lg-danger {
-  display: grid;
-  gap: var(--sp-2);
-  justify-items: start;
-  padding-top: var(--sp-3);
-  border-top: 1px solid var(--border);
-}
 .mb-ask {
   margin-bottom: var(--sp-3);
 }

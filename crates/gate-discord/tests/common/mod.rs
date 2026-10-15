@@ -2,7 +2,6 @@
 //! 按场景脚本回话，并逐条记录收到的请求。测试里不连任何真实的 Discord。
 #![allow(dead_code)]
 
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
@@ -13,14 +12,13 @@ use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::Response;
 use serde_json::{Map, Value, json};
 
-/// 合成数据（与 tools/parity/golden/discord_commands.py 保持一致）。
+/// 合成数据。
 pub const GUILD: &str = "900000000000000001";
-pub const OWNER: &str = "900000000000000002";
 pub const APP: &str = "900000000000000003";
 pub const BOT_ID: &str = "900000000000000099";
 pub const SECRET: &str = "test-secret";
 pub const SITE: &str = "https://site.test";
-/// 夹具里固定的 `time.time()`。
+/// 固定的「现在」（Unix 秒），Key 剩余有效期才不会随时间漂移。
 pub const NOW: f64 = 1_760_000_000.0;
 
 #[derive(Default)]
@@ -198,41 +196,4 @@ async fn handle(State(shared): State<Arc<Shared>>, req: Request) -> Response {
     }
 
     json_response(404, &json!({"detail": "mock: unknown path"}))
-}
-
-/// 把一组 JSON 里的字符串按映射表整体替换（弹窗 custom_id ↔ 占位符）。
-pub fn deep_replace(v: &mut Value, map: &HashMap<String, String>) {
-    match v {
-        Value::String(s) => {
-            if let Some(r) = map.get(s.as_str()) {
-                *s = r.clone();
-            }
-        }
-        Value::Array(a) => a.iter_mut().for_each(|x| deep_replace(x, map)),
-        Value::Object(o) => o.values_mut().for_each(|x| deep_replace(x, map)),
-        _ => {}
-    }
-}
-
-/// 从一批 Discord 请求里找出弹窗（回调类型 9），返回「真实 custom_id → 占位符」
-/// （弹窗本身是 `<modal>`，第 i 个下拉框是 `<sel{i}>`）。
-pub fn modal_placeholders(calls: &[Value]) -> HashMap<String, String> {
-    let mut out = HashMap::new();
-    for call in calls {
-        let body = &call["json"];
-        if body["type"] == 9 {
-            let modal = &body["data"];
-            out.insert(
-                modal["custom_id"].as_str().unwrap().to_owned(),
-                "<modal>".to_owned(),
-            );
-            for (i, c) in modal["components"].as_array().unwrap().iter().enumerate() {
-                out.insert(
-                    c["component"]["custom_id"].as_str().unwrap().to_owned(),
-                    format!("<sel{i}>"),
-                );
-            }
-        }
-    }
-    out
 }

@@ -56,7 +56,6 @@ twilight-gateway = "0.17"
 twilight-http = "0.17"
 twilight-model = "0.17"
 proptest = "1.12"
-insta = { version = "1.49", features = ["json"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

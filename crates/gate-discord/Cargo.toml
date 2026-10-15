@@ -1,6 +1,6 @@
 [package]
 name = "gate-discord"
-description = "Discord 机器人：奶妹（领 Key / 额度 / 反馈）与燕双鹰（只在线）。"
+description = "Discord 机器人：奶妹（领 Key / 额度 / 换 Key / 反馈）。"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -16,7 +16,6 @@ name = "nai-bots"
 path = "src/main.rs"
 
 [dependencies]
-gate-core.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 serde.workspace = true
@@ -28,13 +27,11 @@ rustls.workspace = true
 clap.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-rand.workspace = true
 twilight-gateway.workspace = true
 twilight-http.workspace = true
 twilight-model.workspace = true
 
 [dev-dependencies]
-gate-golden = { path = "../gate-golden" }
 axum.workspace = true
 
 [lints]

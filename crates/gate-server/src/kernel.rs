@@ -13,8 +13,8 @@
 //!
 //! # 外部钩子（旧版 `kernel.extra`）
 //!
-//! 注册服务（领 Key）与私信函数不属于内核：[`crate::jobs::startup`] 在注册服务配齐时自动接上（[`ServiceRegistrar`]），
-//! 也可以用 [`Kernel::set_registrar`] / [`Kernel::set_dm`] 换掉。
+//! 注册服务（领 Key）不属于内核：[`crate::jobs::startup`] 在注册服务配齐时自动接上（[`ServiceRegistrar`]），
+//! 也可以用 [`Kernel::set_registrar`] 换掉。
 //! 没接时等同旧版 `extra.get("registrar") is None`（自动驾驶按「名额不限」走，领 Key 模块不出校验）。
 
 mod algo;
@@ -109,7 +109,7 @@ pub struct RegistrarSettings {
 }
 
 /// 注册服务（领 Key）在内核里的样子（旧版 `kernel.extra["registrar"]`）：内核模块与自动驾驶只用名额上限和占用人数。
-/// 摘身份组 / 同步 / 退群回收 / 定时清空这些要碰 Discord 的后台工作不走这里，见 [`crate::registration`]。
+/// 摘身份组 / 同步 / 退群回收这些要碰 Discord 的后台工作不走这里，见 [`crate::registration`]。
 /// 线上用 [`ServiceRegistrar`]（`startup` 自动接上）；对拍测试换成读库的假实现。
 pub trait KernelRegistrar: Send + Sync {
     /// `registrar.settings()`：站长在后台保存的优先，其次是启动时的环境默认值。
@@ -135,9 +135,6 @@ impl KernelRegistrar for ServiceRegistrar {
         Box::pin(async move { self.0.count_active().await.map_err(|e| e.to_string()) })
     }
 }
-
-/// 私信函数（旧版 `kernel.extra["dm"]`）：`(key_id, 正文)`。当前没有模块用它，留着对接。
-pub type DmHook = Arc<dyn Fn(i64, String) -> BoxFuture<'static, ()> + Send + Sync>;
 
 /// 一个上游账号的 V5 缓存（`allowance.snapshot(pool)["accounts"]` 里内核用到的两项）。
 pub use gate_core::quota::AccountAllowance;
@@ -229,7 +226,6 @@ impl AllowanceSource for LiveAllowance {
 #[derive(Default)]
 struct Hooks {
     registrar: Option<Arc<dyn KernelRegistrar>>,
-    dm: Option<DmHook>,
     allowance: Option<Arc<dyn AllowanceSource>>,
     /// 官方状态接口地址的覆盖（测试用）；None 用状态页模块里的 `OFFICIAL_API`。
     official_api: Option<String>,
@@ -270,14 +266,6 @@ impl Kernel {
 
     pub fn registrar(&self) -> Option<Arc<dyn KernelRegistrar>> {
         self.hooks.read().expect("kernel hooks").registrar.clone()
-    }
-
-    pub fn set_dm(&self, dm: Option<DmHook>) {
-        self.hooks.write().expect("kernel hooks").dm = dm;
-    }
-
-    pub fn dm(&self) -> Option<DmHook> {
-        self.hooks.read().expect("kernel hooks").dm.clone()
     }
 
     /// 换掉账号 V5 缓存的来源（测试用）；`None` 恢复线上实现。

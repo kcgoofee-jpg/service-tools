@@ -1,6 +1,6 @@
 //! `cargo xtask dev`：本地开发环境，一个进程里起三样东西——
 //!
-//! 1. 假上游（`gate_testkit::MockUpstream`，默认 18001）：出图 / 文本 / 订阅查询都有默认回复，不连真实 NovelAI；
+//! 1. 假上游（`gate_testkit::MockUpstream`，默认 18001）：出图 / 工具 / 标签补全 / 订阅查询都有默认回复，不连真实 NovelAI；
 //! 2. 合成演示数据（`seed`）：每次启动都重建数据目录（默认 `target/owl-dev`），并写出 `cookies.json`
 //!    （后台与成员会话，Playwright 端到端读它）；
 //! 3. 真正的网关（`AppState::build` + `app`，默认 18000，只监听本机），环境变量与 2.x 的本地演示脚本一致：
@@ -115,9 +115,7 @@ fn gateway_env(
         ("DATA_DIR", data.to_string_lossy().into_owned()),
         ("ADMIN_PASSWORD", seed::ADMIN_PASSWORD.into()),
         ("NAI_TOKENS", "pst-devdevdevdevdevdevdev".into()),
-        ("NAI_IMAGE_HOST", mock_url.clone()),
-        ("NAI_TEXT_HOST", mock_url.clone()),
-        ("NAI_TEXT_HOST_LEGACY", mock_url),
+        ("NAI_IMAGE_HOST", mock_url),
         // 假 Discord 配置：让自助领 Key / 网页登录处于「已配置」状态；地址是死端口，什么都发不出去
         ("DISCORD_CLIENT_ID", "1".into()),
         ("DISCORD_CLIENT_SECRET", "dev".into()),

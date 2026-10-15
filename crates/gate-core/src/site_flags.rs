@@ -123,13 +123,6 @@ pub static WEB_LOGIN_PAUSED: Spec = spec(
     "registration_routes",
     "网页 Discord 登录暂停（Discord 回调修复 / 审核期间）。网页只有 Discord 登录，暂停期间成员只能在 Discord 里用 /quota 看额度",
 );
-pub static DM_ENABLED: Spec = spec(
-    "dm_enabled",
-    Kind::Flag,
-    SpecDefault::Bool(false),
-    "registration",
-    "私信总闸门（关 = 任何私信都不发）",
-);
 pub static ISSUE_HOURLY_CAP: Spec = bounded(
     spec(
         "issue_hourly_cap",
@@ -280,10 +273,9 @@ pub static MEMBER_SWEEP: Spec = spec(
 );
 
 /// 登记表（顺序与旧版 `ALL` 一致，`facts_table` 按这个顺序出行）。
-pub static ALL: [&Spec; 15] = [
+pub static ALL: [&Spec; 14] = [
     &MEMBER_SWEEP,
     &WEB_LOGIN_PAUSED,
-    &DM_ENABLED,
     &ISSUE_HOURLY_CAP,
     &REGISTER_OPEN,
     &HOME_JOIN_OPEN,
@@ -477,7 +469,7 @@ mod tests {
     #[test]
     fn flags_fail_closed() {
         assert_eq!(
-            parse(&DM_ENABLED, &json!("maybe"), Value::Bool(false)),
+            parse(&REGISTER_OPEN, &json!("maybe"), Value::Bool(false)),
             Value::Bool(false)
         );
         assert_eq!(

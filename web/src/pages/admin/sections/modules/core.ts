@@ -36,17 +36,6 @@ export function moduleState(m: Mod): ModState {
   return "ok";
 }
 
-/** 侧栏角标：启用中的模块里「有问题」级别的校验数（上次直接跑挂也算一个） */
-export function failingChecks(mods: Mod[]): number {
-  let n = 0;
-  for (const m of mods) {
-    if (!m.enabled) continue;
-    n += (m.last.checks ?? []).filter((c) => c.level === "bad").length;
-    if (m.last.ok === false) n += 1;
-  }
-  return n;
-}
-
 const lastAt = (m: Mod, level: Level): number =>
   Math.max(0, ...(m.last.runs ?? []).filter((r) => r.level === level).map((r) => r.at || 0));
 

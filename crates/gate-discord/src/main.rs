@@ -1,10 +1,10 @@
-//! `nai-bots naimei` / `nai-bots warden`：两个 Discord 机器人的入口（docker-compose 里各跑一个容器）。
+//! `nai-bots naimei`：奶妹（docker-compose 里 `owl-naimei` 容器）的入口。
 
 use std::process::ExitCode;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
-use gate_discord::{config, naimei, warden};
+use gate_discord::{config, naimei};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
@@ -16,10 +16,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Bot {
-    /// 奶妹：领 Key / 额度 / 反馈 / 管理员命令（需要 DISCORD_BOT_TOKEN 等环境变量）
+    /// 奶妹：领 Key / 额度 / 反馈（需要 DISCORD_BOT_TOKEN、DISCORD_GUILD_ID、REGISTRATION_BRIDGE_SECRET）
     Naimei,
-    /// 燕双鹰：只保持在线（需要 WARDEN_BOT_TOKEN；没配则休眠，不退出）
-    Warden,
 }
 
 /// 致命错误后先等一会儿再退出：容器是 `restart: unless-stopped`，别让它飞快地重复登录（会被 Discord 限流）。
@@ -42,13 +40,6 @@ async fn main() -> ExitCode {
             Ok(cfg) => naimei::run(cfg).await,
             Err(e) => Err(e),
         },
-        Bot::Warden => {
-            let token = config::warden_token_from(|k| std::env::var(k).ok());
-            if token.is_empty() {
-                warden::idle_forever().await
-            }
-            warden::run(token).await
-        }
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

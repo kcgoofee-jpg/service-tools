@@ -3,8 +3,8 @@ import { Eye, EyeOff } from "lucide-preact";
 import { useId, useState } from "preact/hooks";
 import { ApiError, sendJSON } from "../../../../lib/api";
 import { Button, Card, toast } from "../../../../ui";
+import { useBusy } from "../_kit";
 import { passwordProblem } from "./core";
-import { useBusy } from "./forms";
 
 function PwInput(props: {
   label: string;

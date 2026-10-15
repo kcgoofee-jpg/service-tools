@@ -78,58 +78,11 @@ export function rechargeDerivation(
   return { hoursPerPercent: 24 / perDay, imagesPerDay: Math.round(perDay * perPercent) };
 }
 
-/** /admin/api/perf */
-export type PerfWindow = {
-  requests: number;
-  ok: number;
-  images: number;
-  rate_limited: number;
-  auth: number;
-  server: number;
-  other: number;
-  success_rate: number | null;
-  samples: number;
-  p50_ms: number | null;
-  p90_ms: number | null;
-  avg_wait_ms: number | null;
-  p90_wait_ms: number | null;
-  actual_per_hour: number | null;
-  capacity_per_hour: number | null;
-  member_capacity_per_hour: number | null;
-};
-export type PerfHour = {
-  t: number;
-  ok: number;
-  err: number;
-  r429: number;
-  images: number;
-  p50_ms: number | null;
-};
-export type PerfFamily = {
-  h1: PerfWindow;
-  d1: PerfWindow;
-  baseline: PerfWindow;
-  hourly: PerfHour[];
-  baseline_ready: boolean;
-};
+/** /admin/api/perf：只用系统判断出的提示（flags）；耗时、限流等明细表不展示 */
 export type Perf = {
-  families: Record<string, PerfFamily>;
   flags: Array<{ code: string; family: string; level: "bad" | "warn"; text: string }>;
-  slots: number;
-  site_interval: number;
-  key_interval: number;
   generated_at: number;
 };
-
-export const secText = (ms: number | null | undefined): string =>
-  ms == null ? "—" : `${(ms / 1000).toFixed(1)} 秒`;
-export const rateText = (r: number | null | undefined): string =>
-  r == null ? "—" : `${Math.round(r * 100)}%`;
-
-/** 每小时请求量图的峰值 */
-export function hourlyPeak(hours: PerfHour[]): number {
-  return Math.max(0, ...hours.map((h) => h.ok + h.err));
-}
 
 /** /admin/api/reconciliation */
 export type Comparison = {

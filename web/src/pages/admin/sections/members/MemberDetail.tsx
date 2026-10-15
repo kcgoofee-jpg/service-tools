@@ -13,7 +13,7 @@ import {
   userTags,
 } from "./logic";
 import { Seg } from "./shared";
-import { FEATURE_LABELS, type MemberRow, ROLE_LABEL, type Role } from "./types";
+import { FEATURE_LABELS, isLiveFeature, type MemberRow, ROLE_LABEL, type Role } from "./types";
 
 export type DetailActions = {
   edit: (m: MemberRow, manual?: boolean) => void;
@@ -26,7 +26,7 @@ export type DetailActions = {
   coupon: (m: MemberRow) => void;
   audit: (m: MemberRow) => void;
   resetQuota: (m: MemberRow) => void;
-  toggle: (m: MemberRow) => void;
+  disable: (m: MemberRow) => void;
   regenerate: (m: MemberRow) => void;
   remove: (m: MemberRow, ban: boolean) => void;
 };
@@ -93,12 +93,12 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
   }
   const u = k.used;
   const quotaSource = k.quota_auto && !m.is_test ? "auto" : "manual";
-  // 今天的 V4.5 / V5 用量在列表行里已经有了，这里只补行里没有的 Anlas、文本
+  // 今天的 V4.5 / V5 用量在列表行里已经有了，这里只补行里没有的 Anlas
   const anlasUsed = Math.round(u.anlas || 0);
   const anlas = !k.allow_anlas
     ? "关闭"
     : `今天 ${anlasUsed} / ${k.daily_anlas > 0 ? Math.round(k.daily_anlas) : "不限"}`;
-  const feats = k.features;
+  const feats = k.features?.filter(isLiveFeature) ?? null;
 
   return (
     <div class="mb-detail">
@@ -169,14 +169,6 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
             )}
             <dt>Anlas</dt>
             <dd>{anlas}</dd>
-            {u.text_tokens > 0 && (
-              <>
-                <dt>文本</dt>
-                <dd>
-                  今天 {u.text_tokens} / {k.daily_text_tokens > 0 ? k.daily_text_tokens : "禁用"} tokens
-                </dd>
-              </>
-            )}
             <dt>功能</dt>
             <dd>
               <span class="mb-chips">
@@ -327,7 +319,7 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
           )}
           items={[
             { label: "重新生成 Key（旧的立即失效）", onSelect: () => act.regenerate(m) },
-            { label: m.enabled ? "停用" : "启用", onSelect: () => act.toggle(m) },
+            { label: "停用", onSelect: () => act.disable(m) },
             ...(m.is_admin
               ? []
               : [

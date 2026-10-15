@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { failingChecks, type Mod, moduleState, sortMods } from "./core";
+import { type Mod, moduleState, sortMods } from "./core";
 
 const mod = (name: string, over: Partial<Mod> & { checks?: Mod["last"]["checks"] }): Mod => ({
   name,
@@ -22,14 +22,6 @@ describe("模块状态", () => {
     expect(moduleState(mod("a", { last: { ok: false } }))).toBe("bad");
     expect(moduleState(mod("a", { checks: [warn] }))).toBe("warn");
     expect(moduleState(mod("a", {}))).toBe("ok");
-  });
-  it("侧栏角标只数启用中模块的「有问题」校验", () => {
-    const list = [
-      mod("a", { checks: [bad, bad, warn] }),
-      mod("b", { enabled: false, checks: [bad] }),
-      mod("c", { last: { ok: false } }),
-    ];
-    expect(failingChecks(list)).toBe(3);
   });
   it("报错优先：有问题的排前面，已关闭的沉底", () => {
     const list = [

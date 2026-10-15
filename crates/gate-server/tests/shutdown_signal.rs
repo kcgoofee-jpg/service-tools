@@ -25,8 +25,6 @@ fn spawn_gateway(port: u16, data: &std::path::Path) -> Child {
         .env("DATA_DIR", data)
         .env("NAI_TOKENS", "synthetic-upstream-token")
         .env("NAI_IMAGE_HOST", "http://127.0.0.1:9")
-        .env("NAI_TEXT_HOST", "http://127.0.0.1:9")
-        .env("NAI_TEXT_HOST_LEGACY", "http://127.0.0.1:9")
         .env("ADMIN_PASSWORD", "dev-admin-password-123")
         .env("SECRET_KEY", "test-secret-key-test-secret-key-0123456789")
         .env("UPSTREAM_HTTP2", "0")

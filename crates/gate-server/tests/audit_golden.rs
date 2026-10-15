@@ -1,4 +1,4 @@
-//! `audit`（旧版 `app/audit.py`）与旧 Python 的对拍。夹具由 `tools/parity/golden/audit.py` 在旧代码上生成：
+//! `audit`（旧版 `app/audit.py`）与旧 Python 的对拍。夹具由旧代码生成（脚本见标签 py-final）：
 //! - `audit_prompts`：提示词整理，逐字节一致，Python 抛的异常（类型 + 消息）也要一致；
 //! - `audit_notice`：披露文案，逐字节一致；
 //! - `audit_settings`：假库里的原始设置串 → 记录开关 / 保留时长 / 披露文案（真实 SQLite 库）；

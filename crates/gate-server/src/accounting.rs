@@ -55,17 +55,13 @@ impl Entry {
 }
 
 /// 路径 → 用量日志里的 kind（旧版 `_PATH_KIND`，按顺序子串匹配）。
-const PATH_KIND: [(&str, &str); 10] = [
+const PATH_KIND: [(&str, &str); 6] = [
     ("generate-image-stream", "image_stream"),
     ("suggest-tags", "tags"),
     ("generate-image", "image"),
     ("encode-vibe", "vibe_encode"),
     ("upscale", "upscale"),
     ("augment-image", "augment-image"),
-    ("generate-voice", "voice"),
-    ("generate-stream", "text"),
-    ("/ai/generate", "text"),
-    ("/v1/chat/completions", "chat"),
 ];
 
 pub fn kind_for_path(path: &str) -> &'static str {
@@ -301,8 +297,8 @@ mod tests {
         assert_eq!(kind_for_path("/ai/generate-image-stream"), "image_stream");
         assert_eq!(kind_for_path("/nai/ai/generate-image"), "image");
         assert_eq!(kind_for_path("/ai/generate-image/suggest-tags"), "tags");
-        assert_eq!(kind_for_path("/ai/generate"), "text");
-        assert_eq!(kind_for_path("/v1/chat/completions"), "chat");
+        // 文本接口已删除（docs/v3-deviations.md #81），这些路径不会再走到记账；按「账户查询」兜底
+        assert_eq!(kind_for_path("/ai/generate"), "account");
         assert_eq!(kind_for_path("/user/subscription"), "account");
     }
 }

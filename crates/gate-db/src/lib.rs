@@ -6,7 +6,7 @@
 //! - **只读连接池**（默认 2 个）：WAL 下读不阻塞写，查询放在 `spawn_blocking` 里跑。
 //!
 //! `repo` 模块是旧版 `class Database`（app/database.py）的逐方法移植，`tests/repo_golden.rs` 用
-//! `tools/parity/golden/db_methods.py` 在旧 Python 上生成的夹具逐方法对拍（返回值 + 整库内容 + 原图目录）。
+//! 旧 Python 生成的夹具（脚本见标签 py-final）逐方法对拍（返回值 + 整库内容 + 原图目录）。
 //!
 //! 旧版的问题（共享主连接上一条语句失败后事务不结束 → 之后所有写都 locked，见 database.py
 //! `_rollback_on_error`）在这里不存在：事务由 `rusqlite::Transaction` 的 Drop 自动回滚。

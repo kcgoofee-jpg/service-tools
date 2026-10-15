@@ -1,11 +1,12 @@
-/** 成员页的各个小对话框：展示新 Key、绑定 Discord、发券、加标签、奖励成员、黑名单、带通知选项的确认框。 */
+/** 成员页的各个小对话框：展示新 Key、绑定 Discord、发券、加标签、奖励成员、黑名单。 */
 import type { ComponentChildren } from "preact";
 import { useEffect, useId, useState } from "preact/hooks";
 import { getJSON } from "../../../../lib/api";
 import { fullTime, rel } from "../../../../lib/format";
 import { Badge, Button, CopyField, copyText, Dialog, Field, Notice, Skeleton } from "../../../../ui";
+import { Avatar, ConfirmDialog, TableWrap, useBusy } from "../_kit";
 import { addBan, addTag, bindDiscord, gift, giveCoupon, removeBan } from "./actions";
-import { Avatar, ConfirmDialog, Empty, TableScroll, useBusy, useDebounced, usePageData } from "./shared";
+import { Empty, useDebounced, usePageData } from "./shared";
 import type { Ban, Coupon } from "./types";
 import { isDiscordId, parseNum } from "./validate";
 
@@ -222,7 +223,7 @@ export function CouponDialog(props: {
         return undefined;
       }}
     >
-      <p class="small muted">成员在首页自己点一下，就能重置当天的 V5 额度；用一次作废。</p>
+      <p class="small muted">成员在首页自己点一下，就能重置当天的 V5 和 Anlas 额度；一张券用一次就作废。</p>
       <div class="xa-form__grid">
         <Field label="有效天数" hint={fieldErr(err) ?? "1～30 天"}>
           <input
@@ -339,7 +340,7 @@ export function GiftDialog(props: { onClose: () => void; onDone: (text: string) 
           <Notice tone="ok">{result.text}</Notice>
           {result.key && (
             <>
-              <p class="small muted">私信没有发出去，请把这把 Key 手动转交给对方：</p>
+              <p class="small muted">请把这把 Key 转交给对方：</p>
               <CopyField value={result.key} label="Key" wrap />
             </>
           )}
@@ -370,7 +371,6 @@ export function GiftDialog(props: { onClose: () => void; onDone: (text: string) 
         const parts = [
           g.new_key ? "对方还没有 Key，已新发一把" : "对方已有 Key",
           d.value > 0 ? `并发了一张 ${d.value} 天的重置券` : "",
-          g.new_key ? (g.dm_sent ? "，已私信" : `，私信没发出去（${g.dm_block || "原因未知"}）`) : "",
         ];
         setResult({ text: `${parts.join("")}。`, ...(g.key ? { key: g.key } : {}) });
         props.onDone("奖励已发出");
@@ -378,7 +378,7 @@ export function GiftDialog(props: { onClose: () => void; onDone: (text: string) 
       }}
     >
       <p class="small muted">
-        对方没有 Key 时会直接发一把（不受名额限制）并私信；已有 Key 就只发重置券。需要 Discord 机器人已配置。
+        对方没有 Key 时会直接发一把（不受名额限制），Key 显示在结果里，由你转交；已有 Key 就只发重置券。
       </p>
       <Field label="Discord 用户 ID" hint={fieldErr(errs.id ?? "") ?? "17～20 位纯数字"}>
         <input
@@ -474,7 +474,7 @@ export function BansDialog(props: { onClose: () => void; onChanged: (text: strin
             />
           </Field>
           {error && <Notice tone="danger">读取黑名单失败：{error}</Notice>}
-          <TableScroll label="封禁黑名单" class={pending ? "xa-busy" : undefined}>
+          <TableWrap label="封禁黑名单" class={pending ? "xa-busy" : undefined}>
             <table class="table">
               <caption class="sr-only">封禁黑名单</caption>
               <thead>
@@ -521,7 +521,7 @@ export function BansDialog(props: { onClose: () => void; onChanged: (text: strin
               </tbody>
             </table>
             {!bans.length && !pending && <Empty title={dq ? "没有匹配的记录" : "当前没有封禁黑名单记录"} />}
-          </TableScroll>
+          </TableWrap>
           <h3 class="mb-h4">手动添加封禁</h3>
           <form
             class="mb-banadd"
@@ -578,40 +578,5 @@ export function BansDialog(props: { onClose: () => void; onChanged: (text: strin
         </ConfirmDialog>
       )}
     </>
-  );
-}
-
-/* ---------------- 带「同时私信通知」选项的确认框 ---------------- */
-export function MemberConfirm(props: {
-  title: string;
-  body: ComponentChildren;
-  confirmText: string;
-  danger?: boolean;
-  /** 成员绑了 Discord 才有「私信通知」选项 */
-  hasDiscord: boolean;
-  notifyLabel?: string;
-  run: (notify: boolean) => Promise<string | undefined>;
-  onClose: () => void;
-}) {
-  const [notify, setNotify] = useState(false);
-  return (
-    <ConfirmDialog
-      title={props.title}
-      confirmText={props.confirmText}
-      {...(props.danger ? { danger: true } : {})}
-      onClose={props.onClose}
-      onConfirm={() => props.run(notify)}
-    >
-      {props.body}
-      {props.hasDiscord && (
-        <label class="xa-check">
-          <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.currentTarget.checked)} />
-          <span>
-            {props.notifyLabel ?? "同时私信通知本人"}
-            <small>Discord 申诉期默认不发</small>
-          </span>
-        </label>
-      )}
-    </ConfirmDialog>
   );
 }

@@ -37,7 +37,7 @@ export type Member = {
   daily_anlas: number;
   image_model_scope: string;
   quota_auto: boolean;
-  today: { images: number; v5: number; anlas: number; text_tokens: number; requests: number };
+  today: { images: number; v5: number; anlas: number; requests: number };
   week: { images: number; v5: number; anlas: number; requests: number };
   total_images: number;
   registered_at: number | null;
@@ -63,7 +63,6 @@ export type KeyRow = {
   daily_anlas: number;
   daily_v5: number;
   monthly_anlas: number;
-  daily_text_tokens: number;
   rpm: number;
   allow_anlas: boolean;
   allow_img2img: boolean;
@@ -78,7 +77,7 @@ export type KeyRow = {
   expires_at: number | null;
   created_at: number;
   last_used_at: number | null;
-  used: { images: number; anlas: number; v5: number; text_tokens: number; requests: number };
+  used: { images: number; anlas: number; v5: number; requests: number };
 };
 
 /** 成员 + 对应的 Key 行（编辑与展示需要的字段分在两个接口里） */
@@ -108,16 +107,8 @@ export type Coupon = {
 };
 
 export type OpsSnapshot = {
-  registration: { daily_images: number; daily_v5: number; expires_days: number; features: string[] | null };
+  registration: { daily_images: number; daily_v5: number };
   features: { labels: Record<string, string>; new_key: string[] | null };
-  audit: {
-    prompts: boolean;
-    thumbs: boolean;
-    retention_days: number;
-    image_cap_mb: number;
-    image_bytes: number;
-    image_keep_hours: number;
-  };
 };
 
 /** 功能名（后端 features.FEATURES 的副本；接口给了 labels 就以接口为准） */
@@ -127,6 +118,10 @@ export const FEATURE_LABELS: Record<string, string> = {
   augment: "导演工具（线稿、上色等）",
   vibe: "Vibe 编码",
   tags: "标签补全",
-  text: "文本生成 / OpenAI 兼容聊天",
-  voice: "语音合成",
 };
+
+/** 3.0 已经没有文本 / 语音功能：旧网关若还带着这两项，页面里也不列出来 */
+const GONE_FEATURES = new Set(["text", "voice"]);
+export const isLiveFeature = (id: string): boolean => !GONE_FEATURES.has(id);
+export const featureIds = (labels: Record<string, string>): string[] =>
+  Object.keys(labels).filter(isLiveFeature);

@@ -1,13 +1,12 @@
 //! 后台常驻任务（旧版 `app/background_tasks.py`）与启动 / 关停序列。
 //!
-//! 四个循环，全部挂在 `state.tasks` 上，睡觉时听 `state.shutdown`：
+//! 三个循环，全部挂在 `state.tasks` 上，睡觉时听 `state.shutdown`：
 //!
 //! | 循环 | 间隔 | 做什么 |
 //! |---|---|---|
 //! | 维护 | 5 分钟 ±20% | 清过期记录 / 状态码统计落库 / 原图保存期与容量上限 / 自动关闭不用处理的 Bug（最多 10 分钟一次）/ 注册服务的三个同步（`registration::registrar_jobs`）/ 上游表现提醒 / 磁盘自检 / 官方状态 |
 //! | 内核 | 10 分钟 ±20% | 各模块 tick + 交叉校验（旧版叫 `anlas_rebalance_loop`，名字是历史遗留：Anlas 自动分配 10-13 已删除，现在就是内核） |
 //! | 闲置回收 | 1 小时 | 长期不用的 Key 删除并拉黑（站点出不了图的服务日不算，见 [`idle_recycle_window`]）；`KEY_INACTIVITY_DELETE_DAYS=0` 时**什么都不做** |
-//! | 定时清空注册 | 每天 `REGISTER_RESET_AT` | 清空自助注册用户（循环本身在 `registration` 模块里；没配 / 没有注册服务就每小时看一眼） |
 //!
 //! 一个循环里的一轮工作做到底才响应关停（只在睡觉时被打断）：额度重算这类多步写入不能被拦腰切断。
 //!
@@ -74,28 +73,15 @@ fn capture(state: &AppState, source: &str, e: &KernelError) {
 /// 启动序列（在 `AppState::build` 之后调用）：读回内核运行记录 → 把注册服务接进内核 → 拉起所有循环 →
 /// 「服务已启动」提醒（冷却 60 秒）。
 ///
-/// 注册服务配齐（`state.registration`）时，内核的 registrar / 私信钩子自动接上；没配齐就是旧版的 `registrar is None`。
+/// 注册服务配齐（`state.registration`）时，内核的 registrar 自动接上；没配齐就是旧版的 `registrar is None`。
 pub async fn startup(state: &AppState) -> Result<(), KernelError> {
     state.kernel.load(state).await?;
-    if let Some(svc) = &state.registration {
-        if state.kernel.registrar().is_none() {
-            state
-                .kernel
-                .set_registrar(Some(Arc::new(ServiceRegistrar(svc.clone()))));
-        }
-        if state.kernel.dm().is_none() {
-            // 旧版 `kernel.extra["dm"]`：按 Key 找到领取人，发「🦉 猫头鹰公益站通知：…」（当前没有模块用它）
-            let svc = svc.clone();
-            state.kernel.set_dm(Some(Arc::new(move |key_id, text| {
-                let svc = svc.clone();
-                Box::pin(async move {
-                    if let Ok(Some(did)) = svc.registration_for_key(key_id).await {
-                        svc.send_dm(&did, &format!("🦉 猫头鹰公益站通知：{text}"))
-                            .await;
-                    }
-                })
-            })));
-        }
+    if let Some(svc) = &state.registration
+        && state.kernel.registrar().is_none()
+    {
+        state
+            .kernel
+            .set_registrar(Some(Arc::new(ServiceRegistrar(svc.clone()))));
     }
     spawn_all(state);
     state.alerter.notify(
@@ -111,11 +97,6 @@ pub fn spawn_all(state: &AppState) {
     spawn_loop(state, "maintenance", maintenance_loop);
     spawn_loop(state, "inactive_key_cleanup", inactive_key_cleanup_loop);
     spawn_loop(state, "kernel_tick", kernel_tick_loop);
-    spawn_loop(
-        state,
-        "registration_reset",
-        crate::registration::registration_reset_loop,
-    );
 }
 
 fn spawn_loop<F, Fut>(state: &AppState, name: &'static str, f: F)
@@ -409,7 +390,7 @@ pub async fn idle_recycle_window(
 
 /// 永久回收长期未使用的普通 Key，并拉入黑名单（由站长在后台管理与解封）。
 ///
-/// **`KEY_INACTIVITY_DELETE_DAYS=0` 表示关闭：这时无论库里有什么都不会删任何 Key**（线上 10-11 起就是 0）。
+/// **`KEY_INACTIVITY_DELETE_DAYS=0` 表示关闭：这时无论库里有什么都不会删任何 Key**（线上现在是 3，10-13 起开着）。
 /// 「连续 N 天」不算站点自己出不了图的服务日，见 [`idle_recycle_window`]。返回删掉的 Key 数。
 pub async fn delete_inactive_keys(state: &AppState) -> Result<usize, KernelError> {
     let days = std::cmp::max(0, state.env.key_inactivity_delete_days);

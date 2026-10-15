@@ -7,18 +7,18 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { useLocation } from "preact-iso";
 import { Button, Menu, toast } from "../../../ui";
 import { useAdmin } from "../Admin";
-import { LoadError, Loading, SectionHead } from "./_kit";
+import { ConfirmDialog, LoadError, Loading, SectionHead } from "./_kit";
 import {
   addTag,
   clearShare,
   createInvite,
+  disableKey,
   type Res,
   regenerateKey,
   removeMember,
   removeTag,
   resetAllKeys,
   resetDailyQuota,
-  setEnabled,
   setQuotaAuto,
   switchRole,
 } from "./members/actions";
@@ -28,7 +28,6 @@ import {
   CouponDialog,
   GiftDialog,
   KeyRevealDialog,
-  MemberConfirm,
   TagDialog,
 } from "./members/Dialogs";
 import { inviteMessage } from "./members/invite";
@@ -50,7 +49,7 @@ import {
 } from "./members/logic";
 import type { DetailActions } from "./members/MemberDetail";
 import { MemberList } from "./members/MemberList";
-import { ConfirmDialog, Empty, NARROW, Seg, useMedia } from "./members/shared";
+import { Empty, NARROW, Seg, useMedia } from "./members/shared";
 import type { KeysResp, MemberRow, MembersResp } from "./members/types";
 import "./members.css";
 
@@ -175,7 +174,7 @@ export default function Members() {
         `已将「${memberLabel(m)}」的身份组切换为「${{ regular: "普通", invite: "邀请", test: "测试", admin: "站长" }[r]}」`,
       ),
     issue: (m, a) => {
-      if (a.kind === "share-clear") void quick(clearShare(m.id), "已清除风险分并解除暂停");
+      if (a.kind === "share-clear") void quick(clearShare(m.id), "已解除限流暂停");
       else if (a.kind === "edit") setDlg({ t: "edit", id: m.id });
       else if (a.kind === "tag-del") void quick(removeTag(m.id, a.tag), `已移除：${a.tag}`);
       else {
@@ -192,10 +191,7 @@ export default function Members() {
     coupon: (m) => setDlg({ t: "coupon", id: m.id }),
     audit: (m) => loc.route(`/admin/logs/audit?key=${m.all_key_ids.join(",")}`),
     resetQuota: (m) => setDlg({ t: "reset", id: m.id }),
-    toggle: (m) => {
-      if (m.enabled) setDlg({ t: "disable", id: m.id });
-      else void quick(setEnabled(m.id, true, false), `已启用「${memberLabel(m)}」`);
-    },
+    disable: (m) => setDlg({ t: "disable", id: m.id }),
     regenerate: (m) => setDlg({ t: "regen", id: m.id }),
     remove: (m, ban) => setDlg({ t: ban ? "ban" : "delete", id: m.id }),
   };
@@ -313,42 +309,34 @@ export default function Members() {
         if (!target) return null;
         const name = memberLabel(target);
         return (
-          <MemberConfirm
+          <ConfirmDialog
             title={`停用「${name}」`}
             confirmText="停用"
             danger
-            hasDiscord={!!target.discord_id}
             onClose={close}
-            body={<p>停用后其 Key 立即不能使用，记录和用量保留，之后可以重新启用。</p>}
-            run={async (notify) => {
-              const r = await setEnabled(target.id, false, notify);
+            onConfirm={async () => {
+              const r = await disableKey(target.id);
               if (!r.ok) return r.error;
               toast(`已停用「${name}」`);
               return undefined;
             }}
-          />
+          >
+            <p>停用后其 Key 立即不能使用，成员列表里不再显示；记录和用量保留，记录在操作日志里。</p>
+          </ConfirmDialog>
         );
       }
       case "regen": {
         if (!target) return null;
         const name = memberLabel(target);
         return (
-          <MemberConfirm
+          <ConfirmDialog
             title={`重新生成「${name}」的 Key`}
             confirmText="重新生成"
             danger
-            hasDiscord={!!target.discord_id}
-            notifyLabel="同时用奶妹私信把新 Key 发给本人"
             // 成功后确认框会调 onClose；此时已切到「展示新 Key」，不能被它关掉
             onClose={() => setDlg((d) => (d?.t === "reveal" ? d : null))}
-            body={
-              <p>
-                旧 Key 将立即失效，需在客户端替换。配额、权限、有效期和历史用量保留，已受理任务继续完成。新
-                Key 会显示给你，请转交给成员。
-              </p>
-            }
-            run={async (notify) => {
-              const r = await regenerateKey(target.id, notify);
+            onConfirm={async () => {
+              const r = await regenerateKey(target.id);
               if (!r.ok) return r.error;
               setDlg({
                 t: "reveal",
@@ -358,26 +346,31 @@ export default function Members() {
               });
               return undefined;
             }}
-          />
+          >
+            <p>
+              旧 Key 将立即失效，需在客户端替换。配额、权限、有效期和历史用量保留，已受理任务继续完成。新 Key
+              会显示给你，请转交给成员。
+            </p>
+          </ConfirmDialog>
         );
       }
       case "reset": {
         if (!target) return null;
         const name = memberLabel(target);
         return (
-          <MemberConfirm
+          <ConfirmDialog
             title={`重置「${name}」今日额度`}
             confirmText="重置"
-            hasDiscord={!!target.discord_id}
             onClose={close}
-            body={<p>重置今天的 V5 和 Anlas 用量。图片、文本、请求数及用量日志不会删除。</p>}
-            run={async (notify) => {
-              const r = await resetDailyQuota(target.id, notify);
+            onConfirm={async () => {
+              const r = await resetDailyQuota(target.id);
               if (!r.ok) return r.error;
               toast(`已重置「${name}」今日的 V5 和 Anlas 用量`);
               return undefined;
             }}
-          />
+          >
+            <p>重置今天的 V5 和 Anlas 用量。图片张数、请求数及用量日志不会删除。</p>
+          </ConfirmDialog>
         );
       }
       case "delete":
@@ -387,29 +380,13 @@ export default function Members() {
         const ban = dlg.t === "ban";
         const dc = !!target.discord_id;
         return (
-          <MemberConfirm
+          <ConfirmDialog
             title={ban ? `删除「${name}」并永久禁止领取` : `删除「${name}」`}
             confirmText={ban ? "删除并永久禁止" : "删除"}
             danger
-            hasDiscord={dc}
             onClose={close}
-            body={
-              ban ? (
-                <p>
-                  其 Key 将被删除，Discord 领取记录会被清除并摘除身份组。该 Discord
-                  账号以后无法再次自助领取，此操作不可恢复。
-                </p>
-              ) : dc ? (
-                <p>
-                  其 Key 将被删除，Discord 领取记录会被清除并摘除身份组。删除后该成员可以重新自助领取新的
-                  Key，历史用量不再保留。
-                </p>
-              ) : (
-                <p>其 Key 将被删除且不可恢复。</p>
-              )
-            }
-            run={async (notify) => {
-              const r = await removeMember(target.id, ban, notify);
+            onConfirm={async () => {
+              const r = await removeMember(target.id, ban);
               if (!r.ok) return r.error;
               setOpen((s) => {
                 const n = new Set(s);
@@ -419,7 +396,21 @@ export default function Members() {
               toast(ban ? `已删除「${name}」并永久禁止领取` : `已删除「${name}」`);
               return undefined;
             }}
-          />
+          >
+            {ban ? (
+              <p>
+                其 Key 将被删除，Discord 领取记录会被清除并摘除身份组。该 Discord
+                账号以后无法再次自助领取，此操作不可恢复。
+              </p>
+            ) : dc ? (
+              <p>
+                其 Key 将被删除，Discord 领取记录会被清除并摘除身份组。删除后该成员可以重新自助领取新的
+                Key，历史用量不再保留。
+              </p>
+            ) : (
+              <p>其 Key 将被删除且不可恢复。</p>
+            )}
+          </ConfirmDialog>
         );
       }
     }

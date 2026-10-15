@@ -227,6 +227,11 @@ async fn terms_and_privacy_pages() {
     ] {
         assert!(privacy.contains(kept), "隐私政策缺：{kept}");
     }
+    // 图片保留期与线上一致（168 小时 = 7 天）；机器人不私信、也不做「防多人共用」的行为统计（docs/v3-deviations.md #79）
+    assert!(privacy.contains("生成的图片 7 天后自动删除"));
+    for gone in ["防多人共用", "行为统计", "私信通知", "默认保留数天"] {
+        assert!(!privacy.contains(gone), "隐私政策还有「{gone}」");
+    }
 }
 
 #[tokio::test]
@@ -637,11 +642,7 @@ async fn public_status_exposes_only_safe_fields() {
         .iter()
         .map(|f| f["id"].as_str().unwrap())
         .collect();
-    assert_eq!(
-        ids,
-        ["image", "upscale", "augment", "vibe", "tags", "text"],
-        "voice 不对外"
-    );
+    assert_eq!(ids, ["image", "upscale", "augment", "vibe", "tags"]);
 
     // 上游状态
     for _ in 0..4 {
@@ -1390,8 +1391,6 @@ async fn setup_page(extra: &[(&str, &str)]) -> Page {
         ),
         ("NAI_TOKENS", "pst-synthetic-upstream-token".into()),
         ("NAI_IMAGE_HOST", mock.url()),
-        ("NAI_TEXT_HOST", mock.url()),
-        ("NAI_TEXT_HOST_LEGACY", mock.url()),
         ("KEY_IMAGE_MIN_INTERVAL", "0".into()),
         ("IMAGE_MIN_INTERVAL", "0".into()),
         (

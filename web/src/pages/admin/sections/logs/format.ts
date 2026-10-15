@@ -7,6 +7,10 @@ export const FEATURES: Array<{ id: string; label: string; short: string }> = [
   { id: "augment", label: "导演工具（线稿、上色等）", short: "导演工具" },
   { id: "vibe", label: "Vibe 编码", short: "Vibe 编码" },
   { id: "tags", label: "标签补全", short: "标签补全" },
+];
+
+/** 已删除的功能（3.0 起不再提供），只用来给历史日志显示名字，不进筛选 */
+const RETIRED: Array<{ id: string; label: string; short: string }> = [
   { id: "text", label: "文本生成 / OpenAI 兼容聊天", short: "文本 / 聊天" },
   { id: "voice", label: "语音合成", short: "语音合成" },
 ];
@@ -26,7 +30,7 @@ const KIND_FEATURE: Record<string, string> = {
 
 export function kindLabel(kind: string | null | undefined): string {
   const id = KIND_FEATURE[kind ?? ""];
-  const f = FEATURES.find((x) => x.id === id);
+  const f = FEATURES.find((x) => x.id === id) ?? RETIRED.find((x) => x.id === id);
   return f ? f.short : kind || "—";
 }
 

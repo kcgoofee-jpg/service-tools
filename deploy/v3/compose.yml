@@ -1,4 +1,4 @@
-# 猫头鹰公益站 3.0（Rust）：一个镜像三个进程。放在服务器 /opt/owl/compose.yml，项目名 owl。
+# 猫头鹰公益站 3.0（Rust）：一个镜像两个进程（网关 + 奶妹）。放在服务器 /opt/owl/compose.yml，项目名 owl。
 #
 # 与 2.x 共用：/opt/service-tools/.env（同一份配置）、/opt/service-tools/data（同一个库、同一个 secret_key，
 # 成员和站长都不用重新登录）、Caddy 直连的固定地址 172.30.0.10（service-tools_edge 网络）。
@@ -39,7 +39,8 @@ services:
       internal:
         aliases: [nai-gate]
 
-  # 奶妹：日常（/register、/quota …）。只拿它需要的变量，不带上游 Token。
+  # 奶妹（/register /quota /resetkey /help /反馈）。只拿它需要的变量，不带上游 Token。
+  # REGISTRATION_BRIDGE_SECRET 不能为空：没配机器人启动即失败（容器会一直重启，日志里有原因）。
   naimei:
     image: owl-gate:current
     container_name: owl-naimei
@@ -57,22 +58,6 @@ services:
       - SITE_URL=${SITE_URL}
       - TZ=Asia/Shanghai
     mem_limit: 128m
-    networks: [internal]
-    logging:
-      driver: json-file
-      options: {max-size: "10m", max-file: "3"}
-
-  # 燕双鹰：执法（零 Intent，只在线；公告由运维命令经 REST 发）
-  warden:
-    image: owl-gate:current
-    container_name: owl-warden
-    restart: unless-stopped
-    entrypoint: ["/usr/local/bin/nai-bots"]
-    command: ["warden"]
-    healthcheck: {disable: true}
-    environment:
-      - WARDEN_BOT_TOKEN=${WARDEN_BOT_TOKEN}
-    mem_limit: 64m
     networks: [internal]
     logging:
       driver: json-file

@@ -2,7 +2,6 @@ data/
 .env
 *.db
 .local/
-*.packed.html
 .DS_Store
 *.db-wal
 *.db-shm

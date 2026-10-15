@@ -51,5 +51,5 @@ export function subscribe<T>(streamUrl: string, pollUrl: string, initial: T | nu
   };
 
   startSse();
-  return { data, connected, refresh: poll };
+  return { data, connected };
 }

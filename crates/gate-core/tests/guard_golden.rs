@@ -1,4 +1,4 @@
-//! guard.rs 与旧 Python 对拍（夹具：tools/parity/golden/guard.py）。
+//! guard.rs 与旧 Python 对拍（夹具生成脚本见标签 py-final）。
 //!
 //! 轨迹夹具：真实 `Guard` 在假时钟 / 假随机 / 假数据库下执行的一串操作，每步记录返回值、写库内容和执行后的
 //! 全部内存状态（时间戳队列用 FNV-1a 摘要）。这里用 `GuardCore` 重放，逐步比较，状态也要逐步一致。

@@ -1,6 +1,6 @@
 [package]
 name = "gate-ops"
-description = "运维命令：巡检、快照、脱敏、提示词统计、状态页事件、公告、逐条私信、冒烟。"
+description = "运维命令：巡检、快照、脱敏、冒烟。"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -17,7 +17,6 @@ path = "src/main.rs"
 
 [dependencies]
 gate-core.workspace = true
-gate-db.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 serde.workspace = true
@@ -27,13 +26,12 @@ tokio.workspace = true
 reqwest.workspace = true
 jiff.workspace = true
 regex.workspace = true
-rand.workspace = true
 sha2.workspace = true
 hex.workspace = true
 flate2 = "1"
 
 [dev-dependencies]
-gate-golden = { path = "../gate-golden" }
+gate-db.workspace = true
 axum.workspace = true
 tempfile = "3"
 

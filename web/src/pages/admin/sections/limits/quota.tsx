@@ -1,11 +1,11 @@
 /** 动态额度：当前结果 + 推算过程 + 最近 7 天的 7 点调整记录 + 算法参数。 */
 import { useMemo, useState } from "preact/hooks";
 import { fullTime } from "../../../../lib/format";
-import { Badge, Button, Card, Notice } from "../../../../ui";
+import { Badge, Button, Card, Notice, toast } from "../../../../ui";
 import { act, useAdmin } from "../../Admin";
-import { LoadError, Loading, Stat } from "../_kit";
+import { actOrError, ConfirmDialog, LoadError, Loading, Stat, TableWrap } from "../_kit";
 import { capText } from "../system/core";
-import { ConfirmDialog, Derive, NumField, SaveBar, Switch, TableWrap, useForm } from "../system/forms";
+import { Derive, NumField, SaveBar, Switch, useForm } from "../system/forms";
 import {
   ALGO_SPECS,
   deriveV5,
@@ -140,9 +140,13 @@ export default function QuotaCard() {
   const d = v5 ? deriveV5(v5, per.value, lo, hi) : null;
   const rc = v5?.rate_check ?? v5?.rate_info;
 
-  const setAuto = async (on: boolean) => {
-    await act("PUT", URL, { quota_auto_enabled: on ? 1 : 0 }, on ? "动态额度已开启并重算" : "动态额度已关闭");
-  };
+  const setAuto = (on: boolean) =>
+    actOrError(
+      "PUT",
+      URL,
+      { quota_auto_enabled: on ? 1 : 0 },
+      on ? "动态额度已开启并重算" : "动态额度已关闭",
+    );
   const save = async () => {
     setSaving(true);
     const ok = await act("PUT", URL, form.changes(), "已保存，额度已按新参数重算");
@@ -173,7 +177,11 @@ export default function QuotaCard() {
             <Switch
               checked={autoOn}
               labelledBy="qa-auto-label"
-              onChange={(on) => (on ? void setAuto(true) : setConfirmOff(true))}
+              onChange={(on) =>
+                on
+                  ? void setAuto(true).then((err) => err && toast(err, { error: true }))
+                  : setConfirmOff(true)
+              }
             />
           </span>
         </div>
@@ -280,13 +288,10 @@ export default function QuotaCard() {
       <ConfirmDialog
         open={confirmOff}
         title="关闭动态额度？"
-        confirmLabel="关闭"
-        tone="danger"
+        confirmText="关闭"
+        danger
         onClose={() => setConfirmOff(false)}
-        onConfirm={async () => {
-          await setAuto(false);
-          setConfirmOff(false);
-        }}
+        onConfirm={() => setAuto(false)}
       >
         <p>关闭后，每把 Key 的额度、领 Key 的默认额度和全站 V5 日限都不再由算法更新，需要站长手动维护。</p>
         <Badge tone="warn">已经分配出去的额度保持不变</Badge>

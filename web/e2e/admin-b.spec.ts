@@ -25,12 +25,6 @@ const creds = readCreds();
 const PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? creds.admin_password ?? "";
 const COOKIE = process.env.E2E_ADMIN_COOKIE ?? creds.admin ?? "";
 
-/**
- * 外壳路由现状：Admin.tsx 里分区路由写成 `${path}/*`，preact-iso 的 `/*` 要求后面至少还有一段，
- * 所以 /admin/limits 本身匹配不上、会掉到总览。等外壳改成 `/:rest*` 后设 E2E_CANONICAL_URLS=1 直接用正式地址。
- */
-const SUFFIX = process.env.E2E_CANONICAL_URLS ? "" : "/-";
-
 const SECTIONS = [
   { id: "upstream", title: "上游" },
   { id: "onboarding", title: "领 Key 与功能" },
@@ -55,7 +49,7 @@ function collect(page: Page): Collected {
 }
 
 async function visit(page: Page, id: string, title: string): Promise<void> {
-  await page.goto(`/admin/${id}${SUFFIX}`);
+  await page.goto(`/admin/${id}`);
   await expect(page.getByRole("heading", { level: 1, name: title, exact: true })).toBeVisible();
   await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
   await page.waitForTimeout(400);
@@ -198,7 +192,8 @@ test("Discord：机器人只有状态卡（离线角标）；公告发送要确�
   await expect(page.getByText("机器人状态")).toBeVisible();
   await expect(page.getByText("离线", { exact: true })).toBeVisible();
   // 跑图分享设置、AI 评论、最近动作已删除（docs/v3-deviations.md #54）
-  for (const gone of ["跑图分享设置", "AI 评论", "最近动作"])
+  // 封禁黑名单只在「成员 › 更多」、成员问卷只在「日志 › 问卷」，这里不再有第二份
+  for (const gone of ["跑图分享设置", "AI 评论", "最近动作", "封禁黑名单", "成员问卷"])
     await expect(page.getByText(gone)).toHaveCount(0);
 
   // 发送公告：先看到确认框，取消
@@ -210,7 +205,7 @@ test("Discord：机器人只有状态卡（离线角标）；公告发送要确�
   await expect(dialog).toBeHidden();
 });
 
-test("模块：列出真实模块，切换启用并还原，侧栏有失败校验角标", async ({ page }) => {
+test("模块：列出真实模块，切换启用并还原", async ({ page }) => {
   await visit(page, "modules", "模块");
   await expect(page.getByText("8 大核心模块")).toHaveCount(0);
   const titles = await page.locator(".card__title").allTextContents();
@@ -225,7 +220,7 @@ test("模块：列出真实模块，切换启用并还原，侧栏有失败校�
   await expect(sw).toHaveAttribute("aria-checked", "true");
 });
 
-test("领 Key 与功能：改有效期并保存；危险操作要输入确认语", async ({ page }) => {
+test("领 Key 与功能：改有效期并保存", async ({ page }) => {
   await visit(page, "onboarding", "领 Key 与功能");
   const field = page.getByLabel("Key 有效期");
   const original = await field.inputValue();
@@ -239,16 +234,8 @@ test("领 Key 与功能：改有效期并保存；危险操作要输入确认语
   await page.getByRole("button", { name: "保存", exact: true }).first().click();
   await expect(page.getByText("领 Key 设置已保存").first()).toBeVisible();
 
-  await page.getByRole("button", { name: "全站重置 Key" }).click();
-  const dialog = page.getByRole("dialog", { name: "全站重置 Key？" });
-  const confirm = dialog.getByRole("button", { name: "确认重置" });
-  await expect(confirm).toBeDisabled();
-  await dialog.getByLabel("请输入「确认重置」以确认").fill("确认重");
-  await expect(confirm).toBeDisabled();
-  await dialog.getByLabel("请输入「确认重置」以确认").fill("确认重置");
-  await expect(confirm).toBeEnabled();
-  await dialog.getByRole("button", { name: "取消" }).click(); // 不真的重置
-  await expect(dialog).toBeHidden();
+  // 高危操作只在「成员 › 更多」里，这一页不再有第二个入口
+  await expect(page.getByRole("button", { name: "全站重置 Key" })).toHaveCount(0);
 });
 
 test("上游：令牌只显示掩码；改并发并还原；添加 Token 校验格式", async ({ page }) => {

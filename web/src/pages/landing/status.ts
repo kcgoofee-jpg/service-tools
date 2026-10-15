@@ -1,9 +1,9 @@
 /**
  * 首页「现在能不能出图」的推导（纯函数，移植自旧版 landing.html 的 render()）。
  *
- * 站长规矩：界面和接口说同一句话。网关拒绝出图时返回的 429 原因（guard.py 的 Reason 文案）
+ * 站长规矩：界面和接口说同一句话。网关拒绝出图时返回的 429 原因（crates/gate-core/src/guard.rs 的原因文案）
  * 同时出现在 /public/live 的 guard.blocked.text 里；这里的措辞、数字都从那句话和 live 的字段里取，
- * 不自己编（见 status.test.ts：把 guard.py 的原文贴进去，核对两边的数字和关键词一致）。
+ * 不自己编（见 status.test.ts：把 guard.rs 的原文贴进去，核对两边的数字和关键词一致）。
  */
 import { duration } from "../../lib/format";
 import type { Live } from "./types";

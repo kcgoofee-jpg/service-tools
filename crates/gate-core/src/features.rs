@@ -14,14 +14,12 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 
 /// 功能名 → 中文说明（顺序有意义：`normalize` / `dump` 按它排序）。
-pub const FEATURES: [(&str, &str); 7] = [
+pub const FEATURES: [(&str, &str); 5] = [
     ("image", "文生图"),
     ("upscale", "放大"),
     ("augment", "导演工具（线稿、上色等）"),
     ("vibe", "Vibe 编码"),
     ("tags", "标签补全"),
-    ("text", "文本生成 / OpenAI 兼容聊天"),
-    ("voice", "语音合成"),
 ];
 pub const GLOBAL_KEY: &str = "features_global";
 /// 需要消耗 Anlas 的功能：本站只提供免费出图，拒绝时说明原因，免得成员以为是 Key 坏了。
@@ -32,16 +30,13 @@ pub const ANLAS_FEATURES: [(&str, &str); 3] = [
 ];
 
 /// 用量日志 `usage_log.kind` → 功能。后台按功能统计与筛选日志时使用。
-pub const KIND_FEATURE: [(&str, &str); 9] = [
+pub const KIND_FEATURE: [(&str, &str); 6] = [
     ("image", "image"),
     ("image_stream", "image"),
     ("upscale", "upscale"),
     ("augment-image", "augment"),
     ("vibe_encode", "vibe"),
     ("tags", "tags"),
-    ("text", "text"),
-    ("chat", "text"),
-    ("voice", "voice"),
 ];
 
 /// 全局开关：功能名 → 是否开启。
@@ -267,8 +262,8 @@ mod tests {
             Some(vec!["vibe".to_string(), "image".to_string()])
         );
         assert_eq!(
-            dump(Some(["voice", "image", "zzz"])),
-            Some("image,voice".into())
+            dump(Some(["vibe", "text", "image", "zzz"])),
+            Some("image,vibe".into())
         );
         assert_eq!(dump::<[&str; 0], &str>(None), None);
         assert_eq!(kinds_for("image"), ["image", "image_stream"]);
@@ -276,11 +271,11 @@ mod tests {
 
     #[test]
     fn decision() {
-        let flags = Some(r#"{"voice": false, "tags": "no"}"#);
+        let flags = Some(r#"{"upscale": false, "tags": "no"}"#);
         let key = json!({"features": "image", "is_admin": 0, "allow_anlas": 0});
         assert_eq!(
-            check_decision(flags, &key, "voice", 0.0, None).unwrap(),
-            Some("站长暂未开放此功能：语音合成".into())
+            check_decision(flags, &key, "upscale", 0.0, None).unwrap(),
+            Some("站长暂未开放此功能：放大".into())
         );
         assert_eq!(
             check_decision(flags, &key, "tags", 0.0, None).unwrap(),

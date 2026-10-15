@@ -15,8 +15,6 @@ export type RegistrationInfo = {
   role_id: string;
   role_note: string;
   active: number;
-  reset_at: string;
-  v5_capacity: { need: number; global: number; short: boolean; message: string };
 };
 export type AuditInfo = {
   prompts: boolean;
@@ -32,7 +30,7 @@ export type Ops = {
   audit: AuditInfo;
 };
 
-/** 消耗官方 Anlas（付费点数）的功能：开启前要确认（接口没有给出这个清单，与 app/features.py 的 ANLAS_FEATURES 对应） */
+/** 消耗官方 Anlas（付费点数）的功能：开启前要确认（接口没有给出这个清单，与 crates/gate-core/src/features.rs 的 ANLAS_FEATURES 对应） */
 export const ANLAS_FEATURES: Record<string, string> = {
   vibe: "每次编码参考图约 2 Anlas",
   upscale: "按图片大小扣 Anlas",
@@ -148,11 +146,6 @@ export function regBody(
   }
   if (!notify) body.notify = false;
   return body;
-}
-
-/** 名额 × 每人 V5 与全站 V5 日限的关系（与后端 v5_capacity 同一口径，但用表单里的最新输入实时算） */
-export function v5Need(seats: number, perV5: number, scope: string): number {
-  return scope === "all" && seats > 0 && perV5 > 0 ? seats * perV5 : 0;
 }
 
 export const AUDIT_SPECS: Record<string, FieldSpec> = {

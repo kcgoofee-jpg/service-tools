@@ -73,5 +73,3 @@ fn to_gate(e: HttpError) -> GateError {
 
 /// 25 MB：生图请求体（含 Base64 图片）的上限。
 pub const IMAGE_BODY_LIMIT: usize = 25 * 1024 * 1024;
-/// 文本输入上限 24000 字符，1 MB 足够任何合法请求。
-pub const TEXT_BODY_LIMIT: usize = 1024 * 1024;
