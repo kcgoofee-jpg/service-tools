@@ -9,7 +9,6 @@ use crate::error::{ApiError, GateError, InternalError};
 use crate::key::Key;
 use crate::reqctx::ReqCtx;
 use crate::state::{AppState, Reservation};
-use gate_core::policy::{FREE_BURST, FREE_REFILL_PER_HOUR};
 use gate_core::reasons::{self, Reason};
 use gate_core::site_flags;
 use std::sync::Arc;
@@ -244,33 +243,8 @@ pub async fn quota_image_check(
             )
             .into());
         }
-        // 平滑注水：底仓 30 张，每小时恢复 4 张，全天恢复上限为每日额度。手动 Key 不走注水。
-        if !key.manual() {
-            let now_ts = state.now();
-            let midnight = state.clock.day_start(now_ts);
-            let hours_today = ((now_ts - midnight) / 3600.0).max(0.0);
-            let burst_base = FREE_BURST.min(daily_images as f64);
-            let refilled =
-                (daily_images as f64).min(burst_base + hours_today * FREE_REFILL_PER_HOUR);
-            let want = (used_legacy + legacy_free_images) as f64;
-            if want > refilled {
-                let needed_hours = (want - burst_base) / FREE_REFILL_PER_HOUR;
-                let wait_minutes =
-                    gate_core::pyc::round0((needed_hours - hours_today) * 60.0).max(1);
-                return Err(gate(
-                    429,
-                    Reason::new(
-                        format!(
-                            "当前出图速度过快（今日已用 {used_legacy} / 每日上限 {daily_images} 张）。\
-                             额度每小时自动恢复 4 张，约 {wait_minutes} 分钟后可用，请稍后再试"
-                        ),
-                        reasons::PACED,
-                    ),
-                ));
-            }
-        }
-        // 「保底 + 全站空闲时借用到每日上限」整层已删除（docs/v3-deviations.md #61）：每人只有每日上限，
-        // 全站按时段放行在 guard_precheck 里对所有人一视同仁。
+        // 每人只有每日上限：2.x 的「每人注水」（底仓 30 张、每小时补 4 张，docs/v3-deviations.md #62）和
+        // 「保底 + 全站空闲时借用」（#61）都已删除；全站按时段放行在 guard_precheck 里对所有人一视同仁。
     }
     if est.v5 > 0 {
         // V5 周额度是账户级共享资源，用全站日计数镜像

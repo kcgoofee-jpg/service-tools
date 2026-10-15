@@ -5,6 +5,8 @@
 //!   `_cfg` 不再有 `quota_base` / `quota_base_min` / `quota_base_step`；写入里没有 `quota_base_now`、
 //!   `guard_base_daily_images`；复盘的 `from` / `to` 只记 `[A]`、没有 `base_blocks`；结果里没有 `base`；
 //!   操作日志不再写「保底」；每小时上限被拦的小时数按原因码数（查询参数只比时间窗口）。
+//! - docs/v3-deviations.md #62：每人注水删除——`free_paced_cap` 不再对拍；首页文案去掉
+//!   「每小时自动恢复 4 张，当天最多约 N 张，」。
 
 use gate_core::clock::Clock;
 use gate_core::quota::{self, *};
@@ -41,6 +43,18 @@ fn clock(rh: i64) -> Clock {
 mod expect {
     use gate_core::jsondump;
     use serde_json::{Map, Value};
+
+    /// 首页文案去掉每人注水那一句（#62）：「（每小时自动恢复 4 张，当天最多约 N 张，每日 7 点重置）」
+    /// →「（每日 7 点重置）」。
+    pub fn notice(text: &str) -> String {
+        let Some(i) = text.find("（每小时自动恢复 ") else {
+            return text.to_string();
+        };
+        let rest = &text[i..];
+        let j = rest.find("当天最多约 ").expect("注水文案");
+        let k = rest[j..].find(" 张，").expect("注水文案") + j + " 张，".len();
+        format!("{}（{}", &text[..i], &rest[k..])
+    }
 
     /// `_cfg` 里 3.0 删掉的键（#61）。
     pub const REMOVED_CFG: [&str; 3] = ["quota_base", "quota_base_min", "quota_base_step"];
@@ -147,9 +161,13 @@ mod expect {
                 "set" => {
                     let key = e["key"].as_str().unwrap().to_string();
                     let raw = e["value"].as_str().unwrap().to_string();
-                    let value = if key == "algo_notice" && drop_review_note {
-                        let i = raw.find("今日额度：").expect("首页文案");
-                        raw[i..].to_string()
+                    let value = if key == "algo_notice" {
+                        let i = if drop_review_note {
+                            raw.find("今日额度：").expect("首页文案")
+                        } else {
+                            0
+                        };
+                        notice(&raw[i..])
                     } else {
                         setting_value(&key, &raw)
                     };
@@ -253,7 +271,8 @@ fn pure_golden() {
                 let (rate, info) = choose_rate(opt_f(c.arg(0)), opt_f(c.arg(1)));
                 json!([f(rate), Value::Object(info)])
             }
-            "free_paced_cap" => f(free_paced_cap(c.arg(0).as_i64().unwrap())),
+            // 随每人注水删除（#62）
+            "free_paced_cap" => continue,
             "v5_factor" => f(v5_factor(opt_f(c.arg(0)), &params(c.arg(1)))),
             "v5_plan" => {
                 let plan = v5_plan(
@@ -269,7 +288,8 @@ fn pure_golden() {
             }
             "quota_notice" => {
                 let kw = |k: &str| c.kwarg(k).unwrap();
-                json!(
+                let want = json!(expect::notice(c.out().as_str().unwrap()));
+                let got = json!(
                     quota_notice(
                         c.arg(0).as_i64().unwrap(),
                         c.arg(1),
@@ -281,7 +301,9 @@ fn pure_golden() {
                         kw("anlas").as_i64().unwrap(),
                     )
                     .unwrap()
-                )
+                );
+                assert_eq_py_ordered(&c, &got, &want);
+                continue;
             }
             other => panic!("未知函数 {other}"),
         };

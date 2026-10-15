@@ -536,6 +536,18 @@ mod v3 {
         jsondump::dumps(&v)
     }
 
+    /// 首页文案去掉每人注水那一句（#62）：「（每小时自动恢复 4 张，当天最多约 N 张，每日 7 点重置）」
+    /// →「（每日 7 点重置）」。
+    fn notice(text: &str) -> String {
+        let Some(i) = text.find("（每小时自动恢复 ") else {
+            return text.to_string();
+        };
+        let rest = &text[i..];
+        let j = rest.find("当天最多约 ").expect("注水文案");
+        let k = rest[j..].find(" 张，").expect("注水文案") + j + " 张，".len();
+        format!("{}（{}", &text[..i], &rest[k..])
+    }
+
     /// 这一轮的复盘是否只因为保底变了才算「调整」：3.0 的首页文案不再写「算法调整」那一句（#61）。
     fn only_base_changed(history_text: &str) -> bool {
         let v = jsondump::loads(history_text).unwrap();
@@ -623,9 +635,13 @@ mod v3 {
                         self.review(r);
                     }
                 }),
-                "algo_notice" if drop_note => {
-                    let i = value.find("今日额度：").expect("首页文案");
-                    value[i..].to_string()
+                "algo_notice" => {
+                    let i = if drop_note {
+                        value.find("今日额度：").expect("首页文案")
+                    } else {
+                        0
+                    };
+                    notice(&value[i..])
                 }
                 _ => value.to_string(),
             };

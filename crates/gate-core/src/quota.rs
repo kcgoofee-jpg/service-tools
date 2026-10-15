@@ -84,10 +84,6 @@ pub const DAY_KEY: &str = "quota_algo_day";
 pub const NOTICE_KEY: &str = "algo_notice";
 pub const V5_DAY_KEY: &str = "quota_v5_day_plan";
 
-/// `policy.FREE_BURST` / `FREE_REFILL_PER_HOUR`：免费档「平滑注水」参数。
-pub const FREE_BURST: f64 = 30.0;
-pub const FREE_REFILL_PER_HOUR: f64 = 4.0;
-
 /// `quota_algo.DEFAULTS`（键名 → 起点值），顺序与旧版一致。
 pub const DEFAULTS: [(&str, i64); 7] = [
     ("quota_auto_enabled", 1),
@@ -379,6 +375,10 @@ impl Default for QuotaCfg {
 
 /// `v2.18 极简模式`（线上）：返回 `(新的每人额度 N, 理由)`。理由已含「每人每天 N 张。」前缀。
 /// `prev_a` = `prev.get("a")`；**为 0 或缺失时退回 `quota_target_avg`**（`prev.get("a") or cfg[...]`，与旧版一致）。
+///
+/// `usage` 是被复盘那个服务日每人实际用掉的 V4.5 免费图张数。「有人用满 A」就是有人当天实际用到了 A：
+/// 2.x 的每人注水让当天最多只能用到约 126 张，A > 126 时这条永远不成立、A 不会再 +25；
+/// 注水删除后（docs/v3-deviations.md #62）用满 A 才真的可能发生。
 pub fn simple(prev_a: Option<i64>, usage: &[i64], budget: i64, cfg: &QuotaCfg) -> (i64, String) {
     let a = match prev_a {
         Some(x) if x != 0 => x,
@@ -576,17 +576,6 @@ pub fn v5_plan(
     })
 }
 
-/// `policy.free_paced_cap`：这一天注水桶最多能放出的张数（与 `quota_image_check` 的判定完全一致）。
-pub fn free_paced_cap(daily_images: i64) -> f64 {
-    if daily_images <= 0 {
-        return 0.0;
-    }
-    py_min(
-        daily_images as f64,
-        FREE_BURST + FREE_REFILL_PER_HOUR * 24.0,
-    )
-}
-
 /// 首页那句「今日额度」。文案与旧版逐字节一致。
 ///
 /// `v5` 是 V5 方案字典（读 `each` / `global`），`review` 是当天的复盘字典（读 `from` / `to` / `reasons`）。
@@ -617,16 +606,8 @@ pub fn quota_notice(
     if anlas > 0 {
         v5_status.push_str(&format!(" · Anlas 每人 {anlas}/天"));
     }
-    let reset_txt = format!("每日 {reset_hour} 点重置");
-    let paced_cap = free_paced_cap(a);
-    let mut note = if (a as f64) > paced_cap {
-        format!(
-            "今日额度：V4.5 每人 {a} 张/天（每小时自动恢复 {} 张，当天最多约 {} 张，{reset_txt}）{v5_status}",
-            FREE_REFILL_PER_HOUR as i64, paced_cap as i64
-        )
-    } else {
-        format!("今日额度：V4.5 每人 {a} 张/天（{reset_txt}）{v5_status}")
-    };
+    // 2.x 的每人注水（每小时恢复 4 张、当天最多约 126 张）已删除（docs/v3-deviations.md #62）：A 就是当天能用到的数
+    let mut note = format!("今日额度：V4.5 每人 {a} 张/天（每日 {reset_hour} 点重置）{v5_status}");
     if let Some(r) = review
         && pyval::truthy(r)
     {

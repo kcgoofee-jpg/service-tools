@@ -141,3 +141,42 @@ fn quota_cfg_has_no_base_settings() {
     }
     assert!(!quota::SETTING_KEYS_READ.contains(&"quota_base_now"));
 }
+
+// ---------------------------------------------------------------- #62 每人注水删除
+
+#[test]
+fn notice_has_no_per_member_pacing() {
+    // A = 150 > 126：旧版会写「每小时自动恢复 4 张，当天最多约 126 张」
+    let out = run(base_inputs());
+    let notice = setting(&out, "algo_notice").unwrap();
+    assert!(
+        notice.contains("今日额度：V4.5 每人 150 张/天（每日 7 点重置）"),
+        "{notice}"
+    );
+    assert!(
+        !notice.contains("自动恢复") && !notice.contains("最多约"),
+        "{notice}"
+    );
+}
+
+#[test]
+fn someone_reaching_a_raises_it_by_a_step() {
+    // 注水删掉以后用满 A 才可能发生：有人昨天实际用到了 150 → A + 25
+    let cfg = quota::QuotaCfg::default();
+    let (n, why) = quota::simple(Some(150), &[150, 20, 5], 1000, &cfg);
+    assert_eq!(n, 175, "{why}");
+    assert!(why.contains("1 人用满 150 张：放宽"), "{why}");
+    // 差一张都不算用满
+    let (n, why) = quota::simple(Some(150), &[149, 20, 5], 1000, &cfg);
+    assert_eq!(n, 150, "{why}");
+    // 端到端：复盘按昨天的实际用量把 A 调到 175，新 A 当天就能用满（文案里没有「最多约」）
+    let mut v = base_inputs();
+    v["daily"]["member_usage"] = json!([150, 20, 5]);
+    let out = run(v);
+    assert_eq!(out.result.as_ref().unwrap()["ceiling"], 175);
+    assert!(
+        setting(&out, "algo_notice")
+            .unwrap()
+            .contains("V4.5 每人 175 张/天（每日 7 点重置）")
+    );
+}

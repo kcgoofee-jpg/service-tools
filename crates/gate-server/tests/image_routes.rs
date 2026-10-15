@@ -4,7 +4,7 @@ mod common;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use common::{TOKEN, setup};
-use gate_db::repo::usage::LogFilter;
+use gate_db::repo::usage::{LogFilter, Success};
 use gate_server::AppState;
 use gate_testkit::Reply;
 use http_body_util::BodyExt;
@@ -85,6 +85,69 @@ async fn generate_image_ok_records_usage() {
     assert!(detail.starts_with("832x1216/28step 免费"), "{detail}");
     let c = e.state.db.get_counter(1, &e.state.day()).await.unwrap();
     assert_eq!((c.images, c.legacy_free_images), (1, 1));
+}
+
+/// 每人只有每日上限：2.x 的每人注水（底仓 30 张、每小时补 4 张，一天最多约 126 张）已删除
+/// （docs/v3-deviations.md #62）。上限 200、今天已用 150 张的算法管理成员照样能出图，不会被 `paced` 拦下；
+/// 用满上限才是「今日 V4.5 免费图额度已用完」。
+#[tokio::test]
+async fn no_per_member_pacing_below_the_daily_cap() {
+    let e = setup(&[]).await;
+    e.state
+        .db
+        .write(|tx| {
+            tx.execute(
+                "UPDATE api_keys SET daily_images=200, quota_auto=1 WHERE id=1",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let used = |n: i64| Success {
+        key_id: 1,
+        kind: "image".into(),
+        model: "nai-diffusion-4-5-full".into(),
+        day: e.state.day(),
+        images: n,
+        legacy_free_images: n,
+        ..Default::default()
+    };
+    e.state
+        .db
+        .record_success(&used(150), e.state.now())
+        .await
+        .unwrap();
+    let (status, _, body) = call(
+        &e.state,
+        "POST",
+        "/ai/generate-image",
+        Some(TOKEN),
+        Some(image_body("nai-diffusion-4-5-full", 1)),
+    )
+    .await;
+    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
+    // 用满 200 张：个人额度用完（402），不是「出图速度过快」
+    e.state
+        .db
+        .record_success(&used(49), e.state.now())
+        .await
+        .unwrap();
+    let (status, _, body) = call(
+        &e.state,
+        "POST",
+        "/ai/generate-image",
+        Some(TOKEN),
+        Some(image_body("nai-diffusion-4-5-full", 1)),
+    )
+    .await;
+    assert_eq!(status, 402, "{}", String::from_utf8_lossy(&body));
+    let text = String::from_utf8_lossy(&body);
+    assert!(
+        text.contains("今日 V4.5 免费图额度已用完（200 张/天）"),
+        "{text}"
+    );
+    assert!(!text.contains("每小时自动恢复"), "{text}");
 }
 
 /// 不识别客户端、不记设备（docs/v3-deviations.md #50）：不管 User-Agent、启动器请求头还是请求体长什么样，
