@@ -103,11 +103,11 @@
 }
 .xa-confirm {
   display: grid;
-  gap: var(--sp-3);
-  font-size: var(--fs-sm);
-  color: var(--text-2);
+  gap: var(--sp-4);
+  font-size: var(--fs-md);
 }
 .xa-confirm p {
+  margin: 0;
   line-height: var(--lh);
 }
 

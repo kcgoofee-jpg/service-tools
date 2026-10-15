@@ -89,22 +89,34 @@ test.describe("游客", () => {
     await expect(page.locator(".lp-step").nth(1)).toContainText("/register");
     await expect(page.locator(".lp-step").nth(2)).toContainText(new URL(page.url()).origin);
 
-    // 客户端设置：三个标签，方向键可切换
+    // 客户端设置：两个标签（没有文本客户端），方向键可切换
     const tabs = page.getByRole("tablist", { name: "客户端" }).getByRole("tab");
-    await expect(tabs).toHaveText(["柏宝绘", "文本客户端", "智绘姬"]);
+    await expect(tabs).toHaveText(["柏宝绘", "智绘姬"]);
     await tabs.first().focus();
     await page.keyboard.press("ArrowRight");
     await expect(tabs.nth(1)).toHaveAttribute("aria-selected", "true");
-    await expect(page.getByRole("tabpanel")).toContainText("/v1");
-    await tabs.nth(2).click();
     await expect(page.getByRole("tabpanel")).toContainText("生图间隔时间");
 
     // 使用须知：数字来自接口，页面里不再有旧文案
     const rules = page.locator(".lp-rules");
     await expect(rules).toContainText("最近 60 分钟（滚动窗口）");
     await expect(rules).toContainText("每日 7 点重置");
+    await expect(rules).toContainText("每人上限");
+    await expect(rules).toContainText("先到先得");
+    // 接入地址整页只在「三步上手」里写一次；使用须知里不再重复
+    await expect(rules.getByText("地址", { exact: false })).toHaveCount(0);
     const text = await page.locator("main").innerText();
-    for (const gone of ["3 小时", "证据", "候补", "缩略图", "闲置", "1000 点", "分享核对"]) {
+    for (const gone of [
+      "3 小时",
+      "证据",
+      "候补",
+      "缩略图",
+      "闲置",
+      "1000 点",
+      "分享核对",
+      "保底",
+      "OpenAI 兼容",
+    ]) {
       expect(text, `旧文案「${gone}」应已删除`).not.toContain(gone);
     }
 
@@ -184,12 +196,12 @@ test.describe("游客", () => {
     await expect(page.getByText(/领到 Key 后直接填进客户端即可使用/)).toBeVisible();
   });
 
-  test("加入 Discord：有邀请链接时是新窗口外链；关闭入口时置灰", async ({ page }) => {
+  test("加入 Discord：有邀请链接时是新窗口外链；自助领 Key 关闭时置灰", async ({ page }) => {
     await patch(page, STATUS, (b) => ({ ...b, discord_invite: "https://discord.gg/owl-test" }));
     await patch(page, LIVE, (b) => ({
       ...b,
       discord_invite: "https://discord.gg/owl-test",
-      home_join_open: true,
+      registration: { configured: true, open: true },
     }));
     await page.goto("/");
     const join = page.getByRole("link", { name: "加入 Discord" });
@@ -201,7 +213,7 @@ test.describe("游客", () => {
     await patch(page, LIVE, (b) => ({
       ...b,
       discord_invite: "https://discord.gg/owl-test",
-      home_join_open: false,
+      registration: { configured: true, open: false },
     }));
     await page.reload();
     await expect(page.getByRole("button", { name: "关闭注册" }).first()).toBeDisabled();
@@ -357,7 +369,7 @@ test.describe("登录成员", () => {
   test.skip(needMember, `没有成员会话文件 ${COOKIES_FILE}（先跑 cargo xtask dev）`);
   test.beforeEach(async ({ context }) => asMember(context));
 
-  test("额度卡是第一块内容：V4.5 / V5 / Anlas、每日 7 点重置、最近 60 分钟（滚动窗口）", async ({ page }) => {
+  test("额度卡是第一块内容：V4.5 / V5 / Anlas、每日 7 点重置；不放全站每小时用量和耗时", async ({ page }) => {
     const errors = watchConsole(page);
     await page.goto("/");
     const main = page.locator("main");
@@ -372,8 +384,9 @@ test.describe("登录成员", () => {
     await expect(quota.getByRole("progressbar", { name: /V4\.5/ })).toBeVisible();
     await expect(quota.getByRole("progressbar", { name: /V5/ })).toBeVisible();
     await expect(quota.getByRole("progressbar", { name: /Anlas/ })).toBeVisible();
-    await expect(quota.getByRole("progressbar", { name: /最近 60 分钟（滚动窗口）/ })).toBeVisible();
-    await expect(quota).toContainText("我的平均出图耗时");
+    // 全站每小时用量条、平均出图耗时 / 排队等待不在个人额度卡里
+    await expect(quota.getByRole("progressbar")).toHaveCount(3);
+    await expect(quota).not.toContainText(/最近 60 分钟|平均出图耗时|排队等待/);
 
     // 游客才有的内容不出现
     await expect(page.getByRole("heading", { name: "三步上手" })).toHaveCount(0);
@@ -447,9 +460,13 @@ test.describe("登录成员", () => {
     await expect(page.getByRole("heading", { name: "重置券" })).toHaveCount(0);
   });
 
-  test("问卷入口与捐赠都在", async ({ page }) => {
+  test("问卷只是页脚里的一行链接（没有整张卡）；捐赠在", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("link", { name: "去填写" })).toHaveAttribute("href", "/survey");
+    await expect(page.getByRole("heading", { name: "使用体验问卷" })).toHaveCount(0);
+    await expect(page.getByRole("contentinfo").getByRole("link", { name: "使用体验问卷" })).toHaveAttribute(
+      "href",
+      "/survey",
+    );
     await expect(page.locator("#donate")).toBeVisible();
   });
 
@@ -539,7 +556,7 @@ test.describe("截图", () => {
             await patch(page, LIVE, (b) => ({
               ...b,
               web_login: true,
-              home_join_open: true,
+              registration: { configured: true, open: true },
               discord_invite: "https://discord.gg/owl",
             }));
           } else {

@@ -1,7 +1,7 @@
 /**
  * 设置表单的纯函数部分（不依赖外壳，可单测）。
  *
- * 校验规则照后端 `_num()`（app/admin.py）：空值、非数字、小数（整数字段）、越界一律拒绝，
+ * 校验规则照后端 `num_int` / `num_float`（crates/gate-server/src/routes/admin）：空值、非数字、小数（整数字段）、越界一律拒绝，
  * 绝不把空值悄悄当成 0——这些字段里 0 往往代表「不限」，一次手滑就会拆掉保护。
  */
 
@@ -97,10 +97,6 @@ export function bytesText(bytes: number): string {
   if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
   return `${Math.round(bytes / 1024)} KB`;
 }
-
-/** 0～100 的百分比显示，空值显示破折号 */
-export const pctText = (v: number | null | undefined, digits = 0): string =>
-  v == null || !Number.isFinite(v) ? "—" : `${v.toFixed(digits)}%`;
 
 /** 0 = 不限 的数字显示 */
 export const capText = (v: number | null | undefined, unit = ""): string =>

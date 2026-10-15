@@ -1,27 +1,15 @@
 /** 生成记录：成员生成过的图（缩略图画廊 / 大图 / 列表）+ 提示词与参数，点开大图查看，可导出某成员的全部原图。 */
-import { ChevronLeft, ChevronRight, Download, ImageOff, Settings2 } from "lucide-preact";
-import { useEffect, useId, useRef, useState } from "preact/hooks";
-import { getJSON } from "../../../../lib/api";
+import { ChevronLeft, ChevronRight, Download, ImageOff } from "lucide-preact";
+import { useEffect, useState } from "preact/hooks";
 import { fullTime, rel } from "../../../../lib/format";
-import { Badge, Button, copyText, cx, Dialog, Field, Notice, Skeleton, toast } from "../../../../ui";
+import { Badge, Button, copyText, cx, Dialog, Skeleton } from "../../../../ui";
 import { useAdmin } from "../../Admin";
 import { LoadError } from "../_kit";
-import { call } from "../members/actions";
-import {
-  ConfirmDialog,
-  downloadFile,
-  Empty,
-  Pager,
-  useBusy,
-  useCloseGuard,
-  usePageData,
-} from "../members/shared";
-import type { Member, OpsSnapshot } from "../members/types";
-import { parseNum } from "../members/validate";
+import { downloadFile, Empty, Pager, usePageData } from "../members/shared";
+import type { Member } from "../members/types";
 import {
   aspectOf,
   charsText,
-  gb,
   hasPicture,
   negativeText,
   paramsLine,
@@ -170,223 +158,6 @@ function Lightbox(props: {
   );
 }
 
-/* ---------------- 记录设置 ---------------- */
-function AuditSettings(props: { onClose: () => void; onSaved: () => void }) {
-  useBusy();
-  const [cfg, setCfg] = useState<OpsSnapshot["audit"] | null>(null);
-  const [loadErr, setLoadErr] = useState("");
-  const [f, setF] = useState<{
-    prompts: boolean;
-    thumbs: boolean;
-    keep: string;
-    days: string;
-    cap: string;
-  } | null>(null);
-  const [errs, setErrs] = useState<Record<string, string>>({});
-  const [formErr, setFormErr] = useState("");
-  const [pending, setPending] = useState(false);
-  const [purge, setPurge] = useState(false);
-  const formId = useId();
-  const initial = useRef("");
-
-  useEffect(() => {
-    getJSON<OpsSnapshot>("/admin/api/ops")
-      .then((o) => {
-        const a = o.audit;
-        setCfg(a);
-        const next = {
-          prompts: a.prompts,
-          thumbs: a.thumbs,
-          keep: String(a.image_keep_hours ?? 24),
-          days: String(a.retention_days),
-          cap: String(a.image_cap_mb ?? 8192),
-        };
-        initial.current = JSON.stringify(next);
-        setF(next);
-      })
-      .catch((e) => setLoadErr(e instanceof Error ? e.message : String(e)));
-  }, [initial]);
-
-  const dirty = f !== null && JSON.stringify(f) !== initial.current;
-  const guard = useCloseGuard(dirty, props.onClose);
-  const set = <K extends keyof NonNullable<typeof f>>(k: K, v: NonNullable<typeof f>[K]) =>
-    setF((x) => (x ? { ...x, [k]: v } : x));
-
-  const save = async () => {
-    if (!f || pending) return;
-    const days = parseNum(f.days, "提示词保留天数", { max: 3650 });
-    const cap = parseNum(f.cap, "原图容量上限", { max: 500000 });
-    const keep = parseNum(f.keep, "原图保存小时数", { max: 8760 });
-    const e: Record<string, string> = {};
-    if (!days.ok) e.days = days.error;
-    if (!cap.ok) e.cap = cap.error;
-    if (!keep.ok) e.keep = keep.error;
-    setErrs(e);
-    if (!days.ok || !cap.ok || !keep.ok) {
-      setFormErr("有填写不正确的地方，请按提示修改");
-      return;
-    }
-    setFormErr("");
-    setPending(true);
-    const r = await call("PUT", "/admin/api/ops/audit", {
-      prompts: f.prompts,
-      thumbs: f.thumbs,
-      retention_days: days.value,
-      image_cap_mb: cap.value,
-      image_keep_hours: keep.value,
-    });
-    setPending(false);
-    if (!r.ok) return setFormErr(r.error);
-    props.onSaved();
-  };
-
-  const err = (k: string) =>
-    errs[k] ? (
-      <span class="field__err" role="alert">
-        {errs[k]}
-      </span>
-    ) : undefined;
-  return (
-    <>
-      <Dialog
-        key={guard.gen}
-        open
-        title="生成记录设置"
-        onClose={guard.tryClose}
-        footer={
-          <>
-            <Button onClick={guard.tryClose}>取消</Button>
-            <Button variant="primary" type="submit" form={formId} disabled={!f || pending}>
-              {pending ? "保存中…" : "保存"}
-            </Button>
-          </>
-        }
-      >
-        {guard.asking && (
-          <div class="mb-ask">
-            <Notice tone="warn">
-              <span>有未保存的修改，确定放弃吗？</span>
-              <span class="spacer" />
-              <Button size="sm" onClick={guard.keep}>
-                继续编辑
-              </Button>
-              <Button size="sm" variant="danger" onClick={guard.discard}>
-                放弃修改
-              </Button>
-            </Notice>
-          </div>
-        )}
-        {loadErr ? (
-          <Notice tone="danger">读取设置失败：{loadErr}</Notice>
-        ) : !f || !cfg ? (
-          <Skeleton h="160px" />
-        ) : (
-          <form
-            id={formId}
-            class="xa-form"
-            noValidate
-            onSubmit={(e) => {
-              e.preventDefault();
-              void save();
-            }}
-          >
-            <div class="xa-form__opts">
-              <label class="xa-check">
-                <input
-                  type="checkbox"
-                  checked={f.prompts}
-                  onChange={(e) => set("prompts", e.currentTarget.checked)}
-                />
-                <span>记录提示词</span>
-              </label>
-              <label class="xa-check">
-                <input
-                  type="checkbox"
-                  checked={f.thumbs}
-                  onChange={(e) => set("thumbs", e.currentTarget.checked)}
-                />
-                <span>
-                  保存原图<small>到保存时长就删，另外超过容量上限时删最旧的</small>
-                </span>
-              </label>
-            </div>
-            <div class="xa-form__grid">
-              <Field label="原图保存小时数" hint={err("keep") ?? "到点自动删；0 = 只按容量上限删"}>
-                <input
-                  class="input"
-                  type="number"
-                  min={0}
-                  max={8760}
-                  value={f.keep}
-                  aria-invalid={errs.keep ? true : undefined}
-                  onInput={(e) => set("keep", e.currentTarget.value)}
-                />
-              </Field>
-              <Field label="提示词保留天数" hint={err("days") ?? "0 = 长期保留"}>
-                <input
-                  class="input"
-                  type="number"
-                  min={0}
-                  max={3650}
-                  value={f.days}
-                  aria-invalid={errs.days ? true : undefined}
-                  onInput={(e) => set("days", e.currentTarget.value)}
-                />
-              </Field>
-              <Field
-                label="原图容量上限（MB）"
-                hint={
-                  err("cap") ??
-                  `现在已用 ${gb(cfg.image_bytes || 0)}（约 1.3MB/张，存成文件）。超过后删最旧的；0 = 不限`
-                }
-              >
-                <input
-                  class="input"
-                  type="number"
-                  min={0}
-                  max={500000}
-                  value={f.cap}
-                  aria-invalid={errs.cap ? true : undefined}
-                  onInput={(e) => set("cap", e.currentTarget.value)}
-                />
-              </Field>
-            </div>
-            {formErr && (
-              <p class="xa-formerr" role="alert">
-                {formErr}
-              </p>
-            )}
-            <div class="lg-danger">
-              <Button variant="danger" onClick={() => setPurge(true)}>
-                清空服务器上的全部原图
-              </Button>
-              <span class="small muted">只删原图，提示词和参数保留</span>
-            </div>
-          </form>
-        )}
-      </Dialog>
-      {purge && (
-        <ConfirmDialog
-          title="清空全部原图"
-          confirmText="清空"
-          danger
-          onClose={() => setPurge(false)}
-          onConfirm={async () => {
-            const r = await call<{ purged: number }>("POST", "/admin/api/audit/purge-images", {
-              confirm: "清空",
-            });
-            if (!r.ok) return r.error;
-            toast(`已清空 ${r.data.purged} 张原图`);
-            return undefined;
-          }}
-        >
-          <p>确定清空服务器上的全部原图？只删原图，提示词和参数保留。删掉后不能恢复。</p>
-        </ConfirmDialog>
-      )}
-    </>
-  );
-}
-
 /* ---------------- 页面 ---------------- */
 export function Audit() {
   const { query, set } = useQueryState();
@@ -403,7 +174,6 @@ export function Audit() {
   if (key) qs.set("key_id", key);
   const { data, error, pending } = usePageData<AuditResp>(`/admin/api/audit?${qs}`);
   const [zoom, setZoom] = useState<number | null>(null);
-  const [settings, setSettings] = useState(false);
   const [exporting, setExporting] = useState(false);
 
   const items = data?.items ?? [];
@@ -461,19 +231,6 @@ export function Audit() {
         >
           <Download size={15} aria-hidden="true" />
           导出该成员全部
-        </Button>
-        <span class="spacer" />
-        {au &&
-          (recording ? (
-            <Badge tone="ok" dot>
-              记录中
-            </Badge>
-          ) : (
-            <Badge>记录已关闭</Badge>
-          ))}
-        <Button onClick={() => setSettings(true)}>
-          <Settings2 size={15} aria-hidden="true" />
-          记录设置
         </Button>
       </div>
 
@@ -586,15 +343,6 @@ export function Audit() {
 
       {zoom !== null && items[zoom] && (
         <Lightbox items={items} index={zoom} onIndex={setZoom} onClose={() => setZoom(null)} />
-      )}
-      {settings && (
-        <AuditSettings
-          onClose={() => setSettings(false)}
-          onSaved={() => {
-            setSettings(false);
-            toast("生成记录设置已保存");
-          }}
-        />
       )}
     </div>
   );

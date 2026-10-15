@@ -90,13 +90,13 @@ describe("mergeMeta", () => {
   it("live 里有的字段优先，没有的用 /public/status 补", () => {
     const m = mergeMeta(
       { discord_invite: "https://discord.gg/a", web_login: false, algo_notice: "旧说明" },
-      { web_login: true, home_join_open: true },
+      { web_login: true, registration: { open: true } },
     );
     expect(m).toEqual({
       discord_invite: "https://discord.gg/a",
       web_login: true,
       algo_notice: "旧说明",
-      home_join_open: true,
+      registration: { open: true },
     });
   });
   it("两边都没有就不出现该字段（不编默认值）", () => {

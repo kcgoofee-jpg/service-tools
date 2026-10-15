@@ -62,6 +62,21 @@ test("首页（游客）：各宽度无孤字、控件对齐", async ({ page }) 
   }
 });
 
+test.describe("首页（成员）", () => {
+  const member = readCreds().member;
+  test.skip(!member, "没有成员会话（先跑 cargo xtask dev）");
+  test("各宽度无孤字、控件对齐（含页脚的问卷链接）", async ({ page, context }) => {
+    await context.addCookies([{ name: "owl_member", value: member ?? "", domain: "localhost", path: "/" }]);
+    for (const w of WIDTHS) {
+      await page.setViewportSize({ width: w, height: 900 });
+      await page.goto("/");
+      await expect(page.locator(".lp-quota")).toBeVisible();
+      await expect(page.locator(".lp-status__text")).not.toBeEmpty();
+      await check(page, `首页（成员） ${w}px`);
+    }
+  });
+});
+
 const ADMIN = [
   "/admin",
   "/admin/members",

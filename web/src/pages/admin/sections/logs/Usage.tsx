@@ -3,8 +3,8 @@ import { useEffect, useState } from "preact/hooks";
 import { fullTime, num } from "../../../../lib/format";
 import { Badge, cx, Skeleton } from "../../../../ui";
 import { useAdmin } from "../../Admin";
-import { LoadError } from "../_kit";
-import { Empty, NARROW, Pager, TableScroll, useDebounced, useMedia, usePageData } from "../members/shared";
+import { LoadError, TableWrap } from "../_kit";
+import { Empty, NARROW, Pager, useDebounced, useMedia, usePageData } from "../members/shared";
 import { FEATURES, kindLabel, shortModel, timing } from "./format";
 import { intParam, useQueryState } from "./query";
 import type { LogsResp, UsageLog } from "./types";
@@ -220,7 +220,7 @@ export function Usage() {
               ))}
             </ul>
           ) : (
-            <TableScroll label="用量日志">
+            <TableWrap label="用量日志">
               <table class="table lg-table">
                 <caption class="sr-only">用量日志</caption>
                 <thead>
@@ -262,7 +262,7 @@ export function Usage() {
                   ))}
                 </tbody>
               </table>
-            </TableScroll>
+            </TableWrap>
           )}
           <Pager
             page={data.page}

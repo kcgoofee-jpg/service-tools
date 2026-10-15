@@ -1,6 +1,6 @@
 /**
- * 首页用到的接口数据形状（旧版 Python 网关与之后的 Rust 网关返回同样的 JSON）。
- * 字段一律可缺省：网关只会多给、不会改名；缺哪个字段就不显示哪块，不编数字。
+ * 首页用到的接口数据形状（Rust 网关返回）。
+ * 字段一律可缺省：网关只会多给、不会改名；缺哪个字段就不显示哪块，不编数字。只列页面真正读的字段。
  */
 
 /** /public/live 里的「我的排队」：登录成员才有 */
@@ -10,7 +10,6 @@ export type LiveMine = { mine?: MineItem[]; waiting?: number; running?: number }
 export type Blocked = { code?: string; text?: string };
 
 export type Live = {
-  t?: number;
   quota?: {
     images_today?: number;
     units_today?: number;
@@ -22,8 +21,6 @@ export type Live = {
   guard?: {
     hour?: number;
     hour_cap?: number;
-    quiet?: boolean;
-    next_in?: number;
     cooldown?: number;
     burst_cap?: number;
     burst_wait?: number;
@@ -32,12 +29,9 @@ export type Live = {
   rules?: {
     queue_cap?: number;
     hourly_cap?: number;
-    daily_cap?: number;
     quiet_start?: number;
     quiet_end?: number;
     quiet_cap?: number;
-    min_interval?: number;
-    jitter?: number;
   };
   /** 一张图的平均放行间隔（秒）：排队时间估算用 */
   interval?: number;
@@ -46,15 +40,13 @@ export type Live = {
 
 /** 变化很慢的站点信息：/public/status 与 /public/live 都带（live 里是 30 秒子缓存） */
 export type Meta = {
-  site?: string;
   discord_invite?: string;
   has_announcement?: boolean;
   algo_notice?: string;
   audit_notice?: string;
   web_login?: boolean;
-  home_join_open?: boolean;
-  key_inactivity_delete_days?: number;
-  registration?: { configured?: boolean; open?: boolean; slots_left?: number | null };
+  /** 加入按钮跟着它走：注册关了就置灰成「关闭注册」 */
+  registration?: { open?: boolean };
   limits?: {
     key_image_queue?: number;
     base_daily_images?: number;
@@ -64,18 +56,7 @@ export type Meta = {
   };
 };
 
-export type Status = Meta & {
-  upstream?: { status?: string; image_cooldown_seconds?: number };
-};
-
 export type Coupon = { id: number; kind?: string; note?: string; expires_at: number };
-
-export type Timing = {
-  count?: number;
-  avg_dur_s?: number | null;
-  avg_wait_s?: number | null;
-  site_avg_dur_s?: number | null;
-};
 
 export type Discord = {
   id?: string;
@@ -90,7 +71,6 @@ export type MeMember = {
   discord?: Discord | null;
   has_key: boolean;
   key?: string;
-  name?: string;
   expires_at?: number | null;
   image_scope?: string;
   today?: {
@@ -103,8 +83,8 @@ export type MeMember = {
     daily_anlas?: number;
     reset_hour?: number | null;
   };
-  queue?: MineItem[];
   coupons?: Coupon[];
-  timing?: Timing | null;
+  /** 我的平均出图耗时：只用来补状态卡那句「平均约 N 秒」 */
+  timing?: { avg_dur_s?: number | null } | null;
 };
 export type Me = MeGuest | MeMember;

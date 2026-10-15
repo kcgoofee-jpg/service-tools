@@ -1,4 +1,4 @@
-/** 生成记录的纯函数：解析 extra、参数摘要、画廊缩略图比例、容量文字、提示词复制块。 */
+/** 生成记录的纯函数：解析 extra、参数摘要、画廊缩略图比例、提示词复制块。 */
 import type { AuditExtra, AuditItem } from "./types";
 
 export function parseExtra(raw: string | null | undefined): AuditExtra {
@@ -43,8 +43,6 @@ export const negativeText = (it: Pick<AuditItem, "negative">, ex: AuditExtra): s
   [it.negative, ...(ex.char_negatives ?? []).map((c, i) => `角色${i + 1}负面：${c}`)]
     .filter(Boolean)
     .join("\n");
-
-export const gb = (bytes: number): string => `${(bytes / 1073741824).toFixed(1)} GB`;
 
 export const STATUS_TEXT: Record<string, string> = { ok: "成功", rejected: "拒绝", error: "错误" };
 export const statusText = (s: string | null | undefined): string => STATUS_TEXT[s ?? ""] ?? (s || "错误");

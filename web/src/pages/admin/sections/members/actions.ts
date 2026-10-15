@@ -26,19 +26,19 @@ export async function call<T = unknown>(
 }
 
 const A = "/admin/api";
-const n = (notify: boolean) => (notify ? "1" : "0");
 
-export const setEnabled = (id: number, enabled: boolean, notify: boolean) =>
-  call("PATCH", `${A}/keys/${id}`, { enabled, notify });
+// 后台操作不再私信成员（成员私信出口已删）。旧网关默认会私信，所以这几个请求仍明确带上 notify=0；
+// 等后端不再认这个参数后可以一起删。
+export const disableKey = (id: number) => call("PATCH", `${A}/keys/${id}`, { enabled: false, notify: false });
 
-export const removeMember = (id: number, ban: boolean, notify: boolean) =>
-  call("DELETE", `${A}/keys/${id}?ban=${ban ? "true" : "false"}&notify=${n(notify)}`);
+export const removeMember = (id: number, ban: boolean) =>
+  call("DELETE", `${A}/keys/${id}?ban=${ban ? "true" : "false"}&notify=0`);
 
-export const regenerateKey = (id: number, notify: boolean) =>
-  call<{ token: string }>("POST", `${A}/keys/${id}/regenerate?notify=${n(notify)}`);
+export const regenerateKey = (id: number) =>
+  call<{ token: string }>("POST", `${A}/keys/${id}/regenerate?notify=0`);
 
-export const resetDailyQuota = (id: number, notify: boolean) =>
-  call("POST", `${A}/keys/${id}/reset-daily-image-quota?notify=${n(notify)}`);
+export const resetDailyQuota = (id: number) =>
+  call("POST", `${A}/keys/${id}/reset-daily-image-quota?notify=0`);
 
 export const switchRole = (id: number, role: Role) => call("POST", `${A}/keys/${id}/role`, { role });
 
@@ -67,8 +67,4 @@ export const addBan = (discordId: string, reason: string) =>
 export const removeBan = (discordId: string) => call("DELETE", `${A}/bans/${encodeURIComponent(discordId)}`);
 
 export const gift = (body: { discord_id: string; username?: string; reason: string; coupon_days: number }) =>
-  call<{ new_key?: boolean; key_id?: number; key?: string; dm_sent?: boolean; dm_block?: string }>(
-    "POST",
-    `${A}/gift`,
-    body,
-  );
+  call<{ new_key?: boolean; key_id?: number; key?: string }>("POST", `${A}/gift`, body);

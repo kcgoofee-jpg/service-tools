@@ -4,7 +4,8 @@ import { useId, useState } from "preact/hooks";
 import { ApiError, sendJSON } from "../../../../lib/api";
 import { Badge, Button, Card, Dialog, Menu, Notice, toast } from "../../../../ui";
 import { act, tick } from "../../Admin";
-import { Kv, NumField, SaveBar, useBusy, useForm, withTone } from "../system/forms";
+import { useBusy } from "../_kit";
+import { Kv, NumField, SaveBar, useForm, withTone } from "../system/forms";
 import { type PoolToken, TOKEN_SPECS, tokenFormatProblem, tokenState } from "./core";
 
 /* ---------------- 添加 / 替换 Token 的对话框 ---------------- */

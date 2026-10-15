@@ -119,11 +119,24 @@ export function Topbar(props: {
   );
 }
 
-export function SiteFooter(props: { note?: string }) {
+export function SiteFooter(props: {
+  note?: string;
+  /** 已领 Key 的成员才有：使用体验问卷的入口只放在这一行链接里 */
+  survey?: boolean;
+}) {
   return (
     <footer class="lp-foot">
       <p>
         猫头鹰公益站 · 非商业公益服务，不保证可用性 · <a href="/terms">条款</a> · <a href="/privacy">隐私</a>
+        {props.survey && (
+          <>
+            {" "}
+            ·{" "}
+            <a class="lp-foot__nowrap" href="/survey">
+              使用体验问卷
+            </a>
+          </>
+        )}
         {props.note ? ` · ${props.note}` : ""}
       </p>
     </footer>

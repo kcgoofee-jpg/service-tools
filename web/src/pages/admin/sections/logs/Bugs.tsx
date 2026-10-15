@@ -7,9 +7,9 @@ import { useState } from "preact/hooks";
 import { fullTime, shortTime } from "../../../../lib/format";
 import { Badge, Button, copyText, cx, Skeleton, toast } from "../../../../ui";
 import { useAdmin } from "../../Admin";
-import { LoadError } from "../_kit";
+import { ConfirmDialog, LoadError, TableWrap } from "../_kit";
 import { call } from "../members/actions";
-import { ConfirmDialog, Empty, NARROW, TableScroll, useMedia } from "../members/shared";
+import { Empty, NARROW, useMedia } from "../members/shared";
 import { autoReason, bugSource } from "./format";
 import { useQueryState } from "./query";
 import type { BugRow, BugsResp } from "./types";
@@ -153,7 +153,7 @@ export function Bugs() {
             ))}
           </ul>
         ) : (
-          <TableScroll label="Bug 追踪">
+          <TableWrap label="Bug 追踪">
             <table class="table lg-table">
               <caption class="sr-only">Bug 追踪</caption>
               <thead>
@@ -203,7 +203,7 @@ export function Bugs() {
                 ))}
               </tbody>
             </table>
-          </TableScroll>
+          </TableWrap>
         )}
         {rows.length > shown.length && (
           <div class="lg-more">

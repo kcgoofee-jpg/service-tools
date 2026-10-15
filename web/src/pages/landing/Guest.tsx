@@ -4,7 +4,7 @@ import { StatusCard } from "./StatusCard";
 
 /* ---------------- 加入 Discord ---------------- */
 
-/** 邀请链接只认 https；站长关了首页「加入」入口（home_join_open=false）时置灰；没配链接就给一句说明，别留空卡片。 */
+/** 邀请链接只认 https；自助领 Key 关闭（registration.open=false）时置灰成「关闭注册」；没配链接就给一句说明，别留空卡片。 */
 export function JoinDiscord(props: {
   variant?: "primary" | "default";
   size?: "md" | "lg";
@@ -13,7 +13,7 @@ export function JoinDiscord(props: {
   const { meta } = useStore();
   const m = meta.value;
   const cls = `btn${props.variant === "primary" ? " btn--primary" : ""}${props.size === "lg" ? " btn--lg" : ""}`;
-  if (m.home_join_open === false) {
+  if (m.registration?.open === false) {
     return (
       <button type="button" class={cls} disabled title="注册已关闭，开放时间看站长公告">
         关闭注册
@@ -111,7 +111,6 @@ export function Steps() {
 
 function Guides() {
   const { facts } = useStore();
-  const site = location.origin;
   const interval = facts.value.interval;
   const ms = interval > 0 ? Math.round(interval * 1000) : 0;
   return (
@@ -131,18 +130,6 @@ function Guides() {
                   <li>「API Key」填写你的 Key</li>
                 </ol>
                 <p class="muted small">任何支持自定义 NovelAI 地址的客户端都可以按同样方式填写。</p>
-              </div>
-            ),
-          },
-          {
-            id: "openai",
-            label: "文本客户端",
-            panel: () => (
-              <div class="stack">
-                <p class="muted small">
-                  只给聊天、写作类客户端用；生图客户端请填步骤 3 里不带 <code>/v1</code> 的地址。
-                </p>
-                <CopyField value={`${site}/v1`} label="OpenAI 兼容地址" />
               </div>
             ),
           },
@@ -196,7 +183,6 @@ function Rules() {
   const { meta, facts } = useStore();
   const m = meta.value;
   const f = facts.value;
-  const site = location.origin;
   const base = m.limits?.base_daily_images ?? 0;
   const extra = m.limits?.key_image_queue ?? 0;
   const quiet = m.limits?.quiet === true;
@@ -207,14 +193,11 @@ function Rules() {
     <Card title="使用须知">
       <ul class="lp-rules">
         <li>
-          <b>地址</b>：生图客户端填 <code>{site}</code>（不加 <code>/v1</code>），API Key 填你的 Key。
-        </li>
-        <li>
           <b>规格</b>：推荐 <code>V4.5 Full</code> / <code>V5 Full</code>，免费尺寸 ≤
           1024×1024（或等像素），步数 ≤ 28。Vibe 消耗 Anlas，每人每天有上限。
         </li>
         <li>
-          <b>额度</b>：V4.5 每人每天{base > 0 ? `保底 ${base} 张，` : "有保底张数，"}每日 7
+          <b>额度</b>：V4.5 {base > 0 ? `每人上限 ${base} 张` : "每人有每日上限"}，先到先得，每日 7
           点重置；全站每小时上限按最近 60 分钟（滚动窗口）计算，不是整点重置。
         </li>
         <li>
