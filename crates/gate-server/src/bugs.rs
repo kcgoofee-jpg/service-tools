@@ -26,6 +26,8 @@ pub struct Bugs {
     /// 同一个特征码的读-改-写串行（旧版用一把全局锁）。
     store_lock: Arc<tokio::sync::Mutex<()>>,
     tasks: tokio_util::task::TaskTracker,
+    /// 还没写进库的记录数（入库是后台任务；`idle()` 等它归零）。
+    pending: Arc<std::sync::atomic::AtomicUsize>,
     /// 上一次自动处理的时间（Unix 秒）；0 = 还没跑过（启动后的第一轮维护就会跑）。
     triage_at: Mutex<f64>,
 }
@@ -54,7 +56,18 @@ impl Bugs {
             recent: Mutex::new(Vec::new()),
             store_lock: Arc::new(tokio::sync::Mutex::new(())),
             tasks,
+            pending: Arc::default(),
             triage_at: Mutex::new(0.0),
+        }
+    }
+
+    /// 等已经记下的 Bug 全部写进库（最多 5 秒）。测试用：读库之前调用，不靠固定的睡眠时间。
+    pub async fn idle(&self) {
+        for _ in 0..500 {
+            if self.pending.load(std::sync::atomic::Ordering::Acquire) == 0 {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
     }
 
@@ -152,7 +165,17 @@ impl Bugs {
         let db = self.db.clone();
         let alerter = self.alerter.clone();
         let lock = self.store_lock.clone();
+        let pending = self.pending.clone();
+        pending.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         self.tasks.spawn(async move {
+            // 不管成功失败，任务结束就减一
+            struct Done(Arc<std::sync::atomic::AtomicUsize>);
+            impl Drop for Done {
+                fn drop(&mut self) {
+                    self.0.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+                }
+            }
+            let _done = Done(pending);
             let _g = lock.lock().await;
             let row = ErrorRow {
                 sig: e.sig.clone(),

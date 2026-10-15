@@ -923,6 +923,7 @@ async fn client_error_report_is_bounded() {
     // 不是 JSON 的也 204
     let (status, _, _) = raw(&e.state, "POST", "/public/client-error", &[], b"not json").await;
     assert_eq!(status, 204);
+    e.state.bugs.idle().await; // 报错是后台任务异步入库的：等写完再读，不靠固定睡眠
     let bugs = web_bugs(&e.state).await;
     assert_eq!(bugs.len(), 1, "同一个报错归并成一行：{bugs:?}");
     assert_eq!(bugs[0]["source"], "web:landing");
