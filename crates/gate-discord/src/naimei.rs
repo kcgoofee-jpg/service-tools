@@ -1,116 +1,70 @@
-//! 奶妹：网关事件循环、斜杠命令分发、反馈弹窗、@ 回复、向网关报心跳。
+//! 奶妹：网关事件循环、斜杠命令分发、反馈弹窗、向网关报心跳。
 //!
-//! 与 `integration/discord_bot.py` 逐行对应；与 Discord 的交互次序、ephemeral 标志、deferred 时机都照抄：
-//! - `/register /quota /resetkey /help /open /limit /ban /unban /slots /revoke`：先 `defer(ephemeral)`（3 秒内确认），
-//!   再去问网关，最后用跟进消息（ephemeral）回话；
-//! - `/反馈`：**立刻弹出**一个只有一段文字的弹窗，不先问网关（docs/v3-deviations.md #52；旧版先取题目再弹窗，
+//! 与 Discord 的交互次序：
+//! - `/register /quota /resetkey /help`：先 `defer(ephemeral)`（3 秒内确认），再去问网关，最后用跟进消息（ephemeral）回话；
+//! - `/反馈`：**立刻弹出**一个只有一段文字的弹窗，不先问网关（docs/v3-deviations.md #52；先取题目再弹窗，
 //!   网关慢于 3 秒时弹窗会失败）。提交时先 `defer(ephemeral)`，再把文字交给网关，回执只有本人可见；
-//! - 命令抛出任何错误 → 打 `[bug]` 日志，并回一句「出了点问题……」（已确认过就用跟进消息，否则直接回复）；
-//! - 不发私信、不加表情、不碰论坛（旧版的画廊点赞 / AI 评论已删除，docs/v3-deviations.md #54）。
+//! - 命令出错 → 打 `[bug]` 日志，并回一句「出了点问题……」（已确认过就用跟进消息，否则直接回复）；
+//! - 不发私信、不加表情、不碰论坛，也不读频道里的消息（没有 GUILD_MESSAGES Intent，@奶妹 不会回应，
+//!   docs/v3-deviations.md #73）；管理员命令都在网页后台，机器人里没有。
 
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use futures::StreamExt as _;
-use gate_core::pyc;
 use serde_json::{Value, json};
 use tracing::{debug, error, info, warn};
 use twilight_gateway::{Config as GatewayConfig, Message, Shard, ShardId};
 use twilight_model::gateway::CloseFrame;
 
 use crate::api::{self, ApiError, DiscordApi};
-use crate::bridge::{Bridge, BridgeError, who_payload};
+use crate::bridge::{Bridge, who_payload};
 use crate::commands::{self, Command, NAIMEI_INTENTS};
 use crate::config::NaimeiConfig;
 use crate::events::{
     self, Gateway, GuildInfo, INTERACTION_APPLICATION_COMMAND, INTERACTION_MODAL_SUBMIT,
-    Interaction, MessageCreate, ReadyInfo, User,
+    Interaction, ReadyInfo, User,
 };
 use crate::handlers::{self, Backend, HandlerError};
-use crate::pystr::py_str;
 
 /// 心跳间隔。
 pub const SYNC_INTERVAL: Duration = Duration::from_secs(60);
 
-/// 命令执行中可能出现的错误；全部会被 `tree.error` 等价逻辑接住。
+/// 命令执行中可能出现的错误；全部会被统一接住：打日志，并回成员「出了点问题」。
 #[derive(Debug, thiserror::Error)]
 pub enum CmdError {
+    /// 网关回的内容读不懂。
     #[error("{0}")]
     Handler(#[from] HandlerError),
+    /// 回 Discord 失败。
     #[error("{0}")]
     Api(#[from] ApiError),
-    #[error("{0}")]
-    Bridge(#[from] BridgeError),
+    /// 命令名不认识。
     #[error("{0}")]
     Invalid(String),
 }
 
 impl CmdError {
-    /// 日志里的「异常类型」，对应 Python 的 `type(error).__name__`。
+    /// 日志里的错误类别。
     fn kind(&self) -> &'static str {
         match self {
-            CmdError::Handler(HandlerError::Key(_)) | CmdError::Bridge(BridgeError::NoSecret) => {
-                "KeyError"
-            }
-            CmdError::Handler(HandlerError::Type(_)) => "TypeError",
-            CmdError::Bridge(BridgeError::Handler(_)) => "HandlerError",
-            CmdError::Api(_) => "HTTPException",
-            CmdError::Invalid(_) => "TransformerError",
+            CmdError::Handler(_) => "handler",
+            CmdError::Api(_) => "discord_api",
+            CmdError::Invalid(_) => "invalid_command",
         }
     }
-}
-
-/// 同一频道 60 秒 / 同一成员 5 分钟 / 全服 20 秒各回一次 @。纯逻辑，时间由调用方传入（单调秒）。
-#[derive(Debug, Default)]
-pub struct MentionLimiter {
-    last: HashMap<LimitKey, f64>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum LimitKey {
-    Channel(u64),
-    Author(u64),
-    Global,
-}
-
-impl MentionLimiter {
-    /// 返回是否放行；放行时同时记录三个时间戳（Python 在发送前记录，发送失败也不回退）。
-    pub fn allow(&mut self, now: f64, channel: u64, author: u64) -> bool {
-        let since = |last: &HashMap<LimitKey, f64>, k: LimitKey| {
-            now - last.get(&k).copied().unwrap_or(-1e9)
-        };
-        if since(&self.last, LimitKey::Channel(channel)) < 60.0
-            || since(&self.last, LimitKey::Author(author)) < 300.0
-            || since(&self.last, LimitKey::Global) < 20.0
-        {
-            return false;
-        }
-        if self.last.len() > 500 {
-            self.last.clear();
-        }
-        self.last.insert(LimitKey::Channel(channel), now);
-        self.last.insert(LimitKey::Author(author), now);
-        self.last.insert(LimitKey::Global, now);
-        true
-    }
-}
-
-/// 正文里明确的 `<@机器人ID>` / `<@!机器人ID>`；回复奶妹的消息（自动带 ping）不算。
-pub fn mentions_bot(content: &str, bot_id: &str) -> bool {
-    content.contains(&format!("<@{bot_id}>")) || content.contains(&format!("<@!{bot_id}>"))
 }
 
 #[derive(Default)]
 struct Inner {
     bot: Option<User>,
-    guilds: HashMap<String, GuildInfo>,
-    mentions: MentionLimiter,
+    /// 配置的那个服务器的名字（只用来在心跳里显示）。
+    guild_name: Option<String>,
     sync_started: bool,
 }
 
-/// 墙钟（Unix 秒）。测试里换成固定值，对拍时「Key 剩余有效期」才不会随时间漂移。
+/// 墙钟（Unix 秒）。测试里换成固定值，「Key 剩余有效期」才不会随时间漂移。
 pub type Clock = Box<dyn Fn() -> f64 + Send + Sync>;
 
 pub struct Naimei {
@@ -118,7 +72,6 @@ pub struct Naimei {
     pub api: DiscordApi,
     pub bridge: Bridge,
     clock: Clock,
-    started: Instant,
     /// 最近一次心跳延迟（毫秒）；`u64::MAX` = 还没有数据。
     latency_ms: AtomicU64,
     ready: AtomicBool,
@@ -146,7 +99,6 @@ impl Naimei {
             api,
             bridge,
             clock,
-            started: Instant::now(),
             latency_ms: AtomicU64::new(u64::MAX),
             ready: AtomicBool::new(false),
             inner: Mutex::new(Inner::default()),
@@ -159,15 +111,9 @@ impl Naimei {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    fn mono_now(&self) -> f64 {
-        self.started.elapsed().as_secs_f64()
-    }
-
-    /// 心跳延迟；上报时按 Python 的 `round(latency_seconds * 1000)` 四舍五入（银行家舍入）成毫秒。
+    /// 记录网关心跳延迟，上报时四舍五入成毫秒。
     pub fn set_latency(&self, latency: Option<Duration>) {
-        let ms = latency.map_or(u64::MAX, |d| {
-            u64::try_from(pyc::round0(d.as_secs_f64() * 1000.0)).unwrap_or(u64::MAX)
-        });
+        let ms = latency.map_or(u64::MAX, |d| (d.as_secs_f64() * 1000.0).round() as u64);
         self.latency_ms.store(ms, Ordering::Relaxed);
     }
 
@@ -179,28 +125,33 @@ impl Naimei {
         self.lock().bot = Some(user);
     }
 
+    /// GUILD_CREATE / GUILD_UPDATE：只关心配置的那个服务器的名字。
     pub fn upsert_guild(&self, g: GuildInfo) {
-        if g.unavailable || g.name.is_none() {
+        if g.unavailable || g.id != self.cfg.guild_id.to_string() {
             return;
         }
-        self.lock().guilds.insert(g.id.clone(), g);
+        if let Some(name) = g.name {
+            self.lock().guild_name = Some(name);
+        }
     }
 
+    /// GUILD_DELETE：被踢出配置的服务器后不再报它的名字。
     pub fn remove_guild(&self, id: &str) {
-        self.lock().guilds.remove(id);
+        if id == self.cfg.guild_id.to_string() {
+            self.lock().guild_name = None;
+        }
     }
 
     // ---------- 向网关要数据 ----------
 
-    /// `backend(path, interaction, extra_id, extra)`。
+    /// POST 到网关，请求体是 `{discord_id, guild_id, ...extra}`。
     async fn backend(
         &self,
         path: &str,
         it: &Interaction,
-        extra_id: Option<&str>,
         extra: &[(&str, Value)],
     ) -> Result<Backend, CmdError> {
-        let payload = who_payload(it, extra_id, extra)?;
+        let payload = who_payload(it, extra)?;
         Ok(self.bridge.command(path, &payload).await?)
     }
 
@@ -230,8 +181,11 @@ impl Naimei {
             ))),
         };
         if let Err(err) = result {
-            // `tree.error`：打日志（监控会抓 [bug]），并告诉成员不是他的问题
-            let shown = command.map_or("?", Command::name);
+            // 打日志（监控会抓 [bug]），并告诉成员不是他的问题
+            let shown: &str = match command {
+                Some(c) => c.name(),
+                None => name.unwrap_or("?"),
+            };
             error!("[bug] bot command /{shown} failed: {}: {err}", err.kind());
             let text = handlers::GENERIC_ERROR;
             let sent = if responder.is_done() {
@@ -254,47 +208,20 @@ impl Naimei {
         match command {
             Command::Register => self.cmd_register(it, r).await,
             Command::Quota => self.cmd_quota(it, r).await,
-            Command::Feedback => self.cmd_feedback(it, r).await,
+            Command::Feedback => self.cmd_feedback(r).await,
             Command::ResetKey => self.cmd_resetkey(it, r).await,
             Command::Help => self.cmd_help(it, r).await,
-            Command::Open => {
-                let state = string_option(it, "state")?;
-                if state != "on" && state != "off" {
-                    return Err(CmdError::Invalid(format!("state 不是可选值：{state}")));
-                }
-                self.run_ops(it, r, "open", &[("value", json!(state))])
-                    .await
-            }
-            Command::Limit => {
-                // 0～1000 的范围由 Discord 客户端限制；discord.py 的 `Range` 在服务端不再校验，
-                // 收到什么就原样 `str(count)` 转给网关（网关会拒绝非数字，见 golden `limit_out_of_range`）
-                let count = it
-                    .option("count")
-                    .and_then(|o| o.value.as_ref())
-                    .ok_or_else(|| CmdError::Invalid("missing option count".into()))?;
-                self.run_ops(it, r, "limit", &[("value", json!(py_str(count)))])
-                    .await
-            }
-            Command::Ban => {
-                let target = user_option(it, "member")?;
-                self.run_ops(it, r, "ban", &[("target", json!(target))])
-                    .await
-            }
-            Command::Unban => {
-                let target = user_option(it, "member")?;
-                self.run_ops(it, r, "unban", &[("target", json!(target))])
-                    .await
-            }
-            Command::Slots => self.cmd_slots(it, r).await,
-            Command::Revoke => self.cmd_revoke(it, r).await,
         }
     }
 
     // ---------- 各命令 ----------
 
-    /// `/register`（`discord_registration.handle_register`）。
+    /// `/register`。
     async fn cmd_register(&self, it: &Interaction, r: &Responder<'_>) -> Result<(), CmdError> {
-        let invite = pyc::strip(&string_option_opt(it, "key").unwrap_or_default()).to_owned();
+        let invite = string_option_opt(it, "key")
+            .unwrap_or_default()
+            .trim()
+            .to_owned();
         let same_guild = it
             .guild_id
             .as_deref()
@@ -303,14 +230,10 @@ impl Naimei {
         if !same_guild || it.actor().is_none() {
             return Ok(r.send_message(handlers::REGISTER_WRONG_GUILD).await?);
         }
-        let secret = self.cfg.secret.as_deref().unwrap_or("");
-        if secret.is_empty() {
-            return Ok(r.send_message(handlers::REGISTER_NOT_CONFIGURED).await?);
-        }
         r.defer(true).await?;
         let payload = handlers::register_payload(it, &invite)?;
         // 直发：斜杠命令已由 Discord 验明身份，不走 OAuth，Key 只在本人可见的临时消息里给
-        let message = match self.bridge.issue(secret, &payload).await {
+        let message = match self.bridge.issue(&payload).await {
             Some((status, body)) => handlers::register_message(status, &body)?,
             None => handlers::REGISTER_UNAVAILABLE.to_owned(),
         };
@@ -319,13 +242,13 @@ impl Naimei {
 
     async fn cmd_quota(&self, it: &Interaction, r: &Responder<'_>) -> Result<(), CmdError> {
         r.defer(true).await?;
-        let quota = self.backend("/self-register/quota", it, None, &[]).await?;
+        let quota = self.backend("/self-register/quota", it, &[]).await?;
         if !quota.is_ok() {
             return Ok(r.followup(&quota.text()).await?);
         }
-        // Python 先拼完额度各行、再去问 /info；额度数据残缺时不会发第二个请求
+        // 额度数据残缺时先报错，不再去问 /info
         handlers::quota_text(&quota.data, None, self.now())?;
-        let info = self.backend("/self-register/info", it, None, &[]).await?;
+        let info = self.backend("/self-register/info", it, &[]).await?;
         let text =
             handlers::quota_text(&quota.data, info.is_ok().then_some(&info.data), self.now())?;
         Ok(r.followup(&text).await?)
@@ -333,9 +256,7 @@ impl Naimei {
 
     async fn cmd_resetkey(&self, it: &Interaction, r: &Responder<'_>) -> Result<(), CmdError> {
         r.defer(true).await?;
-        let b = self
-            .backend("/self-register/resetkey", it, None, &[])
-            .await?;
+        let b = self.backend("/self-register/resetkey", it, &[]).await?;
         let text = if b.is_ok() {
             handlers::resetkey_text(&b.data)?
         } else {
@@ -346,59 +267,21 @@ impl Naimei {
 
     async fn cmd_help(&self, it: &Interaction, r: &Responder<'_>) -> Result<(), CmdError> {
         r.defer(true).await?;
-        let b = self.backend("/self-register/info", it, None, &[]).await?;
+        let b = self.backend("/self-register/info", it, &[]).await?;
         let text = handlers::help_text(&self.cfg.site, b.is_ok().then_some(&b.data))?;
         Ok(r.followup(&text).await?)
     }
 
-    async fn run_ops(
-        &self,
-        it: &Interaction,
-        r: &Responder<'_>,
-        action: &str,
-        extra: &[(&str, Value)],
-    ) -> Result<(), CmdError> {
-        r.defer(true).await?;
-        let mut all: Vec<(&str, Value)> = vec![("action", json!(action))];
-        all.extend(extra.iter().cloned());
-        let b = self.backend("/self-register/ops", it, None, &all).await?;
-        Ok(r.followup(&handlers::ops_text(&b)?).await?)
-    }
-
-    async fn cmd_slots(&self, it: &Interaction, r: &Responder<'_>) -> Result<(), CmdError> {
-        r.defer(true).await?;
-        let b = self.backend("/self-register/slots", it, None, &[]).await?;
-        let text = if b.is_ok() {
-            handlers::slots_text(&b.data)?
-        } else {
-            b.text()
-        };
-        Ok(r.followup(&text).await?)
-    }
-
-    async fn cmd_revoke(&self, it: &Interaction, r: &Responder<'_>) -> Result<(), CmdError> {
-        let member = user_option(it, "member")?;
-        r.defer(true).await?;
-        let b = self
-            .backend("/self-register/revoke", it, Some(&member), &[])
-            .await?;
-        Ok(r.followup(&handlers::revoke_text(&member, &b)).await?)
-    }
-
     /// `/反馈`：立刻弹出只有一段文字的表单。成员自己发起，不私信、不群发。
-    async fn cmd_feedback(&self, _it: &Interaction, r: &Responder<'_>) -> Result<(), CmdError> {
+    async fn cmd_feedback(&self, r: &Responder<'_>) -> Result<(), CmdError> {
         Ok(r.send_modal(handlers::feedback_modal()).await?)
     }
 
-    /// 弹窗提交（`on_submit`）。出错只记日志，不回成员消息（`Modal.on_error` 的默认行为）；
-    /// 不是反馈弹窗的（例如升级前发出去的旧版选择题弹窗）直接忽略。
+    /// 弹窗提交。出错只记日志，不回成员消息。
+    /// 机器人只有 `/反馈` 这一个弹窗，所以不再区分 `custom_id`（网关会拒绝空内容）。
     async fn handle_modal_submit(self: &Arc<Self>, it: &Interaction) {
-        let custom_id = it.data.as_ref().and_then(|d| d.custom_id.as_deref());
-        if custom_id != Some(handlers::FEEDBACK_MODAL_ID) {
-            return;
-        }
         if let Err(e) = self.submit_feedback(it).await {
-            error!("Ignoring exception in modal: {}: {e}", e.kind());
+            error!("[bug] feedback submit failed: {}: {e}", e.kind());
         }
     }
 
@@ -416,73 +299,13 @@ impl Naimei {
             .backend(
                 "/self-register/feedback",
                 it,
-                None,
                 &[
                     ("text", json!(text)),
-                    ("username", json!(pyc::take_chars(username, 80))),
+                    ("username", json!(handlers::clip(username, 80))),
                 ],
             )
             .await?;
         Ok(r.followup(&handlers::feedback_receipt(&b)).await?)
-    }
-
-    // ---------- @奶妹 ----------
-
-    /// 有人在频道里 @奶妹 → 回一句并 @ 服务器主人。限流见 [`MentionLimiter`]。
-    pub async fn handle_message(self: &Arc<Self>, msg: MessageCreate) {
-        let now = self.mono_now();
-        self.handle_message_at(msg, now).await;
-    }
-
-    pub async fn handle_message_at(self: &Arc<Self>, msg: MessageCreate, now: f64) {
-        let (guild, bot_id) = {
-            let inner = self.lock();
-            (
-                msg.guild_id
-                    .as_ref()
-                    .and_then(|g| inner.guilds.get(g))
-                    .cloned(),
-                inner.bot.as_ref().map(|b| b.id.clone()),
-            )
-        };
-        let (Some(guild), Some(bot_id)) = (guild, bot_id) else {
-            return;
-        };
-        if msg.author.bot || !mentions_bot(&msg.content, &bot_id) {
-            return; // 只认正文里明确的 @奶妹
-        }
-        let (Ok(channel), Ok(author)) =
-            (msg.channel_id.parse::<u64>(), msg.author.id.parse::<u64>())
-        else {
-            return;
-        };
-        if !self.lock().mentions.allow(now, channel, author) {
-            return;
-        }
-        let Some(owner) = guild
-            .owner_id
-            .as_deref()
-            .and_then(|o| o.parse::<u64>().ok())
-        else {
-            return;
-        };
-        let content = handlers::mention_reply_text(owner);
-        let nonce = rand::random::<u64>();
-        let body = api::mention_reply_body(
-            &content,
-            &msg.id,
-            &msg.channel_id,
-            msg.guild_id.as_deref(),
-            owner,
-            nonce,
-        );
-        match self.api.create_message(&msg.channel_id, &body).await {
-            Ok(()) => info!(
-                "[mention] replied in #{} to {}",
-                msg.channel_id, msg.author.id
-            ),
-            Err(e) => error!("[bug] mention reply failed: {e}"),
-        }
     }
 
     // ---------- 启动 / 同步 ----------
@@ -495,7 +318,7 @@ impl Naimei {
             .sync_guild_commands(&ready.application_id, self.cfg.guild_id, &defs)
             .await
         {
-            // discord.py 的 on_ready 在 tree.sync 抛错时就此中断（既不打印 ready 也不启动同步循环）
+            // 命令没同步成功就不开始心跳（后台显示离线，站长能发现）
             error!("[bug] on_ready failed: {e}");
             return;
         }
@@ -517,33 +340,25 @@ impl Naimei {
     pub async fn sync_loop(self: Arc<Self>) {
         let ready_at = self.now();
         loop {
-            if let Err(e) = self.sync_once(ready_at).await {
-                warn!("[sync_loop] heart-beat warning: {e}");
+            if !self.sync_once(ready_at).await {
+                warn!("[sync_loop] heart-beat not delivered");
             }
             tokio::time::sleep(SYNC_INTERVAL).await;
         }
     }
 
-    pub async fn sync_once(&self, ready_at: f64) -> Result<(), BridgeError> {
+    /// 报一次心跳；网关收到（200）返回 true。
+    pub async fn sync_once(&self, ready_at: f64) -> bool {
         let status = self.status_report(ready_at);
         self.bridge
-            .bot(
-                reqwest::Method::POST,
-                "/report",
-                Some(&json!({"status": status})),
-            )
-            .await?;
-        Ok(())
+            .bot("/report", &json!({"status": status}))
+            .await
+            .is_some()
     }
 
-    /// 心跳里的 `status`：键顺序与 Python 一致（旧版多的 `ai_ready` / `ai_today` 随 AI 评论一起删了）。
+    /// 心跳里的 `status`。
     pub fn status_report(&self, ready_at: f64) -> Value {
         let inner = self.lock();
-        let guild = inner
-            .guilds
-            .get(&self.cfg.guild_id.to_string())
-            .and_then(|g| g.name.clone())
-            .unwrap_or_default();
         let user = inner
             .bot
             .as_ref()
@@ -555,7 +370,7 @@ impl Naimei {
         };
         json!({
             "user": user,
-            "guild": guild,
+            "guild": inner.guild_name.clone().unwrap_or_default(),
             "latency_ms": latency,
             "ready_at": ready_at,
         })
@@ -566,7 +381,7 @@ impl Naimei {
     }
 }
 
-/// 一次交互的回复器：记录是否已经响应过（对应 `interaction.response.is_done()`）。
+/// 一次交互的回复器：记录是否已经响应过。
 pub struct Responder<'a> {
     app: &'a Naimei,
     it: &'a Interaction,
@@ -595,24 +410,24 @@ impl<'a> Responder<'a> {
         Ok(())
     }
 
-    /// `response.defer(ephemeral=...)`
+    /// 先确认收到：斜杠命令是「正在思考」（类型 5），弹窗提交是无声的更新确认（类型 6）。
     pub async fn defer(&self, ephemeral: bool) -> Result<(), ApiError> {
         let modal_submit = self.it.kind == INTERACTION_MODAL_SUBMIT;
         self.callback(api::defer_body(ephemeral, modal_submit))
             .await
     }
 
-    /// `response.send_message(content, ephemeral=True)`
+    /// 直接回复一条只有本人可见的消息。
     pub async fn send_message(&self, content: &str) -> Result<(), ApiError> {
         self.callback(api::message_body(content, true)).await
     }
 
-    /// `response.send_modal(modal)`
+    /// 弹出表单。
     pub async fn send_modal(&self, modal: Value) -> Result<(), ApiError> {
         self.callback(api::modal_body(modal)).await
     }
 
-    /// `followup.send(content, ephemeral=True)`
+    /// 跟进消息（只有本人可见）。
     pub async fn followup(&self, content: &str) -> Result<(), ApiError> {
         self.app
             .api
@@ -625,25 +440,13 @@ impl<'a> Responder<'a> {
     }
 }
 
-// ---------- 选项解析（对应 discord.py 的参数转换，不合法 = TransformerError） ----------
+// ---------- 选项解析 ----------
 
 fn string_option_opt(it: &Interaction, name: &str) -> Option<String> {
     it.option(name)
         .and_then(|o| o.value.as_ref())
         .and_then(Value::as_str)
         .map(str::to_owned)
-}
-
-fn string_option(it: &Interaction, name: &str) -> Result<String, CmdError> {
-    string_option_opt(it, name).ok_or_else(|| CmdError::Invalid(format!("缺少选项 {name}")))
-}
-
-/// 用户选项（USER，type 6）的值是用户 ID 字符串；规范成 `str(member.id)`。
-fn user_option(it: &Interaction, name: &str) -> Result<String, CmdError> {
-    let raw = string_option(it, name)?;
-    raw.parse::<u64>()
-        .map(|n| n.to_string())
-        .map_err(|_| CmdError::Invalid(format!("选项 {name} 不是用户 ID：{}", py_str(&json!(raw)))))
 }
 
 // ---------- 事件循环 ----------
@@ -680,10 +483,6 @@ pub fn dispatch(app: &Arc<Naimei>, raw: &str) {
         }
         Ok(Gateway::GuildCreate(g) | Gateway::GuildUpdate(g)) => app.upsert_guild(g),
         Ok(Gateway::GuildDelete(id)) => app.remove_guild(&id),
-        Ok(Gateway::MessageCreate(m)) => {
-            let app = app.clone();
-            tokio::spawn(async move { app.handle_message(m).await });
-        }
         Ok(Gateway::Interaction(it)) => {
             let app = app.clone();
             tokio::spawn(async move { app.handle_interaction(*it).await });
@@ -732,40 +531,45 @@ pub async fn run(cfg: NaimeiConfig) -> anyhow::Result<()> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn mention_detection_requires_explicit_tag() {
-        assert!(mentions_bot(
-            "hi <@900000000000000099> there",
-            "900000000000000099"
-        ));
-        assert!(mentions_bot("<@!900000000000000099>", "900000000000000099"));
-        assert!(!mentions_bot("<@900000000000000098>", "900000000000000099"));
-        assert!(!mentions_bot("@everyone", "900000000000000099"));
-        assert!(!mentions_bot("", "900000000000000099"));
+    fn app() -> Arc<Naimei> {
+        let cfg = NaimeiConfig {
+            token: "t".into(),
+            guild_id: 900000000000000001,
+            backend: "http://127.0.0.1:1".into(),
+            site: "https://site.test".into(),
+            secret: "s".into(),
+        };
+        Naimei::new(cfg, None)
     }
 
-    #[test]
-    fn limiter_channel_author_global_windows() {
-        let mut l = MentionLimiter::default();
-        assert!(l.allow(1000.0, 1, 10));
-        // 全服 20 秒内谁都不行
-        assert!(!l.allow(1010.0, 2, 20));
-        // 20 秒后换频道换人可以
-        assert!(l.allow(1021.0, 2, 20));
-        // 频道 1 的 60 秒窗口：不同的人也不行
-        assert!(!l.allow(1030.0, 1, 30));
-        assert!(l.allow(1062.0, 1, 30));
-        // 成员 10 的 5 分钟窗口：换个频道也不行
-        assert!(!l.allow(1090.0, 3, 10));
-        assert!(l.allow(1301.0, 3, 10));
-    }
-
-    #[test]
-    fn limiter_clears_when_over_500_keys() {
-        let mut l = MentionLimiter::default();
-        for i in 0..300u64 {
-            assert!(l.allow(i as f64 * 1000.0, i + 1, i + 10_000));
+    fn guild(id: &str, name: Option<&str>, unavailable: bool) -> GuildInfo {
+        GuildInfo {
+            id: id.into(),
+            name: name.map(str::to_owned),
+            unavailable,
         }
-        assert!(l.last.len() <= 501);
+    }
+
+    #[tokio::test]
+    async fn only_the_configured_guild_name_is_kept() {
+        let app = app();
+        app.upsert_guild(guild("900000000000000009", Some("别的服"), false));
+        assert_eq!(app.status_report(1.0)["guild"], "");
+        app.upsert_guild(guild("900000000000000001", None, true));
+        assert_eq!(app.status_report(1.0)["guild"], "", "掉线的服务器没有名字");
+        app.upsert_guild(guild("900000000000000001", Some("测试服"), false));
+        assert_eq!(app.status_report(1.0)["guild"], "测试服");
+        app.remove_guild("900000000000000009");
+        assert_eq!(app.status_report(1.0)["guild"], "测试服");
+        app.remove_guild("900000000000000001");
+        assert_eq!(app.status_report(1.0)["guild"], "");
+    }
+
+    #[tokio::test]
+    async fn latency_is_reported_in_whole_milliseconds() {
+        let app = app();
+        assert_eq!(app.status_report(1.0)["latency_ms"], 0, "还没有数据按 0 报");
+        app.set_latency(Some(Duration::from_secs_f64(0.0425)));
+        assert_eq!(app.status_report(1.0)["latency_ms"], 43);
     }
 }

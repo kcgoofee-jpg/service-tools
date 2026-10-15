@@ -96,11 +96,9 @@ pub struct RegistrationEnv {
     pub key_expires_days: i64,
     pub key_rpm: i64,
     pub max_users: i64,
-    pub reset_at: String,
     pub key_features: String,
     pub min_account_days: i64,
     pub member_role_id: String,
-    pub admin_ids: Vec<String>,
     pub idle_days: i64,
 }
 
@@ -268,19 +266,12 @@ impl EnvConfig {
                 key_expires_days: r.nonneg("REGISTER_EXPIRES_DAYS", 30),
                 key_rpm: r.nonneg("REGISTER_RPM", 5).max(1),
                 max_users: r.nonneg("REGISTER_MAX_USERS", 10),
-                reset_at: r.trimmed("REGISTER_RESET_AT"),
                 key_features: {
                     let f = r.str("REGISTER_FEATURES", "image");
                     f.trim().to_string()
                 },
                 min_account_days: r.nonneg("REGISTER_MIN_ACCOUNT_DAYS", 7),
                 member_role_id: r.trimmed("DISCORD_MEMBER_ROLE_ID"),
-                admin_ids: r
-                    .str("ADMIN_DISCORD_IDS", "")
-                    .split(',')
-                    .map(|x| x.trim().to_string())
-                    .filter(|x| !x.is_empty() && x.chars().all(|c| c.is_ascii_digit()))
-                    .collect(),
                 idle_days: r.nonneg("KEY_INACTIVITY_DELETE_DAYS", 3),
             })
         })();
@@ -424,11 +415,9 @@ mod tests {
         let mut ok = env(&base);
         ok.insert("REGISTRATION_BRIDGE_SECRET".into(), "a".repeat(32));
         ok.insert("REGISTER_RPM".into(), "0".into());
-        ok.insert("ADMIN_DISCORD_IDS".into(), "123, abc,456".into());
         let reg = EnvConfig::load(&ok).registration.unwrap();
         assert_eq!(reg.guild_id, "42");
         assert_eq!(reg.site_url, "https://x.test/");
         assert_eq!(reg.key_rpm, 1);
-        assert_eq!(reg.admin_ids, ["123", "456"]);
     }
 }

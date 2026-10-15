@@ -1,4 +1,4 @@
-//! 一致快照（移植自 deploy/ops/snapshot.py + naigate-snapshot 的「完整性校验 → gzip（权限 600）」两步）。
+//! 一致快照（移植自旧版 snapshot.py，见标签 py-final，加上 naigate-snapshot 的「完整性校验 → gzip（权限 600）」两步）。
 //!
 //! 为什么不用 sqlite3 `.backup` / backup API：库里 90% 是审计原图 BLOB（曾达 1.3GB），整库复制 + VACUUM
 //! 要好几分钟、磁盘 IO 打满，网关写库等锁超过 15 秒就报 database is locked（2026-10-10 两次部署，

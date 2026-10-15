@@ -1,4 +1,4 @@
-//! 各子命令共用的小工具：时间、路径、HTML 转义、Python 风格的输出格式。
+//! 各子命令共用的小工具：时间、路径、环境文件、巡检输出格式。
 
 use jiff::{Timestamp, tz::TimeZone};
 use serde::Serialize;
@@ -27,22 +27,6 @@ pub fn fmt_ts(ts: f64, tz: &TimeZone, fmt: &str) -> String {
         .to_zoned(tz.clone())
         .strftime(fmt)
         .to_string()
-}
-
-/// Python `html.escape(s)`（quote=True）。
-pub fn html_escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 8);
-    for c in s.chars() {
-        match c {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#x27;"),
-            _ => out.push(c),
-        }
-    }
-    out
 }
 
 /// 近似 `du -h`：1024 进制，向上取整，小于 10 的保留一位小数（「3.2M」「120K」）。
@@ -115,37 +99,6 @@ pub fn sv_str(v: &rusqlite::types::Value) -> String {
     }
 }
 
-/// 保持插入顺序的计数器（`collections.Counter` 的 `most_common()` 对并列项保持首次出现的顺序）。
-#[derive(Default)]
-pub struct Counter {
-    index: std::collections::HashMap<String, usize>,
-    items: Vec<(String, u64)>,
-}
-
-impl Counter {
-    pub fn add(&mut self, key: String) {
-        match self.index.get(&key) {
-            Some(&i) => self.items[i].1 += 1,
-            None => {
-                self.index.insert(key.clone(), self.items.len());
-                self.items.push((key, 1));
-            }
-        }
-    }
-    pub fn len(&self) -> usize {
-        self.items.len()
-    }
-    pub fn is_empty(&self) -> bool {
-        self.items.is_empty()
-    }
-    /// `most_common()`：按次数降序，并列保持首次出现的顺序（稳定排序）。
-    pub fn most_common(&self) -> Vec<(&str, u64)> {
-        let mut v: Vec<(&str, u64)> = self.items.iter().map(|(k, n)| (k.as_str(), *n)).collect();
-        v.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
-        v
-    }
-}
-
 /// `json.dumps(v, ensure_ascii=False, indent=2)`：浮点用 Python 的 repr（`1e-05`、`2.0`）。
 pub fn dumps_indent2(v: &Value) -> String {
     let mut out = Vec::with_capacity(512);
@@ -193,7 +146,7 @@ impl serde_json::ser::Formatter for PyPretty<'_> {
     }
 }
 
-/// 读取 `.env` 风格文件里的某个键（与 patrol.py 的 `env_value` 一致：取第一处命中，
+/// 读取 `.env` 风格文件里的某个键（与旧版 patrol.py 的 `env_value` 一致，见标签 py-final：取第一处命中，
 /// 去掉首尾空白与成对引号字符；文件读不到按空串）。
 pub fn env_file_value(path: &Path, key: &str) -> String {
     let Ok(bytes) = std::fs::read(path) else {
@@ -216,26 +169,6 @@ pub fn env_file_value(path: &Path, key: &str) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
-
-    #[test]
-    fn escape_like_python() {
-        assert_eq!(
-            html_escape("<a href=\"x\">&'"),
-            "&lt;a href=&quot;x&quot;&gt;&amp;&#x27;"
-        );
-    }
-
-    #[test]
-    fn counter_keeps_first_seen_order_on_ties() {
-        let mut c = Counter::default();
-        for k in ["b", "a", "b", "c", "a", "d"] {
-            c.add(k.into());
-        }
-        assert_eq!(
-            c.most_common(),
-            vec![("b", 2), ("a", 2), ("c", 1), ("d", 1)]
-        );
-    }
 
     #[test]
     fn indent2_matches_python_dumps() {

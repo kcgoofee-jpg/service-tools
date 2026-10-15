@@ -1,12 +1,11 @@
-//! 网关桥接客户端：`/self-register/*`（命令）与 `/self-register/bot/*`（配置 / 心跳）。
+//! 网关桥接客户端：`/self-register/*`（命令）与 `/self-register/bot/*`（心跳）。
 //!
-//! 鉴权：`Authorization: Bearer <REGISTRATION_BRIDGE_SECRET>`；请求体 / 超时与 Python 一致：
-//! - 命令类（`backend()`）：POST JSON，8 秒；
-//! - `/register`（`discord_registration.py`）：POST JSON，12 秒；
-//! - 配置 / 上报（`bridge()`）：8 秒，任何失败返回 None，不影响机器人其他功能。
+//! 鉴权：`Authorization: Bearer <REGISTRATION_BRIDGE_SECRET>`（密钥缺失时机器人启动即失败，见 `config`）；超时：
+//! - 命令类（[`Bridge::command`]）：POST JSON，8 秒；
+//! - `/register`（[`Bridge::issue`]）：POST JSON，12 秒；
+//! - 心跳（[`Bridge::bot`]）：8 秒，任何失败返回 None，不影响机器人其他功能。
 //!
-//! httpx 的 `timeout=8` 是「连接 / 读 / 写 / 取连接」各 8 秒，reqwest 这里用整体 8 秒；
-//! 网关在同机 docker 网络里，两者在实际行为上没有差别。
+//! 超时是整个请求的上限；网关在同机 docker 网络里，连接几乎是瞬时的。
 
 use std::time::Duration;
 
@@ -18,28 +17,18 @@ use crate::handlers::{Backend, HandlerError, interpret_backend};
 pub const COMMAND_TIMEOUT: Duration = Duration::from_secs(8);
 pub const REGISTER_TIMEOUT: Duration = Duration::from_secs(12);
 
-/// Python 的 `os.environ["REGISTRATION_BRIDGE_SECRET"]` 没配置时会抛 `KeyError`，
-/// 命令里走 `tree.error`（回「出了点问题」），同步循环里被 `except Exception` 吞掉并打日志。
-#[derive(Debug, thiserror::Error)]
-pub enum BridgeError {
-    #[error("KeyError: 'REGISTRATION_BRIDGE_SECRET'")]
-    NoSecret,
-    #[error("{0}")]
-    Handler(#[from] HandlerError),
-}
-
 #[derive(Clone)]
 pub struct Bridge {
     http: reqwest::Client,
     backend: String,
-    secret: Option<String>,
+    secret: String,
     command_timeout: Duration,
     register_timeout: Duration,
 }
 
 impl Bridge {
     /// `backend` 已去掉末尾的 `/`。
-    pub fn new(backend: impl Into<String>, secret: Option<String>) -> Self {
+    pub fn new(backend: impl Into<String>, secret: impl Into<String>) -> Self {
         let http = reqwest::Client::builder()
             .user_agent(concat!("nai-bots/", env!("CARGO_PKG_VERSION")))
             .build()
@@ -47,7 +36,7 @@ impl Bridge {
         Bridge {
             http,
             backend: backend.into(),
-            secret,
+            secret: secret.into(),
             command_timeout: COMMAND_TIMEOUT,
             register_timeout: REGISTER_TIMEOUT,
         }
@@ -61,22 +50,18 @@ impl Bridge {
         self
     }
 
-    fn bearer(&self) -> Result<String, BridgeError> {
-        self.secret
-            .as_ref()
-            .map(|s| format!("Bearer {s}"))
-            .ok_or(BridgeError::NoSecret)
+    fn bearer(&self) -> String {
+        format!("Bearer {}", self.secret)
     }
 
-    /// `backend(path, interaction, ...)`：POST 到网关，返回 `(status, data)`。
+    /// POST 到网关，返回 `(status, data)`。
     /// 连不上 / 超时 / 返回体不是 JSON → `(0, "服务暂时不可用，请稍后再试。")`。
-    pub async fn command(&self, path: &str, payload: &Value) -> Result<Backend, BridgeError> {
-        let auth = self.bearer()?;
+    pub async fn command(&self, path: &str, payload: &Value) -> Result<Backend, HandlerError> {
         let sent = self
             .http
             .post(format!("{}{path}", self.backend))
             .timeout(self.command_timeout)
-            .header("Authorization", auth)
+            .header("Authorization", self.bearer())
             .json(payload)
             .send()
             .await;
@@ -87,16 +72,16 @@ impl Bridge {
         let Ok(body) = response.bytes().await else {
             return Ok(Backend::unavailable());
         };
-        Ok(interpret_backend(status, &body)?)
+        interpret_backend(status, &body)
     }
 
     /// `/register` 直发：返回网关的 `(status, body)`；传输层失败返回 `None`（调用方回「领 Key 暂不可用」）。
-    pub async fn issue(&self, secret: &str, payload: &Value) -> Option<(u16, Vec<u8>)> {
+    pub async fn issue(&self, payload: &Value) -> Option<(u16, Vec<u8>)> {
         let response = self
             .http
             .post(format!("{}/self-register/issue", self.backend))
             .timeout(self.register_timeout)
-            .header("Authorization", format!("Bearer {secret}"))
+            .header("Authorization", self.bearer())
             .json(payload)
             .send()
             .await
@@ -106,49 +91,32 @@ impl Bridge {
         Some((status, body.to_vec()))
     }
 
-    /// `bridge(method, path, payload)`：机器人专用接口 `/self-register/bot{path}`；
-    /// 非 200 / 连不上 / 不是 JSON 一律 `Ok(None)`。
-    pub async fn bot(
-        &self,
-        method: reqwest::Method,
-        path: &str,
-        payload: Option<&Value>,
-    ) -> Result<Option<Value>, BridgeError> {
-        let auth = self.bearer()?;
-        let mut request = self
+    /// 机器人专用接口 `/self-register/bot{path}`（心跳）；非 200 / 连不上 / 不是 JSON 一律 `None`。
+    pub async fn bot(&self, path: &str, payload: &Value) -> Option<Value> {
+        let response = self
             .http
-            .request(method, format!("{}/self-register/bot{path}", self.backend))
+            .post(format!("{}/self-register/bot{path}", self.backend))
             .timeout(self.command_timeout)
-            .header("Authorization", auth);
-        if let Some(p) = payload {
-            request = request.json(p);
-        }
-        let Ok(response) = request.send().await else {
-            return Ok(None);
-        };
+            .header("Authorization", self.bearer())
+            .json(payload)
+            .send()
+            .await
+            .ok()?;
         if response.status().as_u16() != 200 {
-            return Ok(None);
+            return None;
         }
-        Ok(response.json::<Value>().await.ok())
+        response.json::<Value>().await.ok()
     }
 }
 
-/// `backend()` 里拼的请求体：`{discord_id, guild_id, actor_id, **extra}`。
-/// `discord_id` 默认是发起者，传了 `extra_id`（非空）就用它（/revoke 用目标成员）；
-/// `extra` 里的同名键覆盖前面的值但保持位置（Python dict 的 `**` 展开语义）。
-pub fn who_payload(
-    it: &Interaction,
-    extra_id: Option<&str>,
-    extra: &[(&str, Value)],
-) -> Result<Value, HandlerError> {
+/// 发给网关的请求体：`{discord_id, guild_id, ...extra}`，`discord_id` 是发起命令的人。
+pub fn who_payload(it: &Interaction, extra: &[(&str, Value)]) -> Result<Value, HandlerError> {
     let user = it
         .actor()
-        .ok_or_else(|| HandlerError::Type("interaction has no user".into()))?;
+        .ok_or_else(|| HandlerError::Malformed("interaction has no user".into()))?;
     let mut map = Map::new();
-    let discord_id = extra_id.filter(|s| !s.is_empty()).unwrap_or(&user.id);
-    map.insert("discord_id".into(), Value::String(discord_id.to_owned()));
+    map.insert("discord_id".into(), Value::String(user.id.clone()));
     map.insert("guild_id".into(), Value::String(it.guild_id_str()));
-    map.insert("actor_id".into(), Value::String(user.id.clone()));
     for (k, v) in extra {
         map.insert((*k).to_owned(), v.clone());
     }
@@ -164,41 +132,38 @@ mod tests {
         serde_json::from_value(json!({
             "id": "900000000000000010", "type": 2, "token": "t", "guild_id": "900000000000000001",
             "member": {"user": {"id": "900000000000000005", "username": "alice"}},
-            "data": {"name": "revoke"},
+            "data": {"name": "quota"},
         }))
         .unwrap()
     }
 
     #[test]
     fn who_payload_default_and_extra() {
-        let p = who_payload(
-            &interaction(),
-            None,
-            &[("action", json!("open")), ("value", json!("on"))],
-        )
-        .unwrap();
+        let p = who_payload(&interaction(), &[("text", json!("你好"))]).unwrap();
         assert_eq!(
             p.to_string(),
-            r#"{"discord_id":"900000000000000005","guild_id":"900000000000000001","actor_id":"900000000000000005","action":"open","value":"on"}"#
+            r#"{"discord_id":"900000000000000005","guild_id":"900000000000000001","text":"你好"}"#
         );
     }
 
     #[test]
-    fn who_payload_extra_id_targets_other_member() {
-        let p = who_payload(&interaction(), Some("900000000000000077"), &[]).unwrap();
-        assert_eq!(p["discord_id"], "900000000000000077");
-        assert_eq!(p["actor_id"], "900000000000000005");
-        // 空串回落到发起者（Python 的 `extra_id or ...`）
-        let p = who_payload(&interaction(), Some(""), &[]).unwrap();
-        assert_eq!(p["discord_id"], "900000000000000005");
+    fn who_payload_without_a_server_says_none() {
+        let it: Interaction = serde_json::from_value(json!({
+            "id": "900000000000000010", "type": 2, "token": "t",
+            "user": {"id": "900000000000000005", "username": "alice"},
+            "data": {"name": "help"},
+        }))
+        .unwrap();
+        let p = who_payload(&it, &[]).unwrap();
+        assert_eq!(p["guild_id"], "None");
     }
 
     #[test]
     fn who_payload_extra_overrides_in_place() {
-        let p = who_payload(&interaction(), None, &[("actor_id", json!("x"))]).unwrap();
+        let p = who_payload(&interaction(), &[("guild_id", json!("x"))]).unwrap();
         assert_eq!(
             p.to_string(),
-            r#"{"discord_id":"900000000000000005","guild_id":"900000000000000001","actor_id":"x"}"#
+            r#"{"discord_id":"900000000000000005","guild_id":"x"}"#
         );
     }
 }

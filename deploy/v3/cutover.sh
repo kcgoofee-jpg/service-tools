@@ -8,7 +8,8 @@
 #   deploy/v3/cutover.sh previous                  3.0 回到上一版 3.0 镜像（owl-gate:previous）
 #   deploy/v3/cutover.sh status
 #
-# 2.x 的容器只停不删，回滚只需几秒。巡检定时器跟着切换（systemd drop-in）。
+# 2.x 的容器只停不删，回滚只需几秒。巡检跟着切换（systemd drop-in）：3.0 检查 owl-gate / owl-naimei / caddy，
+# 回滚到 2.x 后改查 nai-gate / nai-gate-discord / caddy，不然巡检会把「owl-* 没在跑」当成危险，每 6 小时私信一次站长。
 set -euo pipefail
 
 OWL_DIR=/opt/owl
@@ -19,6 +20,10 @@ BACKUPS=/opt/backups/pre-v3
 LEGACY=(nai-gate-discord nai-gate-warden nai-gate)
 COMPOSE=(docker compose -p owl --env-file "$ENV_FILE" -f "$OWL_DIR/compose.yml")
 PATROL_DROPIN=/etc/systemd/system/nai-patrol.service.d/v3.conf
+# 回滚到 2.x 时才有：让巡检去查 2.x 的容器名
+PATROL_ROLLBACK_DROPIN=/etc/systemd/system/nai-patrol.service.d/rollback.conf
+PATROL_CONTAINERS_V3=owl-gate,owl-naimei,caddy
+PATROL_CONTAINERS_LEGACY=nai-gate,nai-gate-discord,caddy
 
 log() { printf '[%(%F %T)T] %s\n' -1 "$*"; }
 die() { log "✗ $*"; exit 1; }
@@ -36,6 +41,7 @@ wait_healthy() {
 
 patrol_v3() {
   mkdir -p "$(dirname "$PATROL_DROPIN")"
+  rm -f "$PATROL_ROLLBACK_DROPIN"   # 回到 3.0 / 上一版 3.0：容器名用默认值（owl-gate,owl-naimei,caddy）
   cat >"$PATROL_DROPIN" <<'UNIT'
 [Service]
 # 3.0：巡检用 nai-ops（宿主机静态二进制，工作目录仍是 /opt/service-tools，读同一份 .env 和 data/）。
@@ -50,8 +56,14 @@ UNIT
   systemctl daemon-reload
 }
 
-patrol_legacy() {
+patrol_rollback() {
   rm -f "$PATROL_DROPIN"
+  mkdir -p "$(dirname "$PATROL_ROLLBACK_DROPIN")"
+  cat >"$PATROL_ROLLBACK_DROPIN" <<UNIT
+[Service]
+# 已回滚到 2.x：3.0 的 owl-* 容器是停着的，巡检改查 2.x 的容器
+Environment=NAI_GATE_CONTAINERS=$PATROL_CONTAINERS_LEGACY
+UNIT
   systemctl daemon-reload
 }
 
@@ -99,7 +111,7 @@ cmd_up() {
   docker stop -t 120 "${LEGACY[@]}" >/dev/null || true
 
   log "起 3.0"
-  if ! "${COMPOSE[@]}" up -d; then
+  if ! "${COMPOSE[@]}" up -d --remove-orphans; then
     log "✗ 3.0 启动失败，回滚"
     cmd_rollback
     exit 1
@@ -127,23 +139,28 @@ cmd_rollback() {
   docker start nai-gate >/dev/null
   wait_healthy 120 || die "2.x 也没起来：docker logs nai-gate"
   docker start nai-gate-discord nai-gate-warden >/dev/null || true
-  patrol_legacy
-  log "✓ 已回到 2.x"
+  patrol_rollback
+  log "✓ 已回到 2.x（巡检改查：$PATROL_CONTAINERS_LEGACY）"
 }
 
 cmd_previous() {
   docker image inspect owl-gate:previous >/dev/null 2>&1 || die "没有 owl-gate:previous"
   docker tag owl-gate:current owl-gate:failed
   docker tag owl-gate:previous owl-gate:current
-  "${COMPOSE[@]}" up -d
+  "${COMPOSE[@]}" up -d --remove-orphans
   wait_healthy 90 || die "上一版也起不来：先 cutover.sh rollback 回 2.x"
+  patrol_v3
   log "✓ 已回到上一版 3.0（坏的那版标成 owl-gate:failed）"
 }
 
 cmd_status() {
   docker ps -a --filter name=owl- --filter name=nai-gate --format '{{.Names}}\t{{.Status}}\t{{.Image}}'
   curl -fsS -m 3 http://127.0.0.1:3003/healthz && echo
-  [[ -f $PATROL_DROPIN ]] && echo "巡检：3.0（nai-ops）" || echo "巡检：2.x（patrol.py）"
+  if [[ -f $PATROL_ROLLBACK_DROPIN ]]; then
+    echo "巡检：nai-ops，检查 2.x 容器（$PATROL_CONTAINERS_LEGACY）"
+  else
+    echo "巡检：nai-ops，检查 3.0 容器（$PATROL_CONTAINERS_V3）"
+  fi
 }
 
 case ${1:-status} in

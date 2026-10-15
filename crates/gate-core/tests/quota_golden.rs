@@ -1,4 +1,4 @@
-//! 额度算法对拍：`tools/parity/golden/quota.py` 生成的夹具（旧 Python 的真实输出）。
+//! 额度算法对拍：旧 Python 生成的夹具（真实输出，生成脚本见标签 py-final）。
 
 use gate_core::clock::Clock;
 use gate_core::quota::{self, *};

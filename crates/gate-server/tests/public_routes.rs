@@ -227,6 +227,11 @@ async fn terms_and_privacy_pages() {
     ] {
         assert!(privacy.contains(kept), "隐私政策缺：{kept}");
     }
+    // 图片保留期与线上一致（168 小时 = 7 天）；机器人不私信、也不做「防多人共用」的行为统计（docs/v3-deviations.md #79）
+    assert!(privacy.contains("生成的图片 7 天后自动删除"));
+    for gone in ["防多人共用", "行为统计", "私信通知", "默认保留数天"] {
+        assert!(!privacy.contains(gone), "隐私政策还有「{gone}」");
+    }
 }
 
 #[tokio::test]

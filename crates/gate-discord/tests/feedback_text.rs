@@ -1,15 +1,13 @@
-//! `/反馈` 的 3.0 流程（docs/v3-deviations.md #52）：点命令立刻弹出一个只有一段文字的弹窗（不先问网关），
-//! 提交后把文字交给网关，回执只有本人可见。冻结的旧版夹具里 `feedback_*` 场景（先取题目、5 个下拉框）
-//! 在 `flows.rs` 里滤掉了，这里是新流程的对拍：Discord 请求逐键比较，网关请求逐字段比较。
+//! `/反馈` 的流程（docs/v3-deviations.md #52）：点命令立刻弹出一个只有一段文字的弹窗（不先问网关），
+//! 提交后把文字交给网关，回执只有本人可见。Discord 请求逐键比较，网关请求逐字段比较。
 //!
-//! 弹窗提交的负载形状（Label 里包着 TextInput，取值字段是 `value`）依据 Discord 文档的 Modal Submit 结构，
-//! 与旧版读 Label 里下拉框 `values` 的方式一致。
+//! 弹窗提交的负载形状（Label 里包着 TextInput，取值字段是 `value`）依据 Discord 文档的 Modal Submit 结构。
 
 mod common;
 
 use std::sync::Arc;
 
-use common::{APP, BOT_ID, GUILD, MockServer, NOW, OWNER, SECRET, SITE};
+use common::{APP, BOT_ID, GUILD, MockServer, NOW, SECRET, SITE};
 use gate_discord::config::NaimeiConfig;
 use gate_discord::events::{GuildInfo, Interaction, User};
 use gate_discord::naimei::Naimei;
@@ -23,7 +21,7 @@ fn naimei(server: &MockServer) -> Arc<Naimei> {
         guild_id: GUILD.parse().unwrap(),
         backend: server.backend_url(),
         site: SITE.into(),
-        secret: Some(SECRET.into()),
+        secret: SECRET.into(),
     };
     let app = Naimei::with_clock(cfg, Some(server.discord_proxy()), Box::new(|| NOW));
     app.set_bot_user(User {
@@ -35,7 +33,6 @@ fn naimei(server: &MockServer) -> Arc<Naimei> {
     app.upsert_guild(GuildInfo {
         id: GUILD.into(),
         name: Some("测试服".into()),
-        owner_id: Some(OWNER.into()),
         unavailable: false,
     });
     app
@@ -117,7 +114,6 @@ async fn command_opens_the_modal_at_once_without_asking_the_gateway() {
         calls[0]["path"],
         "/interactions/900000000000000201/tok-1/callback"
     );
-    // 查询参数和其它回调一样（flows.rs 把 true / false 统一成 discord.py 的 1 / 0 再比）
     assert_eq!(calls[0]["query"], json!({"with_response": "true"}));
     // 回调类型 9 = 弹窗；内容逐键等于 handlers::feedback_modal()
     assert_eq!(
@@ -177,8 +173,7 @@ async fn submit_reads_the_text_and_sends_it_to_the_gateway_with_an_ephemeral_rec
     assert_eq!(bridge[0]["content_type"], "application/json");
     assert_eq!(
         bridge[0]["json"],
-        json!({"discord_id": MEMBER, "guild_id": GUILD, "actor_id": MEMBER,
-               "text": text, "username": "alice"})
+        json!({"discord_id": MEMBER, "guild_id": GUILD, "text": text, "username": "alice"})
     );
     assert!(bridge[0]["json"].get("answers").is_none());
 
@@ -259,19 +254,28 @@ async fn gateway_down_gives_the_usual_unavailable_receipt() {
 }
 
 #[tokio::test]
-async fn other_modals_are_ignored() {
+async fn every_modal_submit_is_treated_as_the_feedback_form() {
+    // 机器人只有 /反馈 这一个弹窗，不再区分 custom_id：升级前发出去的旧版选择题弹窗提交上来，
+    // 取不到文字框的内容，交给网关当空内容拒绝，成员会看到「写点什么再提交吧～」，而不是没有回应
     let server = MockServer::start().await;
     let app = naimei(&server);
-    server.reset(&Value::Null, &Value::Null);
-    // 升级前发出去的旧版选择题弹窗（随机 32 位十六进制 custom_id）、以及不认识的弹窗：不回应，也不碰网关
-    for (n, id) in [
-        (8, "0123456789abcdef0123456789abcdef"),
-        (9, "feedback"),
-        (10, ""),
-    ] {
-        app.handle_interaction(submit(n, id, text_components("你好呀")))
-            .await;
-    }
-    assert!(server.discord_log().is_empty());
-    assert!(bridge_paths(&server).is_empty());
+    server.reset(
+        &json!({"/self-register/feedback": {"status": 400, "json": {"detail": "写点什么再提交吧～"}}}),
+        &Value::Null,
+    );
+    app.handle_interaction(submit(
+        8,
+        "0123456789abcdef0123456789abcdef",
+        json!([{"type": 18, "id": 1, "component": {"type": 3, "id": 2, "custom_id": "sel-a", "values": ["满意"]}}]),
+    ))
+    .await;
+    let bridge = server.bridge_log();
+    assert_eq!(bridge.len(), 1, "{bridge:?}");
+    assert_eq!(bridge[0]["json"]["text"], "");
+    let calls = server.discord_log();
+    assert_eq!(calls.len(), 2, "{calls:?}");
+    assert_eq!(
+        calls[1]["json"],
+        json!({"content": "写点什么再提交吧～", "tts": false, "flags": 64})
+    );
 }

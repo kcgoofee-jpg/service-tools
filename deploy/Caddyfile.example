@@ -1,26 +1,49 @@
 # Caddy 自动申请并续期 HTTPS 证书。把域名换成你自己的，并让它的 A 记录指向本机公网 IP。
-# 用法（Caddy 以 host 网络运行，才能访问只绑定在 127.0.0.1 的网关）：
-#   docker run -d --name caddy --restart unless-stopped --network host \
-#     -v $PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro -v caddy_data:/data -v caddy_config:/config caddy:2
+#
+# 与 deploy/v3/compose.yml 配套：网关容器接在 Docker 网络 service-tools_edge 上，固定地址 172.30.0.10:8000，
+# Caddy 容器接入同一个网络直连它（不经过宿主机的 127.0.0.1:3003 端口转发）：
+#   docker network create --subnet 172.30.0.0/24 service-tools_edge      # 只需一次
+#   docker run -d --name caddy --restart unless-stopped --network service-tools_edge \
+#     -p 80:80 -p 443:443 -p 443:443/udp \
+#     -v /opt/caddy/Caddyfile:/etc/caddy/Caddyfile:ro -v caddy_data:/data -v caddy_config:/config caddy:2
+# 网关用 FORWARDED_ALLOW_IPS 只信任 Caddy 所在网桥（172.30.0.1）带来的 X-Forwarded-For，compose 里已经配好。
+#
+# 注意：改了这份文件，服务器上正在用的 Caddyfile（/opt/caddy/Caddyfile）不会自动更新，要手动拷过去再 reload。
 gate.example.com {
-	# 机器人与网关之间的桥接接口只在容器内网使用，不对公网开放。
-	# 用通配：以后新增的桥接路由默认也不会暴露（旧的 OAuth 领取回调已删除，不再需要放行）。
+	# 桥接接口只在容器内网使用：整段屏蔽；以后新增的桥接路由默认不暴露。
 	@bridge {
 		path /self-register /self-register/*
 	}
 	respond @bridge 404
-	respond /openapi.json 404
-	# 只压缩网页、后台和公开 JSON；出图接口（含流式）不压缩，避免缓冲
-	@compress path / /admin /admin/* /status /status.json /public/* /static/*
+
+	# 只压缩网页、后台、前端资源和公开 JSON；出图接口与两条实时推送（SSE）不压缩，避免缓冲
+	@compress {
+		path / /admin /admin/* /status /status.json /public/* /_owl/*
+		not path /public/live/stream /admin/api/events
+	}
 	encode @compress zstd gzip
 	header {
 		Strict-Transport-Security "max-age=31536000"
 		X-Content-Type-Options "nosniff"
 		-Server
 	}
-	# 部署重启时网关短暂连不上：挂住请求、每 0.5 秒重连，最多 45 秒，不直接回 502（只重试连不上的情况，不会重复发送）
-	reverse_proxy 127.0.0.1:3003 {
-		lb_try_duration 45s
+
+	# 状态页独立容灾降级：若网关容器重启或 502/503/504，2 秒内快速降级到独立离线状态页，避免同生共死报原始 502
+	handle /status {
+		reverse_proxy 172.30.0.10:8000 {
+			lb_try_duration 2s
+			lb_try_interval 500ms
+			@status_err status 502 503 504
+			handle_response @status_err {
+				header Content-Type "text/html; charset=utf-8"
+				respond `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><title>系统状态 · 猫头鹰公益站</title><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{font-family:system-ui,-apple-system,sans-serif;background:#0f1117;color:#e6edf3;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:20px;box-sizing:border-box}.card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:32px;max-width:520px;width:100%;text-align:center;box-shadow:0 8px 24px rgba(0,0,0,0.5)}h1{font-size:22px;margin:0 0 16px;color:#f0883e}p{color:#8b949e;line-height:1.6;font-size:14px;margin:0 0 20px}.btn{display:inline-block;padding:10px 20px;background:#238636;color:#fff;text-decoration:none;border-radius:6px;font-weight:600;font-size:14px}.btn:hover{background:#2ea043}.badge{display:inline-block;padding:4px 10px;background:#f0883e22;color:#f0883e;border-radius:20px;font-size:12px;font-weight:600;margin-bottom:12px}</style></head><body><div class="card"><div class="badge">容灾降级模式</div><h1>网关自检中</h1><p>网关主服务正在进行版本发布或例行自检，将在数秒内恢复。<br>外部 NovelAI 服务目前正常，请求正在队列中安全等待。</p><p><a class="btn" href="https://status.novelai.net" target="_blank" rel="noopener">查看 NovelAI 官方状态 ↗</a></p><p style="font-size:12px;color:#484f58;margin-top:24px">页面每 15 秒自动重新检查连接…</p></div><script>setTimeout(function(){ location.reload(); }, 15000);</script></body></html>` 200
+			}
+		}
+	}
+
+	# 部署重启时网关短暂连不上：挂住请求、每 0.5 秒重连，最多 150 秒，不直接回 502（只重试连不上的情况，不会重复发送）
+	reverse_proxy 172.30.0.10:8000 {
+		lb_try_duration 150s
 		lb_try_interval 500ms
 	}
 }

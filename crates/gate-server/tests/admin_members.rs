@@ -33,29 +33,27 @@ async fn ready() -> (Env, Admin) {
     (e, a)
 }
 
-/// 配齐自助领取的网关：真实的 `RegistrationService`，Discord REST 指向本机假服务，私信总闸门打开。
+/// 配齐自助领取的网关：真实的 `RegistrationService`，Discord REST 指向本机假服务。
 async fn ready_reg() -> (Env, Admin, MockDiscord) {
     let d = MockDiscord::start().await;
     let vars = registration_env(&d.url());
     let refs: Vec<(&str, &str)> = vars.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
     let e = setup(&refs).await;
-    e.state.db.set_setting("dm_enabled", "1").await.unwrap();
     let a = Admin::login(&e.state).await;
     (e, a, d)
 }
 
-/// 假 Discord 收到的私信：(收信人, 文本)。一条私信 = 先建私信频道、再发消息。
-fn dms(d: &MockDiscord) -> Vec<(String, String)> {
-    d.calls()
-        .windows(2)
-        .filter(|w| w[0][1] == "/users/@me/channels" && w[1][1] == "/channels/dm-1/messages")
-        .map(|w| {
-            (
-                w[0][2]["recipient_id"].as_str().unwrap().to_string(),
-                w[1][2]["content"].as_str().unwrap().to_string(),
-            )
+/// 机器人不私信成员（docs/v3-deviations.md #76）：假 Discord 上不能出现「开私信频道」或「发消息」的请求。
+fn assert_no_dm(d: &MockDiscord) {
+    let dm: Vec<_> = d
+        .calls()
+        .into_iter()
+        .filter(|c| {
+            let path = c[1].as_str().unwrap_or("");
+            path == "/users/@me/channels" || path.ends_with("/messages")
         })
-        .collect()
+        .collect();
+    assert!(dm.is_empty(), "不该有私信请求：{dm:?}");
 }
 
 #[tokio::test]
@@ -432,61 +430,31 @@ async fn regenerate_replaces_the_key_immediately() {
 }
 
 #[tokio::test]
-async fn regenerate_dm_goes_through_the_registration_service() {
-    let (e, a, d) = ready_reg().await;
+async fn regenerate_shows_the_new_key_and_never_dms() {
+    let (_e, a, d) = ready_reg().await;
     let url = format!("{A}/keys/1/regenerate");
-    // 没有绑定 Discord 的 Key：只换 Key，不私信
-    a.req("POST", &url, None).await;
-    assert!(d.calls().is_empty());
     a.post(
         &format!("{A}/keys/1/bind-discord"),
         json!({"discord_id": "900000000000000001", "username": "u1"}),
     )
     .await;
-    let r = a.req("POST", &url, None).await;
-    let token = r.json()["token"].as_str().unwrap().to_string();
-    assert_eq!(
-        dms(&d),
-        [(
-            "900000000000000001".to_string(),
-            format!(
-                "🦉 猫头鹰公益站通知：站长为你重置了 Key，旧 Key 已失效。新的 Key（请妥善保存）：`{token}`"
-            )
-        )]
-    );
-    // 操作日志里的 Key 被打码
+    // 绑了 Discord 的成员：新 Key 只在响应里给站长（手动转交），机器人不私信；旧的 `notify` 参数被忽略、不报错
+    for suffix in ["", "?notify=1", "?notify=0"] {
+        let r = a.req("POST", &format!("{url}{suffix}"), None).await;
+        assert_eq!(r.status, 200, "{suffix}: {}", r.text());
+        assert!(r.json()["token"].as_str().unwrap().starts_with("nai-"));
+        assert_eq!(r.headers["cache-control"], "no-store");
+    }
+    assert_no_dm(&d);
     let acts = a.actions().await;
-    let dm = acts
-        .iter()
-        .find(|(act, ..)| act == "私信成员")
-        .expect("私信日志");
-    assert_eq!((dm.1.as_str(), dm.3), ("Key #1", true));
     assert!(
-        dm.2.starts_with(
-            "已私信：站长为你重置了 Key，旧 Key 已失效。新的 Key（请妥善保存）：`nai-***`"
-        ),
-        "{}",
-        dm.2
+        acts.iter().all(|(act, ..)| act != "私信成员"),
+        "不再有「私信成员」操作记录：{acts:?}"
     );
-    assert!(!acts.iter().any(|(_, _, d, _)| d.contains(&token)));
-    // ?notify=0 不私信
-    a.req("POST", &format!("{url}?notify=0"), None).await;
-    assert_eq!(dms(&d).len(), 1);
-    // 私信总闸门关着：被拦下，日志里记原因
-    e.state.db.set_setting("dm_enabled", "0").await.unwrap();
-    a.req("POST", &url, None).await;
-    assert_eq!(dms(&d).len(), 1);
-    // 对方关了私信（Discord 拒绝建频道）：记失败
-    e.state.db.set_setting("dm_enabled", "1").await.unwrap();
-    d.set_closed(true);
-    a.req("POST", &url, None).await;
-    let acts = a.actions().await;
-    assert!(acts.iter().any(|(act, _, det, ok)| act == "私信成员"
-        && det.starts_with("未私信（私信总开关已关闭）：")
-        && *ok));
-    assert!(acts.iter().any(|(act, _, det, ok)| act == "私信成员"
-        && det == "私信失败（对方可能关闭了私信）"
-        && !ok));
+    assert!(
+        acts.iter().any(|(act, ..)| act == "重新生成 Key"),
+        "{acts:?}"
+    );
 }
 
 #[tokio::test]
@@ -651,33 +619,28 @@ async fn patch_quota_auto_hands_the_key_to_the_algorithm() {
 }
 
 #[tokio::test]
-async fn patch_notifies_member_about_visible_changes() {
+async fn patch_never_dms_and_ignores_the_old_notify_flag() {
     let (_e, a, d) = ready_reg().await;
     a.post(
         &format!("{A}/keys/1/bind-discord"),
         json!({"discord_id": "900000000000000001"}),
     )
     .await;
-    a.patch(
-        &format!("{A}/keys/1"),
-        json!({"enabled": false, "daily_images": 50, "daily_anlas": 0, "image_model_scope": "all", "allow_anlas": false}),
-    )
-    .await;
-    let sent = dms(&d);
-    assert_eq!(sent.len(), 1);
-    assert_eq!(
-        sent[0].1,
-        "🦉 猫头鹰公益站通知：站长调整了你的 Key：\n• 你的 Key 已被站长暂停，暂时无法使用（有疑问请到 🛠️｜问题反馈）\n• 每日图片额度：100 → 50\n• 可用模型：含 V5"
-    );
-    // notify=false 不私信；没有可见变化也不私信
-    a.patch(
-        &format!("{A}/keys/1"),
-        json!({"enabled": true, "notify": false}),
-    )
-    .await;
-    a.patch(&format!("{A}/keys/1"), json!({"name": "只改名"}))
-        .await;
-    assert_eq!(dms(&d).len(), 1);
+    // 有可见变化时旧版会私信成员；现在不发，`notify: true / false` 都照常保存
+    for notify in [json!(true), json!(false)] {
+        let r = a
+            .patch(
+                &format!("{A}/keys/1"),
+                json!({"enabled": false, "daily_images": 50, "daily_anlas": 0,
+                       "image_model_scope": "all", "allow_anlas": false, "notify": notify}),
+            )
+            .await;
+        assert_eq!(r.status, 200, "{}", r.text());
+        assert_eq!(r.json()["key"]["enabled"], false);
+        assert_eq!(r.json()["key"]["daily_images"], 50);
+    }
+    assert_no_dm(&d);
+    assert!(a.actions().await.iter().all(|(act, ..)| act != "私信成员"));
 }
 
 #[tokio::test]
@@ -939,7 +902,7 @@ async fn delete_key_revokes_or_bans_through_the_registration_service() {
         json!({"discord_id": "900000000000000004", "username": "u4"}),
     )
     .await;
-    // 撤销：删 Key 和领取记录；notify=0 不私信
+    // 撤销：删 Key 和领取记录；旧的 `notify` 参数被忽略
     let r = a.delete(&format!("{A}/keys/{k3}?notify=0")).await;
     assert_eq!(
         r.json(),
@@ -955,7 +918,7 @@ async fn delete_key_revokes_or_bans_through_the_registration_service() {
             .is_none()
     );
     assert!(d.calls().is_empty());
-    // 封禁：先私信，再写封禁表（带上领取记录里的资料）、撤销 Key
+    // 封禁：写封禁表（带上领取记录里的资料）、撤销 Key；不私信
     let r = a
         .delete(&format!("{A}/keys/{k4}?ban=true&reason=%E5%88%B7%E9%87%8F"))
         .await;
@@ -963,14 +926,7 @@ async fn delete_key_revokes_or_bans_through_the_registration_service() {
         r.json(),
         json!({"ok": true, "discord_id": "900000000000000004", "banned": true})
     );
-    assert_eq!(
-        dms(&d),
-        [(
-            "900000000000000004".to_string(),
-            "🦉 猫头鹰公益站通知：你的 Key 已被站长删除，并且这个 Discord 账号不能再领取。"
-                .to_string()
-        )]
-    );
+    assert_no_dm(&d);
     let bans = rows(
         &e.state,
         "SELECT discord_id, reason, username, banned_by FROM discord_bans",
@@ -1003,7 +959,7 @@ async fn delete_key_revokes_or_bans_through_the_registration_service() {
         a.delete(&format!("{A}/keys/{k6}")).await.json(),
         json!({"ok": true})
     );
-    assert_eq!(dms(&d).len(), 1);
+    assert_no_dm(&d);
 }
 
 #[tokio::test]
@@ -1110,7 +1066,7 @@ async fn gift_needs_the_registration_service() {
 }
 
 #[tokio::test]
-async fn gift_issues_key_coupon_dm_and_reply() {
+async fn gift_issues_key_and_coupon_and_returns_the_key_for_hand_over() {
     let (e, a, d) = ready_reg().await;
     let g = format!("{A}/gift");
     a.post(
@@ -1121,7 +1077,7 @@ async fn gift_issues_key_coupon_dm_and_reply() {
     a.post(&g, json!({"discord_id": "900000000000000071"}))
         .await
         .assert_detail(409, "这个 Discord 账号已被站长停用");
-    // 新账号：发 Key + 重置券 + 私信（带理由和券说明）
+    // 新账号：发 Key + 重置券；机器人不私信，新 Key 在响应里交给站长手动转交
     let r = a
         .post(
             &g,
@@ -1131,23 +1087,15 @@ async fn gift_issues_key_coupon_dm_and_reply() {
     assert_eq!(r.status, 200, "{}", r.text());
     let v = r.json();
     assert_eq!(v["new_key"], true);
-    assert_eq!(v["dm_sent"], true);
     assert_eq!(v["coupon"]["note"], "唱得好听");
-    assert!(v.get("key").is_none(), "私信发出去了就不回 Key 原文");
+    for gone in ["dm_sent", "dm_block", "replied"] {
+        assert!(v.get(gone).is_none(), "{gone} 已删除：{v}");
+    }
     let key_id = v["key_id"].as_i64().unwrap();
     let key = e.state.db.get_key(key_id).await.unwrap().unwrap();
     assert_eq!(key["name"], "七十 (@u70)");
-    let sent = dms(&d);
-    assert_eq!(sent.len(), 1);
-    assert!(
-        sent[0].1.contains(key["token"].as_str().unwrap()),
-        "欢迎私信里有 Key"
-    );
-    assert!(sent[0].1.ends_with(
-        "\n\n🎁 这把 Key 是奶妹送你的（唱得好听），还附带一张重置券，网页登录开放后在首页登录即可使用、7 天内有效～"
-    ));
-    // 私信总闸门关着：回 Key 原文和原因，交给站长转交；不发券（coupon_days=0）；回复消息
-    e.state.db.set_setting("dm_enabled", "0").await.unwrap();
+    assert_eq!(v["key"], key["token"], "新 Key 原文在响应里");
+    // 不发券（coupon_days=0）；旧版的 `reply`（让奶妹回复某条消息）被忽略，不发任何消息
     let r = a
         .post(
             &g,
@@ -1156,25 +1104,10 @@ async fn gift_issues_key_coupon_dm_and_reply() {
         )
         .await;
     let v = r.json();
-    assert_eq!(v["dm_sent"], false);
-    assert_eq!(v["dm_block"], "私信总开关已关闭");
     assert!(v["key"].as_str().unwrap().starts_with("nai-"));
     assert!(v.get("coupon").is_none());
-    assert_eq!(v["replied"], true);
-    assert!(d.calls().contains(&json!([
-        "POST",
-        "/channels/123/messages",
-        {"content": "好耶", "message_reference": {"message_id": "5", "fail_if_not_exists": false},
-         "allowed_mentions": {"parse": [], "replied_user": true}}
-    ])));
-    // 对方关了私信：没有被拦下的原因，用默认说法
-    e.state.db.set_setting("dm_enabled", "1").await.unwrap();
-    d.set_closed(true);
-    let r = a
-        .post(&g, json!({"discord_id": "900000000000000073"}))
-        .await;
-    assert_eq!(r.json()["dm_block"], "对方关闭了私信");
-    d.set_closed(false);
+    assert!(v.get("replied").is_none());
+    assert_no_dm(&d);
     // 名额：奖励的 Key 不占别人的名额，已领人数超过上限时上限静默加到已领人数
     e.state
         .db
@@ -1184,7 +1117,7 @@ async fn gift_issues_key_coupon_dm_and_reply() {
     let r = a
         .post(&g, json!({"discord_id": "900000000000000074"}))
         .await;
-    assert_eq!(r.json()["max_users"], 4);
+    assert_eq!(r.json()["max_users"], 3);
     assert_eq!(
         e.state
             .db
@@ -1192,10 +1125,9 @@ async fn gift_issues_key_coupon_dm_and_reply() {
             .await
             .unwrap()
             .as_deref(),
-        Some("4")
+        Some("3")
     );
-    // 已经有 Key 的账号：不重复发，仍然发券，不私信
-    let before = dms(&d).len();
+    // 已经有 Key 的账号：不重复发（响应里没有 key），仍然发券
     let r = a
         .post(
             &g,
@@ -1203,19 +1135,17 @@ async fn gift_issues_key_coupon_dm_and_reply() {
         )
         .await;
     let v = r.json();
-    assert_eq!(
-        (v["new_key"].clone(), v.get("dm_sent").cloned()),
-        (json!(false), None)
-    );
-    assert_eq!(dms(&d).len(), before);
+    assert_eq!(v["new_key"], false);
+    assert!(v.get("key").is_none());
     let acts = a.actions().await;
     assert!(acts.iter().any(|(act, t, det, _)| act == "奖励成员"
         && t == "Discord:900000000000000070"
-        && det == "新发 Key · 重置券 7 天 · 唱得好听 · 已私信"));
+        && det == "新发 Key · 重置券 7 天 · 唱得好听"));
     assert!(
         acts.iter()
             .any(|(act, _, det, _)| act == "奖励成员" && det == "重置券 7 天 · 再夸一次")
     );
+    assert_no_dm(&d);
 }
 
 #[tokio::test]

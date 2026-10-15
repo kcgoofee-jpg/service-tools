@@ -1,12 +1,12 @@
 //! Golden 夹具读取与 Python 语义比较。
 //!
-//! 夹具由 `tools/parity/golden/*.py` 在旧 Python 代码上生成（3.0 上线后 Python 已整体删除，生成脚本和旧代码都在
+//! 夹具由旧 Python 代码生成（3.0 上线后 Python 已整体删除，生成脚本和旧代码都在
 //! git 标签 `py-final` 里；夹具从此冻结，不再重新生成——行为有意改动时，在测试里把期望侧对应部分去掉并注明
 //! `docs/v3-deviations.md` 的编号）。一行一个用例：
 //! `{"fn": "...", "args": [...], "kwargs": {...}, "out": ..., "err": null | {"type": "...", "msg": "..."}}`
 //! 另可带 `"after": {...}`（原地修改型函数：调用后的入参）与 `"note"`。
 //!
-//! 编码约定（与 `tools/parity/golden/_golden.py` 的 `enc()` 一一对应）：
+//! 编码约定（与 py-final 标签里生成脚本的 `enc()` 一一对应）：
 //! - int → JSON 整数，float → 带小数点或指数的 JSON 数（Python repr），二者类型不混；
 //! - 非有限浮点 → `{"$f": "inf" | "-inf" | "nan"}`；
 //! - bytes → `{"$b": "<base64>"}`；tuple / set / frozenset → 列表（set 已排序）；

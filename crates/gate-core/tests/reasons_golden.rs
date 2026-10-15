@@ -1,4 +1,4 @@
-//! `reasons` 与旧 Python（app/reasons.py）对拍：夹具由 tools/parity/golden/reasons.py 生成。
+//! `reasons` 与旧 Python（app/reasons.py）对拍：夹具由旧 Python 生成（脚本见标签 py-final）。
 
 use gate_core::reasons::{self, Reason};
 use gate_golden::{assert_eq_py_ordered, load};

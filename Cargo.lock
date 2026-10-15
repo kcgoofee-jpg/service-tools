@@ -890,7 +890,6 @@ name = "gate-core"
 version = "3.0.0"
 dependencies = [
  "base64 0.22.1",
- "bytes",
  "fancy-regex",
  "gate-golden",
  "hex",
@@ -930,9 +929,6 @@ dependencies = [
  "axum",
  "clap",
  "futures",
- "gate-core",
- "gate-golden",
- "rand 0.9.5",
  "reqwest",
  "rustls",
  "serde",
@@ -950,7 +946,6 @@ dependencies = [
 name = "gate-golden"
 version = "3.0.0"
 dependencies = [
- "base64 0.22.1",
  "flate2",
  "serde_json",
 ]
@@ -965,10 +960,8 @@ dependencies = [
  "flate2",
  "gate-core",
  "gate-db",
- "gate-golden",
  "hex",
  "jiff",
- "rand 0.9.5",
  "regex",
  "reqwest",
  "rusqlite",
@@ -1009,7 +1002,6 @@ dependencies = [
  "rust-embed",
  "rustix",
  "scrypt",
- "serde",
  "serde_json",
  "sha2",
  "subtle",
@@ -1030,7 +1022,6 @@ version = "3.0.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
- "bytes",
  "futures",
  "image",
  "rmpv",
@@ -1043,13 +1034,11 @@ dependencies = [
 name = "gate-upstream"
 version = "3.0.0"
 dependencies = [
- "axum",
  "bytes",
  "futures",
  "gate-core",
  "gate-testkit",
  "hex",
- "http",
  "rand 0.9.5",
  "serde_json",
  "sha2",
