@@ -188,7 +188,6 @@ async fn setup_reg(extra: &[(&str, &str)]) -> (Env, Discord) {
         ("DISCORD_GUILD_ID", GUILD),
         ("SITE_URL", "https://gate.test"),
         ("DISCORD_API_BASE", &base),
-        ("REGISTER_RESET_AT", "07:00"),
     ];
     vars.extend_from_slice(extra);
     let e = setup(&vars).await;
@@ -860,8 +859,6 @@ async fn invite_key_binds_without_minting_and_ignores_the_closed_switch() {
             "这个 Discord 账号已经领取过 Key，可用 /quota 查看、/resetkey 重置。"
         )
     );
-    // 邀请 Key 不受每日清空影响
-    assert_eq!(svc(&e).reset_all().await.unwrap(), 0);
     assert!(e.state.db.get_key(key_id).await.unwrap().is_some());
     assert!(
         actions(&e)
@@ -1347,6 +1344,33 @@ async fn member_role_is_granted_removed_and_retried() {
 }
 
 #[tokio::test]
+async fn sync_roles_removes_at_most_five_per_run() {
+    // 待摘身份组一次堆起很多时（比如全站重置之后），每轮最多摘 5 个，剩下的留到下一轮（docs/v3-deviations.md #78）
+    let (e, d) = setup_reg(&[("DISCORD_MEMBER_ROLE_ID", "900000000000000055")]).await;
+    let ids: Vec<String> = (0..7).map(|i| format!("90000000000000040{i}")).collect();
+    for id in &ids {
+        e.state
+            .db
+            .queue_role_removal(id, e.state.now())
+            .await
+            .unwrap();
+    }
+    let deletes = |d: &Discord| {
+        d.calls()
+            .iter()
+            .filter(|c| c.starts_with("DELETE "))
+            .count()
+    };
+    assert_eq!(svc(&e).sync_roles().await.unwrap(), 5);
+    assert_eq!(deletes(&d), 5);
+    assert_eq!(e.state.db.pending_role_removals().await.unwrap().len(), 2);
+    assert_eq!(svc(&e).sync_roles().await.unwrap(), 2);
+    assert_eq!(deletes(&d), 7);
+    assert!(e.state.db.pending_role_removals().await.unwrap().is_empty());
+    assert_eq!(svc(&e).sync_roles().await.unwrap(), 0);
+}
+
+#[tokio::test]
 async fn failed_role_grant_does_not_block_registration() {
     let (e, d) = setup_reg(&[("DISCORD_MEMBER_ROLE_ID", "900000000000000055")]).await;
     open_registration(&e).await;
@@ -1528,77 +1552,6 @@ async fn profile_backfill_names_default_keys() {
         "已补全的不再查"
     );
     assert_eq!(d.calls(), ["GET /users/900000000000000260"]);
-}
-
-#[tokio::test]
-async fn reset_all_clears_regular_members_but_spares_disabled_and_invites() {
-    let (e, _d) = setup_reg(&[("REGISTER_MAX_USERS", "0")]).await;
-    open_registration(&e).await;
-    for id in ["900000000000000301", "900000000000000302"] {
-        assert_eq!(issue(&e, id).await.0, 200);
-    }
-    // 其中一人被停用：不在清空范围
-    let row = e
-        .state
-        .db
-        .key_row_for_discord("900000000000000302")
-        .await
-        .unwrap()
-        .unwrap();
-    let mut f = serde_json::Map::new();
-    f.insert("enabled".into(), json!(0));
-    e.state
-        .db
-        .update_key(row["id"].as_i64().unwrap(), &f)
-        .await
-        .unwrap();
-    assert_eq!(svc(&e).reset_all().await.unwrap(), 1);
-    assert!(
-        e.state
-            .db
-            .key_row_for_discord("900000000000000301")
-            .await
-            .unwrap()
-            .is_none()
-    );
-    assert!(
-        e.state
-            .db
-            .key_row_for_discord("900000000000000302")
-            .await
-            .unwrap()
-            .is_some()
-    );
-    // 用量账本保留、成员可以重新领
-    assert_eq!(issue(&e, "900000000000000301").await.0, 200);
-    assert!(
-        actions(&e)
-            .await
-            .iter()
-            .map(action_tuple)
-            .any(|a| a.0 == "系统"
-                && a.1 == "每日清空自助注册"
-                && a.3 == "清空 1 人（REGISTER_RESET_AT）")
-    );
-    // 封禁不会被清空解除
-    svc(&e)
-        .ban("900000000000000301", "测试", "站长")
-        .await
-        .unwrap();
-    assert_eq!(svc(&e).reset_all().await.unwrap(), 0);
-    assert!(svc(&e).is_banned("900000000000000301").await.unwrap());
-    // 调度：HH:MM 按 TZ，格式不对返回 None
-    let tz = e.state.clock.tz();
-    let wait = gate_server::registration::reset_delay_secs(svc(&e).reset_at(), tz, e.state.now());
-    assert!(wait.is_some_and(|w| w > 0.0 && w <= 86400.0));
-    assert_eq!(
-        gate_server::registration::reset_delay_secs("", tz, 0.0),
-        None
-    );
-    assert_eq!(
-        gate_server::registration::scheduled_reset(&e.state).await,
-        Some(0)
-    );
 }
 
 #[tokio::test]

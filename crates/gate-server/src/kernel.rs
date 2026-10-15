@@ -109,7 +109,7 @@ pub struct RegistrarSettings {
 }
 
 /// 注册服务（领 Key）在内核里的样子（旧版 `kernel.extra["registrar"]`）：内核模块与自动驾驶只用名额上限和占用人数。
-/// 摘身份组 / 同步 / 退群回收 / 定时清空这些要碰 Discord 的后台工作不走这里，见 [`crate::registration`]。
+/// 摘身份组 / 同步 / 退群回收这些要碰 Discord 的后台工作不走这里，见 [`crate::registration`]。
 /// 线上用 [`ServiceRegistrar`]（`startup` 自动接上）；对拍测试换成读库的假实现。
 pub trait KernelRegistrar: Send + Sync {
     /// `registrar.settings()`：站长在后台保存的优先，其次是启动时的环境默认值。

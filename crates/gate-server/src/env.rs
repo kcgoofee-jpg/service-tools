@@ -96,7 +96,6 @@ pub struct RegistrationEnv {
     pub key_expires_days: i64,
     pub key_rpm: i64,
     pub max_users: i64,
-    pub reset_at: String,
     pub key_features: String,
     pub min_account_days: i64,
     pub member_role_id: String,
@@ -273,7 +272,6 @@ impl EnvConfig {
                 key_expires_days: r.nonneg("REGISTER_EXPIRES_DAYS", 30),
                 key_rpm: r.nonneg("REGISTER_RPM", 5).max(1),
                 max_users: r.nonneg("REGISTER_MAX_USERS", 10),
-                reset_at: r.trimmed("REGISTER_RESET_AT"),
                 key_features: {
                     let f = r.str("REGISTER_FEATURES", "image");
                     f.trim().to_string()

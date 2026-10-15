@@ -704,7 +704,7 @@ async fn ops_snapshot_defaults() {
         json!({
             "registration": {"configured": false, "open": false, "max_users": 0, "features": null, "daily_images": 30,
                 "daily_v5": 0, "image_scope": "legacy", "expires_days": 30, "role_guild": "", "role_id": "", "role_note": "",
-                "active": 0, "reset_at": "", "v5_capacity": {"need": 0, "global": 150, "short": false, "message": ""}},
+                "active": 0, "v5_capacity": {"need": 0, "global": 150, "short": false, "message": ""}},
             "features": {
                 "global": {"image": true, "upscale": true, "augment": true, "vibe": true, "tags": true, "text": true, "voice": true},
                 "labels": {"image": "文生图", "upscale": "放大", "augment": "导演工具（线稿、上色等）", "vibe": "Vibe 编码",
@@ -743,7 +743,6 @@ async fn ops_snapshot_defaults() {
             "role_id",
             "role_note",
             "active",
-            "reset_at",
             "v5_capacity"
         ]
     );
@@ -955,7 +954,6 @@ async fn ops_registration_uses_env_defaults_when_configured() {
         ("REGISTER_IMAGE_SCOPE", "all"),
         ("REGISTER_EXPIRES_DAYS", "14"),
         ("REGISTER_FEATURES", "image,vibe"),
-        ("REGISTER_RESET_AT", "每日 7 点"),
     ])
     .await;
     let api = Api::login(&e).await;
@@ -992,7 +990,7 @@ async fn ops_registration_uses_env_defaults_when_configured() {
         v["registration"],
         json!({"configured": true, "open": false, "max_users": 12, "features": ["image", "vibe"], "daily_images": 40,
                "daily_v5": 5, "image_scope": "all", "expires_days": 14, "role_guild": "", "role_id": "", "role_note": "",
-               "active": 2, "reset_at": "每日 7 点",
+               "active": 2,
                "v5_capacity": {"need": 60, "global": 150, "short": false, "message": ""}})
     );
     // 站长在后台改过的值优先于 .env

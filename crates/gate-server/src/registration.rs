@@ -8,6 +8,7 @@
 //! - 机器人不私信成员：发 Key 的结果只在 /register 的临时回复里给本人看，后台「重新生成 Key」「奖励成员」
 //!   把新 Key 展示给站长手动转交（Discord 应用曾被标记，错误码 680009，docs/v3-deviations.md #76）。
 //! - 后台循环不在这里起：见文件末尾的 [`registrar_jobs`]，由任务调度方安排。
+//!   每日清空自助注册（旧的 `REGISTER_RESET_AT`）已删除（docs/v3-deviations.md #77）。
 
 use crate::action_log::log_action;
 use crate::env::{EnvConfig, RegistrationEnv};
@@ -25,6 +26,9 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Duration;
+
+/// 身份组同步每轮最多摘几个（docs/v3-deviations.md #78）。
+pub const SYNC_ROLES_PER_RUN: usize = 5;
 
 /// Discord 要求机器人带可识别的 User-Agent（空的 / 默认的会被 Cloudflare 拦）。
 const USER_AGENT: &str = concat!("DiscordBot (nai-gate, ", env!("CARGO_PKG_VERSION"), ")");
@@ -291,10 +295,6 @@ impl RegistrationService {
     pub fn command_guild(&self) -> &str {
         &self.cfg.guild_id
     }
-    /// `REGISTER_RESET_AT`（HH:MM，空 = 不每日清空）。
-    pub fn reset_at(&self) -> &str {
-        &self.cfg.reset_at
-    }
     pub fn site_url(&self) -> &str {
         &self.cfg.site_url
     }
@@ -451,13 +451,22 @@ impl RegistrationService {
     }
 
     /// 后台同步：Key 已过期 / 被停用 / 被删除的成员摘掉身份组，并重试之前失败的摘除。返回本次摘掉的人数。
+    ///
+    /// 每轮最多处理 [`SYNC_ROLES_PER_RUN`] 个（维护循环每 5 分钟一轮），和 `backfill_profiles(5)` 一样不制造突发请求：
+    /// 全站重置一次堆起几十个待办时，分几轮慢慢摘，剩下的留到下一轮（待办表不丢）。
     pub async fn sync_roles(&self) -> Result<usize, DbError> {
         if self.cfg.member_role_id.is_empty() {
             return Ok(0);
         }
         self.db.queue_expired_role_removals(now()).await?;
         let mut done = 0;
-        for discord_id in self.db.pending_role_removals().await? {
+        for discord_id in self
+            .db
+            .pending_role_removals()
+            .await?
+            .into_iter()
+            .take(SYNC_ROLES_PER_RUN)
+        {
             if self.set_role(&discord_id, false).await {
                 // 每摘一个就提交：不能在持有未提交写事务时去等下一个 Discord 请求
                 self.db.finish_role_removal(&discord_id).await?;
@@ -641,31 +650,6 @@ impl RegistrationService {
             self.db.queue_role_removal(discord_id, now()).await?;
         }
         Ok(true)
-    }
-
-    /// 清空所有自助注册用户（删 Key 和记录，保留用量账本），用户需重新 /register。
-    ///
-    /// 带「邀请」标签的 Key 不在清空范围：和手动全站重置同一口径（2026-10-13），私邀的朋友不受每日轮换影响。
-    pub async fn reset_all(&self) -> Result<usize, DbError> {
-        // 被停用的成员不在清空范围内；邀请 Key 豁免
-        let rows = self.db.reset_all_candidates().await?;
-        for discord_id in &rows {
-            self.revoke(discord_id, false).await?;
-        }
-        self.sync_roles().await?;
-        if !rows.is_empty() {
-            log_action(
-                &self.db,
-                "系统",
-                "每日清空自助注册",
-                "",
-                &format!("清空 {} 人（REGISTER_RESET_AT）", rows.len()),
-                true,
-                now(),
-            )
-            .await;
-        }
-        Ok(rows.len())
     }
 
     // ---- 网页登录 ----
@@ -1163,74 +1147,6 @@ pub async fn registrar_jobs(state: &AppState) {
     }
 }
 
-/// 距离下一次每日清空还有多少秒（`REGISTER_RESET_AT=HH:MM`，按 TZ）。
-/// 没配 / 格式不对返回 None：调用方等一小时后再看（旧版 `registration_reset_loop`）。
-pub fn reset_delay_secs(at: &str, tz: &jiff::tz::TimeZone, now: f64) -> Option<f64> {
-    let parts: Vec<&str> = at.split(':').collect();
-    let [h, m] = parts.as_slice() else {
-        return None;
-    };
-    let (hour, minute) = (gate_core::pyc::parse_int(h)?, gate_core::pyc::parse_int(m)?);
-    if !(0..24).contains(&hour) || !(0..60).contains(&minute) {
-        return None;
-    }
-    let secs = now.floor();
-    let nanos = ((now - secs) * 1e9) as i32;
-    let here = jiff::Timestamp::new(secs as i64, nanos)
-        .ok()?
-        .to_zoned(tz.clone());
-    let mut target = here
-        .with()
-        .hour(hour as i8)
-        .minute(minute as i8)
-        .second(0)
-        .subsec_nanosecond(0)
-        .build()
-        .ok()?;
-    if target.timestamp() <= here.timestamp() {
-        target = target.checked_add(jiff::Span::new().days(1)).ok()?;
-    }
-    let delta = target.timestamp().as_nanosecond() - here.timestamp().as_nanosecond();
-    Some(delta as f64 / 1e9)
-}
-
-/// 每日清空（到点时调用一次）。出错记 Bug，不抛出。返回清掉的人数。
-pub async fn scheduled_reset(state: &AppState) -> Option<usize> {
-    let svc = state.registration.as_ref()?;
-    match svc.reset_all().await {
-        Ok(n) => {
-            tracing::info!("scheduled registration reset: removed {n} user(s)");
-            Some(n)
-        }
-        Err(e) => {
-            state.bugs.capture(crate::bugs::Report {
-                source: "registration_reset",
-                error: Some(("DbError", &e.to_string())),
-                ..Default::default()
-            });
-            None
-        }
-    }
-}
-
-/// 旧版 `registration_reset_loop` 的完整循环（不自己 spawn；`shutdown` 取消时返回）。
-pub async fn registration_reset_loop(state: AppState) {
-    loop {
-        let delay = state
-            .registration
-            .as_ref()
-            .and_then(|svc| reset_delay_secs(svc.reset_at(), state.clock.tz(), state.now()));
-        let wait = Duration::from_secs_f64(delay.unwrap_or(3600.0).max(0.0));
-        tokio::select! {
-            () = tokio::time::sleep(wait) => {}
-            () = state.shutdown.cancelled() => return,
-        }
-        if delay.is_some() {
-            scheduled_reset(&state).await;
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1268,22 +1184,6 @@ mod tests {
             ]),
             "redirect_uri=https%3A%2F%2Fx.test%2Flogin%2Fcallback&s=a+b~"
         );
-    }
-
-    #[test]
-    fn reset_delay() {
-        let tz = jiff::tz::TimeZone::get("Asia/Shanghai").unwrap();
-        // 2026-10-14 06:59:59 +08:00 = 1791932399
-        assert_eq!(reset_delay_secs("07:00", &tz, 1_791_932_399.0), Some(1.0));
-        // 刚过点：等到明天
-        assert_eq!(
-            reset_delay_secs("07:00", &tz, 1_791_932_400.0),
-            Some(86400.0)
-        );
-        assert_eq!(reset_delay_secs("", &tz, 0.0), None);
-        assert_eq!(reset_delay_secs("25:00", &tz, 0.0), None);
-        assert_eq!(reset_delay_secs("7", &tz, 0.0), None);
-        assert_eq!(reset_delay_secs("07:00:00", &tz, 0.0), None);
     }
 
     #[test]
