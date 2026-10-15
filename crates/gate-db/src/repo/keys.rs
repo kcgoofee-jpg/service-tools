@@ -218,7 +218,10 @@ impl Db {
 
     /// 闲置 = 连续没生图（2026-10-13 站长）：只看 last_image_at，从没生过图的 Key 从创建时间起算；
     /// 邀请标签的 Key 豁免。「宽限起点」设置损坏（解析不了 / 非有限 / 负数）时返回空，绝不触发批量删除。
-    pub async fn inactive_key_ids(&self, cutoff: f64) -> Result<Vec<i64>> {
+    ///
+    /// 已过期的 Key（`expires_at <= now`）不算闲置：过期后请求一律 403、`last_image_at` 不会再更新，
+    /// 它们照旧在成员下次 /register 时释放，不进封禁表（docs/v3-deviations.md #56）。
+    pub async fn inactive_key_ids(&self, cutoff: f64, now: f64) -> Result<Vec<i64>> {
         self.read(move |c| {
             let raw: Option<String> = c
                 .query_row(
@@ -241,11 +244,12 @@ impl Db {
             let mut stmt = c.prepare(
                 "SELECT id FROM api_keys \
                  WHERE is_admin=0 AND is_test=0 AND enabled=1 \
+                   AND (expires_at IS NULL OR expires_at > ?) \
                    AND MAX(COALESCE(last_image_at, created_at), ?) < ? \
                    AND id NOT IN (SELECT key_id FROM key_tags WHERE tag=?) \
                  ORDER BY id ASC",
             )?;
-            stmt.query_map(params![grace, cutoff, INVITE_TAG], |r| {
+            stmt.query_map(params![now, grace, cutoff, INVITE_TAG], |r| {
                 value::i64_or(r, 0, 0)
             })?
             .collect()
