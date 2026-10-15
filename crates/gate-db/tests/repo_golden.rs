@@ -576,7 +576,8 @@ async fn call(db: &Db, c: &Case) -> Out {
             db.delete_key(int(a(0, "key_id"), 0)).await?;
             Value::Null
         }
-        "inactive_key_ids" => json!(db.inactive_key_ids(num(a(0, "cutoff"), 0.0)).await?),
+        // 3.0 多一个 `now`：已过期的 Key 不算闲置（docs/v3-deviations.md #56）；夹具里的 Key 都没设过期时间，结果不变
+        "inactive_key_ids" => json!(db.inactive_key_ids(num(a(0, "cutoff"), 0.0), now).await?),
         "list_keys" => json!(db.list_keys().await?),
         "touch_key" => {
             db.touch_key(int(a(0, "key_id"), 0), now).await?;

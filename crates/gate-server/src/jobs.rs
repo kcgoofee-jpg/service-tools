@@ -6,7 +6,7 @@
 //! |---|---|---|
 //! | 维护 | 5 分钟 ±20% | 清过期记录 / 状态码统计落库 / 原图保存期与容量上限 / 自动关闭不用处理的 Bug（最多 10 分钟一次）/ 注册服务的三个同步（`registration::registrar_jobs`）/ 上游表现提醒 / 磁盘自检 / 官方状态 |
 //! | 内核 | 10 分钟 ±20% | 各模块 tick + 交叉校验（旧版叫 `anlas_rebalance_loop`，名字是历史遗留：Anlas 自动分配 10-13 已删除，现在就是内核） |
-//! | 闲置回收 | 1 小时 | 长期不用的 Key 删除并拉黑；`KEY_INACTIVITY_DELETE_DAYS=0` 时**什么都不做** |
+//! | 闲置回收 | 1 小时 | 长期不用的 Key 删除并拉黑（站点出不了图的服务日不算，见 [`idle_recycle_window`]）；`KEY_INACTIVITY_DELETE_DAYS=0` 时**什么都不做** |
 //! | 定时清空注册 | 每天 `REGISTER_RESET_AT` | 清空自助注册用户（循环本身在 `registration` 模块里；没配 / 没有注册服务就每小时看一眼） |
 //!
 //! 一个循环里的一轮工作做到底才响应关停（只在睡觉时被打断）：额度重算这类多步写入不能被拦腰切断。
@@ -21,6 +21,7 @@ use crate::audit::{audit_flags, audit_image_cap_mb, audit_image_keep_hours};
 use crate::bugs::Report;
 use crate::kernel::{KernelError, ServiceRegistrar, collect_perf};
 use crate::state::AppState;
+use gate_core::idle;
 use gate_db::repo::discord::BanInfo;
 use std::future::Future;
 use std::sync::Arc;
@@ -359,17 +360,82 @@ async fn inactive_key_cleanup_loop(state: AppState) {
     }
 }
 
+/// 本轮闲置回收的截止时间；站点眼下就出不了图时返回 `None`（本轮不回收）。
+///
+/// 站点自己出不了图的服务日不算成员闲置（docs/v3-deviations.md #55）：
+/// - 已完结的服务日全站成功出图不到 [`idle::HEALTHY_DAY_MIN_IMAGES`] 张 → 跳过，往回多数一天（最多回看 30 天）；
+/// - 当前服务日：不在安静时段、且最近 60 分钟全站一张都没出成功 → 本轮直接跳过。
+///
+/// 平时（近几天都在正常出图）截止时间就是「现在 − N 天」，与原来完全相同。
+pub async fn idle_recycle_window(
+    state: &AppState,
+    days: i64,
+    now: f64,
+) -> Result<Option<idle::IdleWindow>, KernelError> {
+    let quiet = state.guard.with(|g| g.in_quiet(now));
+    if !quiet {
+        let recent = state
+            .db
+            .ok_image_counts(vec![(now - idle::RECENT_OK_WINDOW, f64::MAX)])
+            .await?;
+        if recent.first().copied().unwrap_or(0) == 0 {
+            return Ok(None);
+        }
+    }
+    // 已完结的服务日：用服务日工具取日期与起点，不自己做时区换算
+    let lookback = idle::max_lookback_days(days) as usize;
+    let names = state.clock.last_days(now, lookback + 1);
+    let mut ranges = Vec::with_capacity(lookback);
+    for pair in names.windows(2) {
+        if let (Some(start), Some(end)) = (
+            state.clock.service_day_start(&pair[0]),
+            state.clock.service_day_start(&pair[1]),
+        ) {
+            ranges.push((start, end));
+        }
+    }
+    let counts = state.db.ok_image_counts(ranges.clone()).await?;
+    let served: Vec<idle::ServedDay> = ranges
+        .into_iter()
+        .zip(counts)
+        .map(|((start, end), ok_images)| idle::ServedDay {
+            start,
+            end,
+            ok_images,
+        })
+        .collect();
+    Ok(Some(idle::idle_window(now, days, &served)))
+}
+
 /// 永久回收长期未使用的普通 Key，并拉入黑名单（由站长在后台管理与解封）。
 ///
 /// **`KEY_INACTIVITY_DELETE_DAYS=0` 表示关闭：这时无论库里有什么都不会删任何 Key**（线上 10-11 起就是 0）。
-/// 返回删掉的 Key 数。
+/// 「连续 N 天」不算站点自己出不了图的服务日，见 [`idle_recycle_window`]。返回删掉的 Key 数。
 pub async fn delete_inactive_keys(state: &AppState) -> Result<usize, KernelError> {
     let days = std::cmp::max(0, state.env.key_inactivity_delete_days);
     if days == 0 {
         return Ok(0);
     }
-    let cutoff = state.now() - days as f64 * 86400.0;
-    let key_ids = state.db.inactive_key_ids(cutoff).await?;
+    let now = state.now();
+    let Some(window) = idle_recycle_window(state, days, now).await? else {
+        tracing::info!("最近 60 分钟全站没有成功出图（不在安静时段），本轮不做闲置回收");
+        return Ok(0);
+    };
+    if window.skipped_days > 0 {
+        tracing::info!(
+            skipped_days = window.skipped_days,
+            "闲置回收跳过站点没在正常出图的服务日"
+        );
+    }
+    let key_ids = state.db.inactive_key_ids(window.cutoff, now).await?;
+    let detail = if window.skipped_days > 0 {
+        format!(
+            "连续 {days} 天未活动自动回收并拉黑（不算站点没在正常出图的 {} 天）",
+            window.skipped_days
+        )
+    } else {
+        format!("连续 {days} 天未活动自动回收并拉黑")
+    };
     let registrar = state.registration.clone();
     for &key_id in &key_ids {
         let key_name = state
@@ -385,7 +451,7 @@ pub async fn delete_inactive_keys(state: &AppState) -> Result<usize, KernelError
             "系统",
             "闲置回收 Key",
             &format!("Key #{key_id} {key_name}"),
-            &format!("连续 {days} 天未活动自动回收并拉黑"),
+            &detail,
             true,
             state.now(),
         )

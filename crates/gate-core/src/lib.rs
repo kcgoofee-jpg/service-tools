@@ -10,6 +10,7 @@ pub mod bot_config;
 pub mod clock;
 pub mod features;
 pub mod guard;
+pub mod idle;
 pub mod jsondump;
 pub mod key_status;
 pub mod modules;

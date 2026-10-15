@@ -249,6 +249,22 @@ impl Db {
         .await
     }
 
+    /// 每个时间段 `[from, to)` 里全站成功出图的条数（与 `ranges` 一一对应）。
+    /// 闲置回收用它判断「站点那天有没有在正常出图」（docs/v3-deviations.md #55）。
+    pub async fn ok_image_counts(&self, ranges: Vec<(f64, f64)>) -> Result<Vec<i64>> {
+        self.read(move |c| {
+            let mut stmt = c.prepare(
+                "SELECT COUNT(*) FROM usage_log \
+                 WHERE ts>=? AND ts<? AND status='ok' AND kind IN ('image','image_stream')",
+            )?;
+            ranges
+                .iter()
+                .map(|(from, to)| stmt.query_row(params![from, to], |r| value::i64_or(r, 0, 0)))
+                .collect()
+        })
+        .await
+    }
+
     /// 只清理明细日志；每日计数器和账本不受影响。返回删除条数。
     pub async fn purge_usage_log(&self, older_than: f64) -> Result<i64> {
         self.write(move |tx| {
