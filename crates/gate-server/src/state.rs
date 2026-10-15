@@ -143,7 +143,6 @@ impl AppState {
         std::fs::create_dir_all(&env.data_dir)?;
         let now = crate::time::now();
         let db = Db::open(env.db_path(), now, gate_core::reasons::BACKFILL)?;
-        db.set_rule_version(VERSION);
         let clock = Clock::new(&env.tz, env.day_reset_hour);
         let params = Arc::new(ParamsStore::new(env.private_params_path()));
         let alerter = Arc::new(Alerter::owner(&env));

@@ -17,7 +17,7 @@ use gate_server::env::EnvConfig;
 use gate_server::key::Key;
 use gate_server::session;
 use gate_server::web::Assets;
-use gate_server::{AppState, jobs, state::VERSION};
+use gate_server::{AppState, jobs};
 use gate_testkit::MockUpstream;
 use std::collections::HashMap;
 use std::future::IntoFuture;
@@ -171,7 +171,6 @@ async fn serve(args: Args) -> Result<()> {
     // 先把数据写进库、关掉这个连接，再让网关像对着一份现成的库那样启动（启动时的回填、停机检测都按真实路径走）
     let seeded = {
         let db = Db::open(env.db_path(), now, gate_core::reasons::BACKFILL)?;
-        db.set_rule_version(VERSION);
         seed::seed(&db, &clock, now)
             .await
             .context("写入合成演示数据失败")?

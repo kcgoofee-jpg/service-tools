@@ -249,15 +249,20 @@ fn set_mtime(p: &Path, secs: f64) {
 /// 3.0 新增、冻结的 2.x 夹具里没有的列（docs/v3-deviations.md #47）：比较前从 Rust 这一侧去掉。
 const RUST_ONLY_COLUMNS: [&str; 1] = ["disabled_reason"];
 
-/// 3.0 删除了客户端识别（docs/v3-deviations.md #50）：`usage_log.client` 列还在（2.x 能读），但不再写入、也不再从
-/// `list_logs` 读出。冻结夹具里旧版写进这一列的客户端名，两边都不比：整表内容里把这一列按空串比较。
+/// `usage_log` 里 3.0 不再写入的列，冻结夹具里旧版写的值两边都不比：整表内容里按空串比较。
+/// - `client`：客户端识别已删除（docs/v3-deviations.md #50），列还在（2.x 能读），也不再从 `list_logs` 读出；
+/// - `src`（来源网段）/ `ver`（网关版本）：只写不读，3.0 不再写（docs/v3-deviations.md #104）。
+const UNWRITTEN_USAGE_COLUMNS: [&str; 3] = ["client", "src", "ver"];
+
 fn blank_usage_client(tables: &mut Value) {
     let rows = tables.get_mut("usage_log").and_then(Value::as_array_mut);
     for row in rows.into_iter().flatten() {
-        if let Some(o) = row.as_object_mut()
-            && o.contains_key("client")
-        {
-            o.insert("client".into(), json!(""));
+        if let Some(o) = row.as_object_mut() {
+            for col in UNWRITTEN_USAGE_COLUMNS {
+                if o.contains_key(col) {
+                    o.insert(col.into(), json!(""));
+                }
+            }
         }
     }
 }
@@ -611,7 +616,6 @@ async fn call(db: &Db, c: &Case) -> Out {
                 dur_ms: int(c.kwarg("dur_ms"), 0),
                 up_status: int(c.kwarg("up_status"), 0),
                 rid: s(c.kwarg("rid"), ""),
-                src: s(c.kwarg("src"), ""),
             };
             db.record_success(&sc, now).await?;
             Value::Null
@@ -632,7 +636,6 @@ async fn call(db: &Db, c: &Case) -> Out {
                 dur_ms: int(a(11, "dur_ms"), 0),
                 up_status: int(a(13, "up_status"), 0),
                 rid: s(a(14, "rid"), ""),
-                src: s(a(15, "src"), ""),
                 reason: s(a(16, "reason"), ""),
             };
             db.add_log(&l, now).await?;
@@ -839,7 +842,6 @@ async fn run_case(case: &Case) {
     }
     let dir = tempfile::tempdir().unwrap();
     let db = Db::open(dir.path().join("gate.db"), 0.0, &[]).unwrap();
-    db.set_rule_version(case.get("rule_version").unwrap().as_str().unwrap());
     let extra = seed(&db, case).await;
     let brief = brief(case);
     // 3.0 不再刷新的 last_image_at：期望一侧换回调用前的值（#65）

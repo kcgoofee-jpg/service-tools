@@ -268,7 +268,6 @@ async fn seed_usage(
             e.kind.to_string(),
             model.to_string(),
             rid(rng),
-            "203.0.*.*".to_string(),
         );
         match e.outcome {
             Outcome::Ok => {
@@ -288,7 +287,6 @@ async fn seed_usage(
                         dur_ms: rng.random_range(3000..9000),
                         up_status: 200,
                         rid: common.4,
-                        src: common.5,
                         ..Default::default()
                     },
                     e.ts,
@@ -328,7 +326,6 @@ async fn seed_usage(
                         reason: reason.into(),
                         wait_ms: rng.random_range(0..3000),
                         rid: common.4,
-                        src: common.5,
                         ..Default::default()
                     },
                     e.ts,
@@ -349,7 +346,6 @@ async fn seed_usage(
                         dur_ms: rng.random_range(3000..9000),
                         up_status: up,
                         rid: common.4,
-                        src: common.5,
                         ..Default::default()
                     },
                     e.ts,

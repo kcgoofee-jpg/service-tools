@@ -28,7 +28,6 @@ pub struct Success {
     pub dur_ms: i64,
     pub up_status: i64,
     pub rid: String,
-    pub src: String,
 }
 
 /// 一条拒绝 / 失败日志（`add_log`）。
@@ -48,7 +47,6 @@ pub struct NewLog {
     pub dur_ms: i64,
     pub up_status: i64,
     pub rid: String,
-    pub src: String,
     pub reason: String,
 }
 
@@ -136,7 +134,6 @@ impl Db {
     /// 锁冲突由 `Db::write` 的 BUSY 重试兜住，可见结果相同。
     pub async fn record_success(&self, s: &Success, now: f64) -> Result<()> {
         let s = s.clone();
-        let ver = self.rule_version();
         self.write(move |tx| {
             tx.execute(
                 INSERT_LOG,
@@ -156,8 +153,6 @@ impl Db {
                     s.dur_ms.max(0),
                     s.up_status,
                     pyc::take_chars(&s.rid, 16),
-                    pyc::take_chars(&s.src, 40),
-                    ver,
                 ],
             )?;
             tx.execute(
@@ -185,7 +180,6 @@ impl Db {
 
     pub async fn add_log(&self, l: &NewLog, now: f64) -> Result<()> {
         let l = l.clone();
-        let ver = self.rule_version();
         self.write(move |tx| {
             tx.execute(
                 INSERT_REJECT,
@@ -205,8 +199,6 @@ impl Db {
                     l.dur_ms.max(0),
                     l.up_status,
                     pyc::take_chars(&l.rid, 16),
-                    pyc::take_chars(&l.src, 40),
-                    ver,
                     pyc::take_chars(&l.reason, 24),
                 ],
             )?;
