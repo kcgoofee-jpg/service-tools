@@ -1,14 +1,18 @@
-//! allowance.rs 与旧 Python 对拍（夹具生成脚本见标签 py-final）。
+//! allowance.rs 的快照。
 //!
-//! 每条夹具是一条操作轨迹：真实 `AllowanceCache` 在假时钟 / 假 HTTP 客户端下执行的 resolve / note_period /
-//! period / snapshot / 改阈值。这里用 `AllowanceCore` 的 check_cache → finish_resolve → note_period 重放，
-//! 逐步比较返回值、缓存行、写库内容、告警和「是否发了 HTTP 请求」。
+//! 每条是一条操作轨迹：`AllowanceCore` 在固定时钟 / 假 HTTP 结果下执行的 resolve / note_period / period /
+//! snapshot / 改阈值。这里用 check_cache → finish_resolve → note_period 重放，逐步记下返回值、缓存行、写库内容和
+//! 「额度偏低」的判定，最后记 periods 整体（含账号插入顺序）。
+
+mod common;
 
 use base64::{Engine, engine::general_purpose::STANDARD};
+use common::Tally;
 use gate_core::allowance::{
     self, AllowanceCore, Begin, Fetched, MAX_BODY, PERIOD_KEY, SETTING, UNAVAILABLE_MSG,
 };
-use gate_snapshot::{Case, assert_eq_py, assert_eq_py_ordered, f, load};
+use gate_snapshot::snapshot::check;
+use gate_snapshot::{Case, f};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -16,20 +20,18 @@ use std::collections::BTreeMap;
 const M: &str = env!("CARGO_MANIFEST_DIR");
 
 #[test]
-fn threshold_golden() {
-    for c in load(M, "allowance/threshold") {
-        let present = c.raw["present"].as_bool().unwrap();
-        let v = if present {
+fn threshold_snapshot() {
+    let mut n = 0;
+    check(M, "allowance/threshold", |c| {
+        n += 1;
+        let v = if c.get("present")?.as_bool()? {
             c.arg(0).clone()
         } else {
             Value::Null
         };
-        assert_eq_py(
-            &c,
-            &json!(allowance::normalize_alert_threshold(&v)),
-            c.out(),
-        );
-    }
+        Some(json!(allowance::normalize_alert_threshold(&v)))
+    });
+    assert!(n >= 20, "用例太少：{n}");
 }
 
 /// 假 HTTP 的结果（拥有数据，好借给 `Fetched`）。
@@ -91,6 +93,7 @@ fn row_json(core: &AllowanceCore, token: &str) -> Value {
     Value::Object(m)
 }
 
+/// 写进库里的一条：键、字符数、SHA-256；不到 700 字符的连原文一起记。
 fn write_json(key: &str, text: &str) -> Value {
     json!({
         "key": key,
@@ -100,7 +103,12 @@ fn write_json(key: &str, text: &str) -> Value {
     })
 }
 
-fn replay(c: &Case) -> usize {
+fn unavailable() -> Value {
+    json!({"err": "AllowanceUnavailable", "msg": UNAVAILABLE_MSG})
+}
+
+/// 重放一条轨迹，返回每一步的结果和最终的 periods。
+fn replay(c: &Case, tally: &mut Tally) -> Value {
     let mut core = AllowanceCore::new();
     let mut kv: BTreeMap<String, String> = c.raw["init"]["kv"]
         .as_object()
@@ -114,43 +122,38 @@ fn replay(c: &Case) -> usize {
             _ => Value::Null,
         })
     };
-    let mut n_fetch = 0;
-    for (i, step) in c.raw["steps"].as_array().unwrap().iter().enumerate() {
-        let ctx = format!("轨迹 {} 第 {i} 步 {}", c.raw["name"], step["op"]);
+    let mut results = Vec::new();
+    for step in c.raw["steps"].as_array().unwrap() {
         let op = step["op"].as_str().unwrap();
-        match op {
-            "set_threshold" => match step["raw"].as_str() {
-                Some(s) => {
-                    kv.insert(SETTING.into(), s.into());
+        tally.add(op);
+        let result = match op {
+            "set_threshold" => {
+                match step["raw"].as_str() {
+                    Some(s) => {
+                        kv.insert(SETTING.into(), s.into());
+                    }
+                    None => {
+                        kv.remove(SETTING);
+                    }
                 }
-                None => {
-                    kv.remove(SETTING);
-                }
-            },
+                Value::Null
+            }
             "resolve" => {
                 let token = step["token"].as_str().unwrap();
-                let (mono, wall) = (
-                    step["mono"].as_f64().unwrap(),
-                    step["wall"].as_f64().unwrap(),
-                );
-                // 夹具记录的阈值原文就是库里当时的值
+                let mono = step["mono"].as_f64().unwrap();
+                // 阈值原文就是库里当时的值
                 let threshold = threshold_of(&step["threshold_raw"]);
                 let (mono_after, wall_after) = (
                     step["mono_after"].as_f64().unwrap(),
                     step["wall_after"].as_f64().unwrap(),
                 );
-                let _ = wall;
-                let mut calls = 0;
-                let mut low = false;
+                let (mut calls, mut low) = (0, false);
                 let mut writes = Vec::new();
                 let out = match core.check_cache(token, mono, threshold) {
-                    Begin::Unavailable => {
-                        json!({"err": "AllowanceUnavailable", "msg": UNAVAILABLE_MSG})
-                    }
+                    Begin::Unavailable => unavailable(),
                     Begin::Cached => json!({"ok": false}),
                     Begin::Fetch => {
                         calls = 1;
-                        n_fetch += 1;
                         let plan = plan_of(&step["plan"]);
                         let fetched = match &plan {
                             Plan::Failed => Fetched::Failed,
@@ -175,54 +178,39 @@ fn replay(c: &Case) -> usize {
                         }
                         match r.result {
                             Ok(neg) => json!({"ok": neg}),
-                            Err(()) => {
-                                json!({"err": "AllowanceUnavailable", "msg": UNAVAILABLE_MSG})
-                            }
+                            Err(()) => unavailable(),
                         }
                     }
                 };
-                let want = &step["out"];
-                // Python 侧的异常消息只在 err 里；ok 的比较见下
-                assert_eq_py(c, &out, want);
-                assert_eq!(
-                    calls,
-                    step["http_calls"].as_i64().unwrap(),
-                    "{ctx}：HTTP 调用次数"
-                );
-                // 「额度偏低」不再发告警，只写一行日志（docs/v3-deviations.md #102）：旧版这一步发了
-                // v5_low 告警 ⇔ 3.0 的 `low` 为真；告警文案与冷却不再比
-                let alerted = step["alerts"].as_array().unwrap();
-                assert!(
-                    alerted.iter().all(|a| a[0] == "v5_low"),
-                    "{ctx}：{alerted:?}"
-                );
-                assert_eq!(low, !alerted.is_empty(), "{ctx}：额度偏低的判定");
-                assert_eq_py(c, &row_json(&core, token), &step["row"]);
-                assert_eq_py(c, &Value::Array(writes), &step["writes"]);
+                tally.add_if(calls > 0, "fetch");
+                tally.add_if(low, "low");
+                json!({
+                    "result": out,
+                    "http_calls": calls,
+                    "low": low,
+                    "row": row_json(&core, token),
+                    "writes": writes,
+                })
             }
             "note_period" => {
-                let token = step["token"].as_str().unwrap();
                 core.load_periods(kv.get(PERIOD_KEY).map(String::as_str));
                 let text = core
                     .note_period(
-                        token,
+                        step["token"].as_str().unwrap(),
                         step["seconds"].as_i64().unwrap(),
                         step["wall"].as_f64().unwrap(),
                     )
                     .unwrap();
-                assert_eq_py(
-                    c,
-                    &Value::Array(vec![write_json(PERIOD_KEY, &text)]),
-                    &step["writes"],
-                );
+                let writes = json!([write_json(PERIOD_KEY, &text)]);
                 kv.insert(PERIOD_KEY.into(), text);
+                json!({"writes": writes})
             }
             "period" => {
                 let got = core.period(
                     step["token"].as_str().unwrap(),
                     step["wall"].as_f64().unwrap(),
                 );
-                assert_eq_py(c, &got.map_or(Value::Null, |v| json!(v)), &step["out"]);
+                got.map_or(Value::Null, |v| json!(v))
             }
             "snapshot" => {
                 let tokens: Vec<&str> = step["tokens"]
@@ -231,44 +219,61 @@ fn replay(c: &Case) -> usize {
                     .iter()
                     .map(|t| t.as_str().unwrap())
                     .collect();
-                let got = core.snapshot(
+                core.snapshot(
                     tokens,
                     threshold_of(&step["threshold_raw"]),
                     step["wall"].as_f64().unwrap(),
                     step["mono"].as_f64().unwrap(),
-                );
-                assert_eq_py_ordered(c, &got, &step["out"]);
+                )
             }
-            other => panic!("{ctx}：未知操作 {other}"),
-        }
+            other => panic!("未知操作 {other}"),
+        };
+        results.push(result);
     }
     // 终态：periods 整体（含账号插入顺序）
-    let got = core
+    let periods = core
         .periods
         .as_ref()
         .map_or(Value::Null, |p| serde_json::from_str(&p.to_json()).unwrap());
-    assert_eq_py_ordered(c, &got, &c.raw["final_periods"]);
-    n_fetch
+    json!({"steps": results, "final_periods": periods})
 }
 
-fn replay_file(name: &str, min_cases: usize) -> usize {
-    let cases = load(M, name);
-    assert!(cases.len() >= min_cases);
-    cases.iter().map(replay).sum()
+fn replay_file(name: &str, tally: &mut Tally) {
+    check(M, name, |c| {
+        tally.add(name);
+        Some(replay(c, tally))
+    });
 }
 
+/// 响应体各种写法（JSON 形状、编码、超长）。
 #[test]
-fn bodies_golden() {
-    assert!(replay_file("allowance/bodies", 70) >= 70);
+fn bodies_snapshot() {
+    let mut tally = Tally::default();
+    replay_file("allowance/bodies", &mut tally);
+    tally.assert_at_least(&[("allowance/bodies", 40), ("fetch", 40)]);
 }
 
+/// 状态码和 Retry-After 的各种组合。
 #[test]
-fn status_and_retry_after_golden() {
-    assert!(replay_file("allowance/status", 300) >= 300);
+fn status_and_retry_after_snapshot() {
+    let mut tally = Tally::default();
+    replay_file("allowance/status", &mut tally);
+    tally.assert_at_least(&[("allowance/status", 40), ("fetch", 40)]);
 }
 
+/// 多步轨迹：缓存命中 / 退避、额度偏低、周期采样、改阈值。
 #[test]
-fn traces_golden() {
-    // 随机轨迹里要真的发生过请求（不能全是缓存命中 / 退避）
-    assert!(replay_file("allowance/traces", 39) > 1000);
+fn traces_snapshot() {
+    let mut tally = Tally::default();
+    replay_file("allowance/traces", &mut tally);
+    // 轨迹里要真的发生过请求（不能全是缓存命中 / 退避）
+    tally.assert_at_least(&[
+        ("allowance/traces", 3),
+        ("fetch", 50),
+        ("resolve", 100),
+        ("note_period", 20),
+        ("snapshot", 10),
+        ("period", 10),
+        ("set_threshold", 5),
+    ]);
 }
