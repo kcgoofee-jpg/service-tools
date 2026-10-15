@@ -4,7 +4,7 @@
 //!
 //! | 循环 | 间隔 | 做什么 |
 //! |---|---|---|
-//! | 维护 | 5 分钟 ±20% | 清过期记录 / 状态码统计落库 / 原图保存期与容量上限 / 自动关闭不用处理的 Bug（最多 10 分钟一次）/ 注册服务的三个同步（`registration::registrar_jobs`）/ 上游表现提醒 / 磁盘自检 / 官方状态 |
+//! | 维护 | 5 分钟 ±20% | 清过期记录 / 状态码统计落库 / 原图保存期与容量上限 / 自动关闭不用处理的 Bug（最多 10 分钟一次）/ 注册服务的三个同步（`registration::registrar_jobs`）/ 磁盘自检 / 官方状态 |
 //! | 内核 | 10 分钟 ±20% | 各模块 tick + 交叉校验（旧版叫 `anlas_rebalance_loop`，名字是历史遗留：Anlas 自动分配 10-13 已删除，现在就是内核） |
 //! | 闲置回收 | 1 小时 | 长期不用的 Key 删除并拉黑（站点出不了图的服务日不算，见 [`idle_recycle_window`]）；`KEY_INACTIVITY_DELETE_DAYS=0` 时**什么都不做** |
 //!
@@ -18,7 +18,7 @@
 use crate::action_log::{RETENTION_DAYS as ADMIN_ACTION_RETENTION_DAYS, log_action};
 use crate::audit::{audit_flags, audit_image_cap_mb, audit_image_keep_hours};
 use crate::bugs::Report;
-use crate::kernel::{KernelError, ServiceRegistrar, collect_perf};
+use crate::kernel::{KernelError, ServiceRegistrar};
 use crate::state::AppState;
 use gate_core::idle;
 use gate_db::repo::discord::BanInfo;
@@ -84,11 +84,6 @@ pub async fn startup(state: &AppState) -> Result<(), KernelError> {
             .set_registrar(Some(Arc::new(ServiceRegistrar(svc.clone()))));
     }
     spawn_all(state);
-    state.alerter.notify(
-        "startup",
-        "服务已启动（重启或更新部署后会收到这条）。",
-        60.0,
-    );
     Ok(())
 }
 
@@ -201,7 +196,6 @@ pub async fn maintenance_once(state: &AppState) {
         return;
     }
     crate::registration::registrar_jobs(state).await;
-    check_upstream_perf(state).await;
     job!("disk", disk_check(state));
     job!("official", official_status(state));
 }
@@ -263,24 +257,6 @@ async fn purge_audit_images(state: &AppState) -> Result<(), KernelError> {
         }
     }
     Ok(())
-}
-
-/// 上游变慢 / 限流增多 / 失败率上升 / 账号受限时私信站长；同类提醒 3 小时内只发一次。
-pub async fn check_upstream_perf(state: &AppState) {
-    let report = match collect_perf(state, state.now()).await {
-        Ok(r) => r,
-        Err(e) => {
-            capture(state, "maintenance:perf", &e);
-            return;
-        }
-    };
-    for flag in &report.flags {
-        state.alerter.notify(
-            &format!("perf_{}_{}", flag.family, flag.code),
-            &format!("📉 上游表现变化 · {} 详情见后台「上游」页。", flag.text),
-            3.0 * 3600.0,
-        );
-    }
 }
 
 /// 磁盘剩余不足 10% 提醒站长（同一条 6 小时一次）。

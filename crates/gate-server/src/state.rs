@@ -103,8 +103,6 @@ pub struct Inner {
     pub shutdown: CancellationToken,
     /// 近 1 分钟的请求结果（首页实时图）。
     pub live_events: Mutex<std::collections::VecDeque<(f64, String)>>,
-    /// 最近 30 分钟上游 5xx：(时间, key_id)。只有不止一把 Key 遇到才算上游故障（见 `note_upstream_5xx`）。
-    pub recent_5xx: Mutex<std::collections::VecDeque<(f64, i64)>>,
     /// 实时看板快照（`/public/live` 与 SSE 共用）、`/public/status` 缓存、前端报错限流。
     pub live: crate::live::Hub,
     /// Discord 自助领 Key（`env.registration` 配齐才有；否则 `/self-register/*` 回 503）。
@@ -151,7 +149,7 @@ impl AppState {
         let alerter = Arc::new(Alerter::owner(&env));
         let announcer = Arc::new(Alerter::announcer(&env));
         let tasks = TaskTracker::new();
-        let bugs = Arc::new(Bugs::new(db.clone(), alerter.clone(), tasks.clone()));
+        let bugs = Arc::new(Bugs::new(db.clone(), tasks.clone()));
         let guard = Arc::new(Guard::new(
             db.clone(),
             &env.tz,
@@ -201,7 +199,7 @@ impl AppState {
         };
         let secret_key = resolve_secret(&env)?;
         let global = env.global_concurrency.max(1) as usize;
-        let allowance = crate::allowance::ServerAllowance::new(db.clone(), alerter.clone());
+        let allowance = crate::allowance::ServerAllowance::new(db.clone());
         let registration = RegistrationService::from_env(&env, db.clone()).map(Arc::new);
         let state = Self(Arc::new(Inner {
             clock,
@@ -234,7 +232,6 @@ impl AppState {
             tasks,
             shutdown: CancellationToken::new(),
             live_events: Mutex::new(std::collections::VecDeque::new()),
-            recent_5xx: Mutex::new(std::collections::VecDeque::new()),
             live: crate::live::Hub::new(),
             registration,
             member_web: MemberWeb::default(),
@@ -375,7 +372,7 @@ impl AppState {
         }
     }
 
-    /// 上游 429：暂停全站图片请求（写库 + AIMD + 告警），返回剩余冷却秒数。
+    /// 上游 429：暂停全站图片请求（写库 + AIMD + 写一行日志），返回剩余冷却秒数。
     pub async fn block_image_generation(&self, retry_after: f64) -> i64 {
         let now = self.now();
         let until = self.cooldown.block(retry_after, now);
@@ -392,51 +389,24 @@ impl AppState {
         }
         let remaining = ((until - now) as i64).max(1);
         match self.guard.on_upstream_429(now).await {
-            Ok(Some((old, new))) => self.alerter.notify(
-                "guard_hourly_down",
-                &format!("上游限流：每小时出图上限自动从 {old} 降到 {new}，之后连续一天没有限流会每天 +10。"),
-                0.0,
+            Ok(Some((old, new))) => tracing::info!(
+                "上游限流：每小时出图上限自动从 {old} 降到 {new}，之后连续一天没有限流会每天 +10"
             ),
             Ok(None) => {}
             Err(e) => {
-                self.bugs.capture(crate::bugs::Report { source: "guard_429", error: Some(("GuardIoError", &e.to_string())), ..Default::default() });
+                self.bugs.capture(crate::bugs::Report {
+                    source: "guard_429",
+                    error: Some(("GuardIoError", &e.to_string())),
+                    ..Default::default()
+                });
             }
         }
-        self.alerter.notify(
-            "upstream_429",
-            &format!("NovelAI 对图片请求返回 429（限流），全站生图已暂停 {remaining} 秒。如果频繁出现，请降低成员人数或调大图片间隔。"),
-            1800.0,
-        );
+        tracing::warn!("NovelAI 对图片请求返回 429（限流），全站生图暂停 {remaining} 秒");
         remaining
     }
 
-    /// 记一次上游 5xx；最近 30 分钟内至少 2 把不同的 Key 遇到时返回 true（该告警站长了）。
-    /// 旧版每个 500 都告警：一位成员反复提交上游处理不了的请求（2026-10-14 夜，V5 + 超长负面提示词）
-    /// 就会每半小时私信站长一次「上游可能故障」，而同时段其他成员一切正常。
-    pub fn note_upstream_5xx(&self, key_id: i64) -> bool {
-        let now = self.now();
-        let mut q = self.recent_5xx.lock().expect("5xx");
-        q.push_back((now, key_id));
-        while q.front().is_some_and(|(t, _)| now - t > 1800.0) {
-            q.pop_front();
-        }
-        let first = q.front().map(|(_, k)| *k);
-        q.iter().any(|(_, k)| Some(*k) != first)
-    }
-
-    /// 记一次上游调用结果；状态翻转时告警。
+    /// 记一次上游调用结果（状态页的「上游」状态按最近 10 分钟算）。
     pub fn record_upstream(&self, ok: bool) {
-        match self.health.record(ok, self.now()) {
-            Some(crate::runtime::HealthChange::Degraded) => self.alerter.notify(
-                "upstream_degraded",
-                "NovelAI 上游近 10 分钟失败率偏高（上游可能在故障），成员的生图会受影响。",
-                1800.0,
-            ),
-            Some(crate::runtime::HealthChange::Recovered) => {
-                self.alerter
-                    .notify("upstream_recovered", "NovelAI 上游已恢复正常。", 0.0)
-            }
-            None => {}
-        }
+        self.health.record(ok, self.now());
     }
 }

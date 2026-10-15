@@ -660,14 +660,6 @@ async fn generation_audit_records_prompt_and_image() {
 }
 
 #[tokio::test]
-async fn single_key_upstream_500s_do_not_page_owner() {
-    let e = setup(&[]).await;
-    assert!(!e.state.note_upstream_5xx(1));
-    assert!(!e.state.note_upstream_5xx(1));
-    assert!(e.state.note_upstream_5xx(2));
-}
-
-#[tokio::test]
 async fn cors_preflight_allows_authorization_and_fallbacks_are_json() {
     let e = setup(&[]).await;
     let req = Request::builder()

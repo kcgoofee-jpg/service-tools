@@ -1201,9 +1201,8 @@ pub fn alert_body(rep: &Report, now: f64, tz: &TimeZone) -> String {
 async fn send_alert(cfg: &Config, text: &str) -> bool {
     let token = util::env_file_value(&cfg.env_file, "DISCORD_BOT_TOKEN");
     let user = util::env_file_value(&cfg.env_file, "ALERT_USER_ID");
-    let channel = util::env_file_value(&cfg.env_file, "ALERT_CHANNEL_ID");
-    if token.is_empty() || (user.is_empty() && channel.is_empty()) {
-        eprintln!("[patrol] 未配置告警通道（ALERT_USER_ID / ALERT_CHANNEL_ID），只记日志");
+    if token.is_empty() || user.is_empty() {
+        eprintln!("[patrol] 未配置告警私信（DISCORD_BOT_TOKEN 与 ALERT_USER_ID），只记日志");
         return false;
     }
     let report_err = |e: &anyhow::Error| {
@@ -1234,29 +1233,25 @@ async fn send_alert(cfg: &Config, text: &str) -> bool {
             return false;
         }
     };
-    let channel_id = if channel.is_empty() {
-        match discord.create_dm(&user).await {
-            Err(e) => {
-                report_err(&e);
-                return false;
-            }
-            Ok(r) if !r.ok() => {
-                report_status(r.status, &r.body);
-                return false;
-            }
-            Ok(r) => match r
-                .json()
-                .and_then(|j| j.get("id").and_then(Value::as_str).map(String::from))
-            {
-                Some(id) => id,
-                None => {
-                    eprintln!("[patrol] 告警发送失败：KeyError");
-                    return false;
-                }
-            },
+    let channel_id = match discord.create_dm(&user).await {
+        Err(e) => {
+            report_err(&e);
+            return false;
         }
-    } else {
-        channel
+        Ok(r) if !r.ok() => {
+            report_status(r.status, &r.body);
+            return false;
+        }
+        Ok(r) => match r
+            .json()
+            .and_then(|j| j.get("id").and_then(Value::as_str).map(String::from))
+        {
+            Some(id) => id,
+            None => {
+                eprintln!("[patrol] 告警发送失败：KeyError");
+                return false;
+            }
+        },
     };
     // 与旧版不同：关掉 @ 提及（告警正文里可能带报错标题，不能让它真的 @everyone）
     match discord

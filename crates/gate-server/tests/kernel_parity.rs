@@ -1207,6 +1207,9 @@ fn drop_check_bugs(diff: &mut Value) {
 // 回放
 // ---------------------------------------------------------------------------
 
+/// 站长告警私信发到的频道：假上游同时扮演 Discord，建私信频道时回这个 id。
+const OWNER_DM: &str = "/channels/900000000000000030/messages";
+
 async fn settle(state: &AppState, mock: &MockUpstream) -> Vec<String> {
     // 记 Bug 的后台任务写完；告警是 fire-and-forget 的 HTTP，等请求数稳定
     for _ in 0..1000 {
@@ -1217,14 +1220,14 @@ async fn settle(state: &AppState, mock: &MockUpstream) -> Vec<String> {
     }
     let mut last = usize::MAX;
     for _ in 0..200 {
-        let n = mock.requests_to("/alert-hook").len();
+        let n = mock.requests_to(OWNER_DM).len();
         if n == last {
             break;
         }
         last = n;
         tokio::time::sleep(std::time::Duration::from_millis(15)).await;
     }
-    mock.requests_to("/alert-hook")
+    mock.requests_to(OWNER_DM)
         .iter()
         .map(|r| {
             r.json()
@@ -1253,6 +1256,10 @@ async fn run_case(case: &Value) -> Result<(), String> {
     gate_server::time::freeze(Some(first_at));
 
     let mock = MockUpstream::start().await;
+    mock.push(
+        "/users/@me/channels",
+        gate_testkit::Reply::json(200, &json!({"id": "900000000000000030"})),
+    );
     let dir = tempfile::tempdir().unwrap();
     if let Some(p) = case["private_params"].as_object() {
         std::fs::write(
@@ -1267,7 +1274,10 @@ async fn run_case(case: &Value) -> Result<(), String> {
         ("DATA_DIR", dir.path().to_str().unwrap().to_string()),
         ("NAI_TOKENS", tokens.join(",")),
         ("NAI_IMAGE_HOST", mock.url()),
-        ("ALERT_WEBHOOK_URL", format!("{}/alert-hook", mock.url())),
+        // 告警私信站长（旧版走 Webhook；3.0 只剩私信，docs/v3-deviations.md #102）
+        ("DISCORD_BOT_TOKEN", "synthetic-bot".into()),
+        ("DISCORD_API_BASE", mock.url()),
+        ("ALERT_USER_ID", "900000000000000031".into()),
         ("TZ", "Asia/Shanghai".into()),
         ("DAY_RESET_HOUR", "7".into()),
         ("IMAGE_MIN_INTERVAL", num("image_min_interval")),
@@ -1690,11 +1700,14 @@ async fn kernel_replays_match_python() {
     );
 }
 
-/// 告警正文「⚠ **猫头鹰公益站告警**（kind）…」里的 kind 是否还会私信。
+/// 告警正文「⚠ **猫头鹰公益站告警**（kind）…」里的 kind 是否还会私信（只有重大事故，见 `alerts.rs`）。
 fn alert_pages(text: &str) -> bool {
     let kind = text
         .split_once('（')
         .and_then(|(_, rest)| rest.split_once('）'))
         .map_or("", |(k, _)| k);
-    gate_server::alerts::pages(kind)
+    matches!(
+        kind,
+        "upstream_401" | "upstream_403_cooldown" | "upstream_token_changed" | "disk_low" | "test"
+    )
 }

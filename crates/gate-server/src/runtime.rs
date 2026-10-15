@@ -321,41 +321,19 @@ impl TagQueue {
     }
 }
 
-/// 最近 10 分钟上游调用结果（判断「上游不稳定」并告警）。
+/// 最近 10 分钟上游调用结果（状态页判断「上游不稳定」）。
 #[derive(Default)]
 pub struct UpstreamHealth {
     events: Mutex<VecDeque<(f64, bool)>>,
-    degraded: Mutex<bool>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum HealthChange {
-    Degraded,
-    Recovered,
 }
 
 impl UpstreamHealth {
-    /// 记一次结果；状态翻转时返回变化（调用方发告警）。
-    pub fn record(&self, ok: bool, now: f64) -> Option<HealthChange> {
-        {
-            let mut e = self.events.lock().expect("health");
-            e.push_back((now, ok));
-            while e.len() > 40 {
-                e.pop_front();
-            }
-        }
-        let status = self.status(now).0;
-        let mut d = self.degraded.lock().expect("health");
-        match status {
-            "degraded" if !*d => {
-                *d = true;
-                Some(HealthChange::Degraded)
-            }
-            "ok" if *d => {
-                *d = false;
-                Some(HealthChange::Recovered)
-            }
-            _ => None,
+    /// 记一次结果（只留最近 40 次）。
+    pub fn record(&self, ok: bool, now: f64) {
+        let mut e = self.events.lock().expect("health");
+        e.push_back((now, ok));
+        while e.len() > 40 {
+            e.pop_front();
         }
     }
 

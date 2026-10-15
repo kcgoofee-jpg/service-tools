@@ -1359,11 +1359,25 @@ fn content(post: &Req) -> String {
     post.body["content"].as_str().unwrap().to_string()
 }
 
+/// 只看发出的消息（每次发告警前都会先建一次私信频道）。
+fn messages(log: &Log) -> Vec<Req> {
+    log.lock()
+        .unwrap()
+        .iter()
+        .filter(|r| r.path.ends_with("/messages"))
+        .cloned()
+        .collect()
+}
+
+/// 站长 ID（假 Discord 给它的私信频道是 `dm-<ID>`）。
+const OWNER: &str = "ALERT_USER_ID=900000000000000011\n";
+const OWNER_DM: &str = "/channels/dm-900000000000000011/messages";
+
 #[tokio::test]
 async fn warnings_alone_never_message_the_owner() {
     let dir = tempfile::tempdir().unwrap();
     let (mock, log) = discord_mock(DiscordScript::default()).await;
-    let mut config = alert_env(dir.path(), "ALERT_CHANNEL_ID=900000000000000010\n");
+    let mut config = alert_env(dir.path(), OWNER);
     config.api_base = mock.base.clone();
     for i in 0..5 {
         maybe_alert(
@@ -1386,7 +1400,7 @@ async fn warnings_alone_never_message_the_owner() {
 async fn red_is_deduplicated_by_check_key_and_recovery_is_announced_once() {
     let dir = tempfile::tempdir().unwrap();
     let (mock, log) = discord_mock(DiscordScript::default()).await;
-    let mut config = alert_env(dir.path(), "ALERT_CHANNEL_ID=900000000000000010\n");
+    let mut config = alert_env(dir.path(), OWNER);
     config.api_base = mock.base.clone();
     let tz = shanghai();
 
@@ -1394,9 +1408,9 @@ async fn red_is_deduplicated_by_check_key_and_recovery_is_announced_once() {
         .await
         .unwrap();
     {
-        let posts = log.lock().unwrap();
+        let posts = messages(&log);
         assert_eq!(posts.len(), 1);
-        assert_eq!(posts[0].path, "/channels/900000000000000010/messages");
+        assert_eq!(posts[0].path, OWNER_DM);
         assert_eq!(posts[0].auth, "Bot synthetic-bot-token");
         assert!(
             posts[0].user_agent.starts_with("DiscordBot ("),
@@ -1422,22 +1436,22 @@ async fn red_is_deduplicated_by_check_key_and_recovery_is_announced_once() {
     let mut same = report_with("/healthz → 503", "healthz");
     same.add(Sev::Warn, "注册", "成功率 59%");
     maybe_alert(&config, &same, NOW + 10.0, &tz).await.unwrap();
-    assert_eq!(log.lock().unwrap().len(), 1);
+    assert_eq!(messages(&log).len(), 1);
     // 冷却内、出现了新的危险项 → 立刻发
     let mut more = report_with("/healthz → 503", "healthz");
     more.add_key(Sev::Red, "系统", "磁盘已用 95%", "disk");
     maybe_alert(&config, &more, NOW + 20.0, &tz).await.unwrap();
-    assert_eq!(log.lock().unwrap().len(), 2);
+    assert_eq!(messages(&log).len(), 2);
     // 同一批问题，冷却过后 → 再提醒一次；差 1 秒 → 不发
     let cd = config.cooldown as f64;
     maybe_alert(&config, &more, NOW + 20.0 + cd + 1.0, &tz)
         .await
         .unwrap();
-    assert_eq!(log.lock().unwrap().len(), 3);
+    assert_eq!(messages(&log).len(), 3);
     maybe_alert(&config, &more, NOW + 20.0 + 2.0 * cd, &tz)
         .await
         .unwrap();
-    assert_eq!(log.lock().unwrap().len(), 3);
+    assert_eq!(messages(&log).len(), 3);
     // 危险消失（只剩「注意」）→ 一条「已恢复」，之后不再响
     maybe_alert(&config, &warn_only(), NOW + 600.0 + 2.0 * cd, &tz)
         .await
@@ -1445,7 +1459,7 @@ async fn red_is_deduplicated_by_check_key_and_recovery_is_announced_once() {
     maybe_alert(&config, &warn_only(), NOW + 900.0 + 2.0 * cd, &tz)
         .await
         .unwrap();
-    let posts = log.lock().unwrap();
+    let posts = messages(&log);
     assert_eq!(posts.len(), 4);
     let recovered = content(&posts[3]);
     assert!(recovered.starts_with("✅ **巡检**"), "{recovered}");
@@ -1456,10 +1470,14 @@ async fn red_is_deduplicated_by_check_key_and_recovery_is_announced_once() {
 }
 
 #[tokio::test]
-async fn alert_goes_to_dm_when_only_user_is_configured() {
+async fn alert_goes_to_owner_dm() {
     let dir = tempfile::tempdir().unwrap();
     let (mock, log) = discord_mock(DiscordScript::default()).await;
-    let mut config = alert_env(dir.path(), "ALERT_USER_ID=900000000000000011\n");
+    // 频道 ID 不再读（docs/v3-deviations.md #102）：配了也只私信站长
+    let mut config = alert_env(
+        dir.path(),
+        "ALERT_CHANNEL_ID=900000000000000010\nALERT_USER_ID=900000000000000011\n",
+    );
     config.api_base = mock.base.clone();
     maybe_alert(&config, &report_with("x", "k"), NOW, &shanghai())
         .await
@@ -1473,7 +1491,7 @@ async fn alert_goes_to_dm_when_only_user_is_configured() {
             &json!({"recipient_id": "900000000000000011"})
         )
     );
-    assert_eq!(posts[1].path, "/channels/dm-900000000000000011/messages");
+    assert_eq!(posts[1].path, OWNER_DM);
 }
 
 #[tokio::test]
@@ -1490,7 +1508,7 @@ async fn failed_alert_leaves_no_state_so_it_retries() {
         },
     ] {
         let (mock, log) = discord_mock(script).await;
-        let mut config = alert_env(dir.path(), "ALERT_CHANNEL_ID=900000000000000010\n");
+        let mut config = alert_env(dir.path(), OWNER);
         config.api_base = mock.base.clone();
         let rep = report_with("x", "k");
         maybe_alert(&config, &rep, NOW, &shanghai()).await.unwrap();
@@ -1498,7 +1516,7 @@ async fn failed_alert_leaves_no_state_so_it_retries() {
             .await
             .unwrap();
         assert_eq!(
-            log.lock().unwrap().len(),
+            messages(&log).len(),
             2,
             "没发成功就不能记冷却，下一轮要重试"
         );
@@ -1516,6 +1534,15 @@ async fn unconfigured_alert_channel_sends_nothing() {
         .await
         .unwrap();
     std::fs::write(&config.env_file, "DISCORD_BOT_TOKEN=synthetic-bot-token\n").unwrap(); // 有 token 但没有收件人
+    maybe_alert(&config, &report_with("x", "k"), NOW, &shanghai())
+        .await
+        .unwrap();
+    // 只配了频道：频道不再读，等于没配
+    std::fs::write(
+        &config.env_file,
+        "DISCORD_BOT_TOKEN=synthetic-bot-token\nALERT_CHANNEL_ID=900000000000000010\n",
+    )
+    .unwrap();
     maybe_alert(&config, &report_with("x", "k"), NOW, &shanghai())
         .await
         .unwrap();

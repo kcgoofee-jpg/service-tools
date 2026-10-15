@@ -158,7 +158,7 @@ pub async fn authenticate(state: &AppState, parts: &Parts, passive: bool) -> Res
     Ok(key)
 }
 
-/// 记一次无效 Key；达到阈值时拦截该 IP 并告警。
+/// 记一次无效 Key；达到阈值时拦截该 IP 并写一行日志。
 pub fn record_auth_failure(state: &AppState, ip: &str, now: f64) {
     let e = &state.env;
     if state.auth_guard.record_failure(
@@ -168,16 +168,12 @@ pub fn record_auth_failure(state: &AppState, ip: &str, now: f64) {
         e.auth_block_seconds,
         now,
     ) {
-        state.alerter.notify(
-            "auth_flood",
-            &format!(
-                "有 IP 在 {} 秒内用无效 Key 反复请求 {} 次，已临时拦截 {} 分钟（IP 后两段：{}）。",
-                e.auth_fail_window.max(1),
-                e.auth_fail_max,
-                e.auth_block_seconds.div_euclid(60),
-                crate::runtime::mask_ip(ip)
-            ),
-            1800.0,
+        tracing::info!(
+            "有 IP 在 {} 秒内用无效 Key 反复请求 {} 次，已临时拦截 {} 分钟（IP 后两段：{}）",
+            e.auth_fail_window.max(1),
+            e.auth_fail_max,
+            e.auth_block_seconds.div_euclid(60),
+            crate::runtime::mask_ip(ip)
         );
     }
 }

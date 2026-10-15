@@ -1264,6 +1264,23 @@ async fn home_join() {
 
 // ------------------------------------------------------------------ 公告与告警
 
+/// 站长告警私信发到的频道（假 Discord 建私信频道时回这个 id）。
+const OWNER_DM: &str = "/channels/900000000000000030/messages";
+
+/// 告警私信接到本地假 Discord：机器人 Token + 站长 ID，建私信频道回固定 id。
+fn owner_dm(hook: &MockUpstream) -> Vec<(&'static str, &'static str)> {
+    hook.push(
+        "/users/@me/channels",
+        Reply::json(200, &json!({"id": "900000000000000030"})),
+    );
+    let base: &'static str = Box::leak(hook.url().into_boxed_str());
+    vec![
+        ("DISCORD_BOT_TOKEN", "synthetic-bot"),
+        ("DISCORD_API_BASE", base),
+        ("ALERT_USER_ID", "900000000000000031"),
+    ]
+}
+
 #[tokio::test]
 async fn announcement_file_roundtrip() {
     let e = setup(&[]).await;
@@ -1374,19 +1391,19 @@ async fn alerts_test_unconfigured_then_throttled() {
         "/alerts/test",
         None,
         409,
-        "尚未配置告警渠道（ALERT_USER_ID / ALERT_CHANNEL_ID / ALERT_WEBHOOK_URL）",
+        "尚未配置告警私信（DISCORD_BOT_TOKEN 与 ALERT_USER_ID）",
     )
     .await;
-    // 配了 Webhook（指向本地假服务）：发一条，10 秒内再发被节流
+    // 配了私信（Discord 指向本地假服务）：发一条，10 秒内再发被节流
     let hook = MockUpstream::start().await;
-    let e = setup(&[("ALERT_WEBHOOK_URL", &format!("{}/hook", hook.url()))]).await;
+    let e = setup(&owner_dm(&hook)).await;
     let api = Api::login(&e).await;
     assert_eq!(
         api.text("POST", "/alerts/test", None).await,
         (200, r#"{"ok":true}"#.into())
     );
     settle().await;
-    let sent = hook.requests_to("/hook");
+    let sent = hook.requests_to(OWNER_DM);
     assert_eq!(sent.len(), 1);
     assert_eq!(
         sent[0].json(),
@@ -1401,7 +1418,7 @@ async fn alerts_test_unconfigured_then_throttled() {
         "{t}"
     );
     settle().await;
-    assert_eq!(hook.requests_to("/hook").len(), 1, "被节流的请求不会再发");
+    assert_eq!(hook.requests_to(OWNER_DM).len(), 1, "被节流的请求不会再发");
     // 操作日志里是「发送测试告警」
     let rows = actions(&e).await;
     assert_eq!(
@@ -1568,7 +1585,7 @@ async fn upstream_token_settings_endpoints() {
 #[tokio::test]
 async fn upstream_token_add_replace_remove() {
     let hook = MockUpstream::start().await;
-    let e = setup(&[("ALERT_WEBHOOK_URL", &format!("{}/hook", hook.url()))]).await;
+    let e = setup(&owner_dm(&hook)).await;
     let api = Api::login(&e).await;
     let first = e.state.nai.tokens().await[0].token_id.clone();
     let file = e.state.env.upstream_tokens_path();
@@ -1689,7 +1706,7 @@ async fn upstream_token_add_replace_remove() {
     // 站长私信：变更提醒
     settle().await;
     let alerts: Vec<String> = hook
-        .requests_to("/hook")
+        .requests_to(OWNER_DM)
         .iter()
         .map(|r| r.json()["content"].as_str().unwrap().to_string())
         .collect();

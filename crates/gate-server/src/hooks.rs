@@ -41,8 +41,13 @@ impl Hooks for GateHooks {
         crate::time::now()
     }
 
+    /// 上游客户端报的事件：Token 失效（401）和连续 403 进入冷却会私信站长；单次 402 / 403 只写日志。
     fn event(&self, kind: &str, message: &str, cooldown: f64) {
-        self.alerter.notify(kind, message, cooldown);
+        if matches!(kind, "upstream_401" | "upstream_403_cooldown") {
+            self.alerter.notify(kind, message, cooldown);
+        } else {
+            tracing::info!(target: "upstream", kind, "{message}");
+        }
     }
 
     fn has_guard(&self) -> bool {

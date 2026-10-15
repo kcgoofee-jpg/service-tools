@@ -9,13 +9,13 @@
 //! 3. 调 [`AllowanceCore::finish_resolve`]（传请求结束后的墙钟 / 单调时钟）：返回 [`Resolved`]
 //!    （`Err(Unavailable)` 或 `Ok(是否耗尽)` 加上要做的副作用）；
 //! 4. 服务层按 [`Resolved::note_period`] 调 [`AllowanceCore::note_period`] 并把返回的文本写回库，
-//!    按 [`Resolved::low_alert`] 发告警（旧版是 `on_low` 回调，设了才发）。
+//!    [`Resolved::low`] 为真（额度偏低）时写一行日志（旧版是 `on_low` 回调，发告警）。
 //!
 //! 不在这里的 IO（服务层负责）：
 //! - `read_alert_threshold(db)`：`db.get_setting("v5_alert_threshold", 20)`，取到的值交给 [`normalize_alert_threshold`]；
 //! - `_note_period` 的读写：第一次用时 `db.get_setting("v5_period_samples", "{}")` 交给 [`AllowanceCore::load_periods`]，
 //!   之后每次 `db.set_setting("v5_period_samples", <note_period 返回的文本>)`，写失败只忽略（旧版 `except Exception: pass`）；
-//! - HTTP 请求与响应体读取本身；`asyncio.Lock` 按 token 串行；`log.warning`；`on_low` 回调。
+//! - HTTP 请求与响应体读取本身；`asyncio.Lock` 按 token 串行；`log.warning`。
 //!
 //! 已知边界（只在库里数据被手改坏、或上游返回非 UTF-8 JSON 时才碰到）：
 //! - `v5_period_samples` 不是 `{token: [[ts, 秒], ...]}` 的形状时，不合法的部分当作没有（旧版会 TypeError / AttributeError）；
@@ -34,8 +34,6 @@ pub const PERIOD_WINDOW: i64 = 48 * 3600;
 pub const PERIOD_KEEP: usize = 500;
 pub const UNAVAILABLE_MSG: &str = "V5 额度暂时无法确认，请稍后重试；未发送生图，未扣积分";
 pub const ERROR_MSG: &str = "额度查询失败，当前状态未确认";
-/// 告警冷却：6 小时
-pub const LOW_ALERT_COOLDOWN: i64 = 6 * 3600;
 /// 订阅响应体上限
 pub const MAX_BODY: usize = 65536;
 
@@ -225,29 +223,6 @@ pub fn cache_ttl(percent: i64, threshold: i64) -> i64 {
     }
 }
 
-/// 额度偏低的告警（旧版 `on_low("v5_low", 文案, 6*3600)`）。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LowAlert {
-    pub message: String,
-    pub cooldown_secs: i64,
-}
-
-/// 读数偏低（已耗尽或低于阈值）时的告警文案。
-pub fn low_alert(percent: i64, is_negative: bool, threshold: i64) -> Option<LowAlert> {
-    if !(is_negative || percent < threshold) {
-        return None;
-    }
-    let state = if is_negative {
-        "已用尽".to_string()
-    } else {
-        format!("仅剩 {percent}%（阈值 {threshold}%）")
-    };
-    Some(LowAlert {
-        message: format!("V5 官方免费额度{state}，之后的 V5 请求会按 Anlas 计费或被拒。"),
-        cooldown_secs: LOW_ALERT_COOLDOWN,
-    })
-}
-
 /// [`AllowanceCore::check_cache`] 的结论。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Begin {
@@ -266,8 +241,8 @@ pub struct Resolved {
     pub result: Result<bool, ()>,
     /// 读数里带了「再恢复 1% 的秒数」：服务层接着调 [`AllowanceCore::note_period`]
     pub note_period: Option<i64>,
-    /// 额度偏低：发告警
-    pub low_alert: Option<LowAlert>,
+    /// 读数偏低（已耗尽或低于阈值）：服务层写一行日志
+    pub low: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -389,7 +364,7 @@ impl AllowanceCore {
             return Resolved {
                 result: Err(()),
                 note_period: None,
-                low_alert: None,
+                low: false,
             };
         };
         self.rows.insert(
@@ -408,7 +383,7 @@ impl AllowanceCore {
         Resolved {
             result: Ok(sub.is_negative),
             note_period: sub.next_percent_seconds,
-            low_alert: low_alert(sub.percent, sub.is_negative, threshold),
+            low: sub.is_negative || sub.percent < threshold,
         }
     }
 

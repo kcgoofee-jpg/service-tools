@@ -1,39 +1,27 @@
-//! 站长告警：推送到 Discord（私信 / 频道 / Webhook 任选）。
+//! 站长告警：机器人私信站长（`ALERT_USER_ID`）；成员公告：机器人发到公告频道（`ANNOUNCE_CHANNEL_ID`）。
 //! - 只发事件类型和一句话，不含 Key、提示词或成员内容；
-//! - 同一 kind 在冷却期内只发一次（只写日志的也一样，免得日志每 5 分钟刷一条）；
+//! - 同一 kind 在冷却期内只发一次；
 //! - **只有重大事故才私信**（站长 10-15：有后台，非重大事故不私信）——成员现在用不了、
-//!   或账号 / 数据有风险，且需要站长动手。其余只写日志，后台总览的「有 N 件事要处理」能看到同样的情况。
+//!   或账号 / 数据有风险，且需要站长动手：上游 Token 失效（`upstream_401`）、连续 403 冷却
+//!   （`upstream_403_cooldown`）、上游 Token 被改动（`upstream_token_changed`）、磁盘剩余不足 10%（`disk_low`）、
+//!   后台「发送测试告警」（`test`）。其余事件在发生的地方直接写一行日志，后台总览能看到同样的情况。
 
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Instant;
 
-/// 会私信站长的事件。新增之前先问：成员现在是不是用不了 / 账号或数据是不是有风险 / 站长是不是必须动手？
-/// 上游 5xx / 限流 / 变慢、V5 余量、Bug、刷 Key 的 IP 都不算：要么会自动恢复，要么站长做不了什么，后台都能看到。
-const PAGE_KINDS: [&str; 6] = [
-    // 上游 Token 失效：生图和文本全部不可用
-    "upstream_401",
-    // 连续 403：账号可能被上游封控
-    "upstream_403_cooldown",
-    "upstream_403_text",
-    // 上游 Token 被改动（安全事件）
-    "upstream_token_changed",
-    // 磁盘剩余不足 10%
-    "disk_low",
-    // 后台「发送测试告警」
-    "test",
-];
-
-pub fn pages(kind: &str) -> bool {
-    PAGE_KINDS.contains(&kind)
+/// 发到哪里。
+enum Target {
+    /// 私信这个 Discord 用户（第一次发时建私信频道并缓存）。
+    Dm(String),
+    /// 发到这个频道。
+    Channel(String),
 }
 
 pub struct Alerter {
     bot_token: String,
-    user_id: String,
-    channel_id: String,
-    webhook_url: String,
+    target: Target,
     api_base: String,
     last: Mutex<HashMap<String, Instant>>,
     dm_channel: tokio::sync::Mutex<Option<String>>,
@@ -42,18 +30,10 @@ pub struct Alerter {
 }
 
 impl Alerter {
-    pub fn new(
-        api_base: &str,
-        bot_token: &str,
-        user_id: &str,
-        channel_id: &str,
-        webhook_url: &str,
-    ) -> Self {
+    fn new(api_base: &str, bot_token: &str, target: Target) -> Self {
         Self {
             bot_token: bot_token.to_string(),
-            user_id: user_id.trim().to_string(),
-            channel_id: channel_id.trim().to_string(),
-            webhook_url: webhook_url.trim().to_string(),
+            target,
             api_base: api_base.trim_end_matches('/').to_string(),
             last: Mutex::new(HashMap::new()),
             dm_channel: tokio::sync::Mutex::new(None),
@@ -67,14 +47,12 @@ impl Alerter {
         }
     }
 
-    /// 站长告警通道。
+    /// 站长告警通道：私信 `ALERT_USER_ID`。
     pub fn owner(env: &crate::env::EnvConfig) -> Self {
         Self::new(
             &env.discord_api_base,
             &env.discord_bot_token,
-            &env.alert_user_id,
-            &env.alert_channel_id,
-            &env.alert_webhook_url,
+            Target::Dm(env.alert_user_id.trim().to_string()),
         )
     }
 
@@ -83,19 +61,16 @@ impl Alerter {
         Self::new(
             &env.discord_api_base,
             &env.discord_bot_token,
-            "",
-            &env.announce_channel_id,
-            "",
+            Target::Channel(env.announce_channel_id.trim().to_string()),
         )
     }
 
     pub fn configured(&self) -> bool {
-        !self.webhook_url.is_empty()
-            || (!self.bot_token.is_empty()
-                && (!self.user_id.is_empty() || !self.channel_id.is_empty()))
+        let (Target::Dm(id) | Target::Channel(id)) = &self.target;
+        !self.bot_token.is_empty() && !id.is_empty()
     }
 
-    /// 告警（不阻塞调用方）。
+    /// 私信站长（不阻塞调用方）；同一 kind 在 `cooldown` 秒内只发一次。
     pub fn notify(self: &std::sync::Arc<Self>, kind: &str, message: &str, cooldown: f64) {
         {
             let mut last = self.last.lock().expect("alerts");
@@ -108,18 +83,7 @@ impl Alerter {
             }
             last.insert(kind.to_string(), now);
         }
-        if !pages(kind) {
-            tracing::info!(target: "alert-log", kind, "{message}");
-            return;
-        }
-        if !self.configured() {
-            return;
-        }
-        let me = self.clone();
-        let text = format!("⚠ **猫头鹰公益站告警**（{kind}）\n{message}");
-        if let Ok(rt) = tokio::runtime::Handle::try_current() {
-            rt.spawn(async move { me.send(&text).await });
-        }
+        self.post(&format!("⚠ **猫头鹰公益站告警**（{kind}）\n{message}"));
     }
 
     /// 不带告警前缀的普通通知（如给成员的公告）；无冷却。
@@ -138,42 +102,32 @@ impl Alerter {
         let content: String = gate_core::pyc::take_chars(text, 1900).to_string();
         let body = json!({"content": content, "allowed_mentions": {"parse": []}});
         let result: Result<(), String> = async {
-            if !self.webhook_url.is_empty() {
-                self.http
-                    .post(&self.webhook_url)
-                    .json(&body)
-                    .send()
-                    .await
-                    .map_err(|e| e.to_string())?
-                    .error_for_status()
-                    .map_err(|e| e.to_string())?;
-                return Ok(());
-            }
             let auth = format!("Bot {}", self.bot_token);
-            let channel = if !self.channel_id.is_empty() {
-                self.channel_id.clone()
-            } else {
-                let mut dm = self.dm_channel.lock().await;
-                if dm.is_none() {
-                    let created: serde_json::Value = self
-                        .http
-                        .post(format!("{}/users/@me/channels", self.api_base))
-                        .header("Authorization", &auth)
-                        .json(&json!({"recipient_id": self.user_id}))
-                        .send()
-                        .await
-                        .map_err(|e| e.to_string())?
-                        .error_for_status()
-                        .map_err(|e| e.to_string())?
-                        .json()
-                        .await
-                        .map_err(|e| e.to_string())?;
-                    *dm = created
-                        .get("id")
-                        .and_then(|v| v.as_str())
-                        .map(str::to_string);
+            let channel = match &self.target {
+                Target::Channel(id) => id.clone(),
+                Target::Dm(user_id) => {
+                    let mut dm = self.dm_channel.lock().await;
+                    if dm.is_none() {
+                        let created: serde_json::Value = self
+                            .http
+                            .post(format!("{}/users/@me/channels", self.api_base))
+                            .header("Authorization", &auth)
+                            .json(&json!({"recipient_id": user_id}))
+                            .send()
+                            .await
+                            .map_err(|e| e.to_string())?
+                            .error_for_status()
+                            .map_err(|e| e.to_string())?
+                            .json()
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        *dm = created
+                            .get("id")
+                            .and_then(|v| v.as_str())
+                            .map(str::to_string);
+                    }
+                    dm.clone().ok_or("no dm channel")?
                 }
-                dm.clone().ok_or("no dm channel")?
             };
             self.http
                 .post(format!("{}/channels/{channel}/messages", self.api_base))
@@ -201,22 +155,44 @@ impl Alerter {
 mod tests {
     use super::*;
     use gate_core::discord_ua::DISCORD_USER_AGENT;
-    use gate_testkit::MockUpstream;
+    use gate_testkit::{MockUpstream, Reply};
 
     /// 告警请求必须带 Discord 认可的 UA（默认 UA 会被 Cloudflare 1010 拦），与注册服务、运维命令共用一个。
     #[tokio::test]
     async fn alert_requests_carry_the_shared_discord_user_agent() {
         let mock = MockUpstream::start().await;
-        // 频道
-        let channel = Alerter::new(&mock.url(), "synthetic-bot", "", "900000000000000020", "");
+        mock.push(
+            "/users/@me/channels",
+            Reply::json(200, &json!({"id": "900000000000000030"})),
+        );
+        // 私信站长：先建私信频道，再发到这个频道
+        let owner = Alerter::new(
+            &mock.url(),
+            "synthetic-bot",
+            Target::Dm("900000000000000031".into()),
+        );
+        owner.send("测试").await;
+        // 公告频道
+        let channel = Alerter::new(
+            &mock.url(),
+            "synthetic-bot",
+            Target::Channel("900000000000000020".into()),
+        );
         channel.send("测试").await;
-        // Webhook
-        let hook = Alerter::new("", "", "", "", &format!("{}/alert-hook", mock.url()));
-        hook.send("测试").await;
         let reqs = mock.requests();
-        assert_eq!(reqs.len(), 2);
-        assert_eq!(reqs[0].path, "/channels/900000000000000020/messages");
-        assert_eq!(reqs[1].path, "/alert-hook");
+        let paths: Vec<&str> = reqs.iter().map(|r| r.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            [
+                "/users/@me/channels",
+                "/channels/900000000000000030/messages",
+                "/channels/900000000000000020/messages"
+            ]
+        );
+        assert_eq!(
+            reqs[0].json(),
+            json!({"recipient_id": "900000000000000031"})
+        );
         for r in &reqs {
             assert_eq!(
                 r.header("user-agent"),
