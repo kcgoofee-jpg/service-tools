@@ -262,15 +262,10 @@ async fn set_image_concurrency(
     if !exists(&state, &id).await {
         return Err(HttpError::new(404, NOT_FOUND).into());
     }
-    // 库里存实际生效的并发（SINGLE_IMAGE_SLOT_ENFORCED 时恒为 1），响应回请求的值（与旧版一致）
-    let effective = if state.env.single_image_slot_enforced {
-        1
-    } else {
-        limit
-    };
+    // 后台设的就是实际生效的并发（SINGLE_IMAGE_SLOT_ENFORCED 已删除，docs/v3-deviations.md #88）
     state
         .db
-        .set_upstream_token_image_concurrency(&id, effective)
+        .set_upstream_token_image_concurrency(&id, limit)
         .await?;
     if state.nai.set_image_concurrency(&id, limit).await.is_none() {
         return Err(HttpError::new(404, NOT_FOUND).into());

@@ -94,7 +94,6 @@ fn config(url: &str, interval: f64) -> Config {
     Config {
         image_host: url.into(),
         proxy: None,
-        single_slot_enforced: true,
         image_min_interval: interval,
     }
 }

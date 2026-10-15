@@ -173,12 +173,11 @@ struct PoolState {
 
 pub(crate) struct Pool {
     state: tokio::sync::Mutex<PoolState>,
-    single_slot_enforced: bool,
 }
 
 impl Pool {
     /// `tokens`：(Token, 每日免费 V5 上限, 是否允许 Anlas)。
-    pub(crate) fn new(tokens: Vec<(String, i64, bool)>, single_slot_enforced: bool) -> Self {
+    pub(crate) fn new(tokens: Vec<(String, i64, bool)>) -> Self {
         let tokens = tokens
             .into_iter()
             .enumerate()
@@ -186,7 +185,6 @@ impl Pool {
             .collect();
         Self {
             state: tokio::sync::Mutex::new(PoolState { tokens, rr: 0 }),
-            single_slot_enforced,
         }
     }
 
@@ -199,13 +197,9 @@ impl Pool {
         pool.tokens.iter().find(|t| t.token_id == token_id).cloned()
     }
 
-    /// 后台设的出图并发：1～4（`SINGLE_IMAGE_SLOT_ENFORCED` 时恒为 1）。
-    fn effective_concurrency(&self, limit: i64) -> i64 {
-        if self.single_slot_enforced {
-            1
-        } else {
-            limit.clamp(1, 4)
-        }
+    /// 后台设的出图并发：1～4（这是唯一的开关，没有全局覆盖）。
+    fn effective_concurrency(limit: i64) -> i64 {
+        limit.clamp(1, 4)
     }
 
     // ---------------- 后台增删改 ----------------
@@ -228,7 +222,7 @@ impl Pool {
             });
             if let Some(c) = concurrency.get(&t.token_id) {
                 t.image_slots
-                    .resize(self.effective_concurrency(*c) as usize);
+                    .resize(Self::effective_concurrency(*c) as usize);
             }
         }
     }
@@ -276,11 +270,7 @@ impl Pool {
             return Err("这把 Token 已经在令牌池的另一个位置".into());
         }
         new.with(|f| f.admin_enabled = of.admin_enabled);
-        new.image_slots.resize(if self.single_slot_enforced {
-            1
-        } else {
-            old.image_slots.limit()
-        });
+        new.image_slots.resize(old.image_slots.limit());
         let new = Arc::new(new);
         pool.tokens[index] = new.clone();
         renumber(&pool.tokens);
@@ -331,7 +321,7 @@ impl Pool {
     pub(crate) async fn set_image_concurrency(&self, token_id: &str, limit: i64) -> Option<i64> {
         let pool = self.state.lock().await;
         let t = pool.tokens.iter().find(|t| t.token_id == token_id)?;
-        let eff = self.effective_concurrency(limit);
+        let eff = Self::effective_concurrency(limit);
         t.image_slots.resize(eff as usize);
         Some(eff)
     }
