@@ -12,7 +12,8 @@ pub const KEY_BUSY: &str = "key_busy"; // 这把 Key 上一张还没出完
 pub const HOURLY_CAP: &str = "hourly_cap"; // 账号每小时上限（AIMD 按它判断「顶到过上限」）
 pub const QUIET_CAP: &str = "quiet_cap"; // 安静时段的每小时上限
 /// 账号 3 小时上限。这个功能已经删除，但 `usage_log.reason` 里还留着历史记录，
-/// 旧版的 `LABELS` / `SITE_LEVEL` 仍然认它，所以常量保留（`reason_label("cap_3h")` 的结果依赖它）。
+/// 短说明（`LABELS`）和单 Key 限流的排除名单（[`crate::autopilot::KEY_GUARD_SKIP_REASONS`]）仍然认它，
+/// 所以常量保留（`reason_label("cap_3h")` 的结果依赖它）。
 pub const CAP_3H: &str = "cap_3h";
 /// 账号每 10 分钟突发窗口。这个功能 3.0 已删除（docs/v3-deviations.md #64），与 [`CAP_3H`] 一样只为
 /// `usage_log.reason` 里的历史记录保留（短说明、回填、单 Key 限流的排除项都还认它）。
@@ -29,23 +30,6 @@ pub const KEY_RATE: &str = "key_rate"; // 这把 Key 的请求频率 / 在途请
 pub const BODY_ABORT: &str = "body_abort"; // 请求体传输中断（客户端或网络，不是上游）
 pub const FEATURE_OFF: &str = "feature_off"; // 该功能没给这把 Key 开通 / 全局关闭（成员可控）
 pub const PARAM: &str = "param"; // 参数不被支持（模型、采样器、角色数、权重写法……），成员按提示改就好
-
-/// 全站层面的拒绝：原因在站点（排队满、账号上限、熔断、冷却），不是这个成员的客户端出了问题。
-/// 自动驾驶的「单 Key 被拒 ≥60 次 → 暂停」不能数这些，否则忙时自动重试的正常成员会被误判为死循环。
-pub const SITE_LEVEL: [&str; 12] = [
-    QUEUE_FULL,
-    HOURLY_CAP,
-    QUIET_CAP,
-    BURST_CAP,
-    CAP_3H,
-    DAILY_CAP,
-    PACED,
-    BREAKER,
-    COOLDOWN,
-    V5_EXHAUSTED,
-    QUEUE_TIMEOUT,
-    SITE_QUOTA,
-];
 
 /// 带原因码的拒绝说明（旧版是 `str` 子类，旧调用方照常当字符串用）。
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -35,6 +35,10 @@
 
 use crate::clock::Clock;
 use crate::quota::{Cx, DecideError, Effect, py_max};
+use crate::reasons::{
+    BREAKER, BURST_CAP, CAP_3H, COOLDOWN, DAILY_CAP, HOURLY_CAP, KEY_PAUSED, PACED, QUEUE_FULL,
+    QUEUE_TIMEOUT, QUIET_CAP, SITE_QUOTA, V5_EXHAUSTED,
+};
 use crate::{jsondump, pyc, pyval};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -46,21 +50,24 @@ pub const HISTORY_KEY: &str = "autopilot_history";
 /// 规则一律执行（旧版的 `off` / `observe` 已删除，#68）；返回值里照旧写出模式，后台据此显示。
 pub const MODE: &str = "enforce";
 
-/// 单 Key 限流统计要排除的拒绝原因码：`KEY_PAUSED` + `reasons.SITE_LEVEL`（全站层面的拒绝不算成员的错）。
+/// 单 Key 限流统计要排除的拒绝原因码：已暂停（`KEY_PAUSED`）+ 全站层面的拒绝（原因在站点：排队满、
+/// 账号上限、熔断、冷却……，不是这个成员的客户端出了问题）。忙时自动重试的正常成员不能被误判为死循环。
+///
+/// 旧版另有一份 `reasons.SITE_LEVEL`（就是去掉 `KEY_PAUSED` 的这份名单），只有这里用，3.0 并成这一份。
 pub const KEY_GUARD_SKIP_REASONS: [&str; 13] = [
-    "key_paused",
-    "queue_full",
-    "hourly_cap",
-    "quiet_cap",
-    "burst_cap",
-    "cap_3h",
-    "daily_cap",
-    "paced",
-    "breaker",
-    "cooldown",
-    "v5_exhausted",
-    "queue_timeout",
-    "site_quota",
+    KEY_PAUSED,
+    QUEUE_FULL,
+    HOURLY_CAP,
+    QUIET_CAP,
+    BURST_CAP,
+    CAP_3H,
+    DAILY_CAP,
+    PACED,
+    BREAKER,
+    COOLDOWN,
+    V5_EXHAUSTED,
+    QUEUE_TIMEOUT,
+    SITE_QUOTA,
 ];
 
 /// `decide` 会读的 `site_settings` 键。

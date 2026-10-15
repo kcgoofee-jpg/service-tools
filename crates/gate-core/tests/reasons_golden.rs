@@ -3,7 +3,11 @@
 //! 3.0 删掉的原因码 `over_base`（V4.5 保底用完后全站不空闲，docs/v3-deviations.md #61）：夹具冻结不改，
 //! 在期望一侧去掉它（常量本身、`SITE_LEVEL` / `LABELS` / `BACKFILL` 里的那一项）；历史记录里的
 //! `over_base` 没有短说明了，按 detail 的第一句显示。
+//!
+//! `SITE_LEVEL` 只有自动驾驶用，3.0 并进 `autopilot::KEY_GUARD_SKIP_REASONS`（那份名单去掉 `key_paused`
+//! 就是它），夹具里的 `SITE_LEVEL` 拿这一段来比。
 
+use gate_core::autopilot;
 use gate_core::reasons::{self, Reason};
 use gate_golden::{assert_eq_py_ordered, load};
 use serde_json::{Map, Value, json};
@@ -43,7 +47,10 @@ fn constants_golden() {
         }
         let want = &without_removed(&c.raw["value"]);
         let got: Value = match name {
-            "SITE_LEVEL" => json!(reasons::SITE_LEVEL),
+            "SITE_LEVEL" => {
+                assert_eq!(autopilot::KEY_GUARD_SKIP_REASONS[0], reasons::KEY_PAUSED);
+                json!(autopilot::KEY_GUARD_SKIP_REASONS[1..])
+            }
             "LABELS" => {
                 let mut m = Map::new();
                 for (k, v) in reasons::LABELS {
