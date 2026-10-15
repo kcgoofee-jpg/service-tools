@@ -354,8 +354,9 @@ impl RegistrationService {
         self.db.registered_discord_for_key(key_id).await
     }
 
-    pub async fn is_banned(&self, discord_id: &str) -> Result<bool, DbError> {
-        self.db.is_discord_banned(discord_id).await
+    /// 在黑名单里就返回拉黑理由，不在返回 None。
+    pub async fn ban_reason(&self, discord_id: &str) -> Result<Option<String>, DbError> {
+        self.db.discord_ban_reason(discord_id).await
     }
 
     pub async fn key_row_for(&self, discord_id: &str) -> Result<Option<Key>, DbError> {
@@ -941,8 +942,8 @@ impl RegistrationService {
             }
         }
         let _g = self.lock.lock().await;
-        if self.is_banned(user_id).await? {
-            return denied("这个 Discord 账号已被站长停用，无法领取 Key。");
+        if let Some(reason) = self.ban_reason(user_id).await? {
+            return denied(gate_core::idle::banned_notice(&reason));
         }
         self.release_if_expired(user_id, true).await?;
         if self.db.registration_exists(user_id).await? {
@@ -1011,8 +1012,14 @@ impl RegistrationService {
             return denied("Discord ID 不对");
         }
         let _g = self.lock.lock().await;
-        if self.is_banned(&user_id).await? {
-            return denied("这个 Discord 账号已被站长停用");
+        if let Some(reason) = self.ban_reason(&user_id).await? {
+            // 奖励是站长发起的：直接给黑名单里的理由
+            let why = if reason.is_empty() {
+                String::new()
+            } else {
+                format!("（{reason}）")
+            };
+            return denied(format!("这个 Discord 账号在黑名单里{why}"));
         }
         self.release_if_expired(&user_id, true).await?;
         if let Some(row) = self.key_row_for(&user_id).await? {

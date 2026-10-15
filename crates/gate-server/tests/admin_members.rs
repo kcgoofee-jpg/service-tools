@@ -1142,7 +1142,7 @@ async fn gift_issues_key_and_coupon_and_returns_the_key_for_hand_over() {
     .await;
     a.post(&g, json!({"discord_id": "900000000000000071"}))
         .await
-        .assert_detail(409, "这个 Discord 账号已被站长停用");
+        .assert_detail(409, "这个 Discord 账号在黑名单里（站长手动封禁）");
     // 新账号：发 Key + 重置券；机器人不私信，新 Key 在响应里交给站长手动转交
     let r = a
         .post(

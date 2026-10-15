@@ -104,16 +104,16 @@ impl Db {
         .await
     }
 
-    pub async fn is_discord_banned(&self, discord_id: &str) -> Result<bool> {
+    /// 在黑名单里就返回拉黑理由（可能是空串），不在返回 None。
+    pub async fn discord_ban_reason(&self, discord_id: &str) -> Result<Option<String>> {
         let id = discord_id.to_string();
         self.read(move |c| {
             c.query_row(
-                "SELECT 1 FROM discord_bans WHERE discord_id=?",
+                "SELECT reason FROM discord_bans WHERE discord_id=?",
                 [id],
-                |_| Ok(()),
+                |r| value::text_or(r, 0, ""),
             )
             .optional()
-            .map(|r| r.is_some())
         })
         .await
     }

@@ -471,6 +471,31 @@ async fn ban_revokes_the_key_and_blocks_reissue_until_unban() {
     assert_eq!(issue(&e, MEMBER).await.0, 200);
 }
 
+/// 闲置回收拉黑的人再来领：说清原因（连续几天没出图、Key 已被自动回收），不说「站长停用」，也不提解封。
+#[tokio::test]
+async fn idle_recycled_member_is_told_why_when_registering_again() {
+    let (e, _d) = setup_reg(&[]).await;
+    open_registration(&e).await;
+    let info = gate_db::repo::discord::BanInfo {
+        reason: gate_core::idle::ban_reason(3),
+        banned_by: "系统".into(),
+        ..Default::default()
+    };
+    e.state
+        .db
+        .ban_discord(MEMBER, &info, e.state.now())
+        .await
+        .unwrap();
+    let again = issue(&e, MEMBER).await;
+    assert_eq!(
+        (again.0, detail(&again)),
+        (
+            403,
+            "你之前的 Key 连续 3 天没有出图，已被自动回收，这个 Discord 账号不能再领取 Key。"
+        )
+    );
+}
+
 // ------------------------------------------------------------------ 桥接：发 Key
 
 const WELCOME: &str = "🦉 **欢迎来到猫头鹰公益站！** 这是你的 API Key（只发这一次，请先保存）：\n`<KEY>`\n\n**三步开始出图（以柏宝绘为例）**\n1. 打开柏宝绘 → 渠道 → 配置 → 新建接入点\n2. 接口地址填 `https://gate.test`（**不要**加 /v1）\n3. API Key 填上面 `nai-` 开头的整串，保存后随便生成一张图试试\n其他支持自定义 NovelAI 地址的客户端同样这样填。\n\n**不确定填对没有？** 在 Discord 输入 `/quota`，能看到额度就说明 Key 正常；也可以在 https://gate.test 用 Discord 登录查看自己的额度。\n\n**规则**\n• 每日额度：每人每天最多 V4.5 及以下 30 张，全站共用、先到先得；每天 7 点重置\n• 已开通功能：文生图\n• 连续 3 天没有成功出图会被自动回收，之后不能再领（不另行提醒）\n• 每把 Key 同时生成 1 张、排队 1 张，多发的会被退回，等前一张出完再发\n• 只提供免费出图：V4.5 及以下总像素 ≤1024×1024（宽高取 64 的倍数，超出自动等比缩小）；≤28 步、每次 1 张；图生图 / 局部重绘不开放；Vibe 在「已开通功能」里时可用，消耗每日 Anlas 额度\n• Key 只给本服务器成员：退出服务器后 Key 自动失效\n• 一人一把，请勿分享：共用或转售会被回收\n\n**常用命令**：`/quota` 看今日额度 · `/resetkey` Key 丢了或泄露时换新 · `/help` 简要说明\n遇到问题到 🛠️｜问题反馈 发截图（记得打码 Key）。";
@@ -935,7 +960,9 @@ async fn gift_issues_even_when_closed_and_is_idempotent() {
     let banned = svc(&e).gift(&u).await;
     assert_eq!(
         banned,
-        Err(RegErr::Denied("这个 Discord 账号已被站长停用".into()))
+        Err(RegErr::Denied(
+            "这个 Discord 账号在黑名单里（站长手动封禁）".into()
+        ))
     );
     // 直发的路径同样认封禁
     assert!(matches!(
