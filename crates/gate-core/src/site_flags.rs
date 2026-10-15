@@ -121,7 +121,7 @@ pub static WEB_LOGIN_PAUSED: Spec = spec(
     Kind::Flag,
     SpecDefault::Bool(true),
     "registration_routes",
-    "网页 Discord OAuth 登录暂停（Discord 回调修复 / 审核期间）。Key 登录照常可用，不受此开关影响",
+    "网页 Discord 登录暂停（Discord 回调修复 / 审核期间）。网页只有 Discord 登录，暂停期间成员只能在 Discord 里用 /quota 看额度",
 );
 pub static DM_ENABLED: Spec = spec(
     "dm_enabled",

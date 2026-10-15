@@ -914,9 +914,14 @@ pub fn check_data(rep: &mut Report, conn: &Connection, ctx: &Ctx<'_>) -> rusqlit
         "bugs_open",
         Value::Object(bugs.iter().map(|(k, n)| (k.clone(), json!(n))).collect()),
     );
-    // 只有 error 级才告警：warn 级只是提示，不该把站长叫起来
+    // 有未处理的 error 级 Bug 只算「注意」：代码缺陷不是站长能半夜处理的事，后台总览和 Bug 追踪里看得到；
+    // 真正影响成员的故障（网关挂了、健康检查不通）由上面的系统检查报「危险」（docs/v3-deviations.md #43）
     rep.add_key(
-        if bug("error") != 0 { Sev::Red } else { Sev::Ok },
+        if bug("error") != 0 {
+            Sev::Warn
+        } else {
+            Sev::Ok
+        },
         "数据",
         format!("未解决 Bug：error {} · warn {}", bug("error"), bug("warn")),
         "bug-count",
@@ -995,14 +1000,9 @@ pub fn check_channels(rep: &mut Report, conn: &Connection, now: f64) -> rusqlite
     rep.set("text_ok_30m", ok);
     if total != 0 {
         let rate = ok as f64 / total as f64;
+        // 文本是次要功能：成功率再低也只算「注意」，不私信（docs/v3-deviations.md #48）
         rep.add_key(
-            if rate >= 0.9 {
-                Sev::Ok
-            } else if rate >= 0.5 {
-                Sev::Warn
-            } else {
-                Sev::Red
-            },
+            if rate >= 0.9 { Sev::Ok } else { Sev::Warn },
             "通道",
             format!(
                 "文本/聊天 30 分钟：{ok}/{total} 成功（{:.0}%）",
@@ -1044,8 +1044,10 @@ pub fn check_channels(rep: &mut Report, conn: &Connection, now: f64) -> rusqlite
     if five != 0 {
         // 别在告警里猜原因：那批 500 全是「最普通的 V4.5 文生图」，
         // 而局部重绘缺蒙版只是已知的一种形态。写清楚怎么查（rid → 日志里的请求形态）就行。
+        // 只算「注意」：一位成员反复提交上游处理不了的请求就能刷出一串 500（10-14 夜就是这样），
+        // 站长也做不了什么；上游整体出问题时状态页和后台总览会标出来（docs/v3-deviations.md #48）
         rep.add_key(
-            if five < 5 { Sev::Warn } else { Sev::Red },
+            Sev::Warn,
             "通道",
             format!("近 30 分钟出图上游 500 × {five}（上游没给原因：按 rid 查 [upstream-5xx] 日志里的请求形态）"),
             "image-500",

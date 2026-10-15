@@ -397,7 +397,10 @@ async fn run_variant(lines: &[Value], variant: &str, diffs: &mut Vec<String>) ->
         if let Some(d) = &discord {
             let got = Value::Array(d.calls());
             let got: Value = serde_json::from_str(&norm_text(&got.to_string())).unwrap();
-            if got != l["calls"] {
+            // 私信里的欢迎语在 3.0 改过几句（docs/v3-deviations.md #48）
+            let want: Value =
+                serde_json::from_str(&common::v3_welcome(&l["calls"].to_string())).unwrap();
+            if got != want {
                 bad(
                     "发给 Discord 的请求",
                     l["calls"].to_string(),

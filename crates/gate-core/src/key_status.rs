@@ -24,8 +24,14 @@ mod tests {
     #[test]
     fn site_reset_tells_member_to_register_again() {
         assert!(disabled_message(Some(SITE_RESET)).contains("/register"));
-        assert_eq!(disabled_message(Some(ADMIN)), "该 Key 已被站长停用，有疑问请联系站长。");
+        assert_eq!(
+            disabled_message(Some(ADMIN)),
+            "该 Key 已被站长停用，有疑问请联系站长。"
+        );
         assert_eq!(disabled_message(None), disabled_message(Some(ADMIN)));
-        assert_eq!(disabled_message(Some("别的")), disabled_message(Some(ADMIN)));
+        assert_eq!(
+            disabled_message(Some("别的")),
+            disabled_message(Some(ADMIN))
+        );
     }
 }

@@ -192,6 +192,20 @@ fn params_load_golden() {
 
 // ---------------------------------------------------------------- site_flags
 
+/// 3.0 改过的设置说明（docs/v3-deviations.md #48）：冻结夹具里是旧说明，比较前换成新的。
+const DOC_FIXES: [(&str, &str); 1] = [(
+    "网页 Discord OAuth 登录暂停（Discord 回调修复 / 审核期间）。Key 登录照常可用，不受此开关影响",
+    "网页 Discord 登录暂停（Discord 回调修复 / 审核期间）。网页只有 Discord 登录，暂停期间成员只能在 Discord 里用 /quota 看额度",
+)];
+
+fn fix_docs(v: &Value) -> Value {
+    let mut text = v.to_string();
+    for (old, new) in DOC_FIXES {
+        text = text.replace(old, new);
+    }
+    serde_json::from_str(&text).unwrap()
+}
+
 #[test]
 fn site_registry_golden() {
     let mut n = 0;
@@ -200,14 +214,16 @@ fn site_registry_golden() {
             "spec" => {
                 let key = c.out()["key"].as_str().unwrap();
                 let s = ALL.iter().find(|s| s.key == key).expect("缺少这个键");
-                assert_eq_py(&c, &spec_json(s), c.out());
+                assert_eq_py(&c, &spec_json(s), &fix_docs(c.out()));
                 n += 1;
             }
             "all_keys" => {
                 let keys: Vec<Value> = ALL.iter().map(|s| json!(s.key)).collect();
                 assert_eq_py(&c, &Value::Array(keys), c.out());
             }
-            "facts_table" => assert_eq_py(&c, &json!(site_flags::facts_table()), c.out()),
+            "facts_table" => {
+                assert_eq_py(&c, &json!(site_flags::facts_table()), &fix_docs(c.out()))
+            }
             other => panic!("未知 {other}"),
         }
     }

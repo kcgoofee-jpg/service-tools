@@ -119,3 +119,25 @@ impl<'a> Call<'a> {
 pub async fn settle() {
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 }
+
+/// 领 Key 欢迎语在 3.0 改正了几句和现状不符的话（docs/v3-deviations.md #48）：冻结的旧版原文按同样的规则换掉再比。
+#[allow(dead_code)] // 只有部分测试文件用到
+pub fn v3_welcome(legacy: &str) -> String {
+    legacy
+        .replace(
+            "天没有使用会被自动回收（回收前 1 天私信提醒）",
+            "天没有成功出图会被自动回收，之后不能再领（不另行提醒）",
+        )
+        .replace(
+            "图生图、Vibe 等会消耗 Anlas 的功能不开放",
+            "图生图 / 局部重绘不开放；Vibe 在「已开通功能」里时可用，消耗每日 Anlas 额度",
+        )
+        .replace(
+            "一人一把，请勿分享（本站记录打码后的来源网段防分享，不存完整 IP，7 天后删除）",
+            "一人一把，请勿分享：共用或转售会被回收",
+        )
+        .replace(
+            "网页登录开放后还能在 https://gate.test/ 用 Discord 一键登录、打包下载自己的作品。",
+            "也可以在 https://gate.test/ 用 Discord 登录查看自己的额度。",
+        )
+}

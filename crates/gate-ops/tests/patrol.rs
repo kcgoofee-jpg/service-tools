@@ -810,7 +810,7 @@ fn data_counts_and_bug_tracking() {
         rows(&rep),
         vec![
             (Sev::Warn, "数据", "今日计数：成员 100 · 上游 110 · 日志 3 张".to_string()),
-            (Sev::Red, "数据", "未解决 Bug：error 1 · warn 2".to_string()),
+            (Sev::Warn, "数据", "未解决 Bug：error 1 · warn 2".to_string()),
             (Sev::Ok, "数据", "[info] 信息（1 次）".to_string()),
             (Sev::Warn, "数据", "[warn] 新问题（3 次）".to_string()),
             (
@@ -932,8 +932,9 @@ fn channels_text_rate_bands() {
     for (ok, total, sev) in [
         (9, 10, Sev::Ok),
         (5, 10, Sev::Warn),
-        (4, 10, Sev::Red),
-        (0, 3, Sev::Red),
+        // 文本是次要功能：再低也只是「注意」，不私信
+        (4, 10, Sev::Warn),
+        (0, 3, Sev::Warn),
     ] {
         let dir = tempfile::tempdir().unwrap();
         let path = new_db(dir.path());
@@ -1018,7 +1019,7 @@ fn channels_image_500_inpaint_429_and_headroom() {
 }
 
 #[test]
-fn channels_500_burst_is_red_and_old_429_is_ignored() {
+fn channels_500_burst_is_only_a_warning_and_old_429_is_ignored() {
     let dir = tempfile::tempdir().unwrap();
     let path = new_db(dir.path());
     let c = rw(&path);
@@ -1037,7 +1038,8 @@ fn channels_500_burst_is_red_and_old_429_is_ignored() {
     set_setting(&c, "guard_account_hourly_cap", "0"); // 0 = 没设上限，不出余量行
     let mut rep = Report::default();
     check_channels(&mut rep, &ro(&path), NOW).unwrap();
-    assert_eq!(text_of(&rep, "出图上游 500 × 5").sev, Sev::Red);
+    // 一位成员反复提交上游处理不了的请求就能刷出一串 500：只算「注意」，不私信
+    assert_eq!(text_of(&rep, "出图上游 500 × 5").sev, Sev::Warn);
     assert!(rep.rows.iter().all(|r| !r.text.contains("429")));
     assert!(rep.rows.iter().all(|r| !r.text.contains("每小时上限")));
 }

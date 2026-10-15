@@ -94,12 +94,6 @@ impl ReqCtx {
         self.with(|i| i.on_sent = Some(Box::new(hook)));
     }
 
-    /// 来源网络打码标签（写进用量日志）。
-    pub fn set_source(&self, label: &str) {
-        let label = label.to_string();
-        self.with(|i| i.src = label);
-    }
-
     /// 无明确自报 UA 的客户端，按请求体参数指纹识别（小白盒、dsh-tavern-image 等）。
     pub fn refine_client_from_payload(&self, body: &serde_json::Value) {
         self.with(|i| {
