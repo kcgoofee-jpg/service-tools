@@ -9,7 +9,7 @@ use axum::body::{Body, Bytes};
 use axum::extract::{Request, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
-use common::{Call, Env, setup, v3_welcome};
+use common::{Call, Env, setup};
 use gate_server::registration::{DiscordUser, Gift, Issued, RegErr};
 use serde_json::{Value, json};
 use std::net::SocketAddr;
@@ -451,7 +451,7 @@ async fn ban_revokes_the_key_and_blocks_reissue_until_unban() {
 
 // ------------------------------------------------------------------ 桥接：发 Key
 
-const WELCOME: &str = "🦉 **欢迎来到猫头鹰公益站！** 这是你的 API Key（只发这一次，请先保存）：\n`<KEY>`\n\n**三步开始出图（以柏宝绘为例）**\n1. 打开柏宝绘 → 渠道 → 配置 → 新建接入点\n2. 接口地址填 `https://gate.test/`（**不要**加 /v1）\n3. API Key 填上面 `nai-` 开头的整串，保存后随便生成一张图试试\n其他支持自定义 NovelAI 地址的客户端同样这样填。\n\n**不确定填对没有？** 在 Discord 输入 `/quota`，能看到额度就说明 Key 正常；网页登录开放后还能在 https://gate.test/ 用 Discord 一键登录、打包下载自己的作品。\n\n**规则**\n• 每日额度：V4.5 及以下 30 张（次日自动恢复）\n• 已开通功能：文生图\n• 有效期 30 天，到期后可重新 /register\n• 连续 3 天没有使用会被自动回收（回收前 1 天私信提醒）\n• 每把 Key 同时生成 1 张，多发的会被退回，等前一张出完再发\n• 只提供免费出图：总像素 ≤1024×1024（尺寸可自定义，超出自动等比缩小）、≤28 步、每次 1 张；图生图、Vibe 等会消耗 Anlas 的功能不开放\n• Key 只给本服务器成员：退出服务器后 Key 自动失效\n• 一人一把，请勿分享（本站记录打码后的来源网段防分享，不存完整 IP，7 天后删除）\n\n**常用命令**：`/quota` 看额度和服务状态 · `/resetkey` Key 丢了或泄露时换新 · `/help` 简要说明\n遇到问题到 🛠️｜问题反馈 发截图（记得打码 Key）。";
+const WELCOME: &str = "🦉 **欢迎来到猫头鹰公益站！** 这是你的 API Key（只发这一次，请先保存）：\n`<KEY>`\n\n**三步开始出图（以柏宝绘为例）**\n1. 打开柏宝绘 → 渠道 → 配置 → 新建接入点\n2. 接口地址填 `https://gate.test`（**不要**加 /v1）\n3. API Key 填上面 `nai-` 开头的整串，保存后随便生成一张图试试\n其他支持自定义 NovelAI 地址的客户端同样这样填。\n\n**不确定填对没有？** 在 Discord 输入 `/quota`，能看到额度就说明 Key 正常；也可以在 https://gate.test 用 Discord 登录查看自己的额度。\n\n**规则**\n• 每日额度：每人每天最多 V4.5 及以下 30 张，全站共用、先到先得；每天 7 点重置\n• 已开通功能：文生图\n• 连续 3 天没有成功出图会被自动回收，之后不能再领（不另行提醒）\n• 每把 Key 同时生成 1 张、排队 1 张，多发的会被退回，等前一张出完再发\n• 只提供免费出图：V4.5 及以下总像素 ≤1024×1024（宽高取 64 的倍数，超出自动等比缩小）；≤28 步、每次 1 张；图生图 / 局部重绘不开放；Vibe 在「已开通功能」里时可用，消耗每日 Anlas 额度\n• Key 只给本服务器成员：退出服务器后 Key 自动失效\n• 一人一把，请勿分享：共用或转售会被回收\n\n**常用命令**：`/quota` 看今日额度 · `/resetkey` Key 丢了或泄露时换新 · `/help` 简要说明\n遇到问题到 🛠️｜问题反馈 发截图（记得打码 Key）。";
 
 #[tokio::test]
 async fn issue_mints_a_key_exactly_like_legacy() {
@@ -474,7 +474,7 @@ async fn issue_mints_a_key_exactly_like_legacy() {
     assert!(key.starts_with("nai-") && key.len() == 36, "{key}");
     assert_eq!(
         r.2["message"].as_str().unwrap(),
-        v3_welcome(&WELCOME.replace("<KEY>", &key))
+        WELCOME.replace("<KEY>", &key)
     );
     // 落库
     let row = e
@@ -2214,7 +2214,7 @@ async fn issue_result_enum_is_provisioned_for_plain_requests() {
     );
 }
 
-// ------------------------------------------------------------------ 文案 / 打包：对拍旧版 golden
+// ------------------------------------------------------------------ 成员名 / 打包：对拍旧版 golden
 
 /// `tools/parity/golden/registration.py` 在旧 Python 上生成：欢迎文案、成员名、zip / epub 的条目与文本内容。
 fn golden() -> Value {
@@ -2226,29 +2226,9 @@ fn golden() -> Value {
 }
 
 #[test]
-fn welcome_text_and_member_labels_match_legacy_golden() {
+fn member_labels_match_legacy_golden() {
+    // 欢迎语不再和旧版对拍（规则改了好几处，docs/v3-deviations.md #75）；成员名的写法没变，仍然对拍
     let g = golden();
-    for c in g["welcome"].as_array().unwrap() {
-        let a = c["args"].as_array().unwrap();
-        let s = |i: usize| a[i].as_str().unwrap();
-        let out = gate_server::registration::welcome_dm(
-            s(0),
-            s(1),
-            s(2),
-            a[3].as_i64().unwrap(),
-            a[4].as_i64().unwrap(),
-            s(5),
-            s(6),
-        );
-        let legacy = c["out"].as_str().unwrap();
-        if legacy.chars().count() == 1990 {
-            // 超长被截断的用例：3.0 的规则几句更短，截断点之前能多放几个字——新文案应以「换过的旧文案」开头，且同样截在 1990 字
-            assert!(out.starts_with(&v3_welcome(legacy)), "{a:?}");
-            assert_eq!(out.chars().count(), 1990);
-        } else {
-            assert_eq!(out, v3_welcome(legacy), "{a:?}");
-        }
-    }
     for c in g["labels"].as_array().unwrap() {
         let u = &c["user"];
         let s = |k: &str| u.get(k).and_then(Value::as_str).unwrap_or("").to_string();
@@ -2410,11 +2390,6 @@ async fn registration_settings_ops_match_legacy() {
         .set_setting("register_daily_v5", "0")
         .await
         .unwrap();
-    e.state
-        .db
-        .set_setting("guard_base_daily_images", "20")
-        .await
-        .unwrap();
     // 记录开关：提示词记录 5 天
     let audit = gate_server::ops::set_audit(
         &e.state,
@@ -2427,7 +2402,7 @@ async fn registration_settings_ops_match_legacy() {
         json!({"prompts": true, "thumbs": false, "retention_days": 5,
                "image_cap_mb": 8192, "image_keep_hours": 24})
     );
-    // 欢迎文案：保底 20 张、全部功能、没有有效期这一行、带记录声明
+    // 欢迎文案：每人最多 100 张、全部功能、没有有效期这一行、带记录声明
     let r = bridge(
         &e,
         "/self-register/issue",
@@ -2436,10 +2411,21 @@ async fn registration_settings_ops_match_legacy() {
     .await;
     assert_eq!(r.0, 200, "{:?}", r.2);
     let key = r.2["key"].as_str().unwrap();
-    let want = "🦉 **欢迎来到猫头鹰公益站！** 这是你的 API Key（只发这一次，请先保存）：\n`<KEY>`\n\n**三步开始出图（以柏宝绘为例）**\n1. 打开柏宝绘 → 渠道 → 配置 → 新建接入点\n2. 接口地址填 `https://gate.test/`（**不要**加 /v1）\n3. API Key 填上面 `nai-` 开头的整串，保存后随便生成一张图试试\n其他支持自定义 NovelAI 地址的客户端同样这样填。\n\n**不确定填对没有？** 在 Discord 输入 `/quota`，能看到额度就说明 Key 正常；网页登录开放后还能在 https://gate.test/ 用 Discord 一键登录、打包下载自己的作品。\n\n**规则**\n• 每日额度：V4.5 及以下保底 20 张、全站空闲时最多 100 张（次日自动恢复）\n• 已开通功能：全部已开放功能\n• 连续 3 天没有使用会被自动回收（回收前 1 天私信提醒）\n• 每把 Key 同时生成 1 张，多发的会被退回，等前一张出完再发\n• 只提供免费出图：总像素 ≤1024×1024（尺寸可自定义，超出自动等比缩小）、≤28 步、每次 1 张；图生图、Vibe 等会消耗 Anlas 的功能不开放\n• Key 只给本服务器成员：退出服务器后 Key 自动失效\n• 一人一把，请勿分享（本站记录打码后的来源网段防分享，不存完整 IP，7 天后删除）\n\n**常用命令**：`/quota` 看额度和服务状态 · `/resetkey` Key 丢了或泄露时换新 · `/help` 简要说明\n遇到问题到 🛠️｜问题反馈 发截图（记得打码 Key）。\n为防止滥用和优化调度，本站会保留你的图片提示词（5 天后自动删除），仅站长可见。";
-    assert_eq!(
-        r.2["message"].as_str().unwrap(),
-        v3_welcome(&want.replace("<KEY>", key))
+    let message = r.2["message"].as_str().unwrap();
+    assert!(message.contains(
+        "• 每日额度：每人每天最多 V4.5 及以下 100 张，全站共用、先到先得；每天 7 点重置\n"
+    ));
+    assert!(message.contains("• 已开通功能：全部已开放功能\n"));
+    assert!(message.contains(&format!("`{key}`")));
+    assert!(
+        !message.contains("有效期") && !message.contains("保底"),
+        "{message}"
+    );
+    assert!(
+        message.ends_with(
+            "\n为防止滥用和优化调度，本站会保留你的图片提示词（5 天后自动删除），仅站长可见。"
+        ),
+        "{message}"
     );
     let row = e
         .state

@@ -118,36 +118,63 @@ pub fn member_label(user: &DiscordUser) -> String {
     take_chars(&label, 60).to_string()
 }
 
-/// 领取成功私信 / 临时回复：Key + 一步步配置教程 + 规则。控制在 Discord 2000 字以内。
-pub fn welcome_dm(
-    key: &str,
-    site: &str,
-    quota: &str,
-    expires_days: i64,
-    idle_days: i64,
-    notice: &str,
-    opened: &str,
-) -> String {
-    let mut rules = vec![format!("• 每日额度：{quota}（次日自动恢复）")];
-    if !opened.is_empty() {
-        rules.push(format!("• 已开通功能：{opened}"));
+/// 领取成功的欢迎语（/register 的临时回复，只有本人可见）所需的内容。
+pub struct Welcome<'a> {
+    pub key: &'a str,
+    /// 站点地址；结尾的 `/` 会去掉，和机器人 /help 里写的一致。
+    pub site: &'a str,
+    /// 每人每天最多出几张 V4.5 及以下的图，0 = 不限。
+    pub daily_images: i64,
+    /// 这把 Key 能不能用 V5（后台「可用模型」选了「含 V5」）。
+    pub v5: bool,
+    /// 每人每天最多出几张 V5，0 = 没有单独的个人上限。
+    pub daily_v5: i64,
+    /// 每天几点重置（服务日起点）。
+    pub reset_hour: i64,
+    /// 连续几天没有成功出图会被回收，0 = 不回收。
+    pub idle_days: i64,
+    /// 站点公告（生成记录声明），空串 = 没有。
+    pub notice: &'a str,
+    /// 已开通功能的名字，空串 = 不写这一行。
+    pub opened: &'a str,
+}
+
+/// 领取成功的欢迎语：Key + 一步步配置教程 + 规则。控制在 Discord 2000 字以内。
+///
+/// 额度是全站共用的池子、先到先得，每人的数字只是上限（docs/v3-deviations.md #75）。
+pub fn welcome_message(w: &Welcome) -> String {
+    let site = w.site.trim_end_matches('/');
+    let mut cap = if w.daily_images == 0 {
+        "V4.5 及以下不限张数".to_string()
+    } else {
+        format!("V4.5 及以下 {} 张", w.daily_images)
+    };
+    if w.v5 && w.daily_v5 != 0 {
+        cap.push_str(&format!("；V5 {} 张", w.daily_v5));
     }
-    if expires_days != 0 {
+    let mut rules = vec![format!(
+        "• 每日额度：每人每天最多 {cap}，全站共用、先到先得；每天 {} 点重置",
+        w.reset_hour
+    )];
+    if !w.opened.is_empty() {
+        rules.push(format!("• 已开通功能：{}", w.opened));
+    }
+    if w.idle_days != 0 {
         rules.push(format!(
-            "• 有效期 {expires_days} 天，到期后可重新 /register"
+            "• 连续 {} 天没有成功出图会被自动回收，之后不能再领（不另行提醒）",
+            w.idle_days
         ));
     }
-    if idle_days != 0 {
-        rules.push(format!(
-            "• 连续 {idle_days} 天没有成功出图会被自动回收，之后不能再领（不另行提醒）"
-        ));
-    }
-    rules.push("• 每把 Key 同时生成 1 张，多发的会被退回，等前一张出完再发".into());
-    rules.push(
-        "• 只提供免费出图：总像素 ≤1024×1024（尺寸可自定义，超出自动等比缩小）、≤28 步、每次 1 张；\
-         图生图 / 局部重绘不开放；Vibe 在「已开通功能」里时可用，消耗每日 Anlas 额度"
-            .into(),
-    );
+    rules.push("• 每把 Key 同时生成 1 张、排队 1 张，多发的会被退回，等前一张出完再发".into());
+    let v5_sizes = if w.v5 {
+        "；V5 只有 832×1216、1216×832、1024×1024 三种尺寸，其他尺寸会自动换成最接近的一种"
+    } else {
+        ""
+    };
+    rules.push(format!(
+        "• 只提供免费出图：V4.5 及以下总像素 ≤1024×1024（宽高取 64 的倍数，超出自动等比缩小）{v5_sizes}；\
+         ≤28 步、每次 1 张；图生图 / 局部重绘不开放；Vibe 在「已开通功能」里时可用，消耗每日 Anlas 额度"
+    ));
     rules.push("• Key 只给本服务器成员：退出服务器后 Key 自动失效".into());
     rules.push("• 一人一把，请勿分享：共用或转售会被回收".into());
     let mut text = format!(
@@ -158,14 +185,15 @@ pub fn welcome_dm(
          3. API Key 填上面 `nai-` 开头的整串，保存后随便生成一张图试试\n\
          其他支持自定义 NovelAI 地址的客户端同样这样填。\n\n\
          **不确定填对没有？** 在 Discord 输入 `/quota`，能看到额度就说明 Key 正常；也可以在 {site} 用 Discord 登录查看自己的额度。\n\n\
-         **规则**\n{}\n\n\
-         **常用命令**：`/quota` 看额度和服务状态 · `/resetkey` Key 丢了或泄露时换新 · `/help` 简要说明\n\
+         **规则**\n{rules}\n\n\
+         **常用命令**：`/quota` 看今日额度 · `/resetkey` Key 丢了或泄露时换新 · `/help` 简要说明\n\
          遇到问题到 🛠️｜问题反馈 发截图（记得打码 Key）。",
-        rules.join("\n")
+        key = w.key,
+        rules = rules.join("\n"),
     );
-    if !notice.is_empty() {
+    if !w.notice.is_empty() {
         text.push('\n');
-        text.push_str(notice);
+        text.push_str(w.notice);
     }
     take_chars(&text, 1990).to_string()
 }
@@ -1060,22 +1088,6 @@ impl RegistrationService {
             self.set_role(user_id, true).await;
         }
         let notice = crate::audit::audit_disclosure(&self.db, &self.env).await?;
-        let base = pyval::number_like(&self.site_value(&site_flags::GUARD_BASE).await?)
-            .unwrap_or(0.0) as i64;
-        let legacy = if base != 0 && cfg.daily_images != 0 && base < cfg.daily_images {
-            format!(
-                "V4.5 及以下保底 {base} 张、全站空闲时最多 {} 张",
-                cfg.daily_images
-            )
-        } else {
-            format!("V4.5 及以下 {} 张", cfg.daily_images)
-        };
-        let quota = legacy
-            + &if cfg.daily_v5 != 0 {
-                format!("；V5 {} 张", cfg.daily_v5)
-            } else {
-                String::new()
-            };
         let opened = match &cfg.features {
             Some(list) => list
                 .iter()
@@ -1089,15 +1101,17 @@ impl RegistrationService {
                 .join("、"),
             None => "全部已开放功能".to_string(),
         };
-        let message = welcome_dm(
-            &key,
-            &self.cfg.site_url,
-            &quota,
-            cfg.expires_days,
-            self.cfg.idle_days,
-            &notice,
-            &opened,
-        );
+        let message = welcome_message(&Welcome {
+            key: &key,
+            site: &self.cfg.site_url,
+            daily_images: cfg.daily_images,
+            v5: cfg.image_scope == "all",
+            daily_v5: cfg.daily_v5,
+            reset_hour: self.env.day_reset_hour.clamp(0, 23),
+            idle_days: self.cfg.idle_days,
+            notice: &notice,
+            opened: &opened,
+        });
         Ok(Provisioned { key, message })
     }
 }
@@ -1186,20 +1200,93 @@ mod tests {
         );
     }
 
+    fn welcome(daily_images: i64, daily_v5: i64) -> Welcome<'static> {
+        Welcome {
+            key: "nai-x",
+            site: "https://site.test/",
+            daily_images,
+            v5: daily_v5 != 0,
+            daily_v5,
+            reset_hour: 7,
+            idle_days: 3,
+            notice: "",
+            opened: "文生图",
+        }
+    }
+
     #[test]
-    fn welcome_text_fits_discord() {
-        let t = welcome_dm(
-            "nai-x",
-            "https://site.test/",
-            "V4.5 及以下 30 张",
-            30,
-            3,
-            "",
-            "文生图",
+    fn welcome_text_states_the_current_rules() {
+        let t = welcome_message(&welcome(30, 0));
+        assert!(t.contains("`nai-x`"));
+        // 接口地址不带结尾斜杠，和机器人 /help 一致
+        assert!(
+            t.contains("接口地址填 `https://site.test`（**不要**加 /v1）"),
+            "{t}"
         );
-        assert!(t.contains("`nai-x`") && t.contains("接口地址填 `https://site.test/`"));
-        assert!(t.contains("• 有效期 30 天，到期后可重新 /register"));
-        assert!(t.contains("• 一人一把，请勿分享"));
+        assert!(!t.contains("https://site.test/"), "{t}");
+        // 每日 7 点重置，没有「保底」「次日自动恢复」「有效期」
+        assert!(
+            t.contains(
+                "• 每日额度：每人每天最多 V4.5 及以下 30 张，全站共用、先到先得；每天 7 点重置"
+            ),
+            "{t}"
+        );
+        for gone in ["保底", "次日自动恢复", "有效期", "全站空闲"] {
+            assert!(!t.contains(gone), "{gone}：{t}");
+        }
+        assert!(
+            t.contains("• 每把 Key 同时生成 1 张、排队 1 张，多发的会被退回"),
+            "{t}"
+        );
+        // 不能用 V5 时不提 V5 的额度和尺寸
+        assert!(!t.contains("832×1216") && !t.contains("V5"), "{t}");
+        assert!(t.contains("• 一人一把，请勿分享：共用或转售会被回收"));
         assert!(t.chars().count() <= 1990);
+    }
+
+    #[test]
+    fn welcome_text_covers_v5_sizes_and_unlimited() {
+        let t = welcome_message(&welcome(0, 3));
+        assert!(
+            t.contains("每人每天最多 V4.5 及以下不限张数；V5 3 张，全站共用、先到先得"),
+            "{t}"
+        );
+        assert!(
+            t.contains(
+                "V5 只有 832×1216、1216×832、1024×1024 三种尺寸，其他尺寸会自动换成最接近的一种"
+            ),
+            "{t}"
+        );
+        // 能用 V5 但没有单独的个人上限：不写 V5 张数，尺寸照写
+        let t = welcome_message(&Welcome {
+            v5: true,
+            ..welcome(30, 0)
+        });
+        assert!(
+            t.contains("每人每天最多 V4.5 及以下 30 张，全站共用"),
+            "{t}"
+        );
+        assert!(t.contains("V5 只有 832×1216"), "{t}");
+        // 不回收、没有已开通功能、有公告
+        let t = welcome_message(&Welcome {
+            idle_days: 0,
+            opened: "",
+            notice: "📢 本站会记录提示词。",
+            ..welcome(30, 0)
+        });
+        assert!(
+            !t.contains("自动回收") && !t.contains("• 已开通功能："),
+            "{t}"
+        );
+        assert!(t.ends_with("\n📢 本站会记录提示词。"), "{t}");
+    }
+
+    #[test]
+    fn welcome_text_is_cut_at_discords_limit() {
+        let t = welcome_message(&Welcome {
+            notice: &"长".repeat(3000),
+            ..welcome(30, 3)
+        });
+        assert_eq!(t.chars().count(), 1990);
     }
 }
