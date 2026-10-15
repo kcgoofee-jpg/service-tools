@@ -1,4 +1,10 @@
 //! 自动驾驶对拍：`tools/parity/golden/autopilot.py` 生成的夹具（旧 Python 的真实输出）。
+//!
+//! 2.x 单 Key 守护的「换网段」「多客户端全天在用」两条规则（输入 `events`，恒为空）在 3.0 已删除
+//! （docs/v3-deviations.md #51）。夹具是冻结的 Python 输出，不改，在这里按输入过滤：
+//! - `pure`：`key_guard_rule` 里只测这两条规则的用例整条跳过，其余照常对拍；
+//! - `run`：`events` 在解析前去掉；某把 Key 的 `events` 会触发这两条规则的用例，期望输出里的 key_guard 判断 /
+//!   状态快照 / 日志带着被删规则的结论，只比较与它无关的部分（异常类型、名额、熔断、查询参数），其余用例逐位对拍。
 
 use gate_core::autopilot::{self, *};
 use gate_core::clock::Clock;
@@ -11,9 +17,36 @@ fn opt_f(v: &Value) -> Option<f64> {
     if v.is_null() { None } else { as_f64(v) }
 }
 
+/// 旧版 `key_guard_rule(alternate, clients, allday, rejects)` 的前三个参数：会触发被删规则
+/// （`alternate >= 2`，或 `clients` 与 `allday` 同时出现）。
+fn removed_key_guard_branch(alternate: i64, clients: i64, allday: i64) -> bool {
+    alternate >= 2 || (clients != 0 && allday != 0)
+}
+
+/// `run` 用例里，任何一把 Key 24 小时内的 `events` 会触发被删规则（期望输出里带着被删规则的判断）。
+fn run_case_hits_removed_rules(inputs: &Value) -> bool {
+    let now = as_f64(&inputs["now"]).unwrap();
+    let events = inputs["events"].as_array().unwrap();
+    inputs["keys"].as_array().unwrap().iter().any(|k| {
+        let kid = k[0].as_i64().unwrap();
+        let count = |kind: &str| {
+            events
+                .iter()
+                .filter(|e| {
+                    e[1].as_i64() == Some(kid)
+                        && as_f64(&e[0]).unwrap() >= now - 86400.0
+                        && e[2] == kind
+                })
+                .count() as i64
+        };
+        removed_key_guard_branch(count("alternate"), count("clients"), count("allday"))
+    })
+}
+
 #[test]
 fn pure_golden() {
     let mut seen = std::collections::BTreeMap::<String, usize>::new();
+    let mut skipped = 0;
     for c in load(M, "autopilot/pure") {
         let name = c.raw["fn"].as_str().unwrap().to_string();
         *seen.entry(name.clone()).or_default() += 1;
@@ -35,22 +68,34 @@ fn pure_golden() {
                     breaker_rule(c.arg(0).as_i64().unwrap(), c.arg(1).as_i64().unwrap());
                 json!([trip, why])
             }
-            "key_guard_rule" => match key_guard_rule(
-                c.arg(0).as_i64().unwrap(),
-                c.arg(1).as_i64().unwrap(),
-                c.arg(2).as_i64().unwrap(),
-                c.arg(3).as_i64().unwrap(),
-            ) {
-                Some((action, secs, why)) => json!([action, secs, why]),
-                None => Value::Null,
-            },
+            "key_guard_rule" => {
+                let (alternate, clients, allday) = (
+                    c.arg(0).as_i64().unwrap(),
+                    c.arg(1).as_i64().unwrap(),
+                    c.arg(2).as_i64().unwrap(),
+                );
+                if removed_key_guard_branch(alternate, clients, allday) {
+                    skipped += 1;
+                    continue;
+                }
+                match key_guard_rule(c.arg(3).as_i64().unwrap()) {
+                    Some(why) => json!(["pause", KEY_GUARD_PAUSE_SECS, why]),
+                    None => Value::Null,
+                }
+            }
             other => panic!("未知函数 {other}"),
         };
         assert_eq_py_ordered(&c, &got, c.out());
     }
-    for k in ["slots_rule", "breaker_rule", "key_guard_rule"] {
+    for k in ["slots_rule", "breaker_rule"] {
         assert!(seen.get(k).copied().unwrap_or(0) > 100, "{k} 用例太少");
     }
+    // 被删规则的用例（alternate >= 2，或 clients 与 allday 同时出现）已跳过，剩下的覆盖「被拒次数」两侧
+    assert!(skipped > 100, "被删规则的用例应该被跳过: {skipped}");
+    assert!(
+        seen.get("key_guard_rule").copied().unwrap_or(0) > 50,
+        "key_guard_rule 用例太少"
+    );
 }
 
 #[test]
@@ -88,29 +133,47 @@ fn queries<'a>(c: &'a Case, tag: &str) -> Vec<&'a Vec<Value>> {
 #[test]
 fn run_golden() {
     let ck = Clock::new("Asia/Shanghai", 7);
-    let (mut errs, mut slots, mut breaker, mut pauses) = (0, 0, 0, 0);
+    let (mut errs, mut slots, mut breaker, mut pauses, mut partial) = (0, 0, 0, 0, 0);
     for c in load(M, "autopilot/run") {
-        let inp: AutopilotInputs = serde_json::from_value(c.raw["inputs"].clone())
+        // `events` 输入已随被删规则一起去掉；没触发被删规则的用例里它本来就不起作用，去掉后结果不变
+        let removed = run_case_hits_removed_rules(&c.raw["inputs"]);
+        let mut raw_inputs = c.raw["inputs"].clone();
+        raw_inputs.as_object_mut().unwrap().remove("events");
+        let inp: AutopilotInputs = serde_json::from_value(raw_inputs)
             .unwrap_or_else(|e| panic!("第 {} 行输入解析失败: {e}", c.line));
         let out = autopilot::decide(&inp, &ck);
         let want_err = c.raw["err"].as_str();
         assert_eq!(out.error.as_deref(), want_err, "第 {} 行异常类型", c.line);
-        let effects = serde_json::to_value(&out.effects).unwrap();
-        assert_eq_py_ordered(&c, &effects, &c.raw["effects"]);
-        match (&out.result, want_err) {
-            (Some(got), None) => assert_eq_py_ordered(&c, got, c.out()),
-            (None, Some(_)) => errs += 1,
-            other => panic!("第 {} 行：结果与异常不匹配 {other:?}", c.line),
-        }
-        if let Some(r) = &out.result {
-            slots += usize::from(r["rules"]["slots"].get("applied").is_some());
-            breaker += usize::from(r["rules"]["breaker"].get("applied").is_some());
-            pauses += r["rules"]["key_guard"]["value"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .filter(|d| d.get("applied").is_some())
-                .count();
+        if removed {
+            // 期望里的 key_guard 判断、状态快照、操作日志带着被删规则的结论：只比较与它无关的部分
+            partial += 1;
+            match (&out.result, want_err) {
+                (Some(got), None) => {
+                    for rule in ["slots", "breaker"] {
+                        assert_eq_py_ordered(&c, &got["rules"][rule], &c.out()["rules"][rule]);
+                    }
+                }
+                (None, Some(_)) => {}
+                other => panic!("第 {} 行：结果与异常不匹配 {other:?}", c.line),
+            }
+        } else {
+            let effects = serde_json::to_value(&out.effects).unwrap();
+            assert_eq_py_ordered(&c, &effects, &c.raw["effects"]);
+            match (&out.result, want_err) {
+                (Some(got), None) => assert_eq_py_ordered(&c, got, c.out()),
+                (None, Some(_)) => errs += 1,
+                other => panic!("第 {} 行：结果与异常不匹配 {other:?}", c.line),
+            }
+            if let Some(r) = &out.result {
+                slots += usize::from(r["rules"]["slots"].get("applied").is_some());
+                breaker += usize::from(r["rules"]["breaker"].get("applied").is_some());
+                pauses += r["rules"]["key_guard"]["value"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter(|d| d.get("applied").is_some())
+                    .count();
+            }
         }
 
         // ---- 服务层该传的查询参数（文档里的清单）----
@@ -143,7 +206,11 @@ fn run_golden() {
     }
     assert!(errs > 50, "异常路径用例太少: {errs}");
     assert!(slots > 50, "名额生效用例太少: {slots}");
-    assert!(breaker > 30, "熔断生效用例太少: {breaker}");
-    assert!(pauses > 100, "Key 限流生效用例太少: {pauses}");
+    assert!(breaker > 20, "熔断生效用例太少: {breaker}");
+    assert!(pauses > 40, "Key 限流生效用例太少: {pauses}");
+    assert!(
+        partial > 100,
+        "触发被删规则的用例应该只做部分对拍: {partial}"
+    );
     let _ = assert_eq_py;
 }

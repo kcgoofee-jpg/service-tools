@@ -189,7 +189,7 @@ pub enum Effect {
         reason: String,
         now: f64,
     },
-    /// 自动驾驶：`share.pause_key(key_id, seconds, reason, now)`。
+    /// 自动驾驶：临时暂停单把 Key（旧版 `share.pause_key(key_id, seconds, reason, now)`；落 `share_state` 表并更新内存暂停表）。
     PauseKey {
         key_id: i64,
         seconds: i64,

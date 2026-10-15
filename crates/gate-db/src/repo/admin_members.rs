@@ -188,8 +188,8 @@ impl Db {
         .await
     }
 
-    /// 防分享暂停表里的 (key_id, paused_until)，包含已过期的行。
-    pub async fn share_pause_rows(&self) -> Result<Vec<(i64, f64)>> {
+    /// Key 临时暂停表（`share_state`）里的 (key_id, paused_until)，包含已过期的行。
+    pub async fn pause_rows(&self) -> Result<Vec<(i64, f64)>> {
         self.read(|c| {
             let mut stmt = c.prepare("SELECT key_id, paused_until FROM share_state")?;
             stmt.query_map([], |r| {

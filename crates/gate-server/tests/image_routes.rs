@@ -185,6 +185,55 @@ async fn disabled_key_message_depends_on_reason() {
     assert!(e.mock.requests().is_empty());
 }
 
+/// 被临时暂停的 Key：没写原因时只说「已被临时暂停，到点自动恢复」（防分享体系已删，不再提「异常多地使用」）；
+/// 写了原因（自动驾驶的限流）就用原因。
+#[tokio::test]
+async fn paused_key_message_without_reason_is_neutral() {
+    let e = setup(&[]).await;
+    let msg = |body: &[u8]| -> String {
+        let v: Value = serde_json::from_slice(body).unwrap();
+        v["error"]["message"]
+            .as_str()
+            .or(v["message"].as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+    let request = || {
+        call(
+            &e.state,
+            "POST",
+            "/ai/generate-image",
+            Some(TOKEN),
+            Some(image_body("x", 1)),
+        )
+    };
+    let until = e.state.now() + 600.0;
+
+    e.state.pauses.set(1, until, String::new());
+    let (status, _, body) = request().await;
+    assert_eq!(status, 403);
+    let m = msg(&body);
+    assert!(
+        m.contains("这把 Key 已被临时暂停，") && m.ends_with(" 自动恢复。"),
+        "{m}"
+    );
+    assert!(!m.contains("多地") && !m.contains("仅限本人"), "{m}");
+
+    e.state.pauses.set(
+        1,
+        until,
+        "你的 Key 短时间内被大量拒绝，已暂停 1 小时".into(),
+    );
+    let (status, _, body) = request().await;
+    assert_eq!(status, 403);
+    let m = msg(&body);
+    assert!(
+        m.contains("你的 Key 短时间内被大量拒绝，已暂停 1 小时，") && m.ends_with(" 自动恢复。"),
+        "{m}"
+    );
+    assert!(e.mock.requests().is_empty());
+}
+
 #[tokio::test]
 async fn unknown_model_is_rejected_and_logged() {
     let e = setup(&[]).await;

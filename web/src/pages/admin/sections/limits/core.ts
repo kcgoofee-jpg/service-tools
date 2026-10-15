@@ -110,7 +110,6 @@ export const AP_RULES: Record<string, string> = {
   slots: "名额上限",
   breaker: "全站熔断",
   key_guard: "单个 Key 守护",
-  alt_link: "疑似同一人（只观察）",
 };
 export const AP_MODES: Record<string, { label: string; tone: "warn" | "ok" | "danger" | undefined }> = {
   observe: { label: "观察", tone: "warn" },
@@ -126,14 +125,8 @@ export function autopilotValue(rule: string, v: unknown): string {
   if (rule === "slots") return typeof v === "number" ? `名额上限 → ${v}` : String(v ?? "—");
   if (rule === "breaker") return v ? "暂停出图 5 分钟" : "正常";
   if (rule === "key_guard") {
-    const list = Array.isArray(v) ? (v as Array<{ name?: string; action?: string }>) : [];
-    return list.length
-      ? list.map((x) => `${x.name ?? "?"}：${x.action === "reset" ? "重置" : "暂停"}`).join("；")
-      : "无";
-  }
-  if (rule === "alt_link") {
-    const list = Array.isArray(v) ? v : [];
-    return list.length ? `${list.length} 对` : "无";
+    const list = Array.isArray(v) ? (v as Array<{ name?: string }>) : [];
+    return list.length ? list.map((x) => `${x.name ?? "?"}：暂停`).join("；") : "无";
   }
   return v == null ? "—" : String(v);
 }

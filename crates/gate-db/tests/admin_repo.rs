@@ -159,7 +159,7 @@ async fn member_page_aggregates() {
         ),
     )
     .await;
-    assert_eq!(db.share_pause_rows().await.unwrap(), [(a, 5.0)]);
+    assert_eq!(db.pause_rows().await.unwrap(), [(a, 5.0)]);
     assert_eq!(
         db.counter_rows("2026-09-22").await.unwrap(),
         [(a, 3, 2, 1.5, 7, 4)]
@@ -238,7 +238,7 @@ async fn reset_all_keys_spares_admins_and_invites() {
         !tags.contains(&(999, "孤儿".into())),
         "没有对应 Key 的孤儿标签也清掉（旧版如此）"
     );
-    assert!(db.share_pause_rows().await.unwrap().is_empty());
+    assert!(db.pause_rows().await.unwrap().is_empty());
     // 再来一次：没有可失效的了（已经失效的算在内——UPDATE 命中的行数）
     assert_eq!(db.reset_all_keys().await.unwrap(), (1, 1));
 }

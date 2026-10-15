@@ -1456,9 +1456,9 @@ async fn members(State(state): State<AppState>, req: Request) -> R {
         .collect();
     let clients: HashMap<i64, String> = st.db.latest_member_clients().await?.into_iter().collect();
     // 旧版 `paused if paused > time.time() else 0`：过期的是整数 0，没过期的是浮点
-    let share_map: HashMap<i64, Value> = st
+    let pause_map: HashMap<i64, Value> = st
         .db
-        .share_pause_rows()
+        .pause_rows()
         .await?
         .into_iter()
         .map(|(k, paused)| {
@@ -1594,9 +1594,10 @@ async fn members(State(state): State<AppState>, req: Request) -> R {
             "rejected_why",
             json!(ms.and_then(|m| m.rejected_why.clone()).unwrap_or_default()),
         );
+        // 字段名沿用 2.x 的 "share"（前端和 admin_golden 按这个名字读）；内容只剩 Key 临时暂停的到期时间
         put(
             "share",
-            share_map
+            pause_map
                 .get(&id)
                 .map_or(Value::Null, |p| json!({"paused_until": p})),
         );

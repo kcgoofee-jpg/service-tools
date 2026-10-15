@@ -114,10 +114,14 @@ describe("memberIssues / needsAttention", () => {
     expect(memberStatus(m, NOW)?.text).toBe("已限流");
   });
 
-  it("站长标记「疑似」类标签要处理，并带移除动作", () => {
-    const m = mk({ tags: [{ tag: "疑似小号", note: "同网段", by: "站长", ts: NOW - 60 }] });
-    const i = memberIssues(m, NOW).find((x) => x.id === "tag:疑似小号");
-    expect(i?.actions).toEqual([{ kind: "tag-del", tag: "疑似小号" }]);
+  it("站长标记「疑似」类标签要处理，并带移除动作；标签名没有特殊含义", () => {
+    for (const tag of ["疑似小号", "疑似同一人", "疑似转卖"]) {
+      const m = mk({ tags: [{ tag, note: "同网段", by: "站长", ts: NOW - 60 }] });
+      const i = memberIssues(m, NOW).find((x) => x.id === `tag:${tag}`);
+      expect(i?.need).toBe(true);
+      expect(i?.actions).toEqual([{ kind: "tag-del", tag }]);
+      expect(needsAttention(m, NOW)).toBe(true);
+    }
   });
 });
 
@@ -163,6 +167,22 @@ describe("筛选", () => {
     });
     const f = buildFilters([m], NOW, 3);
     expect(f.userTags.map((x) => x.label)).toEqual(["老朋友"]);
+  });
+  it("没有「疑似小号 / 同一人」内置筛选：这些只是普通的站长标签，进站长标签分组", () => {
+    const m = mk({
+      tags: [
+        { tag: "疑似小号", note: "", by: "站长", ts: NOW },
+        { tag: "疑似同一人", note: "", by: "站长", ts: NOW },
+      ],
+    });
+    const f = buildFilters([m, mk()], NOW, 3);
+    expect([...f.main, ...f.more].some((x) => x.id === "alt")).toBe(false);
+    const labels = f.userTags.map((x) => x.label);
+    expect(labels).toHaveLength(2);
+    expect(labels).toEqual(expect.arrayContaining(["疑似小号", "疑似同一人"]));
+    const same = f.userTags.find((x) => x.label === "疑似同一人");
+    expect(same?.test(m)).toBe(true);
+    expect(same?.test(mk())).toBe(false);
   });
   it("默认筛选：有要处理的人看「需要处理」，否则「全部成员」", () => {
     expect(defaultFilter([mk()], NOW)).toBe("all");

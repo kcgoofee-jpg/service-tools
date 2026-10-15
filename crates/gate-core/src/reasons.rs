@@ -6,7 +6,7 @@
 use crate::pyc;
 use crate::pyext::is_nd;
 
-pub const KEY_PAUSED: &str = "key_paused"; // Key 被防分享 / 自动驾驶暂停
+pub const KEY_PAUSED: &str = "key_paused"; // Key 被自动驾驶临时暂停
 pub const QUEUE_FULL: &str = "queue_full"; // 全站排队满（节约模式按它判断拥挤）
 pub const KEY_BUSY: &str = "key_busy"; // 这把 Key 上一张还没出完
 pub const HOURLY_CAP: &str = "hourly_cap"; // 账号每小时上限（AIMD 按它判断「顶到过上限」）

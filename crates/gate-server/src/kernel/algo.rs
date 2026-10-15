@@ -152,7 +152,7 @@ pub(crate) async fn apply_effects(
                     .with(|g| g.trip_breaker(seconds as f64, &reason, now))
                     .map_err(|e| KernelError::new("ValueError", format!("{e:?}")))?;
             }
-            // share.pause_key：写 share_state 表并更新内存里的暂停表
+            // 临时暂停单把 Key：写 share_state 表（现在只存这个，表名为兼容旧库保留）并更新内存里的暂停表
             Effect::PauseKey {
                 key_id,
                 seconds,
@@ -297,9 +297,7 @@ pub async fn run_autopilot(state: &AppState) -> Result<Value, KernelError> {
         queue_hours,
         breaker,
         guard: Some(autopilot::GuardState { breaker_until }),
-        share: Some(autopilot::ShareState { paused }),
-        // 旧版读 `state.sources.events`，而 `state.sources` 早就不存在了（防分享证据整体移除）：永远是空的
-        events: Vec::new(),
+        pauses: Some(autopilot::PausedKeys { paused }),
         rejects,
         keys,
     };
