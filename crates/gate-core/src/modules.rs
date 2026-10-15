@@ -129,7 +129,8 @@ pub const MODULES: [ModuleMeta; 6] = [
         default_enabled: true,
         periodic: true,
         has_checks: true,
-        custom_enabled: false,
+        // 开关就是动态额度的 `quota_auto_enabled`（不再有单独的 `module_allocation`，docs/v3-deviations.md #70）
+        custom_enabled: true,
         params: &[
             ("今天每人 V4.5", "每天服务日起点后按昨天的用量重算"),
             ("规则", ""),

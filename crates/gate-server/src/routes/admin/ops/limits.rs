@@ -34,7 +34,7 @@ pub(super) fn router() -> Router<AppState> {
 async fn get_settings(State(state): State<AppState>, _s: AdminSession) -> ApiResult {
     Ok(ok_json(&json!({
         "global_monthly_anlas": pyval::float(site_flag_f64(&state, &GLOBAL_MONTHLY_ANLAS).await?),
-        "global_daily_v5": site_flag(&state, &GLOBAL_DAILY_V5).await?,
+        "global_daily_v5": crate::ops::algo_owned(&state.db).await?.global_daily_v5,
         "member_daily_anlas": site_flag(&state, &MEMBER_DAILY_ANLAS).await?,
         ALERT_THRESHOLD: read_alert_threshold(&state.db).await?,
     })))
@@ -43,6 +43,14 @@ async fn get_settings(State(state): State<AppState>, _s: AdminSession) -> ApiRes
 async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Request) -> ApiResult {
     let (parts, body) = req.into_parts();
     let body = read_json_body(&parts.headers, body, BODY_LIMIT).await?;
+    // 全站 V5 归动态额度管：开着时不能手改（docs/v3-deviations.md #70）
+    let managed: Vec<&str> = [GLOBAL_DAILY_V5.key]
+        .into_iter()
+        .filter(|k| body.contains_key(*k))
+        .collect();
+    if let Some(m) = crate::ops::managed_error(&state.db, &managed).await? {
+        return Err(HttpError::new(400, m).into());
+    }
     let threshold = match body.get(ALERT_THRESHOLD) {
         Some(v) => v.clone(),
         None => Value::from(read_alert_threshold(&state.db).await?),
@@ -63,6 +71,9 @@ async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Requ
     ) -> Result<Value, ApiError> {
         let value = match body.get(spec.key) {
             Some(v) => v.clone(),
+            None if spec.key == GLOBAL_DAILY_V5.key => {
+                Value::from(crate::ops::algo_owned(&state.db).await?.global_daily_v5)
+            }
             None => site_flag(state, spec).await?,
         };
         Ok(strict_num(&value, kind, 0.0, hi, spec.key)?)

@@ -349,7 +349,8 @@ async fn modules_list_toggle_and_run() {
     // 分配模块的 tick 跑了动态额度：成员 Key 拿到了算法给的额度
     assert!(setting(&e, "quota_algo_last").await.is_some());
 
-    // 关闭分配：写 module_allocation=0，立即再跑一轮，面板里 enabled=false 且没有新的运行记录
+    // 关闭分配：就是关掉动态额度（写 quota_auto_enabled=0，不再有单独的 module_allocation，
+    // docs/v3-deviations.md #70），立即再跑一轮，面板里 enabled=false 且没有新的运行记录
     let (status, v) = api
         .json(
             "PUT",
@@ -358,7 +359,16 @@ async fn modules_list_toggle_and_run() {
         )
         .await;
     assert_eq!(status, 200);
-    assert_eq!(setting(&e, "module_allocation").await.as_deref(), Some("0"));
+    assert_eq!(
+        setting(&e, "quota_auto_enabled").await.as_deref(),
+        Some("0")
+    );
+    assert_eq!(setting(&e, "module_allocation").await, None);
+    let (_, q) = api.json("GET", "/quota-algo", None).await;
+    assert_eq!(
+        q["params"]["quota_auto_enabled"], "0",
+        "后台「动态额度」开关同步关掉"
+    );
     let m = v["modules"]
         .as_array()
         .unwrap()
@@ -376,7 +386,10 @@ async fn modules_list_toggle_and_run() {
         .json("PUT", "/modules/allocation", Some(json!({"enabled": true})))
         .await;
     assert_eq!(status, 200);
-    assert_eq!(setting(&e, "module_allocation").await.as_deref(), Some("1"));
+    assert_eq!(
+        setting(&e, "quota_auto_enabled").await.as_deref(),
+        Some("1")
+    );
     let m = v["modules"]
         .as_array()
         .unwrap()
@@ -548,8 +561,6 @@ async fn service_registrar_reads_settings_and_env_defaults() {
         ("DISCORD_GUILD_ID", "9000000000000000099"),
         ("SITE_URL", "https://owl.example"),
         ("REGISTER_MAX_USERS", "20"),
-        ("REGISTER_DAILY_IMAGES", "80"),
-        ("REGISTER_DAILY_V5", "7"),
     ])
     .await;
     let reg = ServiceRegistrar(e.state.registration.clone().expect("注册服务配齐了"));

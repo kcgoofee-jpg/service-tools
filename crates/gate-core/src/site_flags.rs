@@ -155,19 +155,18 @@ pub static HOME_JOIN_OPEN: Spec = spec(
     "landing / admin",
     "首页「加入 Discord」按钮（独立于 register_open：只管首页按钮显示，关 = 置灰「关闭注册」）",
 );
-pub static GLOBAL_DAILY_V5: Spec = with_env(
-    bounded(
-        spec(
-            "global_daily_v5",
-            Kind::Int,
-            SpecDefault::None,
-            "额度 / 首页 / 客户端",
-            "全站每日 V5 张数（0 = 不限）",
-        ),
-        0,
-        100000,
+/// 动态额度每轮写入；没设过按 150。2.x 的默认值取环境变量 `GLOBAL_DAILY_V5`，3.0 删了这个环境变量
+/// （docs/v3-deviations.md #70）。
+pub static GLOBAL_DAILY_V5: Spec = bounded(
+    spec(
+        "global_daily_v5",
+        Kind::Int,
+        SpecDefault::Int(150),
+        "额度 / 首页 / 客户端",
+        "全站每日 V5 张数（0 = 不限）",
     ),
-    "global_daily_v5",
+    0,
+    100000,
 );
 pub static GLOBAL_DAILY_ANLAS: Spec = with_env(
     bounded(

@@ -185,6 +185,12 @@ impl Discord {
 // ------------------------------------------------------------------ 公共小件
 
 async fn setup_reg(extra: &[(&str, &str)]) -> (Env, Discord) {
+    setup_reg_with(extra, true).await
+}
+
+/// `legacy_expiry`：旧版夹具都是在 `REGISTER_EXPIRES_DAYS` 默认 30 天下录的；3.0 默认改成 0（不过期，
+/// docs/v3-deviations.md #70），对拍这些用例时显式给回 30。
+async fn setup_reg_with(extra: &[(&str, &str)], legacy_expiry: bool) -> (Env, Discord) {
     let d = Discord::start().await;
     let base = d.url();
     let mut vars: Vec<(&str, &str)> = vec![
@@ -198,6 +204,9 @@ async fn setup_reg(extra: &[(&str, &str)]) -> (Env, Discord) {
         ("ADMIN_DISCORD_IDS", ADMIN),
         ("REGISTER_RESET_AT", "07:00"),
     ];
+    if legacy_expiry {
+        vars.push(("REGISTER_EXPIRES_DAYS", "30"));
+    }
     vars.extend_from_slice(extra);
     let e = setup(&vars).await;
     (e, d)
@@ -669,6 +678,24 @@ async fn ops_grant_ban_unban_audit() {
 // ------------------------------------------------------------------ 桥接：发 Key
 
 const WELCOME: &str = "🦉 **欢迎来到猫头鹰公益站！** 这是你的 API Key（只发这一次，请先保存）：\n`<KEY>`\n\n**三步开始出图（以柏宝绘为例）**\n1. 打开柏宝绘 → 渠道 → 配置 → 新建接入点\n2. 接口地址填 `https://gate.test/`（**不要**加 /v1）\n3. API Key 填上面 `nai-` 开头的整串，保存后随便生成一张图试试\n其他支持自定义 NovelAI 地址的客户端同样这样填。\n\n**不确定填对没有？** 在 Discord 输入 `/quota`，能看到额度就说明 Key 正常；网页登录开放后还能在 https://gate.test/ 用 Discord 一键登录、打包下载自己的作品。\n\n**规则**\n• 每日额度：V4.5 及以下 30 张（次日自动恢复）\n• 已开通功能：文生图\n• 有效期 30 天，到期后可重新 /register\n• 连续 3 天没有使用会被自动回收（回收前 1 天私信提醒）\n• 每把 Key 同时生成 1 张，多发的会被退回，等前一张出完再发\n• 只提供免费出图：总像素 ≤1024×1024（尺寸可自定义，超出自动等比缩小）、≤28 步、每次 1 张；图生图、Vibe 等会消耗 Anlas 的功能不开放\n• Key 只给本服务器成员：退出服务器后 Key 自动失效\n• 一人一把，请勿分享（本站记录打码后的来源网段防分享，不存完整 IP，7 天后删除）\n\n**常用命令**：`/quota` 看额度和服务状态 · `/resetkey` Key 丢了或泄露时换新 · `/help` 简要说明\n遇到问题到 🛠️｜问题反馈 发截图（记得打码 Key）。";
+
+/// 没配 `REGISTER_EXPIRES_DAYS`：新 Key 不过期，欢迎私信里也没有「有效期」那一行（docs/v3-deviations.md #70）
+#[tokio::test]
+async fn issued_key_never_expires_by_default() {
+    let (e, _d) = setup_reg_with(&[], false).await;
+    open_registration(&e).await;
+    let r = issue(&e, MEMBER).await;
+    assert_eq!(r.0, 200, "{:?}", r.2);
+    assert!(!r.2["message"].as_str().unwrap().contains("有效期"));
+    let row = e
+        .state
+        .db
+        .key_row_for_discord(MEMBER)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(row["expires_at"].is_null(), "{row:?}");
+}
 
 #[tokio::test]
 async fn issue_mints_a_key_exactly_like_legacy() {
@@ -2683,6 +2710,19 @@ async fn registration_settings_ops_match_legacy() {
         invalid(set(json!({"expires_days": 99999})).await),
         "expires_days 超出范围 0～3650"
     );
+    // 动态额度开着（默认）：新 Key 的张数 / V5 / 模型范围归算法管，不能手改（docs/v3-deviations.md #70）
+    match set(json!({"image_scope": "all", "daily_images": 5})).await {
+        Err(gate_server::ops::OpsError::Managed(m)) => assert_eq!(
+            m,
+            "daily_images、image_scope 由动态额度管理：关闭动态额度后才能手动修改"
+        ),
+        other => panic!("应当是动态额度管着：{other:?}"),
+    }
+    e.state
+        .db
+        .set_setting("quota_auto_enabled", "0")
+        .await
+        .unwrap();
     set(json!({"image_scope": "x"})).await.unwrap();
     assert_eq!(
         e.state

@@ -17,7 +17,7 @@ use gate_core::features::{self, FEATURES};
 use gate_core::pyc;
 use gate_core::pyval;
 use gate_core::reasons::Reason;
-use gate_core::site_flags::{ALGO_NOTICE, GLOBAL_DAILY_V5, HOME_JOIN_OPEN, WEB_LOGIN_PAUSED};
+use gate_core::site_flags::{ALGO_NOTICE, HOME_JOIN_OPEN, WEB_LOGIN_PAUSED};
 use serde_json::{Map, Value, json};
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -128,7 +128,7 @@ pub async fn build(state: &AppState, now: f64) -> Result<Map<String, Value>, Int
     let values = state.guard.with(|g| g.values.clone());
     let gv = |name: &str| values.get(name).copied().unwrap_or(0);
     let usable = (accounts.iter().filter(|a| a.usable).count() as i64).max(1);
-    let v5_cap = site_flag(state, &GLOBAL_DAILY_V5).await?;
+    let v5_cap = crate::ops::algo_owned(&state.db).await?.global_daily_v5;
     // 10 分钟突发窗口已删除（docs/v3-deviations.md #64）：`guard` 段不再有 `burst_cap` / `burst_wait`
     let (hour_cap, quiet) = state.guard.with(|g| (g.hourly_cap(now), g.in_quiet(now)));
     let min_interval = {

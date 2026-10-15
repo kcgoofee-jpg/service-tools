@@ -90,9 +90,8 @@ pub struct RegistrationEnv {
     pub role_id: String,
     /// 以 `/` 结尾。
     pub site_url: String,
-    pub key_daily_images: i64,
-    pub key_daily_v5: i64,
-    pub key_image_scope: &'static str,
+    /// `REGISTER_EXPIRES_DAYS`：新领的 Key 几天后过期，0 = 不过期（默认，站长 10-15）。
+    /// 每日张数 / V5 / 模型范围归动态额度管，没有环境变量（见 `ops::algo_owned`）。
     pub key_expires_days: i64,
     pub key_rpm: i64,
     pub max_users: i64,
@@ -164,7 +163,6 @@ pub struct EnvConfig {
     pub allow_img2img: bool,
     // 全站预算
     pub global_monthly_anlas: f64,
-    pub global_daily_v5: i64,
     pub global_daily_anlas: i64,
     // 新 Key 默认值
     pub default_daily_images: i64,
@@ -262,14 +260,7 @@ impl EnvConfig {
                 guild_id: src.get("DISCORD_GUILD_ID")?.trim().to_string(),
                 role_id: r.trimmed("DISCORD_ROLE_ID"),
                 site_url: format!("{}/", src.get("SITE_URL")?.trim_end_matches('/')),
-                key_daily_images: r.nonneg("REGISTER_DAILY_IMAGES", 30),
-                key_daily_v5: r.nonneg("REGISTER_DAILY_V5", 0),
-                key_image_scope: if src.get("REGISTER_IMAGE_SCOPE").as_deref() == Some("all") {
-                    "all"
-                } else {
-                    "legacy"
-                },
-                key_expires_days: r.nonneg("REGISTER_EXPIRES_DAYS", 30),
+                key_expires_days: r.nonneg("REGISTER_EXPIRES_DAYS", 0),
                 key_rpm: r.nonneg("REGISTER_RPM", 5).max(1),
                 max_users: r.nonneg("REGISTER_MAX_USERS", 10),
                 reset_at: r.trimmed("REGISTER_RESET_AT"),
@@ -344,7 +335,6 @@ impl EnvConfig {
             max_steps: r.int("MAX_STEPS", 28),
             allow_img2img: r.bool("ALLOW_IMG2IMG", false),
             global_monthly_anlas: r.float("GLOBAL_MONTHLY_ANLAS", 10000.0),
-            global_daily_v5: r.int("GLOBAL_DAILY_V5", 150),
             global_daily_anlas: r.int("GLOBAL_DAILY_ANLAS", 200),
             default_daily_images: r.int("DEFAULT_DAILY_IMAGES", 100),
             default_daily_anlas: r.float("DEFAULT_DAILY_ANLAS", 100.0),
@@ -361,10 +351,10 @@ impl EnvConfig {
         }
     }
 
-    /// `site_flags.get(db, spec, settings)` 用的 `settings` 视图：只有带 env 回退的三个全站预算。
+    /// `site_flags.get(db, spec, settings)` 用的 `settings` 视图：只有带 env 回退的两个全站 Anlas 预算
+    /// （全站 V5 归动态额度管，没有环境变量，见 `ops::algo_owned`）。
     pub fn settings_view(&self) -> serde_json::Value {
         serde_json::json!({
-            "global_daily_v5": self.global_daily_v5,
             "global_daily_anlas": self.global_daily_anlas,
             "global_monthly_anlas": self.global_monthly_anlas,
         })
@@ -438,5 +428,12 @@ mod tests {
         assert_eq!(reg.site_url, "https://x.test/");
         assert_eq!(reg.key_rpm, 1);
         assert_eq!(reg.admin_ids, ["123", "456"]);
+        // 新领的 Key 默认不过期（站长 10-15，docs/v3-deviations.md #70）
+        assert_eq!(reg.key_expires_days, 0);
+        ok.insert("REGISTER_EXPIRES_DAYS".into(), "30".into());
+        assert_eq!(
+            EnvConfig::load(&ok).registration.unwrap().key_expires_days,
+            30
+        );
     }
 }

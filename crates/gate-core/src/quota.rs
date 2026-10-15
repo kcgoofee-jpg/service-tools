@@ -36,7 +36,7 @@
 //! | `active_v5` | `SELECT COUNT(DISTINCT c.key_id) FROM counters c JOIN api_keys k ON k.id=c.key_id WHERE c.v5>0 AND k.is_test=0 AND k.is_admin=0 AND c.day IN (?,?,?)` | [`active_v5_days`]`(clock, now, 3)`：今天之前的 3 个**完整服务日**（旧版是含今天的 3 个自然日，docs/v3-deviations.md #63） |
 //! | `managed_keys` | `SELECT daily_images, daily_v5, image_model_scope FROM api_keys WHERE quota_auto=1 AND is_admin=0 AND is_test=0`（旧版直接 `COUNT(*)` 带 `daily_images<>? OR daily_v5<>? OR image_model_scope<>'all'`，这里改成取出行再在 Rust 里数，三列都是 NOT NULL，结果相同） | — |
 //! | `settings` | `SELECT value FROM site_settings WHERE key=?`，读到的键见 [`SETTING_KEYS_READ`] | — |
-//! | `guard` / `pool_len` / `global_daily_v5_default` | 内存里的 Guard（`values["account_daily_cap"]`）、上游账号池大小、`site_flags.default_of(GLOBAL_DAILY_V5, settings)`（= `Settings.global_daily_v5` 钳到 0..100000，解析失败为 0） | — |
+//! | `guard` / `pool_len` / `global_daily_v5_default` | 内存里的 Guard（`values["account_daily_cap"]`）、上游账号池大小、`site_flags.default_of(GLOBAL_DAILY_V5)`（3.0 固定 150，不再取环境变量，docs/v3-deviations.md #70） | — |
 //!
 //! # `effects` 的执行方式（按顺序）
 //!

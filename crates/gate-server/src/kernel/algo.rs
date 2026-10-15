@@ -28,9 +28,9 @@ async fn read_settings(
     Ok(out)
 }
 
-/// `site_flags.default_of(GLOBAL_DAILY_V5, settings)`（环境变量 `GLOBAL_DAILY_V5` 钳到 0..100000）。
-fn global_daily_v5_default(state: &AppState) -> i64 {
-    let v = site_flags::default_of(&GLOBAL_DAILY_V5, Some(&state.env.settings_view()));
+/// 全站 V5 没设过时的起点值（`site_flags::GLOBAL_DAILY_V5` 的默认 150；2.x 取环境变量，已删除，#70）。
+fn global_daily_v5_default() -> i64 {
+    let v = site_flags::default_of(&GLOBAL_DAILY_V5, None);
     pyval::number_like(&v).map_or(0, |f| f.trunc() as i64)
 }
 
@@ -157,7 +157,7 @@ pub async fn run_quota(state: &AppState) -> Result<Value, KernelError> {
             account_daily_cap: cap,
         });
         inp.pool_len = Some(state.nai.tokens().await.len());
-        inp.global_daily_v5_default = global_daily_v5_default(state);
+        inp.global_daily_v5_default = global_daily_v5_default();
         inp.members = db.quota_member_count().await?;
         inp.params = quota_params(&state.params.get());
         let today = clock.day(now);

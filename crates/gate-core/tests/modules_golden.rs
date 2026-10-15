@@ -39,6 +39,11 @@ const REMOVED_META_FIELDS: [&str; 1] = ["report_bugs"];
 
 /// 3.0 额度改动对模块元数据的影响（期望一侧改写）。
 fn v3_meta(name: &str, want: &mut Value) {
+    if name == "allocation" {
+        // 开关接到动态额度的 quota_auto_enabled，不再有单独的 module_allocation（docs/v3-deviations.md #70）
+        assert_eq!(want["custom_enabled"], false);
+        want["custom_enabled"] = json!(true);
+    }
     if name == "autopilot" {
         // 「名额 +5」删除（docs/v3-deviations.md #68）
         assert_eq!(want["question"], "名额、全站熔断、单个 Key 限流");

@@ -12,17 +12,19 @@ use crate::error::{ApiError, HttpError, InternalError};
 use crate::state::AppState;
 use gate_core::features::{self, FEATURES, GLOBAL_KEY};
 use gate_core::pyext::{self, PyErr};
-use gate_core::site_flags::{self, REGISTER_OPEN};
+use gate_core::site_flags::{self, GLOBAL_DAILY_V5, REGISTER_OPEN};
 use gate_core::{jsondump, pyc, pyval};
 use gate_db::{Db, DbError};
 use serde_json::{Map, Value, json};
 use std::sync::Mutex;
 
-/// 后台这几个接口里的错误：参数不合法回 422，库里的数据坏了回 500。
+/// 后台这几个接口里的错误：参数不合法回 422，归动态额度管的设置回 400，库里的数据坏了回 500。
 #[derive(Debug)]
 pub enum OpsError {
     /// 旧版 `ValueError` / `TypeError`：路由层回 422，原文作为 `detail`。
     Invalid(String),
+    /// 动态额度开着时想改它管的设置：400（docs/v3-deviations.md #70）。
+    Managed(String),
     Db(DbError),
     /// 库里的存档坏了（旧版会抛未捕获的异常 → 500）。
     Corrupt(String),
@@ -38,6 +40,7 @@ impl From<OpsError> for ApiError {
     fn from(e: OpsError) -> Self {
         match e {
             OpsError::Invalid(m) => HttpError::new(422, m).into(),
+            OpsError::Managed(m) => HttpError::new(400, m).into(),
             OpsError::Db(e) => e.into(),
             OpsError::Corrupt(m) => InternalError(m).into(),
         }
@@ -55,6 +58,66 @@ pub struct Shared {
     pub runtime_limits: tokio::sync::Mutex<()>,
     /// 旧版 `ManualReconciliation.lock`：同一时刻只允许一次 Anlas 核对。
     pub reconcile: tokio::sync::Mutex<()>,
+}
+
+// ------------------------------------------------------------------ 动态额度管着的设置
+
+/// 动态额度每轮都写的四个设置：新 Key 的每日 V4.5 / V5 张数与模型范围、全站每日 V5。
+/// 读取只走 [`algo_owned`]；动态额度开着时后台不能改（[`managed_error`]）。
+/// 2.x 的环境变量 `REGISTER_DAILY_IMAGES` / `REGISTER_DAILY_V5` / `REGISTER_IMAGE_SCOPE` / `GLOBAL_DAILY_V5`
+/// 已删除，没设过时用这里的起点值（docs/v3-deviations.md #70）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct AlgoOwned {
+    /// `register_daily_images`，起点 30。
+    pub daily_images: i64,
+    /// `register_daily_v5`，起点 0。
+    pub daily_v5: i64,
+    /// `register_image_scope`，起点 `legacy`。
+    pub image_scope: String,
+    /// `global_daily_v5`，起点 150（0 = 不限）。
+    pub global_daily_v5: i64,
+}
+
+pub async fn algo_owned(db: &Db) -> Result<AlgoOwned, DbError> {
+    let daily_images = to_int(
+        db.get_setting("register_daily_images").await?.as_deref(),
+        30,
+    );
+    let daily_v5 = to_int(db.get_setting("register_daily_v5").await?.as_deref(), 0);
+    let image_scope = db
+        .get_setting("register_image_scope")
+        .await?
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "legacy".to_string());
+    let raw = db.get_setting(GLOBAL_DAILY_V5.key).await?;
+    let global = site_flags::get_from_raw(&GLOBAL_DAILY_V5, raw.as_deref(), None);
+    Ok(AlgoOwned {
+        daily_images,
+        daily_v5,
+        image_scope,
+        global_daily_v5: pyval::number_like(&global).map_or(0, |f| f.trunc() as i64),
+    })
+}
+
+/// 动态额度开着吗：`quota_auto_enabled`（后台「动态额度」开关与模块「分配」开关是同一个设置）。
+/// 读不懂（比如写成 inf）按开着算——宁可先拦住手改。
+pub async fn quota_algo_enabled(db: &Db) -> Result<bool, DbError> {
+    let mut settings = std::collections::HashMap::new();
+    if let Some(v) = db.get_setting("quota_auto_enabled").await? {
+        settings.insert("quota_auto_enabled".to_string(), v);
+    }
+    Ok(gate_core::quota::quota_cfg(&settings).map_or(true, |c| c.quota_auto_enabled != 0))
+}
+
+/// 动态额度开着时想改它管的设置：返回 400 的说明（`names` 是请求里的字段名）。
+pub async fn managed_error(db: &Db, names: &[&str]) -> Result<Option<String>, DbError> {
+    if names.is_empty() || !quota_algo_enabled(db).await? {
+        return Ok(None);
+    }
+    Ok(Some(format!(
+        "{} 由动态额度管理：关闭动态额度后才能手动修改",
+        names.join("、")
+    )))
 }
 
 // ------------------------------------------------------------------ 注册设置
@@ -138,21 +201,11 @@ pub async fn registration_settings_for(
         Some(s) => features::parse_list(&Value::String(s)),
         None => defaults.and_then(|d| features::parse_list(&Value::String(d.key_features.clone()))),
     };
-    let daily_images = to_int(
-        read("register_daily_images").await?.as_deref(),
-        defaults.map_or(30, |d| d.key_daily_images),
-    );
-    let daily_v5 = to_int(
-        read("register_daily_v5").await?.as_deref(),
-        defaults.map_or(0, |d| d.key_daily_v5),
-    );
-    let image_scope = read("register_image_scope")
-        .await?
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| defaults.map_or("legacy", |d| d.key_image_scope).to_string());
+    let owned = algo_owned(db).await?;
+    // 没配注册服务时也按「不过期」（REGISTER_EXPIRES_DAYS 默认 0，站长 10-15）
     let expires_days = to_int(
         read("register_expires_days").await?.as_deref(),
-        defaults.map_or(30, |d| d.key_expires_days),
+        defaults.map_or(0, |d| d.key_expires_days),
     );
     // 限定身份组：只有在这个 Discord 服务器里拥有这个身份组的人能领 Key（可以是别的社区的服务器）。
     // 都为空时沿用启动配置（DISCORD_ROLE_ID，本服务器）。
@@ -164,9 +217,9 @@ pub async fn registration_settings_for(
         open,
         max_users,
         features,
-        daily_images,
-        daily_v5,
-        image_scope,
+        daily_images: owned.daily_images,
+        daily_v5: owned.daily_v5,
+        image_scope: owned.image_scope,
         expires_days,
         role_guild,
         role_id,
@@ -238,8 +291,16 @@ pub fn registration_notice(before: (bool, i64), after: (bool, i64), active: i64)
 }
 
 /// 保存注册设置；开放 / 关闭或名额上限变化会在公告频道通知成员（`notify: false` 可关闭）。
+/// 新 Key 的每日张数 / V5 / 模型范围归动态额度管：动态额度开着时带这几个字段回 400（docs/v3-deviations.md #70）。
 pub async fn set_registration(state: &AppState, body: &Map<String, Value>) -> Result<(), OpsError> {
     let db = &state.db;
+    let managed: Vec<&str> = ["daily_images", "daily_v5", "image_scope"]
+        .into_iter()
+        .filter(|k| body.contains_key(*k))
+        .collect();
+    if let Some(m) = managed_error(db, &managed).await? {
+        return Err(OpsError::Managed(m));
+    }
     let before = registration_settings(state).await?;
     let mut values: Vec<(String, String)> = Vec::new();
     if let Some(v) = body.get("open") {

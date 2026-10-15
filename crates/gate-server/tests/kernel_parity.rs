@@ -547,6 +547,17 @@ mod v3 {
         out
     }
 
+    /// 模块「分配」的开关（#70：旧版写 `module_allocation`）。
+    pub const QUOTA_SWITCH: &str = "quota_auto_enabled";
+
+    fn switch_key(key: &str) -> &str {
+        if key == "module_allocation" {
+            QUOTA_SWITCH
+        } else {
+            key
+        }
+    }
+
     /// 3.0 不再写的设置（#61：保底）。
     const DROPPED_SETTINGS: [&str; 2] = ["guard_base_daily_images", "quota_base_now"];
 
@@ -964,7 +975,7 @@ mod v3 {
                 for w in writes.iter() {
                     match w[0].as_str() {
                         Some("set") => {
-                            let key = w[1].as_str().unwrap();
+                            let key = switch_key(w[1].as_str().unwrap());
                             if let Some(v) = self.setting(key, w[2].as_str().unwrap(), drop_note) {
                                 out.push(json!(["set", key, v]));
                             }
@@ -1034,6 +1045,11 @@ mod v3 {
                 for side in ["added", "removed"] {
                     if let Some(rows) = t.get_mut(side).and_then(Value::as_array_mut) {
                         rows.retain(|r| !DROPPED_SETTINGS.iter().any(|k| r["key"] == *k));
+                        for r in rows.iter_mut() {
+                            if r["key"] == "module_allocation" {
+                                r["key"] = json!(QUOTA_SWITCH);
+                            }
+                        }
                         // 名额 +5 删除（#68）：不记加名额的时间，也不改注册名额
                         rows.retain(|r| r["key"] != "autopilot_slots_at");
                         if self.slots_changed {
@@ -1257,7 +1273,7 @@ async fn run_case(case: &Value) -> Result<(), String> {
             "KEY_INACTIVITY_DELETE_DAYS",
             int("key_inactivity_delete_days"),
         ),
-        ("GLOBAL_DAILY_V5", int("global_daily_v5")),
+        // 夹具 env 里的 global_daily_v5：3.0 没有这个环境变量（全站 V5 归动态额度管，docs/v3-deviations.md #70），不再传
         ("POST_REQUEST_JITTER_MIN", num("post_jitter_min")),
         ("POST_REQUEST_JITTER_MAX", num("post_jitter_max")),
         (
@@ -1292,11 +1308,17 @@ async fn run_case(case: &Value) -> Result<(), String> {
     }
 
     // 种子数据
+    // 模块「分配」的开关 3.0 就是动态额度的 quota_auto_enabled（docs/v3-deviations.md #70）：种子里的
+    // module_allocation 按同一个开关写进去
     let seed: Vec<String> = case["seed_sql"]
         .as_array()
         .unwrap()
         .iter()
-        .map(|s| s.as_str().unwrap().to_string())
+        .map(|s| {
+            s.as_str()
+                .unwrap()
+                .replace("'module_allocation'", &format!("'{}'", v3::QUOTA_SWITCH))
+        })
         .collect();
     if !seed.is_empty() {
         state

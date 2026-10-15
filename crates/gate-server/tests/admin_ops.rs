@@ -252,6 +252,28 @@ async fn settings_get_put_and_stored_strings() {
         (200, SETTINGS_DEFAULT.to_string())
     );
 
+    // 动态额度开着（默认）：全站 V5 归算法管，带上它就 400、什么都不写（docs/v3-deviations.md #70）
+    let before = settings(&e).await;
+    assert_eq!(
+        api.text(
+            "PUT",
+            "/settings",
+            Some(json!({"global_daily_v5": 200, "member_daily_anlas": 40}))
+        )
+        .await,
+        (
+            400,
+            r#"{"detail":"global_daily_v5 由动态额度管理：关闭动态额度后才能手动修改"}"#.into()
+        )
+    );
+    assert_eq!(settings(&e).await, before);
+    // 以下是动态额度关着时手动改
+    e.state
+        .db
+        .set_setting("quota_auto_enabled", "0")
+        .await
+        .unwrap();
+
     // 空请求体：缺省字段保持原值，并且把现值（带类型的字符串）写回库
     let before = settings(&e).await;
     let (s, t) = api.text("PUT", "/settings", Some(json!({}))).await;
@@ -706,7 +728,8 @@ async fn ops_snapshot_defaults() {
         ops_fixed(&v),
         json!({
             "registration": {"configured": false, "open": false, "max_users": 0, "features": null, "daily_images": 30,
-                "daily_v5": 0, "image_scope": "legacy", "expires_days": 30, "role_guild": "", "role_id": "", "role_note": "",
+                // 新 Key 默认不过期（REGISTER_EXPIRES_DAYS 默认 0，docs/v3-deviations.md #70）
+                "daily_v5": 0, "image_scope": "legacy", "expires_days": 0, "role_guild": "", "role_id": "", "role_note": "",
                 "active": 0, "reset_at": ""},
             "features": {
                 "global": {"image": true, "upscale": true, "augment": true, "vibe": true, "tags": true, "text": true, "voice": true},
@@ -766,6 +789,29 @@ async fn ops_registration_put() {
         changed(&before, &settings(&e).await),
         map(&[("register_open", "1")])
     );
+
+    // 动态额度开着（默认）：新 Key 的每日张数 / V5 / 模型范围归算法管，400、什么都不写（#70）
+    let before = settings(&e).await;
+    let (s, v) = api
+        .json(
+            "PUT",
+            "/ops/registration",
+            Some(json!({"max_users": 20, "daily_v5": 15, "image_scope": "all"})),
+        )
+        .await;
+    assert_eq!(
+        (s, v),
+        (
+            400,
+            json!({"detail": "daily_v5、image_scope 由动态额度管理：关闭动态额度后才能手动修改"})
+        )
+    );
+    assert_eq!(settings(&e).await, before);
+    e.state
+        .db
+        .set_setting("quota_auto_enabled", "0")
+        .await
+        .unwrap();
 
     let before = settings(&e).await;
     let (_, v) = api
@@ -948,6 +994,7 @@ async fn ops_registration_uses_env_defaults_when_configured() {
         ("DISCORD_GUILD_ID", "900000000000000001"),
         ("SITE_URL", "https://owl.example"),
         ("REGISTER_MAX_USERS", "12"),
+        // 这三个环境变量 3.0 已删除（归动态额度管，docs/v3-deviations.md #70）：设了也不读
         ("REGISTER_DAILY_IMAGES", "40"),
         ("REGISTER_DAILY_V5", "5"),
         ("REGISTER_IMAGE_SCOPE", "all"),
@@ -988,8 +1035,8 @@ async fn ops_registration_uses_env_defaults_when_configured() {
     let v = api.get("/ops").await;
     assert_eq!(
         v["registration"],
-        json!({"configured": true, "open": false, "max_users": 12, "features": ["image", "vibe"], "daily_images": 40,
-               "daily_v5": 5, "image_scope": "all", "expires_days": 14, "role_guild": "", "role_id": "", "role_note": "",
+        json!({"configured": true, "open": false, "max_users": 12, "features": ["image", "vibe"], "daily_images": 30,
+               "daily_v5": 0, "image_scope": "legacy", "expires_days": 14, "role_guild": "", "role_id": "", "role_note": "",
                "active": 2, "reset_at": "每日 7 点"})
     );
     // 站长在后台改过的值优先于 .env
@@ -1001,7 +1048,7 @@ async fn ops_registration_uses_env_defaults_when_configured() {
             v["registration"]["max_users"].clone(),
             v["registration"]["daily_images"].clone()
         ),
-        (json!(3), json!(40))
+        (json!(3), json!(30))
     );
 }
 
@@ -2446,7 +2493,12 @@ async fn overview_reports_today_week_pool_and_feature_usage() {
             "image", "upscale", "augment", "vibe", "tags", "text", "voice"
         ]
     );
-    // 全站预算改了，总览跟着变
+    // 全站预算改了（全站 V5 要先关掉动态额度才能手改，#70），总览跟着变
+    e.state
+        .db
+        .set_setting("quota_auto_enabled", "0")
+        .await
+        .unwrap();
     api.json(
         "PUT",
         "/settings",

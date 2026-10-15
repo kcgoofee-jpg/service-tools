@@ -284,7 +284,7 @@ pub async fn quota_image_check(
             )
             .into());
         }
-        let g = site_flag_f64(state, &site_flags::GLOBAL_DAILY_V5).await?;
+        let g = crate::ops::algo_owned(&state.db).await?.global_daily_v5 as f64;
         if g > 0.0 && !key.exclude_global_v5() {
             let total = state.db.day_v5_total(&day).await?;
             let in_flight: i64 = pending
