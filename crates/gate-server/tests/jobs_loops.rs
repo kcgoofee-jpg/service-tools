@@ -1,12 +1,16 @@
-//! 后台常驻任务：闲置回收（线上开关关着时绝不删 Key）、维护循环一轮、启动 / 关停序列。
+//! 定时任务的循环：闲置回收（线上开关关着时绝不删 Key）、维护一轮、启动 / 关停序列，以及
+//! 「任务出错或 panic 时循环不退出」。各任务本身的规则见 `jobs_quota.rs` / `jobs_capacity.rs` / `jobs_autopilot.rs`。
 //! 公开仓库：全部是合成数据；Discord / NovelAI / 官方状态页都不出本机。
 
 mod common;
 use common::*;
+use futures::future::BoxFuture;
 use gate_db::repo::keys::NewKey;
-use gate_server::jobs;
+use gate_server::AppState;
+use gate_server::jobs::{self, JOBS, Job, JobError};
 use gate_testkit::MockUpstream;
 use serde_json::{Value, json};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 const DAY: f64 = 86400.0;
@@ -74,7 +78,7 @@ fn discord_env<'a>(base: &'a str, days: &'a str) -> Vec<(&'a str, &'a str)> {
 }
 
 /// 平时的出图记录：往前 32 天每 20 分钟一张成功出图（每个服务日 72 张，≥ 健康线 50 张；最近一张在 30 秒前）。
-/// 闲置回收不算站点出不了图的服务日（docs/v3-deviations.md #55），所以「平时」场景要先有正常出图的历史。
+/// 闲置回收不算站点出不了图的服务日，所以「平时」场景要先有正常出图的历史。
 async fn seed_healthy_history(env: &Env) {
     let now = env.state.now();
     env.state
@@ -141,12 +145,20 @@ async fn idle_recycle_switched_off_never_deletes_anything() {
         "领取记录也不动"
     );
 
-    // 通过真正的循环也一样：起一遍所有循环，等一会儿再关
+    // 通过真正的循环也一样：起一遍所有循环，等闲置回收跑完第一轮再关
     e.state
-        .kernel
+        .jobs
         .set_official_api(Some("http://127.0.0.1:9/never".into()));
     jobs::startup(&e.state).await.unwrap();
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    let start = Instant::now();
+    while Value::Object(e.state.jobs.last().await)["idle_recycle"]["summary"] != "关闭（天数=0）"
+    {
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "闲置回收没有在启动后立即跑第一轮"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
     jobs::shutdown(&e.state).await;
     assert!(key_exists(&e, 1).await && key_exists(&e, 2).await);
     assert!(role_removals(&discord).is_empty());
@@ -164,7 +176,7 @@ async fn idle_recycle_deletes_bans_and_logs_when_switched_on() {
     key(&e, 5, 10.0, &[("is_admin", json!(1))]).await; // 站长 Key 豁免
     key(&e, 6, 10.0, &[]).await; // 邀请标签豁免
     key(&e, 7, 1.0, &[]).await; // 刚创建
-    // 已过期：过期后请求一律 403、last_image_at 不再更新；不算闲置，照旧等 /register 时释放（docs/v3-deviations.md #56）
+    // 已过期：过期后请求一律 403、last_image_at 不再更新；不算闲置，照旧等 /register 时释放
     key(&e, 8, 10.0, &[("expires_at", json!(now - 4.0 * DAY))]).await;
     // 还没到期的期限 Key 照常判定
     key(&e, 9, 10.0, &[("expires_at", json!(now + 30.0 * DAY))]).await;
@@ -184,14 +196,16 @@ async fn idle_recycle_deletes_bans_and_logs_when_switched_on() {
         ])
         .await
         .unwrap();
-    let n = jobs::delete_inactive_keys(&e.state).await.unwrap();
+    // 通过定时任务跑一轮：摘要写明回收了几把
+    let summary = run_job(&e.state, "idle_recycle").await.unwrap();
+    assert_eq!(summary, "回收 3 把");
     let mut gone = Vec::new();
     for id in 1..=9 {
         if !key_exists(&e, id).await {
             gone.push(id);
         }
     }
-    assert_eq!((n, gone), (3, vec![1, 2, 9]));
+    assert_eq!(gone, vec![1, 2, 9]);
     for (id, alive) in [
         (1, false),
         (2, false),
@@ -272,75 +286,13 @@ async fn idle_recycle_negative_days_is_off_too() {
     assert!(key_exists(&e, 1).await);
 }
 
-// ------------------------------------------------------------------ 自动驾驶熔断
-
-/// 熔断要求失败来自 ≥ 2 把不同的非测试 Key：一个成员反复发畸形请求、测试 Key 出错都停不了全站
-/// （docs/v3-deviations.md #58）。
-#[tokio::test]
-async fn breaker_needs_upstream_failures_from_two_member_keys() {
-    let e = setup(&[]).await;
-    let s = &e.state;
-    s.db.set_setting("autopilot_breaker", "enforce")
-        .await
-        .unwrap();
-    key(&e, 1, 10.0, &[]).await;
-    key(&e, 2, 10.0, &[]).await;
-    key(&e, 3, 10.0, &[("is_test", json!(1))]).await;
-    let (m1, m2, t) = (db_id(&e, 1).await, db_id(&e, 2).await, db_id(&e, 3).await);
-    let now = s.now();
-    let log = |key_id: i64, status: &str, up: i64, n: usize| {
-        (0..n)
-            .map(|i| {
-                format!(
-                    "INSERT INTO usage_log (ts, key_id, key_name, kind, status, up_status) \
-                     VALUES ({}, {key_id}, '', 'image', '{status}', {up})",
-                    now - 60.0 - i as f64
-                )
-            })
-            .collect::<Vec<_>>()
-    };
-    // 一个成员 8 次上游 502（占比 8/12），另有 4 次成功
-    let mut sql = log(m1, "error", 502, 8);
-    sql.extend(log(m2, "ok", 200, 4));
-    s.db.run_script(sql).await.unwrap();
-    let rows = s.db.autopilot_breaker_rows(now - 900.0).await.unwrap();
-    assert_eq!(
-        (rows.fails, rows.total, rows.fail_keys),
-        (Some(8), Some(12), 1)
-    );
-    let tripped = |s: &gate_server::AppState| s.guard.with(|g| g.breaker_until) > s.now();
-    let r = gate_server::kernel::run_autopilot_checked(s).await.unwrap();
-    assert_eq!(r["rules"]["breaker"]["value"], json!(false), "{r}");
-    assert!(!tripped(s), "一把 Key 停不了全站");
-
-    // 测试 Key 的失败不算
-    s.db.run_script(log(t, "error", 500, 6)).await.unwrap();
-    let rows = s.db.autopilot_breaker_rows(now - 900.0).await.unwrap();
-    assert_eq!((rows.fails, rows.fail_keys), (Some(14), 1));
-    gate_server::kernel::run_autopilot_checked(s).await.unwrap();
-    assert!(!tripped(s), "测试 Key 的失败不算第二把 Key");
-
-    // 第二个成员也遇到上游失败：这才像上游故障
-    s.db.run_script(log(m2, "error", 503, 1)).await.unwrap();
-    assert_eq!(
-        s.db.autopilot_breaker_rows(now - 900.0)
-            .await
-            .unwrap()
-            .fail_keys,
-        2
-    );
-    let r = gate_server::kernel::run_autopilot_checked(s).await.unwrap();
-    assert_eq!(r["rules"]["breaker"]["applied"], json!(true), "{r}");
-    assert!(tripped(s));
-}
-
 // ------------------------------------------------------------------ 维护循环一轮
 
 #[tokio::test]
 async fn maintenance_round_purges_and_flushes() {
     let e = setup(&[("USAGE_LOG_RETENTION_DAYS", "10")]).await;
     let s = &e.state;
-    s.kernel
+    s.jobs
         .set_official_api(Some("http://127.0.0.1:9/never".into()));
     let now = s.now();
     let old_hour = ((now - 40.0 * DAY) / 3600.0).floor() as i64 * 3600;
@@ -359,7 +311,7 @@ async fn maintenance_round_purges_and_flushes() {
     s.status_stats.record(200, now);
     s.status_stats.record(429, now);
 
-    jobs::maintenance_once(s).await;
+    assert_eq!(run_job(s, "maintenance").await.unwrap(), "全部完成");
     settle().await;
 
     // 明细日志只留 10 天内；操作日志 180 天；30 天前的状态码统计与已处理的旧 Bug 清掉
@@ -417,40 +369,65 @@ async fn flush_status_stats_puts_counts_back_when_the_write_fails() {
     );
 }
 
+// ------------------------------------------------------------------ 维护里一步出错
+
+#[tokio::test]
+async fn a_failing_maintenance_step_is_shown_but_filed_only_once() {
+    let e = setup(&[]).await;
+    let s = &e.state;
+    s.jobs
+        .set_official_api(Some("http://127.0.0.1:9/never".into()));
+    // 让清理这一步失败：把状态码统计表删掉，再留一笔要落库的统计
+    s.db.run_script(vec!["DROP TABLE status_hourly".into()])
+        .await
+        .unwrap();
+    s.status_stats.record(200, s.now());
+    let err = run_job(s, "maintenance").await.unwrap_err();
+    assert!(err.to_string().starts_with("清理过期记录出错："), "{err}");
+    let last = Value::Object(s.jobs.last().await);
+    assert_eq!(last["maintenance"]["ok"], false);
+    // 只有那一步自己的 Bug（来源 maintenance:purge），不再另记一条 job:maintenance
+    assert_eq!(bug_sources(s).await, ["maintenance:purge"]);
+}
+
 // ------------------------------------------------------------------ 启动 / 关停
 
 #[tokio::test]
-async fn startup_runs_loops_and_shutdown_finishes_promptly() {
+async fn startup_runs_every_job_and_shutdown_finishes_promptly() {
     let e = setup(&[]).await;
     let s = &e.state;
-    s.kernel
+    s.jobs
         .set_official_api(Some("http://127.0.0.1:9/never".into()));
-    // 上次的运行记录在启动时读回来
+    // 上次的运行记录在启动时读回来（包括已经不存在的任务）
     s.db.set_setting(
-        "kernel_last",
-        &json!({"retired_module": {"enabled": true}}).to_string(),
+        "job_last",
+        &json!({"retired_job": {"at": 1.0, "ok": true, "ms": 0, "summary": "旧"}}).to_string(),
     )
     .await
     .unwrap();
+    // 内核时代的运行记录和模块开关：不读不写也不删
+    s.db.set_setting("kernel_last", "{\"capacity\": {}}")
+        .await
+        .unwrap();
+    s.db.set_setting("module_capacity", "0").await.unwrap();
     jobs::startup(s).await.unwrap();
-    assert!(s.kernel.last().contains_key("retired_module"));
-    // 第一轮内核 tick 立即执行（不等 10 分钟）
+    assert!(s.jobs.last().await.contains_key("retired_job"));
+    // 每个任务的第一轮都立即执行（不等一个周期）
     let start = Instant::now();
     loop {
-        let raw =
-            s.db.get_setting("kernel_last")
-                .await
-                .unwrap()
-                .unwrap_or_default();
-        if raw.contains("\"capacity\"") && raw.contains("\"retired_module\"") {
+        let raw = setting(s, "job_last").await.unwrap_or_default();
+        let saved: Value = serde_json::from_str(&raw).unwrap_or(Value::Null);
+        if JOBS.iter().all(|j| saved.get(j.name).is_some()) && saved.get("retired_job").is_some() {
             break;
         }
         assert!(
             start.elapsed() < Duration::from_secs(10),
-            "内核没有在启动后立即跑第一轮：{raw}"
+            "定时任务没有在启动后立即跑第一轮：{raw}"
         );
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
+    // 7 个循环都还挂着（跑完第一轮在睡觉，没有退出）
+    assert!(s.tasks.len() >= JOBS.len(), "{}", s.tasks.len());
     // 关停前内存里还有没落库的状态码统计
     s.status_stats.record(503, s.now());
     let t = Instant::now();
@@ -469,36 +446,72 @@ async fn startup_runs_loops_and_shutdown_finishes_promptly() {
             .contains(&(503, 1)),
         "关停时要把状态码统计落库"
     );
+    assert_eq!(
+        setting(s, "kernel_last").await.as_deref(),
+        Some("{\"capacity\": {}}")
+    );
+    assert_eq!(setting(s, "module_capacity").await.as_deref(), Some("0"));
+}
+
+// ------------------------------------------------------------------ 出错 / panic 不让循环退出
+
+static FLAKY_CALLS: AtomicUsize = AtomicUsize::new(0);
+
+/// 第一轮 panic，第二轮报错，之后正常。
+fn flaky(_: &AppState) -> BoxFuture<'_, Result<String, JobError>> {
+    Box::pin(async {
+        match FLAKY_CALLS.fetch_add(1, Ordering::SeqCst) {
+            0 => panic!("合成的 panic"),
+            1 => Err(JobError::new("ValueError", "合成的错误")),
+            n => Ok(format!("第 {} 轮", n + 1)),
+        }
+    })
+}
+
+static FLAKY: Job = Job {
+    name: "flaky_test",
+    title: "测试用",
+    every: "每 0.05 秒",
+    every_secs: 0.05,
+    jitter: 0.0,
+    run: flaky,
+};
+
+#[tokio::test]
+async fn a_failing_or_panicking_job_keeps_its_loop_alive() {
+    let e = setup(&[]).await;
+    jobs::spawn_job(&e.state, &FLAKY);
+    let start = Instant::now();
+    loop {
+        let last = Value::Object(e.state.jobs.last().await);
+        if last["flaky_test"]["ok"] == true {
+            break;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "循环在出错后退出了：{last}"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(FLAKY_CALLS.load(Ordering::SeqCst) >= 3);
+    // panic 和报错各记一条 Bug（来源 job:<名字>）
+    let mut sources = bug_sources(&e.state).await;
+    sources.dedup();
+    assert_eq!(sources, ["job:flaky_test"]);
+    let events = e.state.db.list_error_events(true, 10).await.unwrap();
+    assert_eq!(events.len(), 2, "{events:?}");
+    jobs::shutdown(&e.state).await;
+    assert!(e.state.tasks.is_empty(), "关停后循环退出");
 }
 
 #[tokio::test]
-async fn startup_wires_the_registration_service_into_the_kernel() {
-    let discord = MockUpstream::start().await;
-    let e = setup(&discord_env(&discord.url(), "0")).await;
-    e.state
-        .kernel
-        .set_official_api(Some("http://127.0.0.1:9/never".into()));
-    assert!(e.state.kernel.registrar().is_none());
-    // 领 Key 开着，「领 Key」模块才会跑校验
-    e.state.db.set_setting("register_open", "1").await.unwrap();
-    jobs::startup(&e.state).await.unwrap();
-    assert!(e.state.kernel.registrar().is_some());
-    // 内核的第一轮 tick 读到了注册服务：「已领人数 ≤ 名额」有了数字，不再是没有注册服务时的空校验
-    let start = Instant::now();
-    loop {
-        let raw = e
-            .state
-            .db
-            .get_setting("kernel_last")
-            .await
-            .unwrap()
-            .unwrap_or_default();
-        if raw.contains("已领人数 ≤ 名额") {
-            assert!(raw.contains("0 / 10"), "{raw}");
-            break;
-        }
-        assert!(start.elapsed() < Duration::from_secs(10), "{raw}");
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    jobs::shutdown(&e.state).await;
+async fn a_panic_becomes_a_job_error() {
+    let r: Result<String, JobError> = jobs::guarded(async { panic!("合成的 panic") }).await;
+    let err = r.unwrap_err();
+    assert_eq!(
+        (err.ty.as_str(), err.msg.as_str()),
+        ("Panic", "合成的 panic")
+    );
+    let r = jobs::guarded(async { Ok::<_, JobError>("好".to_string()) }).await;
+    assert_eq!(r.unwrap(), "好");
 }

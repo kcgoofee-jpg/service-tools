@@ -1,12 +1,11 @@
 //! 上游表现分析的取数（旧版 `perf.collect(state, now)`）：日志 + 当前并发 / 间隔设置 → gate-core 的 `analyze`。
-//! 后台「上游」页、维护循环的变慢提醒、风险检查都用它。
+//! 后台「上游」页用它。
 
-use super::KernelError;
 use crate::state::AppState;
 use gate_core::perf::{self, BASELINE_DAYS, DAY, PerfParams, PerfReport, PerfRow};
 
 /// 从网关状态读取日志和当前并发 / 间隔设置，返回 `analyze()` 结果。
-pub async fn collect_perf(state: &AppState, now: f64) -> Result<PerfReport, KernelError> {
+pub async fn collect_perf(state: &AppState, now: f64) -> Result<PerfReport, gate_db::DbError> {
     let rows = state
         .db
         .image_perf_rows(now - (BASELINE_DAYS * DAY) as f64)

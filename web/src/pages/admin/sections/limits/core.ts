@@ -52,21 +52,21 @@ export type QuotaAlgo = {
   };
   history: QuotaReview[];
   params: Record<string, number>;
+  /** V5 每 1% 约多少张（推算全站 V5 用）；缺了才用 DEFAULT_IMAGES_PER_PERCENT */
+  images_per_percent?: number;
 };
 
 /** 官方：100% ≈ 1730 张（23 步估算）→ 17.3 张 / 1%，折成成员常用的 28 步：17.3 × 23 / 28 */
 export const DEFAULT_IMAGES_PER_PERCENT = 14.2;
 
-/** /admin/api/modules 里推算要用到的那一小块 */
-export type ModulesLite = {
-  modules: Array<{ name: string; params: Array<{ name: string; value: unknown }> }>;
-};
-
-/** 每 1% 约多少张：取「容量」模块参数（接口给的），拿不到才用默认值 */
-export function imagesPerPercent(m: ModulesLite | null | undefined): { value: number; fromApi: boolean } {
-  const p = m?.modules.find((x) => x.name === "capacity")?.params.find((x) => x.name.includes("1%"));
-  return typeof p?.value === "number"
-    ? { value: p.value, fromApi: true }
+/** 每 1% 约多少张：取动态额度接口（/admin/api/quota-algo）给的 images_per_percent，拿不到才用默认值 */
+export function imagesPerPercent(algo: Pick<QuotaAlgo, "images_per_percent"> | null | undefined): {
+  value: number;
+  fromApi: boolean;
+} {
+  const v = algo?.images_per_percent;
+  return typeof v === "number" && Number.isFinite(v) && v > 0
+    ? { value: v, fromApi: true }
     : { value: DEFAULT_IMAGES_PER_PERCENT, fromApi: false };
 }
 

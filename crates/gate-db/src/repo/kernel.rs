@@ -1,6 +1,6 @@
-//! 自适应内核（动态额度 / 自动驾驶 / 模块校验 / 风险检查 / 维护循环）要用的查询与写入。
+//! 定时任务（动态额度 / 自动驾驶 / 上游快照 / 维护循环 / 闲置回收）要用的查询与写入。
 //!
-//! 旧版散在 `quota_algo.py` / `autopilot.py` / `modules.py` / `risk_check.py` / `background_tasks.py` /
+//! 旧版散在 `quota_algo.py` / `autopilot.py` / `modules.py` / `background_tasks.py` /
 //! `state.py` 里的 `db._db.execute*`，这里按「同一个任务读到的一批数据」收成一个方法一次读完。
 //! SQL 文本与旧版逐字相同（包括没有 `ORDER BY` 的地方：行顺序由 SQLite 决定，两边引擎一致）。
 //!
@@ -9,12 +9,11 @@
 use super::NOT_TEST;
 use crate::{Db, Result, value};
 use gate_core::autopilot::BreakerRows;
-use gate_core::modules::SnapRow;
 use gate_core::quota::{
-    CounterRow, DailyInputs, ManagedKey, PyNum, QuietInputs, QuietSnap, V5Row, YesterdayInputs,
+    CounterRow, DailyInputs, ManagedKey, QuietInputs, QuietSnap, V5Row, YesterdayInputs,
     quiet_count_pairs, quiet_snaps_since,
 };
-use rusqlite::{params, params_from_iter, types::Value as SqlValue, types::ValueRef};
+use rusqlite::{params, params_from_iter, types::ValueRef};
 use serde_json::{Map, Value};
 
 /// 领取记录里闲置回收要用到的资料。
@@ -25,9 +24,6 @@ pub struct RegistrationProfile {
     pub display_name: String,
     pub avatar: String,
 }
-
-/// 用量集中度：`(key_id, key_name, 张数)` 前几名 + 全站总张数。
-pub type Concentration = (Vec<(Option<i64>, String, i64)>, i64);
 
 fn count_i64(
     c: &rusqlite::Connection,
@@ -285,7 +281,7 @@ impl Db {
         .await
     }
 
-    // ------------------------------------------------------------------ 模块（modules.py）
+    // ------------------------------------------------------------------ 上游 V5 快照（定时任务 upstream_snapshot）
 
     /// `SELECT MAX(ts) FROM upstream_snapshots`
     pub async fn latest_snapshot_ts(&self) -> Result<Option<f64>> {
@@ -312,130 +308,6 @@ impl Db {
                 params![ts, v5_percent, v5_rate, anlas, fresh],
             )?;
             Ok(())
-        })
-        .await
-    }
-
-    /// 容量校验：`since` 之后（**不含**边界）成功出图的张数。
-    pub async fn images_ok_after(&self, since: f64) -> Result<i64> {
-        self.read(move |c| {
-            count_i64(
-                c,
-                "SELECT COALESCE(SUM(images),0) FROM usage_log WHERE ts>? AND status='ok' AND kind LIKE 'image%'",
-                [since],
-            )
-        })
-        .await
-    }
-
-    /// 观测校验：`start` 起（**含**边界）成功出图的张数。
-    pub async fn images_ok_from(&self, start: f64) -> Result<i64> {
-        self.read(move |c| {
-            count_i64(
-                c,
-                "SELECT COALESCE(SUM(images),0) FROM usage_log WHERE ts>=? AND status='ok' AND kind LIKE 'image%'",
-                [start],
-            )
-        })
-        .await
-    }
-
-    /// 容量校验：24 小时内带 V5 剩余的快照（按时间升序）。
-    pub async fn snapshot_rows_since(&self, since: f64) -> Result<Vec<SnapRow>> {
-        self.read(move |c| {
-            let mut stmt = c.prepare(
-                "SELECT ts, v5_percent, v5_rate FROM upstream_snapshots WHERE ts>? AND v5_percent IS NOT NULL ORDER BY ts",
-            )?;
-            stmt.query_map([since], |r| {
-                Ok(SnapRow {
-                    ts: value::f64_or(r, 0, 0.0)?,
-                    percent: value::f64_or(r, 1, 0.0)?,
-                    rate: value::f64_opt(r, 2)?,
-                })
-            })?
-            .collect()
-        })
-        .await
-    }
-
-    /// 容量校验：`(t0, t1]` 里日志数到的 V5 张数。
-    pub async fn v5_images_between(&self, t0: f64, t1: f64) -> Result<i64> {
-        self.read(move |c| {
-            count_i64(
-                c,
-                "SELECT COALESCE(SUM(images),0) FROM usage_log WHERE ts>? AND ts<=? AND status='ok' AND model LIKE '%diffusion-5%'",
-                params![t0, t1],
-            )
-        })
-        .await
-    }
-
-    /// 分配校验：算法管理的启用 Key 数，以及其中额度和算法结果不一致的数量。
-    /// `a` 是 `quota_algo_last.ceiling`（可能为 NULL：SQL 比较恒不成立 → 0），`each` 是 `v5.each`。
-    pub async fn managed_keys_drift(&self, a: &Value, each: PyNum) -> Result<(i64, i64)> {
-        let a = super::json_to_sql(a)?;
-        let each = match each {
-            PyNum::Int(i) => SqlValue::Integer(i),
-            PyNum::Float(f) => SqlValue::Real(f),
-        };
-        self.read(move |c| {
-            let keys = count_i64(
-                c,
-                "SELECT COUNT(*) FROM api_keys WHERE quota_auto=1 AND is_admin=0 AND is_test=0 AND enabled=1",
-                [],
-            )?;
-            let drift = count_i64(
-                c,
-                "SELECT COUNT(*) FROM api_keys WHERE quota_auto=1 AND is_admin=0 AND is_test=0 \
-                 AND enabled=1 AND (daily_images<>? OR daily_v5<>?)",
-                params![a, each],
-            )?;
-            Ok((keys, drift))
-        })
-        .await
-    }
-
-    /// 观测校验：`start` 起生成记录里成功的条数。
-    pub async fn audited_ok_from(&self, start: f64) -> Result<i64> {
-        self.read(move |c| {
-            count_i64(
-                c,
-                "SELECT COUNT(*) FROM generation_audit WHERE ts>=? AND status='ok'",
-                [start],
-            )
-        })
-        .await
-    }
-
-    // ------------------------------------------------------------------ 风险检查（risk_check.py）
-
-    /// 用量集中度：`since` 之后各 Key 的成功出图张数前 6 名 + 全站总数（都不含测试 Key）。
-    pub async fn usage_concentration(&self, since: f64) -> Result<Concentration> {
-        self.read(move |c| {
-            let rows: Vec<(Option<i64>, String, i64)> = {
-                let mut stmt = c.prepare(&format!(
-                    "SELECT key_id, key_name, COUNT(*) AS c FROM usage_log \
-                     WHERE ts>=? AND kind IN ('image','image_stream') AND status='ok' AND {NOT_TEST} \
-                     GROUP BY key_id ORDER BY c DESC LIMIT 6"
-                ))?;
-                stmt.query_map([since], |r| {
-                    Ok((
-                        value::i64_opt(r, 0)?,
-                        value::text_or(r, 1, "")?,
-                        value::i64_or(r, 2, 0)?,
-                    ))
-                })?
-                .collect::<rusqlite::Result<_>>()?
-            };
-            let total = count_i64(
-                c,
-                &format!(
-                    "SELECT COUNT(*) FROM usage_log \
-                     WHERE ts>=? AND kind IN ('image','image_stream') AND status='ok' AND {NOT_TEST}"
-                ),
-                [since],
-            )?;
-            Ok((rows, total))
         })
         .await
     }
@@ -483,7 +355,7 @@ impl Db {
         .await
     }
 
-    // ------------------------------------------------------------------ 对拍测试支撑
+    // ------------------------------------------------------------------ 测试支撑
 
     /// 所有非空表的整表内容（按 rowid），`{表名: [ {列: 值} ]}`。BLOB 写成 `{"$b": 十六进制}`。
     pub async fn dump_tables(&self) -> Result<Value> {

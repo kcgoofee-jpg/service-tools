@@ -1,5 +1,5 @@
 /**
- * 后台外壳：登录门、侧栏导航（9 个分区）、路由、⌘K 命令面板、全局刷新节拍。
+ * 后台外壳：登录门、侧栏导航（8 个分区）、路由、⌘K 命令面板、全局刷新节拍。
  *
  * 分区组件放在 ./sections/<id>.tsx，默认导出一个无参组件；数据用 useAdmin(url) 取，
  * 它跟着全局「刷新节拍」自动重取（SSE 推送事件时，或 SSE 不可用时页面可见每 15 秒一次）。
@@ -15,7 +15,6 @@ import {
   Menu as MenuIcon,
   MessagesSquare,
   Moon,
-  Puzzle,
   Search,
   Server,
   SlidersHorizontal,
@@ -31,7 +30,7 @@ import { Button, cx, Dialog, Field, Skeleton, toast } from "../../ui";
 import "./admin.css";
 import { memberLabel } from "./sections/members/logic";
 import type { Member } from "./sections/members/types";
-import { type ModulesResponse, moduleState } from "./sections/modules/core";
+import { type JobsResponse, jobAlertCount } from "./sections/system/jobs-core";
 
 /* ---------------- 分区注册表 ---------------- */
 export type SectionId =
@@ -41,7 +40,6 @@ export type SectionId =
   | "upstream"
   | "onboarding"
   | "limits"
-  | "modules"
   | "discord"
   | "system";
 
@@ -102,14 +100,6 @@ export const SECTIONS: Section[] = [
     path: "/admin/limits",
     icon: SlidersHorizontal,
     view: lazy(() => import("./sections/limits")),
-  },
-  {
-    id: "modules",
-    label: "模块",
-    group: "设置",
-    path: "/admin/modules",
-    icon: Puzzle,
-    view: lazy(() => import("./sections/modules")),
   },
   {
     id: "discord",
@@ -226,7 +216,7 @@ function setNav(id: SectionId, value: number | string | null): void {
   navBadges.value = next;
 }
 
-/** 侧栏角标的唯一来源：每次刷新节拍都看一次未处理 Bug、模块自检、奶妹在线、未处理捐赠（各分区页面不再自己写角标）。 */
+/** 侧栏角标的唯一来源：每次刷新节拍都看一次未处理 Bug、定时任务（出错 + 超时）、奶妹在线、未处理捐赠（各分区页面不再自己写角标）。 */
 function BadgePoller() {
   const t = tick.value;
   useEffect(() => {
@@ -234,13 +224,13 @@ function BadgePoller() {
     const quiet = <T,>(url: string) => getJSON<T>(url).catch(() => null);
     void Promise.all([
       quiet<{ open?: number }>("/admin/api/errors"),
-      quiet<ModulesResponse>("/admin/api/modules"),
+      quiet<JobsResponse>("/admin/api/jobs"),
       quiet<BotResp>("/admin/api/discord-bot"),
       quiet<{ open?: number }>("/admin/api/donations/count"),
-    ]).then(([bugs, mods, bot, donations]) => {
+    ]).then(([bugs, jobs, bot, donations]) => {
       if (!alive) return;
       if (bugs) setNav("logs", bugs.open ?? 0);
-      if (mods?.modules) setNav("modules", mods.modules.filter((m) => moduleState(m) === "bad").length);
+      if (jobs?.jobs) setNav("system", jobAlertCount(jobs, Date.now() / 1000));
       const offline = bot?.status ? !bot.status.online : false;
       const open = donations?.open ?? 0;
       setNav("discord", offline ? (open ? `! ${open}` : "!") : open);
@@ -519,6 +509,13 @@ function Shell(props: { children: ComponentChildren }) {
   );
 }
 
+/** 旧的「模块」页已经删了（改成「系统」页的「定时任务」卡片）：旧书签直接换到那里 */
+function OldModules() {
+  const { route } = useLocation();
+  useEffect(() => route("/admin/system#jobs", true), [route]);
+  return null;
+}
+
 export function Admin() {
   useEffect(() => {
     getJSON("/admin/api/me")
@@ -550,6 +547,7 @@ export function Admin() {
                   <Route key={`${s.id}-sub`} path={`${s.path}/*`} component={s.view} />,
                 ],
           )}
+          <Route path="/admin/modules" component={OldModules} />
           <Route default component={SECTIONS[0]?.view as ComponentType} />
         </Router>
       </Shell>

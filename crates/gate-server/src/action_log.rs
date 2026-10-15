@@ -69,8 +69,6 @@ pub const ADMIN_ACTIONS: &[(&str, &str, &str)] = &[
     ("PUT", "/quota-algo", "修改动态额度参数"),
     ("POST", "/keys/{key_id}/share-clear", "防分享清零（误判）"),
     ("PUT", "/share-guard", "修改防分享模式"),
-    ("PUT", "/modules/{name}", "启用 / 关闭模块"),
-    ("POST", "/modules/run", "手动执行模块校验"),
     ("POST", "/audit/purge-images", "清空原图"),
     ("POST", "/ops/reset-all-keys", "全站杀头重置"),
     ("POST", "/incidents", "发布状态页事件"),

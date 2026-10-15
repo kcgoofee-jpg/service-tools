@@ -162,7 +162,7 @@ pub struct EnvConfig {
     pub auth_block_seconds: i64,
     pub login_max_attempts: i64,
     pub login_window_seconds: i64,
-    /// 连续这么多天没成功出过图的 Key 自动回收（0 = 关）。只在这里解析一次，机器人、后台、内核共用。
+    /// 连续这么多天没成功出过图的 Key 自动回收（0 = 关）。只在这里解析一次，机器人、后台、定时任务共用。
     pub key_inactivity_delete_days: i64,
     // Discord / 告警 / 公告
     pub discord_bot_token: String,

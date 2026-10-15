@@ -285,7 +285,7 @@ async fn server_status(State(state): State<AppState>, _s: AdminSession) -> ApiRe
 
 /// 上游表现：V4.5 / V5 的生成耗时、排队、限流、成功率、产能，与过去 7 天对比。
 async fn upstream_perf(State(state): State<AppState>, _s: AdminSession) -> ApiResult {
-    let report = crate::kernel::collect_perf(&state, state.now()).await?;
+    let report = crate::perf::collect_perf(&state, state.now()).await?;
     Ok(ok_json(
         &serde_json::to_value(report).map_err(|e| InternalError(e.to_string()))?,
     ))

@@ -75,7 +75,7 @@ fn serve(bind: SocketAddr) -> anyhow::Result<()> {
         let env = EnvConfig::from_process();
         let assets = Assets::new(std::env::var_os("STATIC_DIR").map(Into::into));
         let state = gate_server::AppState::build(env, assets).await?;
-        // 注册服务配齐（state.registration）时，startup 会把它接进内核（registrar / 私信钩子）并拉起全部后台循环
+        // 读回定时任务的运行记录并拉起全部定时任务
         gate_server::jobs::startup(&state).await?;
         let app = gate_server::app(state.clone());
         let listener = tokio::net::TcpListener::bind(bind).await?;

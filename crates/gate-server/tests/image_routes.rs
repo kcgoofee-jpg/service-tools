@@ -700,3 +700,57 @@ async fn cors_preflight_allows_authorization_and_fallbacks_are_json() {
         (405, r#"{"detail":"Method Not Allowed"}"#.to_string())
     );
 }
+
+/// 记账恒等式（原「观测」「容量」模块在线上核对的，现在由测试守住）：每个成功的出图请求，
+/// 今日计数器、用量日志、生成记录三处的张数一致；内存里的每小时计数等于本小时日志里的张数，且不超过上限。
+#[tokio::test]
+async fn accounting_identity_across_counters_logs_and_audit() {
+    let e = setup(&[]).await;
+    e.state.db.set_setting("audit_prompts", "1").await.unwrap();
+    e.state.db.set_setting("audit_thumbs", "1").await.unwrap();
+    for n in [1, 2] {
+        let (status, _, body) = call(
+            &e.state,
+            "POST",
+            "/ai/generate-image",
+            Some(TOKEN),
+            Some(image_body("nai-diffusion-4-5-full", n)),
+        )
+        .await;
+        assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    let counter = e
+        .state
+        .db
+        .get_counter(1, &e.state.day())
+        .await
+        .unwrap()
+        .images;
+    let logged = common::query(
+        &e.state.db,
+        "SELECT COALESCE(SUM(images), 0) AS n FROM usage_log WHERE status='ok' AND kind LIKE 'image%'",
+    )
+    .await[0]["n"]
+        .as_i64()
+        .unwrap();
+    let audited = common::query(
+        &e.state.db,
+        "SELECT COUNT(*) AS n FROM generation_audit WHERE status='ok'",
+    )
+    .await[0]["n"]
+        .as_i64()
+        .unwrap();
+    // 每张成功出图一条生成记录（一次请求多张时网关按实际出的张数记）
+    assert!(logged >= 2, "{logged}");
+    assert_eq!((counter, audited), (logged, logged));
+    let now = e.state.now();
+    let tokens = e.state.nai.tokens().await;
+    let in_memory: i64 = tokens
+        .iter()
+        .map(|t| e.state.guard.with(|g| g.hour_count(&t.token_id, now)))
+        .sum();
+    assert_eq!(in_memory, logged, "内存每小时计数 = 本小时日志张数");
+    let cap = e.state.guard.with(|g| g.hourly_cap(now));
+    assert!(in_memory <= cap * tokens.len() as i64);
+}

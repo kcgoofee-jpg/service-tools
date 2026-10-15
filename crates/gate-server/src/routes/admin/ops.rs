@@ -7,7 +7,7 @@
 //! - [`system`]：站点公告、测试告警、Discord 机器人。
 //!
 //! 已删除功能的残留接口不移植：`/quota-shadow`、`/shadow`（调度影子模式）、`/anlas-pool`、`/share-guard`
-//! （新前端都不再调用）。动态额度 / 自动驾驶 / 模块（`quota-algo`、`autopilot`、`modules*`）由内核那一组负责。
+//! （新前端都不再调用）。动态额度参数和定时任务（`quota-algo`、`jobs`）在 `routes/admin/jobs.rs`。
 
 mod limits;
 mod monitor;

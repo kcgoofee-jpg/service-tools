@@ -99,7 +99,7 @@ pub async fn algo_owned(db: &Db) -> Result<AlgoOwned, DbError> {
     })
 }
 
-/// 动态额度开着吗：`quota_auto_enabled`（后台「动态额度」开关与模块「分配」开关是同一个设置）。
+/// 动态额度开着吗：`quota_auto_enabled`（后台「额度与保护」页的动态额度开关）。
 /// 读不懂（比如写成 inf）按开着算——宁可先拦住手改。
 pub async fn quota_algo_enabled(db: &Db) -> Result<bool, DbError> {
     let mut settings = std::collections::HashMap::new();

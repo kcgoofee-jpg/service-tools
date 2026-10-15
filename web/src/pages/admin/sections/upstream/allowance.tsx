@@ -3,7 +3,7 @@ import { fullTime } from "../../../../lib/format";
 import { Badge, Card, Meter, Notice } from "../../../../ui";
 import { useAdmin } from "../../Admin";
 import { LoadError, Loading } from "../_kit";
-import { imagesPerPercent, type ModulesLite } from "../limits/core";
+import { imagesPerPercent, type QuotaAlgo } from "../limits/core";
 import { Derive, withTone } from "../system/forms";
 import { type Allowance, type AllowanceAccount, rechargeDerivation } from "./core";
 
@@ -54,8 +54,8 @@ function Account(props: { a: AllowanceAccount; threshold: number; per: number })
 
 export default function AllowanceCard() {
   const { data, error, loading } = useAdmin<Allowance>("/admin/api/allowance");
-  const mods = useAdmin<ModulesLite>("/admin/api/modules");
-  const per = imagesPerPercent(mods.data);
+  const algo = useAdmin<QuotaAlgo>("/admin/api/quota-algo");
+  const per = imagesPerPercent(algo.data);
   return (
     <Card
       title="V5 官方余量"
