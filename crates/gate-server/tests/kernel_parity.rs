@@ -1279,7 +1279,6 @@ async fn run_case(case: &Value) -> Result<(), String> {
             "test-secret-key-test-secret-key-0123456789".into(),
         ),
         ("ADMIN_PASSWORD", "dev-admin-password-123".into()),
-        ("UPSTREAM_HTTP2", "0".into()),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))

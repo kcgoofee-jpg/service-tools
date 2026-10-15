@@ -184,8 +184,6 @@ impl AppState {
             UpConfig {
                 image_host: env.image_host.clone(),
                 proxy: Some(env.upstream_proxy.clone()).filter(|s| !s.is_empty()),
-                custom_user_agent: Some(env.upstream_user_agent.clone()).filter(|s| !s.is_empty()),
-                http2: env.upstream_http2,
                 post_jitter_min: env.post_request_jitter_min,
                 post_jitter_max: env.post_request_jitter_max,
                 single_slot_enforced: env.single_image_slot_enforced,

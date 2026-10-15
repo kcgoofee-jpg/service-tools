@@ -57,6 +57,7 @@ gate-testkit = { path = "../gate-testkit" }
 gate-golden = { path = "../gate-golden" }
 tempfile = "3"
 flate2 = "1"
+rmpv.workspace = true
 
 [lints]
 workspace = true

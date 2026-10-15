@@ -27,7 +27,6 @@ fn spawn_gateway(port: u16, data: &std::path::Path) -> Child {
         .env("NAI_IMAGE_HOST", "http://127.0.0.1:9")
         .env("ADMIN_PASSWORD", "dev-admin-password-123")
         .env("SECRET_KEY", "test-secret-key-test-secret-key-0123456789")
-        .env("UPSTREAM_HTTP2", "0")
         // 维护循环启动就会取一次官方状态：指到不可达的本机端口，保证不出本机
         .env("OFFICIAL_STATUS_URL", "http://127.0.0.1:9/never")
         .env("RUST_LOG", "info")

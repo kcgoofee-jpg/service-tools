@@ -120,8 +120,6 @@ pub struct EnvConfig {
     pub nai_token_allow_anlas: Vec<bool>,
     pub image_host: String,
     pub upstream_proxy: String,
-    pub upstream_user_agent: String,
-    pub upstream_http2: bool,
     pub post_request_jitter_min: f64,
     pub post_request_jitter_max: f64,
     pub single_image_slot_enforced: bool,
@@ -285,8 +283,6 @@ impl EnvConfig {
             nai_tokens,
             image_host: r.str("NAI_IMAGE_HOST", "https://image.novelai.net"),
             upstream_proxy: r.trimmed("UPSTREAM_PROXY"),
-            upstream_user_agent: r.trimmed("UPSTREAM_USER_AGENT"),
-            upstream_http2: r.bool("UPSTREAM_HTTP2", true),
             post_request_jitter_min: r.float("POST_REQUEST_JITTER_MIN", 1.0),
             post_request_jitter_max: r.float("POST_REQUEST_JITTER_MAX", 3.0),
             single_image_slot_enforced: r.bool("SINGLE_IMAGE_SLOT_ENFORCED", false),
@@ -373,7 +369,6 @@ mod tests {
             ("NAI_TOKEN_ALLOW_ANLAS", "0"),
             ("QUEUE_TIMEOUT", "  "),
             ("IMAGE_MIN_INTERVAL", "abc"),
-            ("UPSTREAM_HTTP2", "Off"),
             ("ADMIN_COOKIE_SECURE", "nope"),
         ]));
         assert_eq!(c.nai_tokens, ["pst-a", "pst-b"]);
@@ -381,7 +376,6 @@ mod tests {
         assert_eq!(c.nai_token_allow_anlas, [false, true]);
         assert_eq!(c.queue_timeout, 90);
         assert_eq!(c.image_min_interval, 15.0);
-        assert!(!c.upstream_http2);
         assert!(c.admin_cookie_secure, "只有 0/false/no/off 才关闭");
         assert!(c.registration.is_none());
     }

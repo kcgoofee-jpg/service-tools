@@ -134,7 +134,6 @@ fn gateway_env(
         // 本地调试用的额外项：假上游是明文 HTTP/1.1，不需要抖动；反复跑端到端不要被登录限流挡住
         ("POST_REQUEST_JITTER_MIN", "0".into()),
         ("POST_REQUEST_JITTER_MAX", "0".into()),
-        ("UPSTREAM_HTTP2", "0".into()),
         ("LOGIN_MAX_ATTEMPTS", "100".into()),
     ]
     .into_iter()

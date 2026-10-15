@@ -26,8 +26,6 @@ pub use crate::pool::{Token, TokenFields};
 pub struct Config {
     pub image_host: String,
     pub proxy: Option<String>,
-    pub custom_user_agent: Option<String>,
-    pub http2: bool,
     pub post_jitter_min: f64,
     pub post_jitter_max: f64,
     pub single_slot_enforced: bool,
@@ -131,16 +129,8 @@ impl<H: Hooks> NaiClient<H> {
         hooks: H,
         tokens: Vec<(String, i64, bool)>,
     ) -> Result<Self, wreq::Error> {
-        let http = Http::new(
-            cfg.proxy.as_deref(),
-            cfg.http2,
-            cfg.custom_user_agent.as_deref(),
-        )?;
-        let pool = Pool::new(
-            tokens,
-            cfg.custom_user_agent.clone(),
-            cfg.single_slot_enforced,
-        );
+        let http = Http::new(cfg.proxy.as_deref())?;
+        let pool = Pool::new(tokens, cfg.single_slot_enforced);
         let scheduler = Scheduler::new(
             cfg.image_min_interval,
             (cfg.post_jitter_min, cfg.post_jitter_max),
@@ -317,7 +307,8 @@ impl<H: Hooks> NaiClient<H> {
 
     // ---------------- 账号查询（见 account.rs） ----------------
 
-    /// 只读查询（订阅 / Anlas 余额 / Token 校验）：与出图同一套浏览器请求头，不碰调度。
+    /// 只读查询（订阅 / Anlas 余额）：用 `profile_index` 那一档指纹（传 [`Token::profile_index`]，
+    /// 与这把 Token 出图时是同一个浏览器），不碰调度。
     pub async fn get_json_with(
         &self,
         token: &str,
@@ -340,7 +331,12 @@ impl<H: Hooks> NaiClient<H> {
     }
 
     /// 后台「添加 / 替换 Token」前的有效性检查：查订阅（只读，不消耗额度，不记录 Token）。
-    pub async fn verify_token(&self, token: &str) -> Result<i64, String> {
-        crate::account::verify(&self.inner.http, 0, self.image_host(), token).await
+    /// 用这把 Token 加进池后会分到的指纹：新增是池尾的位置，替换（`replacing` = 旧 token_id）是原位置。
+    pub async fn verify_token(&self, token: &str, replacing: Option<&str>) -> Result<i64, String> {
+        let tokens = self.tokens().await;
+        let index = replacing
+            .and_then(|id| tokens.iter().position(|t| t.token_id == id))
+            .unwrap_or(tokens.len());
+        crate::account::verify(&self.inner.http, index, self.image_host(), token).await
     }
 }

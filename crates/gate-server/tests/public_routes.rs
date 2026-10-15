@@ -1377,7 +1377,6 @@ async fn setup_page(extra: &[(&str, &str)]) -> Page {
             "test-secret-key-test-secret-key-0123456789".into(),
         ),
         ("ADMIN_PASSWORD", ADMIN_PASSWORD.into()),
-        ("UPSTREAM_HTTP2", "0".into()),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))

@@ -7,39 +7,20 @@ use serde_json::Value;
 use std::time::Duration;
 
 /// 每个指纹档位一对（客户端, 请求头档案），下标就是 [`crate::pool::Token::profile_index`]。
+/// 客户端与请求头取自同一个 [`BrowserProfile`]：UA / sec-ch-ua 与 TLS / HTTP2 指纹一定是同一个 Chrome。
 pub(crate) struct Http {
     clients: Vec<(wreq::Client, BrowserProfile)>,
 }
 
 impl Http {
-    pub(crate) fn new(
-        proxy: Option<&str>,
-        http2: bool,
-        custom_user_agent: Option<&str>,
-    ) -> Result<Self, wreq::Error> {
-        let mut clients = Vec::with_capacity(3);
-        for (i, p) in headers::browser_profiles().into_iter().enumerate() {
-            let emu = wreq_util::Emulation::builder()
-                .profile(p.chrome)
-                .platform(p.platform)
-                .http2(http2)
-                .headers(false)
-                .build();
-            let mut b = wreq::Client::builder()
-                .emulation(emu)
-                .connect_timeout(Duration::from_secs(15))
-                .read_timeout(Duration::from_secs(300))
-                // 旧版 keepalive_expiry=120：出图间隔 15 秒，默认 5 秒会让每张图都重新 TLS 握手
-                .pool_idle_timeout(Duration::from_secs(120))
-                .pool_max_idle_per_host(8)
-                .redirect(wreq::redirect::Policy::limited(20));
-            if !http2 {
-                b = b.http1_only();
-            }
+    pub(crate) fn new(proxy: Option<&str>) -> Result<Self, wreq::Error> {
+        let mut clients = Vec::with_capacity(headers::POOL.len());
+        for profile in headers::browser_profiles() {
+            let mut b = profile.client_builder();
             if let Some(proxy) = proxy.filter(|p| !p.is_empty()) {
                 b = b.proxy(wreq::Proxy::all(proxy)?);
             }
-            clients.push((b.build()?, headers::profile_for(i, custom_user_agent)));
+            clients.push((b.build()?, profile.clone()));
         }
         Ok(Self { clients })
     }

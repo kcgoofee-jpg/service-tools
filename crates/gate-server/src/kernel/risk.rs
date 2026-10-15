@@ -1,8 +1,8 @@
 //! 风险检查（旧版 `app/risk_check.py`，后台只读诊断）：出站请求的样子（请求头、TLS、出口链路）和滥用线索
 //! （用量集中度、上游限流信号、当日 V5 消耗）。只读：不写库、不发上游请求、不发消息。
 //!
-//! 与旧版不同的只有两处（出站指纹在 3.0 换了，旧文案会说谎，见 `docs/v3-deviations.md` #7）：
-//! 「出站请求头」里 HTTP/2 一行和状态判断、「TLS 指纹」整条；其余逐字一致。
+//! 与旧版不同的只有两处（出站指纹在 3.0 换了，旧文案会说谎，见 `docs/v3-deviations.md` #7、#86）：
+//! 「出站请求头」整条（头的集合 / 顺序、HTTP/2 一行）、「TLS 指纹」整条；其余逐字一致。
 
 use super::perf::collect_perf;
 use crate::state::AppState;
@@ -73,7 +73,7 @@ fn redact_proxy(value: &str) -> String {
 
 // ---------- 出站指纹盘点 ----------
 
-/// 如实列出生图请求真正发出去的头（来自 gate-upstream 的 `headers::ordered` + 每把 Token 的指纹档位）。
+/// 如实列出生图请求真正发出去的头（gate-upstream 的 `headers::ordered`，按发出的顺序；每把 Token 一套指纹）。
 async fn outbound_headers_item(state: &AppState) -> Value {
     let tokens = state.nai.tokens().await;
     if tokens.is_empty() {
@@ -92,21 +92,12 @@ async fn outbound_headers_item(state: &AppState) -> Value {
             t.fields().position,
             mask_token(&t.token)
         ));
-        // 旧版列的是 default_browser_headers 字典（不含 Authorization）；Accept-Encoding / Connection 是协议层补的，不列
-        for (k, v) in gate_upstream::headers::ordered(&t.profile, None, "application/json", false) {
-            if !matches!(k, "Accept-Encoding" | "Connection") {
-                evidence.push(format!("  {k}: {v}"));
-            }
+        // 不含 Authorization（Token 不展示）；POST 时 content-length 在最前、content-type 在 sec-ch-ua 之后
+        for (k, v) in gate_upstream::headers::ordered(&t.profile, None, "*/*", false) {
+            evidence.push(format!("  {k}: {v}"));
         }
     }
-    evidence.push(format!(
-        "HTTP/2：{}",
-        if state.env.upstream_http2 {
-            "启用"
-        } else {
-            "关闭"
-        }
-    ));
+    evidence.push("HTTP/2：由 TLS ALPN 协商（与 Chrome 一致）".to_string());
     evidence.push(format!(
         "请求后随机间隔：{}~{} 秒；连续 3 次 403 冷却 5 分钟",
         pyc::float_repr(state.env.post_request_jitter_min),
@@ -116,17 +107,30 @@ async fn outbound_headers_item(state: &AppState) -> Value {
         "outbound_headers",
         "出站请求头",
         OK,
-        "所有上游请求使用同一套 Chrome 请求头。",
+        "每把 Token 固定一个 Chrome 指纹：UA、sec-ch-ua 与 TLS / HTTP2 出自同一个 profile，按 Chrome fetch() 的顺序发。",
         evidence,
     )
 }
 
 fn tls_fingerprint_item() -> Value {
+    let pool: Vec<String> = gate_upstream::headers::browser_profiles()
+        .iter()
+        .map(|p| {
+            format!(
+                "Chrome {}（{:?}）",
+                p.tls_major().map_or("?".into(), |v| v.to_string()),
+                p.platform
+            )
+        })
+        .collect();
     item(
         "tls_fingerprint",
         "TLS 指纹（JA3/JA4）",
         OK,
-        "TLS / HTTP2 握手由 wreq 模拟 Chrome（129 / 128，随 Token 档位），与请求头一致。",
+        &format!(
+            "TLS / HTTP2 握手由 wreq 模拟 {}，按 Token 序号轮换，与请求头是同一个 profile。",
+            pool.join(" / ")
+        ),
         vec![],
     )
 }

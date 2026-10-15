@@ -42,18 +42,12 @@ pub struct Token {
 }
 
 impl Token {
-    fn new(
-        token: String,
-        index: usize,
-        v5_daily_limit: i64,
-        allow_anlas: bool,
-        custom_ua: Option<&str>,
-    ) -> Self {
+    fn new(token: String, index: usize, v5_daily_limit: i64, allow_anlas: bool) -> Self {
         Self {
             token_id: headers::token_id(&token),
             token,
-            profile: headers::profile_for(index, custom_ua),
-            profile_index: index % 3,
+            profile: headers::profile_for(index),
+            profile_index: index % headers::POOL.len(),
             image_slots: AdjustableLimiter::new(1),
             dispatch_lock: tokio::sync::Mutex::new(()),
             fields: Mutex::new(TokenFields {
@@ -179,27 +173,19 @@ struct PoolState {
 
 pub(crate) struct Pool {
     state: tokio::sync::Mutex<PoolState>,
-    custom_user_agent: Option<String>,
     single_slot_enforced: bool,
 }
 
 impl Pool {
     /// `tokens`：(Token, 每日免费 V5 上限, 是否允许 Anlas)。
-    pub(crate) fn new(
-        tokens: Vec<(String, i64, bool)>,
-        custom_user_agent: Option<String>,
-        single_slot_enforced: bool,
-    ) -> Self {
+    pub(crate) fn new(tokens: Vec<(String, i64, bool)>, single_slot_enforced: bool) -> Self {
         let tokens = tokens
             .into_iter()
             .enumerate()
-            .map(|(i, (t, v5, anlas))| {
-                Arc::new(Token::new(t, i, v5, anlas, custom_user_agent.as_deref()))
-            })
+            .map(|(i, (t, v5, anlas))| Arc::new(Token::new(t, i, v5, anlas)))
             .collect();
         Self {
             state: tokio::sync::Mutex::new(PoolState { tokens, rr: 0 }),
-            custom_user_agent,
             single_slot_enforced,
         }
     }
@@ -255,13 +241,7 @@ impl Pool {
         saved_enabled: Option<bool>,
     ) -> Result<Arc<Token>, String> {
         let mut pool = self.state.lock().await;
-        let new = Token::new(
-            token,
-            pool.tokens.len(),
-            0,
-            allow_anlas,
-            self.custom_user_agent.as_deref(),
-        );
+        let new = Token::new(token, pool.tokens.len(), 0, allow_anlas);
         if pool.tokens.iter().any(|t| t.token_id == new.token_id) {
             return Err("这把 Token 已经在令牌池里".into());
         }
@@ -291,13 +271,7 @@ impl Pool {
         };
         let old = pool.tokens[index].clone();
         let of = old.fields();
-        let new = Token::new(
-            token,
-            index,
-            of.v5_daily_limit,
-            of.allow_anlas,
-            self.custom_user_agent.as_deref(),
-        );
+        let new = Token::new(token, index, of.v5_daily_limit, of.allow_anlas);
         if new.token_id != old.token_id && pool.tokens.iter().any(|t| t.token_id == new.token_id) {
             return Err("这把 Token 已经在令牌池的另一个位置".into());
         }

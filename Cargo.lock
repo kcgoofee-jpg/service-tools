@@ -1038,6 +1038,7 @@ dependencies = [
  "multer",
  "rand 0.9.5",
  "reqwest",
+ "rmpv",
  "rust-embed",
  "rustix",
  "scrypt",
@@ -1061,24 +1062,29 @@ version = "3.0.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
+ "brotli 8.0.4",
+ "flate2",
  "futures",
  "image",
  "rmpv",
  "serde_json",
  "tokio",
  "zip",
+ "zstd 0.13.3",
 ]
 
 [[package]]
 name = "gate-upstream"
 version = "3.0.0"
 dependencies = [
+ "axum",
  "bytes",
  "futures",
  "gate-core",
  "gate-testkit",
  "hex",
  "rand 0.9.5",
+ "rmpv",
  "serde_json",
  "sha2",
  "tempfile",

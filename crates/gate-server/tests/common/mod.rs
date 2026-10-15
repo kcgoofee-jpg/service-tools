@@ -35,7 +35,6 @@ pub async fn setup(extra: &[(&str, &str)]) -> Env {
         ("QUEUE_TIMEOUT", "5"),
         ("SECRET_KEY", "test-secret-key-test-secret-key-0123456789"),
         ("ADMIN_PASSWORD", ADMIN_PASSWORD),
-        ("UPSTREAM_HTTP2", "0"),
     ]
     .iter()
     .map(|(k, v)| (k.to_string(), v.to_string()))

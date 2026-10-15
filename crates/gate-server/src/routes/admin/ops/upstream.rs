@@ -125,10 +125,11 @@ async fn token_payload(
 }
 
 /// 向 NovelAI 查订阅信息确认 Token 有效（只读，不消耗额度）。返回订阅等级。
-async fn verify(state: &AppState, token: &str) -> Result<i64, ApiError> {
+/// `replacing`：替换时是旧 token_id（用那个位置的浏览器指纹），新增时为 None。
+async fn verify(state: &AppState, token: &str, replacing: Option<&str>) -> Result<i64, ApiError> {
     state
         .nai
-        .verify_token(token)
+        .verify_token(token, replacing)
         .await
         .map_err(|msg| HttpError::new(422, msg).into())
 }
@@ -139,7 +140,7 @@ async fn verify(state: &AppState, token: &str) -> Result<i64, ApiError> {
 async fn add_token(State(state): State<AppState>, _s: AdminSession, req: Request) -> ApiResult {
     let (parts, body) = req.into_parts();
     let (token, body) = token_payload(&parts, body).await?;
-    let tier = verify(&state, &token).await?;
+    let tier = verify(&state, &token, None).await?;
     let id = token_id(&token);
     let saved_v5 = state
         .db
@@ -182,7 +183,7 @@ async fn replace_token(
 ) -> ApiResult {
     let (parts, body) = req.into_parts();
     let (token, _) = token_payload(&parts, body).await?;
-    let tier = verify(&state, &token).await?;
+    let tier = verify(&state, &token, Some(&old_id)).await?;
     match state.nai.replace_token(&old_id, token).await {
         Ok((new, previous)) => {
             state

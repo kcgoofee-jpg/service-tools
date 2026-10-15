@@ -89,8 +89,6 @@ fn config(url: &str, interval: f64) -> Config {
     Config {
         image_host: url.into(),
         proxy: None,
-        custom_user_agent: None,
-        http2: false,
         post_jitter_min: 1.0,
         post_jitter_max: 3.0,
         single_slot_enforced: true,
@@ -440,4 +438,230 @@ async fn image_stream_settles_completed_images() {
     s.finish().await;
     let tid = gate_upstream::headers::token_id(T1);
     assert_eq!(hooks.0.images.lock().unwrap().get(&tid), Some(&2));
+}
+
+// ---------------------------------------------------------------- 响应压缩
+
+/// Chrome 的 Accept-Encoding 声明了这四种：上游用哪一种回，网关都要解开。
+const ENCODINGS: [&str; 4] = ["gzip", "deflate", "br", "zstd"];
+
+#[tokio::test]
+async fn compressed_responses_are_decoded() {
+    for enc in ENCODINGS {
+        let up = MockUpstream::start().await;
+        up.set_encoding(Some(enc));
+        let c = NaiClient::new(
+            config(&up.url(), 0.0),
+            TestHooks::default(),
+            vec![(T1.into(), 0, false)],
+        )
+        .unwrap();
+        // 出图 zip（读正文有上限的分支）
+        let body = image_body(2);
+        let resp = c
+            .request(
+                image_opts(&up.url(), &body, 2),
+                &Callbacks::default(),
+                None,
+                &NoObserver,
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.body, gate_testkit::zip_of_pngs(2), "{enc}");
+        assert!(resp.headers.get("content-encoding").is_none(), "{enc}");
+        // Vibe 编码（不设上限的分支）
+        let vibe = json!({"image": "AAAA", "model": "nai-diffusion-4-5-full"});
+        let resp = c
+            .request(
+                RequestOpts::post(format!("{}/ai/encode-vibe", up.url()), &vibe),
+                &Callbacks::default(),
+                None,
+                &NoObserver,
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.body.as_ref(), [7u8; 128].as_slice(), "{enc}");
+        assert!(resp.headers.get("content-encoding").is_none(), "{enc}");
+        // 标签补全（GET）
+        let mut o = RequestOpts::get(format!(
+            "{}/ai/generate-image/suggest-tags?model=m&prompt=p",
+            up.url()
+        ));
+        o.accept = "application/json";
+        let resp = c
+            .request(o, &Callbacks::default(), None, &NoObserver)
+            .await
+            .unwrap();
+        let tags: serde_json::Value = serde_json::from_slice(&resp.body).unwrap();
+        assert_eq!(tags["tags"][0]["tag"], "1girl", "{enc}");
+        // 订阅查询：Token 校验与额度查询
+        assert_eq!(c.verify_token(T2, None).await, Ok(3), "{enc}");
+        let (status, _, sub) = c
+            .get_json_with(
+                T1,
+                0,
+                &format!("{}/user/subscription", up.url()),
+                Duration::from_secs(5),
+                1 << 20,
+                false,
+            )
+            .await
+            .unwrap();
+        assert_eq!(status, 200);
+        let sub: serde_json::Value = serde_json::from_slice(&sub).unwrap();
+        assert_eq!(sub["usage"]["percent"], 80, "{enc}");
+        // 上面每个响应都真的压缩过；每个请求都按 Chrome 声明了四种编码
+        let encoded = up.encoded_responses();
+        for path in [
+            "/ai/generate-image",
+            "/ai/encode-vibe",
+            "/ai/generate-image/suggest-tags",
+            "/user/subscription",
+        ] {
+            assert!(
+                encoded.iter().any(|(p, e)| p == path && e == enc),
+                "{enc} {path} {encoded:?}"
+            );
+        }
+        for r in up.requests() {
+            assert_eq!(
+                r.header("accept-encoding"),
+                Some("gzip, deflate, br, zstd"),
+                "{}",
+                r.path
+            );
+        }
+    }
+}
+
+/// 按 4 字节大端长度前缀切 msgpack 帧，返回每帧的 event_type。
+fn msgpack_events(mut data: &[u8]) -> Vec<String> {
+    let mut out = Vec::new();
+    while data.len() >= 4 {
+        let len = u32::from_be_bytes(data[..4].try_into().unwrap()) as usize;
+        let v = rmpv::decode::read_value(&mut &data[4..4 + len]).unwrap();
+        let kind = v
+            .as_map()
+            .unwrap()
+            .iter()
+            .find(|(k, _)| k.as_str() == Some("event_type"))
+            .and_then(|(_, v)| v.as_str())
+            .unwrap()
+            .to_string();
+        out.push(kind);
+        data = &data[4 + len..];
+    }
+    assert!(data.is_empty(), "帧没有切齐");
+    out
+}
+
+fn msgpack_body(n: i64) -> serde_json::Value {
+    let mut body = image_body(n);
+    body["parameters"]["stream"] = json!("msgpack");
+    body
+}
+
+#[tokio::test]
+async fn compressed_msgpack_stream_is_complete() {
+    use futures::StreamExt;
+    for enc in ENCODINGS {
+        let up = MockUpstream::start().await;
+        up.set_encoding(Some(enc));
+        let c = NaiClient::new(
+            config(&up.url(), 0.0),
+            TestHooks::default(),
+            vec![(T1.into(), 0, false)],
+        )
+        .unwrap();
+        let mut s = c
+            .image_stream(
+                &format!("{}/ai/generate-image-stream", up.url()),
+                &msgpack_body(2),
+                false,
+                false,
+                90.0,
+                &Callbacks::default(),
+                None,
+                &NoObserver,
+            )
+            .await
+            .unwrap();
+        assert!(
+            s.headers().unwrap().get("content-encoding").is_none(),
+            "{enc}"
+        );
+        let mut data = Vec::new();
+        let mut stream = Box::pin(s.take_body().unwrap());
+        while let Some(chunk) = stream.next().await {
+            data.extend_from_slice(&chunk.unwrap());
+        }
+        let events = msgpack_events(&data);
+        assert_eq!(
+            events.iter().filter(|e| *e == "final").count(),
+            2,
+            "{enc} {events:?}"
+        );
+        assert_eq!(up.encoded_responses().len(), 1, "{enc}");
+        s.completed_images = 2;
+        s.finish().await;
+    }
+}
+
+/// 压缩的图片流仍是边收边转：上游先发一帧、一小时后才发下一块，整包缓冲的话第一帧永远等不到。
+#[tokio::test]
+async fn compressed_msgpack_stream_is_not_buffered() {
+    use futures::StreamExt;
+    let frame = gate_testkit::msgpack_frame(vec![
+        ("event_type", "intermediate".into()),
+        ("samp_ix", 0.into()),
+        ("step_ix", 0.into()),
+        ("image", rmpv::Value::Binary(gate_testkit::tiny_png())),
+    ]);
+    for enc in ENCODINGS {
+        let up = MockUpstream::start().await;
+        up.set_encoding(Some(enc));
+        up.push(
+            "/ai/generate-image-stream",
+            Reply::Chunks {
+                status: 200,
+                content_type: "application/x-msgpack".into(),
+                chunks: vec![
+                    (Duration::ZERO, Bytes::from(frame.clone())),
+                    (Duration::from_secs(3600), Bytes::from_static(b"never")),
+                ],
+            },
+        );
+        let c = NaiClient::new(
+            config(&up.url(), 0.0),
+            TestHooks::default(),
+            vec![(T1.into(), 0, false)],
+        )
+        .unwrap();
+        let mut s = c
+            .image_stream(
+                &format!("{}/ai/generate-image-stream", up.url()),
+                &msgpack_body(1),
+                false,
+                false,
+                90.0,
+                &Callbacks::default(),
+                None,
+                &NoObserver,
+            )
+            .await
+            .unwrap();
+        let mut stream = Box::pin(s.take_body().unwrap());
+        let mut got = Vec::new();
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while got.len() < frame.len() {
+                got.extend_from_slice(&stream.next().await.unwrap().unwrap());
+            }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("{enc}：第一帧没有在上游结束前转出来"));
+        assert_eq!(got, frame, "{enc}");
+        assert_eq!(msgpack_events(&got), ["intermediate"], "{enc}");
+        drop(stream);
+        s.finish().await;
+    }
 }
