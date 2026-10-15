@@ -36,5 +36,4 @@ pub mod perf;
 pub mod pyloads;
 pub mod pymsgpack;
 pub mod pyobj;
-pub mod request_timing;
 pub mod sse;
