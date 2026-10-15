@@ -3,7 +3,7 @@
 
 use super::registration::{no_store, read_model};
 use crate::action_log::log_action;
-use crate::auth::{client_ip, header_str, site_flag};
+use crate::auth::{client_ip, header_str};
 use crate::error::{ApiError, ApiResult, HttpError, InternalError, ok_json};
 use crate::registration::RegErr;
 use crate::session::{
@@ -52,13 +52,6 @@ fn internal(e: impl std::fmt::Display) -> ApiError {
     InternalError(e.to_string()).into()
 }
 
-/// 网页 Discord 登录是否暂停（默认暂停，设置 web_login_paused=0 才开放）：Discord 应用审核期间不发起任何 OAuth。
-async fn web_login_paused(state: &AppState) -> Result<bool, ApiError> {
-    Ok(pyval::truthy(
-        &site_flag(state, &gate_core::site_flags::WEB_LOGIN_PAUSED).await?,
-    ))
-}
-
 async fn log_member(state: &AppState, who: &str, action: &str, target: &str, detail: &str) {
     log_action(
         &state.db,
@@ -78,10 +71,6 @@ async fn login_start(State(state): State<AppState>) -> ApiResult {
     let Some(svc) = state.registration.as_deref() else {
         return Err(HttpError::new(503, "登录尚未配置").into());
     };
-    // 首页按钮已隐藏；书签 / 旧链接 / 爬虫直接访问也不能进入 OAuth
-    if web_login_paused(&state).await? {
-        return Ok(redirect("/?login=paused#live"));
-    }
     use base64::Engine;
     let nonce = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(rand::random::<[u8; 24]>());
     let mut resp = redirect(&svc.web_login_url(&nonce));
@@ -100,9 +89,6 @@ async fn login_callback(
     let Some(svc) = state.registration.as_deref() else {
         return Err(HttpError::new(503, "登录尚未配置").into());
     };
-    if web_login_paused(&state).await? {
-        return Ok(redirect("/?login=paused#live"));
-    }
     let code = q.get("code").map_or("", String::as_str);
     let given = q.get("state").map_or("", String::as_str);
     let expected = cookie(&headers, STATE_COOKIE).unwrap_or_default();

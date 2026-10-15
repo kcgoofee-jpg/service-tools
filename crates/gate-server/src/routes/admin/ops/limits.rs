@@ -14,7 +14,9 @@ use axum::routing::get;
 use gate_core::allowance::SETTING as ALERT_THRESHOLD;
 use gate_core::guard::GuardError;
 use gate_core::pyval;
-use gate_core::site_flags::{self, GLOBAL_DAILY_V5, GLOBAL_MONTHLY_ANLAS, MEMBER_DAILY_ANLAS};
+use gate_core::site_flags::{
+    self, GLOBAL_DAILY_ANLAS, GLOBAL_DAILY_V5, GLOBAL_MONTHLY_ANLAS, MEMBER_DAILY_ANLAS,
+};
 use serde_json::{Value, json};
 
 const BODY_LIMIT: usize = 1024 * 1024;
@@ -35,6 +37,7 @@ async fn get_settings(State(state): State<AppState>, _s: AdminSession) -> ApiRes
     Ok(ok_json(&json!({
         "global_monthly_anlas": pyval::float(site_flag_f64(&state, &GLOBAL_MONTHLY_ANLAS).await?),
         "global_daily_v5": crate::ops::algo_owned(&state.db).await?.global_daily_v5,
+        "global_daily_anlas": site_flag(&state, &GLOBAL_DAILY_ANLAS).await?,
         "member_daily_anlas": site_flag(&state, &MEMBER_DAILY_ANLAS).await?,
         ALERT_THRESHOLD: read_alert_threshold(&state.db).await?,
     })))
@@ -87,10 +90,12 @@ async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Requ
     )
     .await?;
     let daily_v5 = field(&state, &body, &GLOBAL_DAILY_V5, Kind::Int, 100_000.0).await?;
+    let daily_anlas = field(&state, &body, &GLOBAL_DAILY_ANLAS, Kind::Int, 100_000.0).await?;
     let member = field(&state, &body, &MEMBER_DAILY_ANLAS, Kind::Int, 100_000.0).await?;
     for (spec, v) in [
         (&GLOBAL_MONTHLY_ANLAS, &monthly),
         (&GLOBAL_DAILY_V5, &daily_v5),
+        (&GLOBAL_DAILY_ANLAS, &daily_anlas),
         (&MEMBER_DAILY_ANLAS, &member),
     ] {
         let text = site_flags::encode(spec, v).map_err(|e| InternalError(e.0))?;
@@ -104,6 +109,7 @@ async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Requ
         "ok": true,
         "global_monthly_anlas": monthly,
         "global_daily_v5": daily_v5,
+        "global_daily_anlas": daily_anlas,
         "member_daily_anlas": member,
         ALERT_THRESHOLD: threshold,
     })))

@@ -1,4 +1,4 @@
-/** Anlas 与 V5 预算：全站月度 Anlas、全站每日 V5、V5 余量告警阈值、每人每日 Anlas。 */
+/** Anlas 与 V5 预算：全站月度 Anlas、全站每日 V5、Vibe 每日 Anlas 池、每人每日 Anlas、V5 余量低提示线。 */
 import { useState } from "preact/hooks";
 import { Card } from "../../../../ui";
 import { act, useAdmin } from "../../Admin";
@@ -11,6 +11,7 @@ const URL = "/admin/api/settings";
 type Settings = {
   global_monthly_anlas: number;
   global_daily_v5: number;
+  global_daily_anlas: number;
   member_daily_anlas: number;
   v5_alert_threshold: number;
 };
@@ -60,8 +61,9 @@ export default function BudgetCard() {
                   : undefined
               }
             />
-            <NumField form={form} name="v5_alert_threshold" />
+            <NumField form={form} name="global_daily_anlas" />
             <NumField form={form} name="member_daily_anlas" />
+            <NumField form={form} name="v5_alert_threshold" />
           </div>
           <SaveBar form={form} onSave={save} saving={saving} label="保存预算" />
         </form>

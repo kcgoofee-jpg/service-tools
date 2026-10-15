@@ -80,7 +80,8 @@ pub struct Spec {
     pub lo: Option<i64>,
     pub hi: Option<i64>,
     pub choices: &'static [&'static str],
-    /// 默认值取自 `config.Settings` 的这个属性（.env 可调），空串 = 不取
+    /// 默认值取自 `config.Settings` 的这个属性（.env 可调），空串 = 不取。
+    /// 3.0 登记表里已经没有取环境变量的设置（docs/v3-deviations.md #92），这条路径只为冻结夹具里的内联 Spec 对拍保留。
     pub env: &'static str,
 }
 
@@ -112,17 +113,6 @@ const fn bounded(s: Spec, lo: i64, hi: i64) -> Spec {
     }
 }
 
-const fn with_env(s: Spec, env: &'static str) -> Spec {
-    Spec { env, ..s }
-}
-
-pub static WEB_LOGIN_PAUSED: Spec = spec(
-    "web_login_paused",
-    Kind::Flag,
-    SpecDefault::Bool(true),
-    "registration_routes",
-    "网页 Discord 登录暂停（Discord 回调修复 / 审核期间）。网页只有 Discord 登录，暂停期间成员只能在 Discord 里用 /quota 看额度",
-);
 pub static ISSUE_HOURLY_CAP: Spec = bounded(
     spec(
         "issue_hourly_cap",
@@ -141,13 +131,6 @@ pub static REGISTER_OPEN: Spec = spec(
     "modules / registration",
     "开放 /register 领取",
 );
-pub static HOME_JOIN_OPEN: Spec = spec(
-    "home_join_open",
-    Kind::Flag,
-    SpecDefault::Bool(true),
-    "landing / admin",
-    "首页「加入 Discord」按钮（独立于 register_open：只管首页按钮显示，关 = 置灰「关闭注册」）",
-);
 /// 动态额度每轮写入；没设过按 150。2.x 的默认值取环境变量 `GLOBAL_DAILY_V5`，3.0 删了这个环境变量
 /// （docs/v3-deviations.md #70）。
 pub static GLOBAL_DAILY_V5: Spec = bounded(
@@ -161,44 +144,30 @@ pub static GLOBAL_DAILY_V5: Spec = bounded(
     0,
     100000,
 );
-pub static GLOBAL_DAILY_ANLAS: Spec = with_env(
-    bounded(
-        spec(
-            "global_daily_anlas",
-            Kind::Int,
-            SpecDefault::None,
-            "额度 / Vibe PVP",
-            "全站每日 Anlas 额度（0 = 不限，Vibe PVP 抢额度）",
-        ),
-        0,
-        100000,
-    ),
-    "global_daily_anlas",
-);
-pub static GLOBAL_DAILY_ANLAS_UNTIL: Spec = bounded(
+/// 全站每日 Anlas 池（Vibe PVP）。没设过按 200；2.x / 3.0 早期的默认值取环境变量 `GLOBAL_DAILY_ANLAS`，
+/// 现已删除（docs/v3-deviations.md #92）。
+pub static GLOBAL_DAILY_ANLAS: Spec = bounded(
     spec(
-        "global_daily_anlas_until",
-        Kind::Float,
-        SpecDefault::Float(0.0),
+        "global_daily_anlas",
+        Kind::Int,
+        SpecDefault::Int(200),
         "额度 / Vibe PVP",
-        "全站每日 Anlas 开放截止时间戳（0 = 不限时）",
+        "全站每日 Anlas 额度（0 = 不开放 Vibe；Vibe PVP 抢额度）",
     ),
     0,
-    2_000_000_000,
+    100000,
 );
-pub static GLOBAL_MONTHLY_ANLAS: Spec = with_env(
-    bounded(
-        spec(
-            "global_monthly_anlas",
-            Kind::Float,
-            SpecDefault::None,
-            "额度 / Anlas 池",
-            "全站每月 Anlas 预算（0 = 不限）",
-        ),
-        0,
-        1_000_000,
+/// 全站每月 Anlas 预算。没设过按 10000；环境变量 `GLOBAL_MONTHLY_ANLAS` 已删除（docs/v3-deviations.md #92）。
+pub static GLOBAL_MONTHLY_ANLAS: Spec = bounded(
+    spec(
+        "global_monthly_anlas",
+        Kind::Float,
+        SpecDefault::Float(10000.0),
+        "额度 / Anlas 池",
+        "全站每月 Anlas 预算（0 = 不限）",
     ),
-    "global_monthly_anlas",
+    0,
+    1_000_000,
 );
 pub static MEMBER_DAILY_ANLAS: Spec = bounded(
     spec(
@@ -217,17 +186,6 @@ pub static ALGO_NOTICE: Spec = spec(
     SpecDefault::Str(""),
     "quota_algo → 首页",
     "首页显示的今日额度说明",
-);
-pub static IMAGE_RETENTION: Spec = bounded(
-    spec(
-        "audit_image_retention_days",
-        Kind::Int,
-        SpecDefault::Int(3),
-        "audit",
-        "（已停用，2026-10-11 起原图按容量上限清理）",
-    ),
-    0,
-    365,
 );
 pub static IMAGE_CAP_MB: Spec = bounded(
     spec(
@@ -259,19 +217,15 @@ pub static MEMBER_SWEEP: Spec = spec(
     "退群回收：每人每天核对一次是否还在服务器，不在就删 Key",
 );
 
-/// 登记表（顺序与旧版 `ALL` 一致，`facts_table` 按这个顺序出行）。
-pub static ALL: [&Spec; 13] = [
+/// 登记表（顺序与旧版 `ALL` 一致，已删除的设置不在里面，见 docs/v3-deviations.md #92）。
+pub static ALL: [&Spec; 9] = [
     &MEMBER_SWEEP,
-    &WEB_LOGIN_PAUSED,
     &ISSUE_HOURLY_CAP,
     &REGISTER_OPEN,
-    &HOME_JOIN_OPEN,
     &GLOBAL_DAILY_V5,
     &GLOBAL_DAILY_ANLAS,
-    &GLOBAL_DAILY_ANLAS_UNTIL,
     &GLOBAL_MONTHLY_ANLAS,
     &ALGO_NOTICE,
-    &IMAGE_RETENTION,
     &IMAGE_CAP_MB,
     &IMAGE_KEEP_HOURS,
 ];
@@ -442,13 +396,31 @@ mod tests {
     #[test]
     fn clamps_with_int_edges() {
         // float 设置被夹到边界时是 int，不是 float
-        let v = parse(&GLOBAL_DAILY_ANLAS_UNTIL, &json!("-5"), Value::Null);
+        let v = parse(&GLOBAL_MONTHLY_ANLAS, &json!("-5"), Value::Null);
         assert!(v.is_i64() && v == json!(0));
-        let v = parse(&GLOBAL_DAILY_ANLAS_UNTIL, &json!("12.5"), Value::Null);
+        let v = parse(&GLOBAL_MONTHLY_ANLAS, &json!("12.5"), Value::Null);
         assert!(v.is_f64());
         assert_eq!(
             encode(&GLOBAL_MONTHLY_ANLAS, &json!("5000000")).unwrap(),
             "1000000"
+        );
+    }
+
+    #[test]
+    fn anlas_budgets_have_fixed_defaults() {
+        // 默认值在登记表里，不再取环境变量（docs/v3-deviations.md #92）
+        assert_eq!(get_from_raw(&GLOBAL_DAILY_ANLAS, None, None), json!(200));
+        assert_eq!(
+            get_from_raw(&GLOBAL_MONTHLY_ANLAS, None, None),
+            json!(10000.0)
+        );
+        assert_eq!(
+            get_from_raw(&GLOBAL_DAILY_ANLAS, Some("abc"), None),
+            json!(200)
+        );
+        assert_eq!(
+            encode(&GLOBAL_DAILY_ANLAS, &json!("100001")).unwrap(),
+            "100000"
         );
     }
 
@@ -459,7 +431,7 @@ mod tests {
             Value::Bool(false)
         );
         assert_eq!(
-            parse(&WEB_LOGIN_PAUSED, &json!(" OFF "), Value::Bool(true)),
+            parse(&MEMBER_SWEEP, &json!(" OFF "), Value::Bool(true)),
             Value::Bool(false)
         );
         assert_eq!(

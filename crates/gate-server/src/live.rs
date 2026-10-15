@@ -17,7 +17,7 @@ use gate_core::features::{self, FEATURES};
 use gate_core::pyc;
 use gate_core::pyval;
 use gate_core::reasons::Reason;
-use gate_core::site_flags::{ALGO_NOTICE, HOME_JOIN_OPEN, WEB_LOGIN_PAUSED};
+use gate_core::site_flags::ALGO_NOTICE;
 use serde_json::{Map, Value, json};
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -305,7 +305,6 @@ async fn build_meta(state: &AppState) -> Result<Map<String, Value>, InternalErro
         }
     }
     let algo = pyval::py_str(&site_flag(state, &ALGO_NOTICE).await?);
-    let paused = pyval::truthy(&site_flag(state, &WEB_LOGIN_PAUSED).await?);
     let mut m = Map::new();
     m.insert("site".into(), json!(env.site_url.trim_end_matches('/')));
     m.insert("discord_invite".into(), json!(env.discord_invite_url));
@@ -318,11 +317,8 @@ async fn build_meta(state: &AppState) -> Result<Map<String, Value>, InternalErro
         "key_inactivity_delete_days".into(),
         json!(env.key_inactivity_delete_days),
     );
-    m.insert("web_login".into(), json!(!paused));
-    m.insert(
-        "home_join_open".into(),
-        json!(pyval::truthy(&site_flag(state, &HOME_JOIN_OPEN).await?)),
-    );
+    // 网页登录常开（暂停开关 web_login_paused 已删除，docs/v3-deviations.md #92）；字段留着是因为已打开的旧页面还在读它
+    m.insert("web_login".into(), json!(true));
     m.insert(
         "audit_notice".into(),
         json!(crate::audit::audit_disclosure(&state.db, &state.env).await?),
@@ -384,7 +380,6 @@ pub async fn build_status(state: &AppState) -> Result<Value, InternalError> {
     let image_jobs = state.budget.lock().await.reservations.len();
     let env = &state.env;
     let algo = pyval::py_str(&site_flag(state, &ALGO_NOTICE).await?);
-    let paused = pyval::truthy(&site_flag(state, &WEB_LOGIN_PAUSED).await?);
     Ok(json!({
         "site": env.site_url.trim_end_matches('/'),
         "upstream": {"status": status, "image_cooldown_seconds": state.cooldown.remaining(now)},
@@ -393,8 +388,8 @@ pub async fn build_status(state: &AppState) -> Result<Value, InternalError> {
             "id": n,
             "label": FEATURES.iter().find(|(f, _)| f == n).map_or("", |(_, l)| *l),
         })).collect::<Vec<_>>(),
-        "audit_notice": crate::audit::audit_disclosure(&state.db, &state.env).await?,
-        "web_login": !paused,
+        "audit_notice": crate::audit::audit_disclosure(&state.db).await?,
+        "web_login": true,
         "algo_notice": pyc::take_chars(&algo, 300),
         "discord_invite": env.discord_invite_url,
         "key_inactivity_delete_days": env.key_inactivity_delete_days,

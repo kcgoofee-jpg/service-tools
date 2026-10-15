@@ -1765,16 +1765,17 @@ async fn get_raw(e: &Env, path: &str, cookie: Option<&str>) -> (u16, HeaderMap, 
 }
 
 #[tokio::test]
-async fn web_login_is_paused_by_default_and_never_starts_oauth() {
-    let (e, d) = setup_reg(&[]).await;
+async fn web_login_is_always_on() {
+    let (e, _d) = setup_reg(&[]).await;
+    // 暂停开关 web_login_paused 已删除（docs/v3-deviations.md #92）：库里残留的值不再拦登录
+    set_db(&e, "web_login_paused", "1").await;
     let (s, h, _) = get_raw(&e, "/login", None).await;
     assert_eq!(s, 307);
-    assert_eq!(h["location"], "/?login=paused#live");
-    assert!(set_cookies(&h).is_empty());
-    let (s, h, _) = get_raw(&e, "/login/callback?code=c&state=s", None).await;
-    assert_eq!(
-        (s, h["location"].to_str().unwrap()),
-        (307, "/?login=paused#live")
+    assert!(
+        h["location"]
+            .to_str()
+            .unwrap()
+            .starts_with("https://discord.com/oauth2/authorize?")
     );
     assert!(d.seen().is_empty());
 }
@@ -1782,11 +1783,6 @@ async fn web_login_is_paused_by_default_and_never_starts_oauth() {
 #[tokio::test]
 async fn web_login_flow_matches_legacy() {
     let (e, d) = setup_reg(&[]).await;
-    e.state
-        .db
-        .set_setting("web_login_paused", "0")
-        .await
-        .unwrap();
     // 起点：跳去 Discord 授权，带 state，并种下 state Cookie
     let (s, h, _) = get_raw(&e, "/login", None).await;
     assert_eq!(s, 307);
@@ -1892,12 +1888,8 @@ async fn web_login_flow_matches_legacy() {
 
 #[tokio::test]
 async fn web_login_rejections() {
-    let (e, d) = setup_reg(&[("DISCORD_ROLE_ID", "900000000000000077")]).await;
-    e.state
-        .db
-        .set_setting("web_login_paused", "0")
-        .await
-        .unwrap();
+    let (e, d) = setup_reg(&[]).await;
+    require_role(&e, "900000000000000077").await;
     let ck = "owl_login_state=st";
     // 授权码被 Discord 拒绝
     d.script(
@@ -1947,11 +1939,6 @@ async fn web_login_rejections() {
 #[tokio::test]
 async fn member_session_dies_when_the_key_is_reset() {
     let (e, _d) = setup_reg(&[]).await;
-    e.state
-        .db
-        .set_setting("web_login_paused", "0")
-        .await
-        .unwrap();
     open_registration(&e).await;
     issue(&e, MEMBER).await;
     let (_, h, _) = get_raw(

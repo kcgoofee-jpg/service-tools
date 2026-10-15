@@ -186,8 +186,6 @@ const ENDPOINTS: &[(&str, &str)] = &[
     ("GET", "/guard"),
     ("PUT", "/guard"),
     ("GET", "/discord-bot"),
-    ("GET", "/home/join"),
-    ("POST", "/home/join"),
     ("GET", "/reconciliation"),
     ("POST", "/reconciliation"),
 ];
@@ -241,7 +239,7 @@ async fn every_endpoint_needs_a_session_and_same_origin_writes() {
 
 // ------------------------------------------------------------------ 预算
 
-const SETTINGS_DEFAULT: &str = r#"{"global_monthly_anlas":10000.0,"global_daily_v5":150,"member_daily_anlas":50,"v5_alert_threshold":20}"#;
+const SETTINGS_DEFAULT: &str = r#"{"global_monthly_anlas":10000.0,"global_daily_v5":150,"global_daily_anlas":200,"member_daily_anlas":50,"v5_alert_threshold":20}"#;
 
 #[tokio::test]
 async fn settings_get_put_and_stored_strings() {
@@ -280,11 +278,12 @@ async fn settings_get_put_and_stored_strings() {
     assert_eq!(s, 200);
     assert_eq!(
         t,
-        r#"{"ok":true,"global_monthly_anlas":10000.0,"global_daily_v5":150,"member_daily_anlas":50,"v5_alert_threshold":20}"#
+        r#"{"ok":true,"global_monthly_anlas":10000.0,"global_daily_v5":150,"global_daily_anlas":200,"member_daily_anlas":50,"v5_alert_threshold":20}"#
     );
     assert_eq!(
         changed(&before, &settings(&e).await),
         map(&[
+            ("global_daily_anlas", "200"),
             ("global_daily_v5", "150"),
             ("global_monthly_anlas", "10000.0"),
             ("member_daily_anlas", "50"),
@@ -297,40 +296,40 @@ async fn settings_get_put_and_stored_strings() {
     let ok_cases: Vec<(Value, &str, [&str; 4])> = vec![
         (
             json!({"global_monthly_anlas": 5000, "global_daily_v5": 200, "member_daily_anlas": 40, "v5_alert_threshold": 30}),
-            r#"{"ok":true,"global_monthly_anlas":5000.0,"global_daily_v5":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
+            r#"{"ok":true,"global_monthly_anlas":5000.0,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
             ["5000.0", "200", "40", "30"],
         ),
         // 字符串数字也收（与旧版 float("1e3") 一致）
         (
             json!({"global_monthly_anlas": "1e3"}),
-            r#"{"ok":true,"global_monthly_anlas":1000.0,"global_daily_v5":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
+            r#"{"ok":true,"global_monthly_anlas":1000.0,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
             ["1000.0", "200", "40", "30"],
         ),
         // 0 被夹到下限：库里是整数 "0"，响应仍是请求值的浮点写法（旧版怪癖）
         (
             json!({"global_monthly_anlas": 0}),
-            r#"{"ok":true,"global_monthly_anlas":0.0,"global_daily_v5":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
+            r#"{"ok":true,"global_monthly_anlas":0.0,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
             ["0", "200", "40", "30"],
         ),
         (
             json!({"global_monthly_anlas": 1000000}),
-            r#"{"ok":true,"global_monthly_anlas":1000000.0,"global_daily_v5":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
+            r#"{"ok":true,"global_monthly_anlas":1000000.0,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
             ["1000000", "200", "40", "30"],
         ),
         (
             json!({"global_monthly_anlas": 12.5}),
-            r#"{"ok":true,"global_monthly_anlas":12.5,"global_daily_v5":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
+            r#"{"ok":true,"global_monthly_anlas":12.5,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
             ["12.5", "200", "40", "30"],
         ),
         (
             json!({"global_daily_v5": "150"}),
-            r#"{"ok":true,"global_monthly_anlas":12.5,"global_daily_v5":150,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
+            r#"{"ok":true,"global_monthly_anlas":12.5,"global_daily_v5":150,"global_daily_anlas":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
             ["12.5", "150", "40", "30"],
         ),
         // 12.0 作为整数字段：存 "12"
         (
             json!({"global_monthly_anlas": 7.0, "global_daily_v5": 12.0}),
-            r#"{"ok":true,"global_monthly_anlas":7.0,"global_daily_v5":12,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
+            r#"{"ok":true,"global_monthly_anlas":7.0,"global_daily_v5":12,"global_daily_anlas":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
             ["7.0", "12", "40", "30"],
         ),
     ];
@@ -396,6 +395,22 @@ async fn settings_get_put_and_stored_strings() {
             "member_daily_anlas 必须在 0～100000 之间",
         ),
         (
+            json!({"global_daily_anlas": 100001}),
+            "global_daily_anlas 必须在 0～100000 之间",
+        ),
+        (
+            json!({"global_daily_anlas": -1}),
+            "global_daily_anlas 必须在 0～100000 之间",
+        ),
+        (
+            json!({"global_daily_anlas": 1.5}),
+            "global_daily_anlas 必须是整数",
+        ),
+        (
+            json!({"global_daily_anlas": null}),
+            "global_daily_anlas 不能为空",
+        ),
+        (
             json!({"global_daily_v5": [1]}),
             "global_daily_v5 必须是有效数字",
         ),
@@ -415,6 +430,53 @@ async fn settings_get_put_and_stored_strings() {
     assert!(rows.iter().any(|r| r.1 == "修改预算"
         && r.3 == r#"{"global_monthly_anlas":5000,"global_daily_v5":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#
         && r.4));
+}
+
+#[tokio::test]
+async fn global_daily_anlas_pool_is_editable() {
+    // Vibe 用的全站每日 Anlas 池（docs/v3-deviations.md #92：以前后台没有写入口，默认值取环境变量）
+    let e = setup(&[]).await;
+    let api = Api::login(&e).await;
+    assert_eq!(
+        api.json("GET", "/settings", None).await.1["global_daily_anlas"],
+        200
+    );
+    for (body, shown, stored) in [
+        (json!({"global_daily_anlas": 350}), 350, "350"),
+        (json!({"global_daily_anlas": "120"}), 120, "120"),
+        // 0 = 不开放 Vibe；12.0 作为整数字段存 "12"
+        (json!({"global_daily_anlas": 0}), 0, "0"),
+        (json!({"global_daily_anlas": 12.0}), 12, "12"),
+        (json!({"global_daily_anlas": 100000}), 100000, "100000"),
+    ] {
+        let (s, v) = api.json("PUT", "/settings", Some(body.clone())).await;
+        assert_eq!(
+            (s, &v["global_daily_anlas"]),
+            (200, &json!(shown)),
+            "{body}"
+        );
+        assert_eq!(settings(&e).await["global_daily_anlas"], stored, "{body}");
+        assert_eq!(
+            api.json("GET", "/settings", None).await.1["global_daily_anlas"],
+            shown
+        );
+    }
+    // 不带这个字段的保存不会把它改掉
+    api.json("PUT", "/settings", Some(json!({"member_daily_anlas": 60})))
+        .await;
+    assert_eq!(settings(&e).await["global_daily_anlas"], "100000");
+    // 准入真的读这个设置：池子是 0 时没有 Anlas 权限的成员用不了 Vibe（见 admission）
+    assert_eq!(
+        gate_core::site_flags::get_from_raw(
+            &gate_core::site_flags::GLOBAL_DAILY_ANLAS,
+            settings(&e)
+                .await
+                .get("global_daily_anlas")
+                .map(String::as_str),
+            None
+        ),
+        json!(100000)
+    );
 }
 
 // ------------------------------------------------------------------ 排队与冷却
@@ -1268,65 +1330,20 @@ async fn ops_audit_put() {
     );
 }
 
-// ------------------------------------------------------------------ 首页加入按钮
+// ------------------------------------------------------------------ 首页加入按钮（已删除）
 
 #[tokio::test]
-async fn home_join() {
+async fn home_join_switch_is_gone() {
+    // 首页「加入 Discord」按钮跟着领 Key 开关（registration.open），不再有独立开关（docs/v3-deviations.md #92）
     let e = setup(&[]).await;
     let api = Api::login(&e).await;
-    assert_eq!(
-        api.text("GET", "/home/join", None).await,
-        (200, r#"{"open":true}"#.into())
-    );
-    assert_eq!(
-        api.text("POST", "/home/join", Some(json!({"open": false})))
-            .await,
-        (200, r#"{"ok":true,"open":false}"#.into())
-    );
-    assert_eq!(settings(&e).await["home_join_open"], "0");
-    assert_eq!(
-        api.text("GET", "/home/join", None).await,
-        (200, r#"{"open":false}"#.into())
-    );
-    // 缺省 = 开放；显式 0 / null = 关闭
-    assert_eq!(
-        api.json("POST", "/home/join", Some(json!({}))).await.1["open"],
-        true
-    );
-    assert_eq!(settings(&e).await["home_join_open"], "1");
-    assert_eq!(
-        api.json("POST", "/home/join", Some(json!({"open": 0})))
-            .await
-            .1["open"],
-        false
-    );
-    // 没有请求体 → 400
-    let (s, _, t) = api.raw("POST", "/home/join", None, &[]).await;
-    assert_eq!(
-        (s, t.as_str()),
-        (400, r#"{"detail":"请求体不是合法 JSON"}"#)
-    );
-
-    // 接口自己记一条（更具体），中间件只在失败时记「修改首页加入按钮」
-    let rows = actions(&e).await;
-    let join: Vec<(&str, &str, bool)> = rows
-        .iter()
-        .filter(|r| r.1.starts_with("首页加入按钮") || r.1 == "修改首页加入按钮")
-        .map(|r| (r.1.as_str(), r.3.as_str(), r.4))
-        .collect();
-    assert_eq!(
-        join,
-        vec![
-            ("首页加入按钮关闭（置灰「关闭注册」）", "", true),
-            ("首页加入按钮开放", "", true),
-            ("首页加入按钮关闭（置灰「关闭注册」）", "", true),
-            (
-                "修改首页加入按钮",
-                "失败（400）：请求体不是合法 JSON",
-                false
-            ),
-        ]
-    );
+    for method in ["GET", "POST"] {
+        let (s, _, _) = api
+            .raw(method, "/home/join", Some(json!({"open": false})), &[])
+            .await;
+        assert!(matches!(s, 404 | 405), "{method} {s}");
+    }
+    assert!(!settings(&e).await.contains_key("home_join_open"));
 }
 
 // ------------------------------------------------------------------ 公告与告警

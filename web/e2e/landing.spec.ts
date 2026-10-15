@@ -235,12 +235,9 @@ test.describe("游客", () => {
     await expect(html).toHaveAttribute("data-theme", "light");
   });
 
-  test("?login=failed 提示一次并清掉地址栏参数；?login=paused 同理", async ({ page }) => {
+  test("?login=failed 提示一次并清掉地址栏参数", async ({ page }) => {
     await page.goto("/?login=failed");
     await expect(page.getByText("Discord 登录没有成功")).toBeVisible();
-    await expect.poll(() => new URL(page.url()).search).toBe("");
-    await page.goto("/?login=paused");
-    await expect(page.getByText("网页登录暂时关闭")).toBeVisible();
     await expect.poll(() => new URL(page.url()).search).toBe("");
   });
 

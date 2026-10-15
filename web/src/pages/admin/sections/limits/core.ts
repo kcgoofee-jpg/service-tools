@@ -236,6 +236,13 @@ export const BUDGET_SPECS: Record<string, FieldSpec> = {
     unit: "张",
     hint: "0 = 不限",
   },
+  global_daily_anlas: {
+    kind: "int",
+    label: "Vibe 每日 Anlas 池",
+    min: 0,
+    max: 100_000,
+    hint: "Vibe 等会消耗 Anlas 的请求共用这个全站每日池，先到先得；0 = 不开放（0～100000）",
+  },
   v5_alert_threshold: {
     kind: "int",
     label: "V5 官方余量告警阈值",

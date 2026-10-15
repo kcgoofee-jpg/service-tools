@@ -312,7 +312,6 @@ async fn public_live_shape_and_key_order() {
             "algo_notice",
             "key_inactivity_delete_days",
             "web_login",
-            "home_join_open",
             "audit_notice",
             "registration",
             "me"
@@ -375,8 +374,14 @@ async fn public_live_shape_and_key_order() {
     assert_eq!(v["discord_invite"], "https://discord.gg/abc");
     assert_eq!(v["has_announcement"], false);
     assert_eq!(v["key_inactivity_delete_days"], 3);
-    assert_eq!(v["web_login"], false, "默认网页登录暂停（fail-closed）");
-    assert_eq!(v["home_join_open"], true);
+    assert_eq!(
+        v["web_login"], true,
+        "网页登录常开（docs/v3-deviations.md #92）"
+    );
+    assert!(
+        v.get("home_join_open").is_none(),
+        "首页加入按钮跟着 registration.open"
+    );
     assert_eq!(v["audit_notice"], "");
     assert_eq!(
         v["registration"],
@@ -410,8 +415,6 @@ async fn public_live_reflects_site_settings_after_meta_cache() {
     let e = setup(&reg_env()).await;
     let long = "额".repeat(400);
     for (k, v) in [
-        ("web_login_paused", "0"),
-        ("home_join_open", "0"),
         ("algo_notice", long.as_str()),
         ("register_open", "1"),
         ("register_max_users", "3"),
@@ -421,7 +424,6 @@ async fn public_live_reflects_site_settings_after_meta_cache() {
     e.state.live.invalidate();
     let (_, _, v) = get_json(&e.state, "/public/live", &[]).await;
     assert_eq!(v["web_login"], true);
-    assert_eq!(v["home_join_open"], false);
     assert_eq!(v["algo_notice"].as_str().unwrap().chars().count(), 300);
     assert_eq!(
         v["registration"],
@@ -432,14 +434,23 @@ async fn public_live_reflects_site_settings_after_meta_cache() {
     // 30 秒子缓存：改了设置，不 invalidate 就还是旧值
     e.state
         .db
-        .set_setting("web_login_paused", "1")
+        .set_setting("algo_notice", "新说明")
         .await
         .unwrap();
     let (_, _, again) = get_json(&e.state, "/public/live", &[]).await;
-    assert_eq!(again["web_login"], true);
+    assert_eq!(again["algo_notice"].as_str().unwrap().chars().count(), 300);
     e.state.live.invalidate();
     let (_, _, fresh) = get_json(&e.state, "/public/live", &[]).await;
-    assert_eq!(fresh["web_login"], false);
+    assert_eq!(fresh["algo_notice"], "新说明");
+    // 登录开关已删除：库里残留 web_login_paused=1 也不影响
+    e.state
+        .db
+        .set_setting("web_login_paused", "1")
+        .await
+        .unwrap();
+    e.state.live.invalidate();
+    let (_, _, fresh) = get_json(&e.state, "/public/live", &[]).await;
+    assert_eq!(fresh["web_login"], true);
 }
 
 #[tokio::test]
@@ -598,7 +609,7 @@ async fn public_status_exposes_only_safe_fields() {
     );
     assert_eq!(v["image_jobs"], 0);
     assert_eq!(v["stability"], json!({"ok": 0, "error": 0}));
-    assert_eq!(v["web_login"], false);
+    assert_eq!(v["web_login"], true);
     assert_eq!(v["has_announcement"], false);
     assert_eq!(v["key_inactivity_delete_days"], 3);
 
@@ -1437,7 +1448,7 @@ async fn landing_boot_for_guest() {
     assert_eq!(boot["live"]["site"], "https://gate.example.top");
     assert_eq!(boot["live"]["quota"]["images_cap"], 1000);
     assert_eq!(boot["status"]["site"], "https://gate.example.top");
-    assert_eq!(boot["status"]["web_login"], false);
+    assert_eq!(boot["status"]["web_login"], true);
     assert_eq!(
         boot["status"]["registration"],
         json!({"open": false, "slots_left": 10})

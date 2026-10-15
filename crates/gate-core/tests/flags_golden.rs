@@ -114,20 +114,35 @@ fn obj(v: &Value) -> Map<String, Value> {
 // ---------------------------------------------------------------- site_flags
 
 /// 3.0 改过的设置说明（docs/v3-deviations.md #48）：冻结夹具里是旧说明，比较前换成新的。
-const DOC_FIXES: [(&str, &str); 1] = [(
-    "网页 Discord OAuth 登录暂停（Discord 回调修复 / 审核期间）。Key 登录照常可用，不受此开关影响",
-    "网页 Discord 登录暂停（Discord 回调修复 / 审核期间）。网页只有 Discord 登录，暂停期间成员只能在 Discord 里用 /quota 看额度",
-)];
+///
+/// `global_daily_anlas`：旧说明写「0 = 不限」，实际 0 是不开放 Vibe（准入和功能检查都这样判），3.0 把说明改对，
+/// 后台设置页也用这句（docs/v3-deviations.md #92）。
+const DOC_FIXES: [(&str, &str); 2] = [
+    (
+        "网页 Discord OAuth 登录暂停（Discord 回调修复 / 审核期间）。Key 登录照常可用，不受此开关影响",
+        "网页 Discord 登录暂停（Discord 回调修复 / 审核期间）。网页只有 Discord 登录，暂停期间成员只能在 Discord 里用 /quota 看额度",
+    ),
+    (
+        "全站每日 Anlas 额度（0 = 不限，Vibe PVP 抢额度）",
+        "全站每日 Anlas 额度（0 = 不开放 Vibe；Vibe PVP 抢额度）",
+    ),
+];
 
 /// 3.0 删掉的设置。冻结夹具里还有它们的用例，登记表里已经没有，逐个用例跳过；`all_keys` / `facts_table`
 /// 在期望值一侧去掉它们：
 /// - `member_image_download`：成员自助导出原图（docs/v3-deviations.md #49）；
 /// - `dm_enabled`：成员私信总闸门，机器人不再私信成员（docs/v3-deviations.md #76）；
-/// - `guard_base_daily_images`：V4.5 保底（docs/v3-deviations.md #61）。
-const REMOVED_KEYS: [&str; 3] = [
+/// - `guard_base_daily_images`：V4.5 保底（docs/v3-deviations.md #61）；
+/// - `web_login_paused`（登录常开）、`home_join_open`（首页按钮跟随领 Key 开关）、`global_daily_anlas_until`
+///   （后台从来没有写入口）、`audit_image_retention_days`（原图早已不按天数删）：docs/v3-deviations.md #92。
+const REMOVED_KEYS: [&str; 7] = [
     "member_image_download",
     "dm_enabled",
     "guard_base_daily_images",
+    "web_login_paused",
+    "home_join_open",
+    "global_daily_anlas_until",
+    "audit_image_retention_days",
 ];
 
 fn is_removed(key: &str) -> bool {
@@ -139,34 +154,60 @@ fn removed_spec(c: &Case) -> bool {
     c.raw["spec"]["ref"].as_str().is_some_and(is_removed)
 }
 
-/// `global_daily_v5` 的默认值 3.0 不再取环境变量 `GLOBAL_DAILY_V5`、固定为 150（docs/v3-deviations.md #70）：
+/// 默认值 3.0 不再取环境变量、固定写在登记表里的设置（键, 默认值, `facts_table` 里旧的「默认」列, 新的「默认」列）：
+/// - `global_daily_v5` 固定 150（docs/v3-deviations.md #70）；
+/// - `global_daily_anlas` 固定 200、`global_monthly_anlas` 固定 10000（#92，原来取 `GLOBAL_DAILY_ANLAS` / `GLOBAL_MONTHLY_ANLAS`）。
+///
 /// 登记表与 facts_table 在期望一侧改写；`default_of` / `get` 里结果取决于默认值的用例跳过，另由
-/// [`global_daily_v5_default_is_fixed`] 测。
-const V5_KEY: &str = "global_daily_v5";
+/// [`fixed_defaults_ignore_the_environment`] 测。
+const FIXED_DEFAULTS: [(&str, &str, &str, &str); 3] = [
+    ("global_daily_v5", "150", "int", "150"),
+    ("global_daily_anlas", "200", "int", "200"),
+    ("global_monthly_anlas", "10000.0", "float", "10000.0"),
+];
 
-fn v5_spec(c: &Case) -> bool {
-    c.raw["spec"]["ref"].as_str() == Some(V5_KEY)
+fn fixed_default(key: &str) -> Option<Value> {
+    FIXED_DEFAULTS
+        .iter()
+        .find(|(k, ..)| *k == key)
+        .map(|(_, d, ..)| serde_json::from_str(d).unwrap())
+}
+
+fn fixed_default_spec(c: &Case) -> bool {
+    c.raw["spec"]["ref"]
+        .as_str()
+        .is_some_and(|k| fixed_default(k).is_some())
 }
 
 #[test]
-fn global_daily_v5_default_is_fixed() {
-    let spec = **ALL.iter().find(|s| s.key == V5_KEY).unwrap();
-    assert_eq!((spec.env, spec.default), ("", SpecDefault::Int(150)));
-    // 环境里有没有值都一样
-    for env in [None, Some(json!({"global_daily_v5": 7}))] {
-        assert_eq!(site_flags::default_of(&spec, env.as_ref()), json!(150));
-        assert_eq!(
-            site_flags::get_from_raw(&spec, None, env.as_ref()),
-            json!(150)
-        );
-        assert_eq!(
-            site_flags::get_from_raw(&spec, Some("abc"), env.as_ref()),
-            json!(150)
-        );
-        assert_eq!(
-            site_flags::get_from_raw(&spec, Some("90"), env.as_ref()),
-            json!(90)
-        );
+fn fixed_defaults_ignore_the_environment() {
+    for (key, want, ..) in FIXED_DEFAULTS {
+        let spec = **ALL.iter().find(|s| s.key == key).unwrap();
+        let want: Value = serde_json::from_str(want).unwrap();
+        assert_eq!(spec.env, "", "{key}");
+        // 环境里有没有值都一样
+        for env in [None, Some(json!({key: 7}))] {
+            assert_eq!(site_flags::default_of(&spec, env.as_ref()), want, "{key}");
+            assert_eq!(
+                site_flags::get_from_raw(&spec, None, env.as_ref()),
+                want,
+                "{key}"
+            );
+            assert_eq!(
+                site_flags::get_from_raw(&spec, Some("abc"), env.as_ref()),
+                want,
+                "{key}"
+            );
+            assert_eq!(
+                site_flags::get_from_raw(&spec, Some("90"), env.as_ref()),
+                if want.is_f64() {
+                    json!(90.0)
+                } else {
+                    json!(90)
+                },
+                "{key}"
+            );
+        }
     }
 }
 
@@ -203,8 +244,8 @@ fn site_registry_golden() {
                 }
                 let s = ALL.iter().find(|s| s.key == key).expect("缺少这个键");
                 let mut want = fix_docs(c.out());
-                if key == V5_KEY {
-                    want["default"] = json!(150);
+                if let Some(d) = fixed_default(key) {
+                    want["default"] = d;
                     want["env"] = json!("");
                 }
                 assert_eq_py(&c, &spec_json(s), &want);
@@ -219,11 +260,18 @@ fn site_registry_golden() {
                 assert_eq_py(&c, &Value::Array(keys), &want);
             }
             "facts_table" => {
-                let want = json!(drop_removed_row(c.out().as_str().unwrap()).replace(
-                    "| `global_daily_v5` | int | `.env global_daily_v5` |",
-                    "| `global_daily_v5` | int | 150 |"
-                ));
-                assert_eq_py(&c, &json!(site_flags::facts_table()), &fix_docs(&want))
+                let mut table = drop_removed_row(c.out().as_str().unwrap());
+                for (key, _, kind, shown) in FIXED_DEFAULTS {
+                    table = table.replace(
+                        &format!("| `{key}` | {kind} | `.env {key}` |"),
+                        &format!("| `{key}` | {kind} | {shown} |"),
+                    );
+                }
+                assert_eq_py(
+                    &c,
+                    &json!(site_flags::facts_table()),
+                    &fix_docs(&json!(table)),
+                )
             }
             other => panic!("未知 {other}"),
         }
@@ -248,7 +296,7 @@ fn site_parse_golden() {
 #[test]
 fn site_default_of_golden() {
     for c in load(M, "flags/site_default_of") {
-        if removed_spec(&c) || v5_spec(&c) {
+        if removed_spec(&c) || fixed_default_spec(&c) {
             continue;
         }
         let spec = spec_of(&c.raw["spec"]);
@@ -260,7 +308,7 @@ fn site_default_of_golden() {
 #[test]
 fn site_get_golden() {
     for c in load(M, "flags/site_get") {
-        if removed_spec(&c) || v5_spec(&c) {
+        if removed_spec(&c) || fixed_default_spec(&c) {
             continue;
         }
         let spec = spec_of(&c.raw["spec"]);
@@ -435,22 +483,40 @@ fn features_check_golden() {
 
         let needs = features::needs_vibe_site_flags(global, key, name);
         let vibe = needs.then(|| {
+            // 旧版的两个设置：开放截止时间 `global_daily_anlas_until` 和全站每日 Anlas `global_daily_anlas`
+            // （默认值取环境）。3.0 没有截止时间（docs/v3-deviations.md #92）：到了截止时间等于额度 0，
+            // 这里折成传给 `check_decision` 的额度，等价于旧版的判定
+            let old_spec = |key: &'static str, kind, hi| Spec {
+                key,
+                kind,
+                default: SpecDefault::None,
+                owner: "",
+                doc: "",
+                lo: Some(0),
+                hi: Some(hi),
+                choices: &[],
+                env: key,
+            };
             let until = site_flags::get_from_raw(
-                &site_flags::GLOBAL_DAILY_ANLAS_UNTIL,
+                &old_spec("global_daily_anlas_until", Kind::Float, 2_000_000_000),
                 kv.get("global_daily_anlas_until").and_then(Value::as_str),
                 env,
             );
             let cap = site_flags::get_from_raw(
-                &site_flags::GLOBAL_DAILY_ANLAS,
+                &old_spec("global_daily_anlas", Kind::Int, 100_000),
                 kv.get("global_daily_anlas").and_then(Value::as_str),
                 env,
             );
+            let until = pyval::number_like(&until).unwrap();
             VibeAnlas {
-                until: pyval::number_like(&until).unwrap(),
-                daily_cap: cap.as_i64().unwrap(),
+                daily_cap: if until > 0.0 && now >= until {
+                    0
+                } else {
+                    cap.as_i64().unwrap()
+                },
             }
         });
-        let got = features::check_decision(global, key, name, now, vibe);
+        let got = features::check_decision(global, key, name, vibe);
         match c.err() {
             None => {
                 let want = &c.out()["out"];
