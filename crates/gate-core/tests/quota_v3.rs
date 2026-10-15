@@ -29,8 +29,6 @@ fn base_inputs() -> Value {
                     {"images": 20, "daily_images": 150, "legacy_free_images": 20, "quota_auto": 1},
                     {"images": 5, "daily_images": 150, "legacy_free_images": 5, "quota_auto": 1}
                 ],
-                "upstream_images": 65,
-                "upstream_units": 65.0,
                 "hourly_block_hours": [],
                 "paced_blocks": 0
             },
@@ -338,4 +336,28 @@ fn removed_v5_settings_are_not_read() {
     assert_eq!(v5_of(&out)["each"], 1);
     assert!(!quota::SETTING_KEYS_READ.contains(&"quota_v5_min"));
     assert!(!quota::SETTING_KEYS_READ.contains(&"quota_v5_max"));
+}
+
+// ---------------------------------------------------------------- #67 节约模式残留
+
+#[test]
+fn yesterday_used_is_the_real_image_count() {
+    // 旧版会按账号层面「节约模式折算值 / 实际张数」把 used 打折；3.0 就是成员实际出图之和
+    let y: quota::YesterdayInputs = serde_json::from_value(json!({
+        "counters": [
+            {"images": 40, "daily_images": 150, "legacy_free_images": 40, "quota_auto": 1},
+            {"images": 25, "daily_images": 150, "legacy_free_images": 25, "quota_auto": 1}
+        ],
+        "hourly_block_hours": [], "paced_blocks": 0
+    }))
+    .unwrap();
+    assert_eq!(quota::yesterday_stats(&y).used, 65);
+    // 输入里已经没有折算用的字段
+    assert!(
+        serde_json::from_value::<quota::YesterdayInputs>(json!({
+            "counters": [], "hourly_block_hours": [], "paced_blocks": 0,
+            "upstream_images": 10, "upstream_units": 5.0
+        }))
+        .is_err()
+    );
 }

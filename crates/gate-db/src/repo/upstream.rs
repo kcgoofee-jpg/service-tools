@@ -5,12 +5,12 @@ use crate::{Db, Result, value};
 use rusqlite::params;
 use serde::Serialize;
 
-/// `get_upstream_counter` 的结果。`units` 是按算力折算的张数（节约模式 14 步的图算 0.5 张）。
+/// `get_upstream_counter` 的结果。表里的 `units`（节约模式折算的张数）3.0 不再读，
+/// 只在写入时跟 `images` 一起累加、给回滚到 2.x 用（docs/v3-deviations.md #67）。
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct UpstreamCounter {
     pub images: i64,
     pub v5: i64,
-    pub units: f64,
 }
 
 impl Db {
@@ -18,23 +18,15 @@ impl Db {
         let (token_id, day) = (token_id.to_string(), day.to_string());
         self.read(move |c| {
             let mut stmt = c.prepare(
-                "SELECT images, v5, units FROM upstream_token_counters WHERE token_id=? AND day=?",
+                "SELECT images, v5 FROM upstream_token_counters WHERE token_id=? AND day=?",
             )?;
             let mut rows = stmt.query(params![token_id, day])?;
             let Some(row) = rows.next()? else {
-                return Ok(UpstreamCounter {
-                    images: 0,
-                    v5: 0,
-                    units: 0.0,
-                });
+                return Ok(UpstreamCounter { images: 0, v5: 0 });
             };
-            let images = value::i64_or(row, "images", 0)?;
-            // 老数据 units 为 NULL：按 1 张 = 1 份
-            let units = value::f64_opt(row, "units")?.unwrap_or(images as f64);
             Ok(UpstreamCounter {
-                images,
+                images: value::i64_or(row, "images", 0)?,
                 v5: value::i64_or(row, "v5", 0)?,
-                units,
             })
         })
         .await
@@ -190,21 +182,19 @@ impl Db {
         Ok(self.get_upstream_counter(token_id, day).await?.v5)
     }
 
-    /// 上游 Token 当日出图张数累加；`weight` 是算力折算（节约模式 0.5），负数 / NaN 按 0 算。
-    /// `images < 1` 什么都不做。
+    /// 上游 Token 当日出图张数累加。`images < 1` 什么都不做。
+    /// `units` 列照旧按「一张 = 一份」一起累加（2.x 读它和每日上限比；回滚窗口内要保持一致）。
+    /// 旧版的 `weight`（节约模式折算）已删除（docs/v3-deviations.md #67）。
     pub async fn bump_upstream_image_counter(
         &self,
         token_id: &str,
         day: &str,
         images: i64,
-        weight: f64,
     ) -> Result<()> {
         if images < 1 {
             return Ok(());
         }
-        // Python: max(0.0, float(weight))——NaN 和 -0.0 都得 0.0
-        let w = if weight > 0.0 { weight } else { 0.0 };
-        let units = images as f64 * w;
+        let units = images as f64;
         let (token_id, day) = (token_id.to_string(), day.to_string());
         self.write(move |tx| {
             tx.execute(

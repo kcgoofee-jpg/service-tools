@@ -13,8 +13,8 @@ use axum::extract::{Request, State};
 use axum::routing::get;
 use gate_core::allowance::SETTING as ALERT_THRESHOLD;
 use gate_core::guard::GuardError;
+use gate_core::pyval;
 use gate_core::site_flags::{self, GLOBAL_DAILY_V5, GLOBAL_MONTHLY_ANLAS, MEMBER_DAILY_ANLAS};
-use gate_core::{pyc, pyval};
 use serde_json::{Value, json};
 
 const BODY_LIMIT: usize = 1024 * 1024;
@@ -170,7 +170,6 @@ async fn guard_view(state: &AppState) -> Result<Value, ApiError> {
             "position": f.position,
             "usable": t.usable(now),
             "today": c.images,
-            "today_units": pyval::float(pyc::round(c.units, 1)),
             "this_hour": state.guard.with(|g| g.hour_count(&t.token_id, now)),
         }));
     }

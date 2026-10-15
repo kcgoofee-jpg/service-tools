@@ -109,11 +109,10 @@ pub async fn build(state: &AppState, now: f64) -> Result<Map<String, Value>, Int
     let day = state.day();
     let mono = state.nai.mono();
     let mut accounts: Vec<Acct> = Vec::with_capacity(pool.len());
-    let (mut images_today, mut units_today) = (0i64, 0f64);
+    let mut images_today = 0i64;
     for t in &pool {
         let c = state.db.get_upstream_counter(&t.token_id, &day).await?;
         images_today += c.images;
-        units_today += c.units; // 和每日上限比较用折算值（节约模式的图算半张）
         let f = t.fields();
         accounts.push(Acct {
             usable: t.usable(now),
@@ -220,8 +219,7 @@ pub async fn build(state: &AppState, now: f64) -> Result<Map<String, Value>, Int
         "quota".into(),
         json!({
             "images_today": images_today,
-            // 没有上游账号时旧版是整数 0（`round(0, 1)`），有账号则是浮点
-            "units_today": if pool.is_empty() { json!(0) } else { pyval::float(pyc::round(units_today, 1)) },
+            // 节约模式的折算张数 `units_today` 已删除（docs/v3-deviations.md #67）：每日上限就按 images_today 比
             "images_cap": gv("account_daily_cap") * usable,
             "v5_today": state.db.day_v5_total(&day).await?,
             "v5_cap": v5_cap,

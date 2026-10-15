@@ -15,7 +15,8 @@
 //! - `seed_hour(db, token_ids)`：`SELECT ts, images FROM usage_log WHERE ts>now-10800 AND status='ok' AND kind LIKE 'image%'
 //!   AND images>0 ORDER BY ts`，行交给 [`stamps_from_rows`] + [`GuardCore::seed_hour`]；
 //! - `token_block_reason(db, token_id, day)` 里的 `db.get_upstream_counter(token_id, day)`
-//!   （`upstream_token_counters` 表的 `units`，缺 `units` 用 `images`，没有记录是 0）：服务层取出 `used` 传进来
+//!   （`upstream_token_counters` 表的 `images`，没有记录是 0；旧版用节约模式折算后的 `units`，
+//!   节约模式早已删除，docs/v3-deviations.md #67）：服务层取出 `used` 传进来
 //!   （旧版 `daily == 0` 或熔断 / 安静时段已经拦下时不会去读，多读一次没有可观察的差别）；
 //! - `on_upstream_429`：读 `guard_429_cap_at`，写 `guard_account_hourly_cap` / `guard_hourly_adapted_at` /
 //!   `guard_last_upstream_429` / `guard_429_cap_at`（方法返回要写的键值，旧版 `db is None` 时不写）；
@@ -659,7 +660,7 @@ impl GuardCore {
     }
 
     /// 这个上游账号现在不能再接新的出图任务时，返回给成员看的原因。
-    /// `used` = 该账号今天已用（`upstream_token_counters` 的 `units`，缺则 `images`；节约模式 14 步的图算半张）。
+    /// `used` = 该账号今天已出的张数（`upstream_token_counters` 的 `images`）。
     pub fn token_block_reason(&mut self, token_id: &str, used: f64, now: f64) -> Option<Reason> {
         if self.breaker_until > now {
             let text = if self.breaker_reason.is_empty() {
@@ -686,7 +687,7 @@ impl GuardCore {
             if used >= daily as f64 {
                 return Some(Reason::new(
                     format!(
-                        "本站今天的出图总量已达上限（每个账号 {daily} 张/天，按算力折算，用来保护上游账号），明天 {} 点恢复",
+                        "本站今天的出图总量已达上限（每个账号 {daily} 张/天，用来保护上游账号），明天 {} 点恢复",
                         self.reset_hour
                     ),
                     reasons::DAILY_CAP,
@@ -901,6 +902,17 @@ mod tests {
         g.record_start("t", NOON - 200.0, 90);
         let r = g.token_block_reason("t", 0.0, NOON).unwrap();
         assert_eq!(r.code(), reasons::HOURLY_CAP);
+    }
+
+    #[test]
+    fn daily_cap_counts_real_images() {
+        // 节约模式已删除（#67）：按实际张数比，文案不再写「按算力折算」
+        let mut g = guard();
+        g.values.insert("daily_burst".into(), 0); // 不分时段，只看每日上限
+        assert_eq!(g.token_block_reason("t", 999.0, NOON), None);
+        let r = g.token_block_reason("t", 1000.0, NOON).unwrap();
+        assert_eq!(r.code(), reasons::DAILY_CAP);
+        assert!(!r.text().contains("折算"), "{}", r.text());
     }
 
     #[test]

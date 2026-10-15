@@ -365,6 +365,7 @@ async fn call(db: &Db, c: &Case) -> Out {
         }
         "reconciliation_history" => json!(db.reconciliation_history(int(a(0, "limit"), 20)).await?),
         // ---------------- upstream
+        // 3.0 不再返回节约模式折算的 `units`（#67）：期望一侧在 run_case 里去掉
         "get_upstream_counter" => js(&db
             .get_upstream_counter(&s(a(0, "token_id"), ""), &s(a(1, "day"), ""))
             .await?),
@@ -405,11 +406,11 @@ async fn call(db: &Db, c: &Case) -> Out {
                 .await?
         ),
         "bump_upstream_image_counter" => {
+            // 节约模式的 weight 参数已删除（docs/v3-deviations.md #67）：一张 = 一份；带别的 weight 的用例在 run_area 里跳过
             db.bump_upstream_image_counter(
                 &s(a(0, "token_id"), ""),
                 &s(a(1, "day"), ""),
                 int(a(2, "images"), 0),
-                num(a(3, "weight"), 1.0),
             )
             .await?;
             Value::Null
@@ -904,6 +905,10 @@ async fn run_case(case: &Case) {
             strip_rust_only(&mut v);
             if case.get("method").and_then(Value::as_str) == Some("list_logs") {
                 assert_eq_py_ordered(&brief, &v, &drop_expected_client(case.out()))
+            } else if case.get("method").and_then(Value::as_str) == Some("get_upstream_counter") {
+                let mut want = case.out().clone();
+                want.as_object_mut().unwrap().shift_remove("units");
+                assert_eq_py_ordered(&brief, &v, &want)
             } else {
                 assert_eq_py_ordered(&brief, &v, case.out())
             }
@@ -934,6 +939,12 @@ async fn run_area(area: &str) {
     for case in &cases {
         // `audit_image_count` 只给成员自助导出的保留天数用，已随导出一起删除（docs/v3-deviations.md #49）
         if case.get("method").and_then(Value::as_str) == Some("audit_image_count") {
+            continue;
+        }
+        // 节约模式按 weight 折算 units 已删除（#67）：只测折算的用例（weight ≠ 1）跳过
+        if case.get("method").and_then(Value::as_str) == Some("bump_upstream_image_counter")
+            && case.args().get(3).is_some_and(|w| w.as_f64() != Some(1.0))
+        {
             continue;
         }
         run_case(case).await;

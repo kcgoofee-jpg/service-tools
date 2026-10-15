@@ -25,7 +25,6 @@
 //! |---|---|---|
 //! | `members` | `SELECT id FROM api_keys WHERE enabled=1 AND is_admin=0 AND is_test=0 AND quota_auto=1`（只用行数） | — |
 //! | `daily.yesterday.counters` | `SELECT c.key_id, c.images, k.daily_images, c.legacy_free_images, k.quota_auto FROM counters c JOIN api_keys k ON k.id=c.key_id WHERE c.day=? AND k.is_test=0 AND k.is_admin=0` | `(yday)` |
-//! | `daily.yesterday.upstream_images/units` | `SELECT COALESCE(SUM(images),0), COALESCE(SUM(COALESCE(units, images)),0) FROM upstream_token_counters WHERE day=?` | `(yday)` |
 //! | `daily.yesterday.hourly_block_hours` | `SELECT DISTINCT CAST(u.ts/3600 AS INT) FROM usage_log u JOIN api_keys k ON k.id=u.key_id WHERE u.ts>=? AND u.ts<? AND u.status='rejected' AND k.is_test=0 AND k.is_admin=0 AND u.reason=?` | `(start, end, 'hourly_cap')`（旧版按文案 `LIKE '%出图量已达上限%'` 数，docs/v3-deviations.md #61） |
 //! | `daily.yesterday.paced_blocks` | `SELECT COUNT(*) FROM usage_log u JOIN api_keys k ON k.id=u.key_id WHERE u.ts>=? AND u.ts<? AND u.status='rejected' AND k.is_test=0 AND k.is_admin=0 AND u.reason=?` | `(start, end, 'paced')` |
 //! | `daily.coverage_first_ts` | `SELECT MIN(ts) FROM usage_log`（无记录为 NULL → `None`） | — |
@@ -635,8 +634,6 @@ pub struct CounterRow {
 #[serde(deny_unknown_fields)]
 pub struct YesterdayInputs {
     pub counters: Vec<CounterRow>,
-    pub upstream_images: i64,
-    pub upstream_units: f64,
     pub hourly_block_hours: Vec<i64>,
     pub paced_blocks: i64,
 }
@@ -661,13 +658,11 @@ impl YesterdayStats {
     }
 }
 
-/// `_yesterday`：成员出图总数（节约模式按算力折算）、顶到上限的人数、被每小时上限拦的小时数等。
+/// `_yesterday`：成员出图总数、顶到上限的人数、被每小时上限拦的小时数等。
+/// 旧版的 `used` 还按当天账号层面「节约模式折算值 / 实际张数」换算；节约模式早已删除，3.0 就是实际张数
+/// （docs/v3-deviations.md #67）。
 pub fn yesterday_stats(y: &YesterdayInputs) -> YesterdayStats {
-    let mut used: i64 = y.counters.iter().map(|r| r.images).sum();
-    // 账号日上限按算力折算（节约模式 14 步算半张）：按当天账号层面「折算值 / 实际张数」的比例换算
-    if y.upstream_images != 0 && y.upstream_units < y.upstream_images as f64 {
-        used = pyc::round0(used as f64 * y.upstream_units / y.upstream_images as f64);
-    }
+    let used: i64 = y.counters.iter().map(|r| r.images).sum();
     // 顶格：V4.5 上限 A 管的是 V4.5 免费图（legacy_free_images）；手动额度（quota_auto != 1）的 Key 不参与
     let hits = y
         .counters

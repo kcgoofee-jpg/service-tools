@@ -317,16 +317,10 @@ async fn public_live_shape_and_key_order() {
     assert_eq!(v["auth"], json!({"requests": 2, "rejected": 1}));
     assert_eq!(
         keys(&v["quota"]),
-        [
-            "images_today",
-            "units_today",
-            "images_cap",
-            "v5_today",
-            "v5_cap"
-        ]
+        // 节约模式折算的 units_today 已删除（docs/v3-deviations.md #67）
+        ["images_today", "images_cap", "v5_today", "v5_cap"]
     );
     assert_eq!(v["quota"]["images_today"], 0);
-    assert!(v["quota"]["units_today"].is_f64(), "有账号时是浮点");
     assert_eq!(v["quota"]["images_cap"], 1000);
     assert_eq!(v["queue"], json!({"waiting": 0, "running": 0}));
     // 10 分钟突发窗口已删除：没有 burst_cap / burst_wait（docs/v3-deviations.md #64）

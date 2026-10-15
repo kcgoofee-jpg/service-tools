@@ -521,7 +521,8 @@ async fn guard_get_put() {
     let e = setup(&[]).await;
     let api = Api::login(&e).await;
     let defaults = r#"{"account_daily_cap":1000,"daily_burst":150,"account_hourly_cap":150,"quiet_start":0,"quiet_end":0,"quiet_hourly_cap":20,"interval_jitter":5,"key_image_queue":1,"queue_per_account":5}"#;
-    let acct0 = r#"[{"position":1,"usable":true,"today":0,"today_units":0.0,"this_hour":0}]"#;
+    // 节约模式折算的 today_units 已删除（docs/v3-deviations.md #67）
+    let acct0 = r#"[{"position":1,"usable":true,"today":0,"this_hour":0}]"#;
     assert_eq!(
         api.text("GET", "/guard", None).await,
         (200, guard_json(defaults, false, 150, acct0, 0))
@@ -593,7 +594,7 @@ async fn guard_accounts_show_usage() {
     let id = e.state.nai.tokens().await[0].token_id.clone();
     e.state
         .db
-        .bump_upstream_image_counter(&id, &e.state.day(), 3, 1.0)
+        .bump_upstream_image_counter(&id, &e.state.day(), 3)
         .await
         .unwrap();
     e.state.guard.record_start(&id, 2, e.state.now());
@@ -601,7 +602,7 @@ async fn guard_accounts_show_usage() {
     let v = api.get("/guard").await;
     assert_eq!(
         v["accounts"],
-        json!([{"position": 1, "usable": true, "today": 3, "today_units": 3.0, "this_hour": 2}])
+        json!([{"position": 1, "usable": true, "today": 3, "this_hour": 2}])
     );
     assert_eq!(v["queued_images"], 2);
 }
@@ -1662,7 +1663,7 @@ async fn upstream_token_add_replace_remove() {
     .await;
     e.state
         .db
-        .bump_upstream_image_counter(&second, &e.state.day(), 2, 1.0)
+        .bump_upstream_image_counter(&second, &e.state.day(), 2)
         .await
         .unwrap();
     let (s, t) = api

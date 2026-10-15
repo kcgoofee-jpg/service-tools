@@ -13,6 +13,8 @@
 //!   首页文案去掉「当前电池充沛…额度放宽」；`_active_v5_days` 按「今天之前的 3 个服务日」核对。
 //!   `run` 里凡是取决于 V5 结果的写入（当天方案、全站 V5 / 新 Key 的 V5 默认值、下发、首页文案的 V5 段、
 //!   结果里的 `v5` / `changed_keys`、「动态额度应用」日志）两边都遮住后逐位对拍，再单独按新规则核对 Rust 的输出。
+//! - docs/v3-deviations.md #67：节约模式残留删除——复盘的 `used` 不再按「折算值 / 实际张数」换算
+//!   （输入里的 `upstream_images` / `upstream_units` 去掉；旧版换算过的用例，期望的 `used` 换成实际张数）。
 
 use gate_core::clock::Clock;
 use gate_core::quota::{self, *};
@@ -45,6 +47,40 @@ fn clock(rh: i64) -> Clock {
 mod expect {
     use gate_core::jsondump;
     use serde_json::{Map, Value};
+    use std::cell::Cell;
+
+    thread_local! {
+        /// 当前用例里旧版按节约模式折算过的复盘：3.0 的 `used`（成员实际出图张数之和，#67）。
+        static RAW_USED: Cell<Option<i64>> = const { Cell::new(None) };
+    }
+
+    /// 旧版 `_yesterday` 是否折算过 `used`（账号层面 `units < images`）；是的话返回实际张数之和。
+    pub fn raw_used(yesterday: &Value) -> Option<i64> {
+        let images = yesterday.get("upstream_images")?.as_i64()?;
+        let units = gate_golden::as_f64(yesterday.get("upstream_units")?)?;
+        (images != 0 && units < images as f64).then(|| {
+            yesterday["counters"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|r| r["images"].as_i64().unwrap())
+                .sum()
+        })
+    }
+
+    /// 开始比较一个 `run` 用例前调用：记下这个用例的折算改写。
+    pub fn set_case(inputs: &Value) {
+        RAW_USED.set(raw_used(&inputs["daily"]["yesterday"]));
+    }
+
+    /// `_yesterday` 的输入：去掉节约模式的两个字段（#67）、保底计数（#61）。
+    pub fn yesterday_input(v: &Value) -> Value {
+        let mut m = v.as_object().cloned().unwrap_or_default();
+        for k in ["base_blocks", "upstream_images", "upstream_units"] {
+            m.shift_remove(k);
+        }
+        Value::Object(m)
+    }
 
     /// 首页文案去掉每人注水那一句（#62）：「（每小时自动恢复 4 张，当天最多约 N 张，每日 7 点重置）」
     /// →「（每日 7 点重置）」。
@@ -151,12 +187,8 @@ mod expect {
         if let Some(g) = v.get_mut("guard").and_then(Value::as_object_mut) {
             g.shift_remove("base_daily_images");
         }
-        if let Some(y) = v
-            .get_mut("daily")
-            .and_then(|d| d.get_mut("yesterday"))
-            .and_then(Value::as_object_mut)
-        {
-            y.shift_remove("base_blocks");
+        if let Some(y) = v.get_mut("daily").and_then(|d| d.get_mut("yesterday")) {
+            *y = yesterday_input(y);
         }
         // 私密参数只剩 min_coverage_hours（#63：V5 的系数表 / 人数下限 / 洪峰 / 收紧都随旧公式删除）
         if let Some(p) = v.get_mut("params").and_then(Value::as_object_mut) {
@@ -165,14 +197,17 @@ mod expect {
         v
     }
 
-    /// `_yesterday` 的结果：没有 `base_blocks`（#61）。
-    pub fn yesterday(v: &Value) -> Value {
+    /// `_yesterday` 的结果：没有 `base_blocks`（#61）；`used` 不折算（#67）。
+    pub fn yesterday(v: &Value, input: &Value) -> Value {
         let mut m = v.as_object().cloned().unwrap_or_default();
         m.shift_remove("base_blocks");
+        if let Some(u) = raw_used(input) {
+            m.insert("used".into(), Value::from(u));
+        }
         Value::Object(m)
     }
 
-    /// 一条复盘：`from` / `to` 只留每人上限 A，去掉 `base_blocks`（#61）。
+    /// 一条复盘：`from` / `to` 只留每人上限 A，去掉 `base_blocks`（#61）；`used` 不折算（#67）。
     pub fn review(r: &mut Map<String, Value>) {
         for k in ["from", "to"] {
             if let Some(Value::Array(pair)) = r.get_mut(k) {
@@ -180,6 +215,9 @@ mod expect {
             }
         }
         r.shift_remove("base_blocks");
+        if let Some(u) = RAW_USED.get() {
+            r.insert("used".into(), Value::from(u));
+        }
     }
 
     /// `run` 的返回值（也是 `quota_algo_last` 的内容）。
@@ -448,24 +486,22 @@ fn sqlmath_golden() {
             "_yesterday" => {
                 let day = c.arg(1).as_str().unwrap();
                 let ck = clock(c.arg(2).as_i64().unwrap());
-                let mut input = c.arg(0).clone();
-                input.as_object_mut().unwrap().shift_remove("base_blocks");
+                let input = expect::yesterday_input(c.arg(0));
                 let stats = yesterday_stats(&yesterday_inputs(&input));
                 assert_eq_py_ordered(
                     &c,
                     &Value::Object(stats.to_map()),
-                    &expect::yesterday(c.out()),
+                    &expect::yesterday(c.out(), c.arg(0)),
                 );
                 // 服务层该传的查询参数
                 let (start, end) = day_window(&ck, day).unwrap();
-                for tag in ["counters", "upstream"] {
-                    assert_eq!(
-                        queries(&c, tag),
-                        vec![&vec![json!(day)]],
-                        "第 {} 行 {tag}",
-                        c.line
-                    );
-                }
+                // 账号层面的 `upstream`（节约模式折算）3.0 不再查（#67）
+                assert_eq!(
+                    queries(&c, "counters"),
+                    vec![&vec![json!(day)]],
+                    "第 {} 行 counters",
+                    c.line
+                );
                 // 每小时上限被拦的小时数 3.0 按原因码 `hourly_cap` 数（旧版按文案 LIKE，#61）：只比时间窗口；
                 // `base_blocks` 随保底删除
                 let hourly = queries(&c, "hourly_hours");
@@ -578,6 +614,7 @@ fn run_golden() {
     for c in load(M, "quota/run") {
         let rh = c.raw["reset_hour"].as_i64().unwrap();
         let ck = clock(rh);
+        expect::set_case(&c.raw["inputs"]);
         let inp: QuotaInputs = serde_json::from_value(expect::inputs(&c.raw["inputs"]))
             .unwrap_or_else(|e| panic!("第 {} 行输入解析失败: {e}", c.line));
         let out = quota::decide(&inp, &ck);

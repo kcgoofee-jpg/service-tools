@@ -107,7 +107,7 @@ impl Hooks for GateHooks {
     ) -> BoxFuture<'a, HookResult<()>> {
         Box::pin(async move {
             self.db
-                .bump_upstream_image_counter(token_id, day, n, 1.0)
+                .bump_upstream_image_counter(token_id, day, n)
                 .await
                 .map_err(boxed)
         })

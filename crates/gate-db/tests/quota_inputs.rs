@@ -64,3 +64,33 @@ async fn hourly_blocks_are_counted_by_reason_code() {
     assert_eq!(hours, vec![1000, 1002]);
     assert_eq!(d.yesterday.paced_blocks, 1);
 }
+
+/// 节约模式的折算已删除（docs/v3-deviations.md #67）：上游计数只按张数累加；
+/// `units` 列照旧跟着 `images` 一起涨（回滚到 2.x 时它拿 `units` 和每日上限比）。
+#[tokio::test]
+async fn upstream_counter_is_plain_image_count() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Db::open(dir.path().join("gate.db"), 0.0, &[]).unwrap();
+    db.bump_upstream_image_counter("token-synthetic", "2030-03-15", 3)
+        .await
+        .unwrap();
+    db.bump_upstream_image_counter("token-synthetic", "2030-03-15", 2)
+        .await
+        .unwrap();
+    db.bump_upstream_image_counter("token-synthetic", "2030-03-15", 0)
+        .await
+        .unwrap();
+    let c = db
+        .get_upstream_counter("token-synthetic", "2030-03-15")
+        .await
+        .unwrap();
+    assert_eq!((c.images, c.v5), (5, 0));
+    let rows = db
+        .execute_fetchall_compat(
+            "SELECT images, units FROM upstream_token_counters WHERE token_id=?",
+            &[json!("token-synthetic")],
+        )
+        .await
+        .unwrap();
+    assert_eq!(rows, vec![json!({"images": 5, "units": 5.0})]);
+}

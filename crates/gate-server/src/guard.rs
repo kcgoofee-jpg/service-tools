@@ -101,7 +101,7 @@ impl Guard {
         now: f64,
     ) -> Result<Option<Reason>, GuardIoError> {
         let c = self.db.get_upstream_counter(token_id, day).await?;
-        Ok(self.with(|g| g.token_block_reason(token_id, c.units, now)))
+        Ok(self.with(|g| g.token_block_reason(token_id, c.images as f64, now)))
     }
 
     /// 上游 429：每小时上限减半（AIMD）。返回 (旧, 新)。

@@ -593,6 +593,14 @@ fn replay(c: &Case, counts: &mut BTreeMap<String, usize>) {
             "describe" => describe_without_removed(&step["out"]),
             // 突发窗口的拒绝 3.0 不再有（#64）
             "token_block_reason" if step["out"][1] == "burst_cap" => Value::Null,
+            // 每日上限的文案不再写「按算力折算」（节约模式已删除，#67）
+            "token_block_reason" if step["out"][1] == "daily_cap" => {
+                let text = step["out"][0]
+                    .as_str()
+                    .unwrap()
+                    .replace("，按算力折算，", "，");
+                json!([text, "daily_cap"])
+            }
             _ => step["out"].clone(),
         };
         match (out, want_err) {

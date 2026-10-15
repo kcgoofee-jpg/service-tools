@@ -509,6 +509,38 @@ mod v3 {
         /// 种子里只有原因码 `hourly_cap`、没有「出图量已达上限」文案的拒绝记录的时间戳：
         /// 旧版的复盘按文案 LIKE 数不到它们，3.0 按原因码数得到（#61）
         code_only_hourly: Vec<f64>,
+        /// 旧版复盘按节约模式折算过 `used` 的服务日 → 3.0 的 `used`（成员实际张数之和，#67）。
+        /// 由 [`raw_used_days`] 在种子写好之后直接查库得到。
+        pub raw_used: HashMap<String, i64>,
+    }
+
+    /// 这些服务日里，旧版的复盘会按账号层面「`units` / `images`」折算 `used`（`units < images`）的，
+    /// 以及 3.0 应得的实际张数（不含测试号、站长号的成员计数之和）。测试自己写 SQL 算，不用被测代码。
+    pub async fn raw_used_days(db: &gate_db::Db, days: &[String]) -> HashMap<String, i64> {
+        let mut out = HashMap::new();
+        for day in days {
+            let up = db
+                .execute_fetchall_compat(
+                    "SELECT COALESCE(SUM(images),0) AS i, COALESCE(SUM(COALESCE(units, images)),0) AS u \
+                     FROM upstream_token_counters WHERE day=?",
+                    &[json!(day)],
+                )
+                .await
+                .unwrap();
+            let (i, u) = (up[0]["i"].as_f64().unwrap(), up[0]["u"].as_f64().unwrap());
+            if i != 0.0 && u < i {
+                let used = db
+                    .execute_fetchall_compat(
+                        "SELECT COALESCE(SUM(c.images),0) AS n FROM counters c JOIN api_keys k ON k.id=c.key_id \
+                         WHERE c.day=? AND k.is_test=0 AND k.is_admin=0",
+                        &[json!(day)],
+                    )
+                    .await
+                    .unwrap();
+                out.insert(day.clone(), used[0]["n"].as_i64().unwrap());
+            }
+        }
+        out
     }
 
     /// 3.0 不再写的设置（#61：保底）。
@@ -743,6 +775,7 @@ mod v3 {
                 last_written: HashMap::new(),
                 resync: Vec::new(),
                 code_only_hourly,
+                raw_used: HashMap::new(),
             }
         }
 
@@ -780,15 +813,28 @@ mod v3 {
             r.insert("hourly_blocks".into(), json!(hours.len()));
         }
 
+        /// 复盘的 `used`：不再按节约模式折算（#67）。
+        fn raw_used(&self, r: &mut Map<String, Value>) {
+            if let Some(u) = r
+                .get("day")
+                .and_then(Value::as_str)
+                .and_then(|d| self.raw_used.get(d))
+            {
+                r.insert("used".into(), json!(u));
+            }
+        }
+
         fn review(&self, r: &mut Map<String, Value>) {
             review(r);
             self.hourly_blocks(r);
+            self.raw_used(r);
         }
 
         fn quota_result(&self, v: &mut Value) {
             quota_result(v);
             if let Some(Value::Object(r)) = v.get_mut("review") {
                 self.hourly_blocks(r);
+                self.raw_used(r);
             }
         }
 
@@ -1221,6 +1267,14 @@ async fn run_case(case: &Value) -> Result<(), String> {
     let mut seen_alerts = 0usize;
     let mut levels = Levels::new();
     let mut v3_expect = v3::Expect::new(&seed);
+    let review_days: Vec<String> = steps
+        .iter()
+        .map(|s| {
+            gate_core::clock::Clock::new("Asia/Shanghai", 7)
+                .day(s["at"].as_f64().unwrap() - 86400.0)
+        })
+        .collect();
+    v3_expect.raw_used = v3::raw_used_days(&state.db, &review_days).await;
     for (i, (step, want)) in steps.iter().zip(expected_steps).enumerate() {
         let at = step["at"].as_f64().unwrap();
         gate_server::time::freeze(Some(at));

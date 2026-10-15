@@ -96,11 +96,6 @@ impl Db {
                 })?
                 .collect::<rusqlite::Result<_>>()?
             };
-            let (upstream_images, upstream_units) = c.query_row(
-                "SELECT COALESCE(SUM(images),0), COALESCE(SUM(COALESCE(units, images)),0) FROM upstream_token_counters WHERE day=?",
-                [&yday],
-                |r| Ok((value::i64_or(r, 0, 0)?, value::f64_or(r, 1, 0.0)?)),
-            )?;
             // 只数成员（不含测试号、站长号）被拦的记录，按原因码数（不依赖中文文案）。
             // 旧版每小时上限按 `detail LIKE '%出图量已达上限%'` 数，还数了「保底」文案；保底已删除，
             // 改成按原因码（docs/v3-deviations.md #61）
@@ -147,8 +142,6 @@ impl Db {
             Ok(DailyInputs {
                 yesterday: YesterdayInputs {
                     counters,
-                    upstream_images,
-                    upstream_units,
                     hourly_block_hours,
                     paced_blocks,
                 },
