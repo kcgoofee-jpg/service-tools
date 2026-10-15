@@ -209,10 +209,9 @@
 
 新 Key 的默认值：每日 V4.5 上限 = `register_daily_images`（线 95，算法同步）、每日 V5 = `register_daily_v5`（线 3，算法同步）、模型范围 `register_image_scope`（线 `all`，`legacy` 则不能用 V5）、有效期 `register_expires_days`（线 30；0 = 不过期）、每分钟请求数 `REGISTER_RPM`（码 5）、功能 `register_features`（线 `image,vibe,tags`）、无 Anlas 权限、无图生图权限。领取成功的回复只有本人可见，不走 OAuth，不私信。
 
-- **邀请 Key**：站长预先发的、带「邀请」标签；成员 `/register` 时填入即绑定到自己的账号，Key 不变，不受开关 / 名额 / 每小时上限限制。邀请 Key 豁免闲置回收、全站重置和每日清空。
+- **邀请 Key**：站长预先发的、带「邀请」标签；成员 `/register` 时填入即绑定到自己的账号，Key 不变，不受开关 / 名额 / 每小时上限限制。邀请 Key 豁免闲置回收和全站重置。
 - **到期**：过期的 Key 回 403「该 Key 已过期」；成员再 `/register` 时旧 Key 和记录自动释放，可重新领取。被站长停用的 Key 不会因过期被释放。
 - **换 Key**：`/resetkey`，旧 Key 立即失效。
-- **每日清空**：配置了 `REGISTER_RESET_AT`（HH:MM）才有，清空全部自助注册用户（删 Key 和记录，邀请 Key 除外）；线上快照未列该变量，未核对。
 
 ### 8.2 闲置回收
 
@@ -242,7 +241,6 @@
 |---|---|---|---|---|---|
 | `member_sweep` | flag | True | | 退群回收：每人每天核对一次是否还在服务器，不在就删 Key | 未设置，按默认（开） |
 | `web_login_paused` | flag | True | | 网页 Discord 登录暂停开关（暂停时首页不显示登录按钮，`/login` 与回调也不发起 OAuth） | 0（登录开放） |
-| `dm_enabled` | flag | False | | 私信总闸门（关 = 任何私信都不发；开启后也限速：10 分钟 ≤ 3 条、24 小时 ≤ 20 条） | 未设置，按默认（关） |
 | `issue_hourly_cap` | int | 12 | 0–500 | 每小时最多发放的新 Key（0 = 不限） | 0（不限） |
 | `register_open` | flag | False | | 开放 /register 领取 | 1 |
 | `home_join_open` | flag | True | | 首页「加入 Discord」按钮（只管按钮显示，关 = 置灰「关闭注册」） | 1 |
