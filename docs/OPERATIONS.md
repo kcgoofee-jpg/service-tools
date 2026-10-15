@@ -101,6 +101,15 @@ cd /opt/owl && docker compose -p owl --env-file /opt/service-tools/.env -f compo
 **不要**在 `/opt/service-tools` 下执行 `docker compose up`：那里是 2.x 的检出，会把 2.x 的容器拉起来。
 `ADMIN_PASSWORD` 只作初始 / 恢复用：后台改过密码的话以库里保存的为准。
 
+## 配置：只有两层
+
+- **环境变量**（`/opt/service-tools/.env`）：只放密钥和基础设施（上游 Token、Discord Token / ID、站点地址、数据目录、网络……），清单见仓库 `.env.example`；改完怎么生效见上面「改密钥」。
+- **后台设置**（`site_settings`，在后台页面里改，不用重启）：额度、名额、新成员默认值、有效期、记录开关、账号保护、排队与冷却、Anlas 预算……没设过的项用代码里的默认值，逐项说明见 `deploy/ops/SYSTEM-FACTS.md`。「额度与保护」页管账号保护（含每小时上限自动调整的下限 / 上限 / 步长）、排队与冷却、Anlas 与 V5 预算（含 Vibe 每日 Anlas 池）、动态额度；「领 Key」页管开放、名额、新成员默认额度 / 有效期 / 功能、限定身份组、生成记录开关。后台手动新建 Key 和一键邀请 Key 读的是「领 Key」页同一份「新成员默认」。
+- **没有第三层**：2.x 的私密参数文件 `data/private_params.json` 3.0 不再读（文件留在原处，备份脚本照旧带着它，只是为了能回滚到 2.x）。
+- **代码常量**：时区 Asia/Shanghai、服务日 07:00 重置、标签补全并发 1、无效 Key 防爆破和后台登录限流的几个数、新 Key 的每分钟请求数等，没有后台入口也没有环境变量，要改只能改代码（`gate-core/src/clock.rs`、`gate-server/src/env.rs`、`gate-server/src/defaults.rs`）。
+
+线上 `.env` 里残留的 `DEFAULT_*`、`REGISTER_*`、`AUDIT_*`、`DISCORD_ROLE_ID`、`SEED_DEMO_KEY`、`TZ`、`DAY_RESET_HOUR`、`GLOBAL_CONCURRENCY`、`GLOBAL_MONTHLY_ANLAS`、`GLOBAL_DAILY_ANLAS`、`QUEUE_TIMEOUT`、`IMAGE_MIN_INTERVAL`、`IMAGE_429_COOLDOWN_SECONDS`、`AUTH_FAIL_*`、`LOGIN_*` 3.0 不再读，可以删掉（`docs/v3-deviations.md` #91～#95）。删之前先确认后台设置里已经有你要的值——比如名额 `register_max_users`、新领 Key 的有效天数 `register_expires_days`：库里没有这一行时，3.0 用代码默认（10 / 不过期），不再回落到 `.env`。回滚到 2.x 时 2.x 仍会读这些变量。
+
 ## 常用命令
 
 ```bash
