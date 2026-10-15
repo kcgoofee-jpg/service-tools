@@ -1,1 +1,0 @@
-{"fn":"constants","out":{"FIELDS":[["gallery_forum","跑图分享","str",1,50],["gallery_like",0,"int",0,1],["gallery_ai",0,"int",0,1],["gallery_ai_daily",30,"int",0,500],["gallery_ai_model","LongCat-2.5-Preview","str",1,80]],"STATUS_KEY":"bot_status","EVENTS_KEY":"bot_events","EVENT_KINDS":[["like","点赞"],["comment","AI 评论"],["shy","捂眼睛（露骨）"],["skip","跳过"],["error","出错"]]}}

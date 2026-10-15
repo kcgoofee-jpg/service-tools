@@ -1,0 +1,500 @@
+{"in":{"fn":"water_fill","args":[[1],1214]},"out":1}
+{"in":{"fn":"water_fill","args":[[],2359]},"out":0}
+{"in":{"fn":"water_fill","args":[[],703]},"out":0}
+{"in":{"fn":"water_fill","args":[[],0]},"out":0}
+{"in":{"fn":"water_fill","args":[[7,8],1]},"out":1}
+{"in":{"fn":"water_fill","args":[[52,26,35],1]},"out":1}
+{"in":{"fn":"water_fill","args":[[],2669]},"out":0}
+{"in":{"fn":"water_fill","args":[[51],1]},"out":1}
+{"in":{"fn":"water_fill","args":[[],1]},"out":0}
+{"in":{"fn":"water_fill","args":[[],1378]},"out":0}
+{"in":{"fn":"water_fill","args":[[8,11],1]},"out":1}
+{"in":{"fn":"water_fill","args":[[231],1]},"out":1}
+{"in":{"fn":"water_fill","args":[[317],0]},"out":1}
+{"in":{"fn":"water_fill","args":[[],587]},"out":0}
+{"in":{"fn":"water_fill","args":[[94,27,43],1]},"out":1}
+{"in":{"fn":"water_fill","args":[[76],0]},"out":1}
+{"in":{"fn":"water_fill","args":[[],787]},"out":0}
+{"in":{"fn":"water_fill","args":[[],1909]},"out":0}
+{"in":{"fn":"water_fill","args":[[],1535]},"out":0}
+{"in":{"fn":"water_fill","args":[[305],1]},"out":1}
+{"in":{"fn":"water_fill","args":[[],497]},"out":0}
+{"in":{"fn":"water_fill","args":[[],2631]},"out":0}
+{"in":{"fn":"water_fill","args":[[],978]},"out":0}
+{"in":{"fn":"water_fill","args":[[],1011]},"out":0}
+{"in":{"fn":"water_fill","args":[[],794]},"out":0}
+{"in":{"fn":"water_fill","args":[[],897]},"out":0}
+{"in":{"fn":"water_fill","args":[[110],1]},"out":1}
+{"in":{"fn":"water_fill","args":[[358],0]},"out":1}
+{"in":{"fn":"water_fill","args":[[203],0]},"out":1}
+{"in":{"fn":"water_fill","args":[[65,4],1]},"out":1}
+{"in":{"fn":"water_fill","args":[[],1986]},"out":0}
+{"in":{"fn":"water_fill","args":[[],321]},"out":0}
+{"in":{"fn":"water_fill","args":[[],1828]},"out":0}
+{"in":{"fn":"water_fill","args":[[],1891]},"out":0}
+{"in":{"fn":"water_fill","args":[[],457]},"out":0}
+{"in":{"fn":"water_fill","args":[[],806]},"out":0}
+{"in":{"fn":"water_fill","args":[[329,19,-5,29,38,216,47,26],383.8593657729858]},"out":112}
+{"in":{"fn":"water_fill","args":[[],1357]},"out":0}
+{"in":{"fn":"water_fill","args":[[246],1]},"out":1}
+{"in":{"fn":"water_fill","args":[[304],1]},"out":1}
+{"in":{"fn":"water_fill","args":[[26],1]},"out":1}
+{"in":{"fn":"water_fill","args":[[],1956]},"out":0}
+{"in":{"fn":"water_fill","args":[[188],0]},"out":1}
+{"in":{"fn":"water_fill","args":[[],191]},"out":0}
+{"in":{"fn":"water_fill","args":[[13],13]},"out":13}
+{"in":{"fn":"water_fill","args":[[-1],1]},"out":0}
+{"in":{"fn":"water_fill","args":[[],1202]},"out":0}
+{"in":{"fn":"water_fill","args":[[41,6],0]},"out":1}
+{"in":{"fn":"water_fill","args":[[],1675]},"out":0}
+{"in":{"fn":"water_fill","args":[[211],1]},"out":1}
+{"in":{"fn":"water_fill","args":[[],2194]},"out":0}
+{"in":{"fn":"water_fill","args":[[355],1]},"out":1}
+{"in":{"fn":"water_fill","args":[[],759]},"out":0}
+{"in":{"fn":"water_fill","args":[[98],0]},"out":1}
+{"in":{"fn":"water_fill","args":[[],451]},"out":0}
+{"in":{"fn":"water_fill","args":[[53],1]},"out":1}
+{"in":{"fn":"water_fill","args":[[33],1]},"out":1}
+{"in":{"fn":"water_fill","args":[[52],0]},"out":1}
+{"in":{"fn":"water_fill","args":[[320],0]},"out":1}
+{"in":{"fn":"water_fill","args":[[],175]},"out":0}
+{"in":{"fn":"water_fill","args":[[],387]},"out":0}
+{"in":{"fn":"water_fill","args":[[],250]},"out":0}
+{"in":{"fn":"water_fill","args":[[332],0]},"out":1}
+{"in":{"fn":"water_fill","args":[[0,6],1]},"out":1}
+{"in":{"fn":"water_fill","args":[[],207]},"out":0}
+{"in":{"fn":"water_fill","args":[[28],28]},"out":28}
+{"in":{"fn":"water_fill","args":[[16],39]},"out":16}
+{"in":{"fn":"water_fill","args":[[395],1]},"out":1}
+{"in":{"fn":"water_fill","args":[[9],644]},"out":9}
+{"in":{"fn":"water_fill","args":[[24],1]},"out":1}
+{"in":{"fn":"water_fill","args":[[205],1]},"out":1}
+{"in":{"fn":"water_fill","args":[[55],0]},"out":1}
+{"in":{"fn":"water_fill","args":[[],949]},"out":0}
+{"in":{"fn":"water_fill","args":[[30],30]},"out":30}
+{"in":{"fn":"water_fill","args":[[25,304,210,78,-5],2852.1718724078414]},"out":304}
+{"in":{"fn":"water_fill","args":[[],204]},"out":0}
+{"in":{"fn":"water_fill","args":[[],34]},"out":0}
+{"in":{"fn":"water_fill","args":[[3,42],1]},"out":1}
+{"in":{"fn":"water_fill","args":[[],10]},"out":0}
+{"in":{"fn":"water_fill","args":[[],30]},"out":0}
+{"in":{"fn":"water_fill","args":[[],36]},"out":0}
+{"in":{"fn":"water_fill","args":[[],37]},"out":0}
+{"in":{"fn":"water_fill","args":[[],100]},"out":0}
+{"in":{"fn":"water_fill","args":[[0],0]},"out":0}
+{"in":{"fn":"water_fill","args":[[0],1]},"out":0}
+{"in":{"fn":"water_fill","args":[[0],10]},"out":0}
+{"in":{"fn":"water_fill","args":[[0],30]},"out":0}
+{"in":{"fn":"water_fill","args":[[0],36]},"out":0}
+{"in":{"fn":"water_fill","args":[[0],37]},"out":0}
+{"in":{"fn":"water_fill","args":[[5],0]},"out":1}
+{"in":{"fn":"water_fill","args":[[5],1]},"out":1}
+{"in":{"fn":"water_fill","args":[[5],10]},"out":5}
+{"in":{"fn":"water_fill","args":[[5],30]},"out":5}
+{"in":{"fn":"water_fill","args":[[5],36]},"out":5}
+{"in":{"fn":"water_fill","args":[[5],37]},"out":5}
+{"in":{"fn":"water_fill","args":[[5],100]},"out":5}
+{"in":{"fn":"water_fill","args":[[5,5],0]},"out":1}
+{"in":{"fn":"water_fill","args":[[5,5],1]},"out":1}
+{"in":{"fn":"water_fill","args":[[5,5],10]},"out":5}
+{"in":{"fn":"water_fill","args":[[5,5],30]},"out":5}
+{"in":{"fn":"simple","args":[{"a":136}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":0}},"out":[136,"每人每天 136 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":195}],"kwargs":{"cfg":{"quota_auto_enabled":25,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":74}},"out":[195,"每人每天 195 张。还有余量（昨天共 0 / 74 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":null}],"kwargs":{"cfg":{"quota_auto_enabled":200,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":25,"quota_step":25},"usage":[],"budget":0}},"out":[150,"每人每天 150 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":null}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":100,"quota_step":100},"usage":[],"budget":0}},"out":[150,"每人每天 150 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":null}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":1,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":200},"usage":[18],"budget":538}},"out":[201,"每人每天 201 张。还有余量（昨天共 18 / 538 张），1 人用满 1 张：放宽"]}
+{"in":{"fn":"simple","args":[{"a":null}],"kwargs":{"cfg":{"quota_auto_enabled":25,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":0}},"out":[150,"每人每天 150 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":99}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":0,"quota_base_min_fair":10,"quota_step":25},"usage":[37,38],"budget":0}},"out":[10,"每人每天 10 张。昨天总需求 75 张已接近可分的 0 张，按需求平分"]}
+{"in":{"fn":"simple","args":[{"a":13}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":480}},"out":[13,"每人每天 13 张。还有余量（昨天共 0 / 480 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":0}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":50,"quota_base_min_fair":10,"quota_step":25},"usage":[17],"budget":472}},"out":[50,"每人每天 50 张。还有余量（昨天共 17 / 472 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":null}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":5,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":49}},"out":[10,"每人每天 10 张。还有余量（昨天共 0 / 49 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":null}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[8],"budget":0}},"out":[10,"每人每天 10 张。昨天总需求 8 张已接近可分的 0 张，按需求平分"]}
+{"in":{"fn":"simple","args":[{"a":1}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":0}},"out":[10,"每人每天 10 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":0}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":1,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[270],"budget":0}},"out":[10,"每人每天 10 张。昨天总需求 270 张已接近可分的 0 张，按需求平分"]}
+{"in":{"fn":"simple","args":[{"a":0}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":460}},"out":[150,"每人每天 150 张。还有余量（昨天共 0 / 460 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":null}],"kwargs":{"cfg":{"quota_auto_enabled":10,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":300},"usage":[],"budget":0}},"out":[150,"每人每天 150 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":0}],"kwargs":{"cfg":{"quota_auto_enabled":50,"quota_target_avg":500,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":363}},"out":[300,"每人每天 300 张。还有余量（昨天共 0 / 363 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":0}],"kwargs":{"cfg":{"quota_auto_enabled":0,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":300},"usage":[],"budget":248}},"out":[150,"每人每天 150 张。还有余量（昨天共 0 / 248 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":49}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":1,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":466}},"out":[10,"每人每天 10 张。还有余量（昨天共 0 / 466 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":54}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[55],"budget":0}},"out":[10,"每人每天 10 张。昨天总需求 55 张已接近可分的 0 张，按需求平分"]}
+{"in":{"fn":"simple","args":[{"a":null}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":50,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":369}},"out":[50,"每人每天 50 张。还有余量（昨天共 0 / 369 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":166}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":5},"usage":[4],"budget":83}},"out":[166,"每人每天 166 张。还有余量（昨天共 4 / 83 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":37}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":500,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":0}},"out":[37,"每人每天 37 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":78}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":5,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":403}},"out":[78,"每人每天 78 张。还有余量（昨天共 0 / 403 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":null}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":0}},"out":[150,"每人每天 150 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":null}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":95}},"out":[150,"每人每天 150 张。还有余量（昨天共 0 / 95 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":null}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":1,"quota_step":150},"usage":[],"budget":0}},"out":[150,"每人每天 150 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":0}],"kwargs":{"cfg":{"quota_auto_enabled":150,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":0}},"out":[150,"每人每天 150 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":242}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":25,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":0}},"out":[242,"每人每天 242 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":144}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":50,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":694}},"out":[50,"每人每天 50 张。还有余量（昨天共 0 / 694 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":null}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":100},"usage":[],"budget":0}},"out":[150,"每人每天 150 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":220}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":0}},"out":[220,"每人每天 220 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":88}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":25,"quota_step":25},"usage":[],"budget":1821}},"out":[88,"每人每天 88 张。还有余量（昨天共 0 / 1821 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":0}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":25,"quota_ceiling_max":300,"quota_base_min_fair":50,"quota_step":25},"usage":[277],"budget":2830}},"out":[50,"每人每天 50 张。还有余量（昨天共 277 / 2830 张），1 人用满 25 张：放宽"]}
+{"in":{"fn":"simple","args":[{"a":261}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":0},"usage":[],"budget":0}},"out":[261,"每人每天 261 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":220}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":200},"usage":[],"budget":0}},"out":[220,"每人每天 220 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":7}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":100,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":166}},"out":[10,"每人每天 10 张。还有余量（昨天共 0 / 166 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":37}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":560}},"out":[37,"每人每天 37 张。还有余量（昨天共 0 / 560 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":null}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":1,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":514}},"out":[10,"每人每天 10 张。还有余量（昨天共 0 / 514 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":306}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":0}},"out":[300,"每人每天 300 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":null}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":25,"quota_step":25},"usage":[],"budget":0}},"out":[150,"每人每天 150 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":293}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":50,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":372}},"out":[50,"每人每天 50 张。还有余量（昨天共 0 / 372 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":245}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[17],"budget":0}},"out":[10,"每人每天 10 张。昨天总需求 17 张已接近可分的 0 张，按需求平分"]}
+{"in":{"fn":"simple","args":[{"a":0}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":0}},"out":[150,"每人每天 150 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":78}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":25,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[4,109,322,47,34,37,394,59],"budget":74}},"out":[10,"每人每天 10 张。昨天总需求 1006 张已接近可分的 74 张，按需求平分"]}
+{"in":{"fn":"simple","args":[{"a":0}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":1,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":2429}},"out":[10,"每人每天 10 张。还有余量（昨天共 0 / 2429 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":11}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":359}},"out":[11,"每人每天 11 张。还有余量（昨天共 0 / 359 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":307}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":0}},"out":[300,"每人每天 300 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":null}],"kwargs":{"cfg":{"quota_auto_enabled":10,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":0}},"out":[150,"每人每天 150 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":null}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":500,"quota_ceiling_max":10,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":378}},"out":[10,"每人每天 10 张。还有余量（昨天共 0 / 378 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":null}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":10},"usage":[],"budget":0}},"out":[150,"每人每天 150 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":65}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[26],"budget":0}},"out":[10,"每人每天 10 张。昨天总需求 26 张已接近可分的 0 张，按需求平分"]}
+{"in":{"fn":"simple","args":[{"a":null}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[-1],"budget":0}},"out":[150,"每人每天 150 张。还有余量（昨天共 -1 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":null}],"kwargs":{"cfg":{"quota_auto_enabled":50,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":8}},"out":[150,"每人每天 150 张。还有余量（昨天共 0 / 8 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":0}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":50,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[4,38,17],"budget":59}},"out":[38,"每人每天 38 张。昨天总需求 59 张已接近可分的 59 张，按需求平分"]}
+{"in":{"fn":"simple","args":[{"a":null}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":5,"quota_step":25},"usage":[],"budget":24}},"out":[150,"每人每天 150 张。还有余量（昨天共 0 / 24 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":null}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[0],"budget":0}},"out":[10,"每人每天 10 张。昨天总需求 0 张已接近可分的 0 张，按需求平分"]}
+{"in":{"fn":"simple","args":[{"a":0}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":167}},"out":[150,"每人每天 150 张。还有余量（昨天共 0 / 167 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":152}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":0}},"out":[152,"每人每天 152 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":119}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":25,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":10},"usage":[53,12,24,32,49,45,59,18],"budget":0}},"out":[10,"每人每天 10 张。昨天总需求 292 张已接近可分的 0 张，按需求平分"]}
+{"in":{"fn":"simple","args":[{"a":0}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":150},"usage":[],"budget":0}},"out":[150,"每人每天 150 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":null}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":5,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[18,-5],"budget":899}},"out":[30,"每人每天 30 张。还有余量（昨天共 13 / 899 张），1 人用满 5 张：放宽"]}
+{"in":{"fn":"simple","args":[{"a":0}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":100,"quota_ceiling_max":10,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":566}},"out":[10,"每人每天 10 张。还有余量（昨天共 0 / 566 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":0}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":60}},"out":[150,"每人每天 150 张。还有余量（昨天共 0 / 60 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":3}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":528}},"out":[10,"每人每天 10 张。还有余量（昨天共 0 / 528 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":null}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":200,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":0}},"out":[150,"每人每天 150 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":171}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":0,"quota_ceiling_max":300,"quota_base_min_fair":100,"quota_step":25},"usage":[],"budget":0}},"out":[171,"每人每天 171 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":49}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":0}},"out":[49,"每人每天 49 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":90}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":5,"quota_base_min_fair":10,"quota_step":25},"usage":[55],"budget":55}},"out":[10,"每人每天 10 张。昨天总需求 55 张已接近可分的 55 张，按需求平分"]}
+{"in":{"fn":"simple","args":[{"a":0}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":0},"usage":[53],"budget":0}},"out":[10,"每人每天 10 张。昨天总需求 53 张已接近可分的 0 张，按需求平分"]}
+{"in":{"fn":"simple","args":[{"a":24}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":25,"quota_base_min_fair":10,"quota_step":25},"usage":[19,23],"budget":152}},"out":[24,"每人每天 24 张。还有余量（昨天共 42 / 152 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":113}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":300,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":500},"usage":[],"budget":0}},"out":[113,"每人每天 113 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":245}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":0}},"out":[245,"每人每天 245 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":259}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":0}},"out":[259,"每人每天 259 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":197}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":0}},"out":[197,"每人每天 197 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":92}],"kwargs":{"cfg":{"quota_auto_enabled":0,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":0}},"out":[92,"每人每天 92 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":99}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[50],"budget":0}},"out":[10,"每人每天 10 张。昨天总需求 50 张已接近可分的 0 张，按需求平分"]}
+{"in":{"fn":"simple","args":[{"a":186}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":0,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":349}},"out":[10,"每人每天 10 张。还有余量（昨天共 0 / 349 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":131}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":54}},"out":[131,"每人每天 131 张。还有余量（昨天共 0 / 54 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":0}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":200,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":0}},"out":[150,"每人每天 150 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":null}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[9],"budget":9}},"out":[10,"每人每天 10 张。昨天总需求 9 张已接近可分的 9 张，按需求平分"]}
+{"in":{"fn":"simple","args":[{"a":0}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":100,"quota_ceiling_max":10,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":0}},"out":[10,"每人每天 10 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":null}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":25,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":297}},"out":[25,"每人每天 25 张。还有余量（昨天共 0 / 297 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":21}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":50},"usage":[58],"budget":127}},"out":[71,"每人每天 71 张。还有余量（昨天共 58 / 127 张），1 人用满 21 张：放宽"]}
+{"in":{"fn":"simple","args":[{"a":null}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":0,"quota_base_min_fair":10,"quota_step":50},"usage":[],"budget":484}},"out":[10,"每人每天 10 张。还有余量（昨天共 0 / 484 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":0}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":5,"quota_base_min_fair":150,"quota_step":25},"usage":[],"budget":830}},"out":[150,"每人每天 150 张。还有余量（昨天共 0 / 830 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":null}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":150},"usage":[],"budget":0}},"out":[150,"每人每天 150 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":0}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":500,"quota_ceiling_max":300,"quota_base_min_fair":1,"quota_step":25},"usage":[],"budget":0}},"out":[300,"每人每天 300 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":null}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":10,"quota_ceiling_max":100,"quota_base_min_fair":10,"quota_step":25},"usage":[26,30,32],"budget":45}},"out":[15,"每人每天 15 张。昨天总需求 88 张已接近可分的 45 张，按需求平分"]}
+{"in":{"fn":"simple","args":[{"a":109}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":0}},"out":[109,"每人每天 109 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":0}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":217}},"out":[150,"每人每天 150 张。还有余量（昨天共 0 / 217 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":0}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":1},"usage":[],"budget":0}},"out":[150,"每人每天 150 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":0}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":25,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":50},"usage":[],"budget":0}},"out":[25,"每人每天 25 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":null}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":25,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":663}},"out":[25,"每人每天 25 张。还有余量（昨天共 0 / 663 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":0}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":200,"quota_ceiling_max":10,"quota_base_min_fair":10,"quota_step":25},"usage":[234],"budget":2}},"out":[10,"每人每天 10 张。昨天总需求 234 张已接近可分的 2 张，按需求平分"]}
+{"in":{"fn":"simple","args":[{"a":null}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":25,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":686}},"out":[25,"每人每天 25 张。还有余量（昨天共 0 / 686 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":260}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":0}},"out":[260,"每人每天 260 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":169}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":300,"quota_step":200},"usage":[],"budget":0}},"out":[300,"每人每天 300 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":0}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":150,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":413}},"out":[150,"每人每天 150 张。还有余量（昨天共 0 / 413 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":null}],"kwargs":{"cfg":{"quota_auto_enabled":1,"quota_target_avg":5,"quota_ceiling_max":300,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":0}},"out":[10,"每人每天 10 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"simple","args":[{"a":68}],"kwargs":{"cfg":{"quota_auto_enabled":50,"quota_target_avg":150,"quota_ceiling_max":500,"quota_base_min_fair":10,"quota_step":25},"usage":[],"budget":0}},"out":[68,"每人每天 68 张。还有余量（昨天共 0 / 0 张），没人用满：不变"]}
+{"in":{"fn":"choose_rate","args":[3.75,2.5]},"out":[2.5,{"api":3.75,"measured":2.5,"used":2.5,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[15.0,10.0]},"out":[10.0,{"api":15.0,"measured":10.0,"used":10.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[14.9,10.0]},"out":[10.0,{"api":14.9,"measured":10.0,"used":10.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[1.0,1.0001]},"out":[1.0,{"api":1.0,"measured":1.0001,"used":1.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[5.0,0.0]},"out":[5.0,{"api":5.0,"measured":null,"used":5.0,"status":"未核对","notes":["实测 0.0%/天 超出合理范围，不用","还没有实测值核对，不超过保守值 5%/天"]}]}
+{"in":{"fn":"choose_rate","args":[5.0,null]},"out":[5.0,{"api":5.0,"measured":null,"used":5.0,"status":"未核对","notes":["还没有实测值核对，不超过保守值 5%/天"]}]}
+{"in":{"fn":"choose_rate","args":[6.0,11.5]},"out":[6.0,{"api":6.0,"measured":11.5,"used":6.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[null,0.5]},"out":[5.0,{"api":null,"measured":null,"used":5.0,"status":"未核对","notes":["实测 0.5%/天 超出合理范围，不用","还没有实测值核对，不超过保守值 5%/天"]}]}
+{"in":{"fn":"choose_rate","args":[0.0,0.0]},"out":[5.0,{"api":null,"measured":null,"used":5.0,"status":"未核对","notes":["接口读数 0.0%/天 超出合理范围 1～15，不用","实测 0.0%/天 超出合理范围，不用","还没有实测值核对，不超过保守值 5%/天"]}]}
+{"in":{"fn":"choose_rate","args":[7.5,14.9]},"out":[7.5,{"api":7.5,"measured":14.9,"used":7.5,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[7.45,14.9]},"out":[7.45,{"api":7.45,"measured":14.9,"used":7.5,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[7.5,15.0]},"out":[7.5,{"api":7.5,"measured":15.0,"used":7.5,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[8.7,15.0]},"out":[8.7,{"api":8.7,"measured":15.0,"used":8.7,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[1.5,1.0]},"out":[1.0,{"api":1.5,"measured":1.0,"used":1.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[9.5,10.0]},"out":[9.5,{"api":9.5,"measured":10.0,"used":9.5,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[7.5,13.71]},"out":[7.5,{"api":7.5,"measured":13.71,"used":7.5,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[0.0,2.5]},"out":[2.5,{"api":null,"measured":2.5,"used":2.5,"status":"已核对","notes":["接口读数 0.0%/天 超出合理范围 1～15，不用"]}]}
+{"in":{"fn":"choose_rate","args":[null,7.0]},"out":[7.0,{"api":null,"measured":7.0,"used":7.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[null,null]},"out":[5.0,{"api":null,"measured":null,"used":5.0,"status":"未核对","notes":["还没有实测值核对，不超过保守值 5%/天"]}]}
+{"in":{"fn":"choose_rate","args":[3.8,7.5]},"out":[3.8,{"api":3.8,"measured":7.5,"used":3.8,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[null,7.5]},"out":[7.5,{"api":null,"measured":7.5,"used":7.5,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[9.51,15.0]},"out":[9.51,{"api":9.51,"measured":15.0,"used":9.5,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[5.0,3.2]},"out":[3.2,{"api":5.0,"measured":3.2,"used":3.2,"status":"对不上","notes":["接口 5.0 和实测 3.2 相差超过一半，取较小的"]}]}
+{"in":{"fn":"choose_rate","args":[15.0,14.9]},"out":[14.9,{"api":15.0,"measured":14.9,"used":14.9,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[2.5,2.5]},"out":[2.5,{"api":2.5,"measured":2.5,"used":2.5,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[7.5,9.721]},"out":[7.5,{"api":7.5,"measured":9.721,"used":7.5,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[2.5,5.0]},"out":[2.5,{"api":2.5,"measured":5.0,"used":2.5,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[10.0,10.0]},"out":[10.0,{"api":10.0,"measured":10.0,"used":10.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[12.1,9.55]},"out":[9.55,{"api":12.1,"measured":9.55,"used":9.6,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[6.0,4.0]},"out":[4.0,{"api":6.0,"measured":4.0,"used":4.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[null,2.5]},"out":[2.5,{"api":null,"measured":2.5,"used":2.5,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[7.5,5.0]},"out":[5.0,{"api":7.5,"measured":5.0,"used":5.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[2.0,2.5]},"out":[2.0,{"api":2.0,"measured":2.5,"used":2.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[1.0,2.0]},"out":[1.0,{"api":1.0,"measured":2.0,"used":1.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[2.0,3.65]},"out":[2.0,{"api":2.0,"measured":3.65,"used":2.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[null,4.0]},"out":[4.0,{"api":null,"measured":4.0,"used":4.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[2.0,1.52]},"out":[1.52,{"api":2.0,"measured":1.52,"used":1.5,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[null,5.0]},"out":[5.0,{"api":null,"measured":5.0,"used":5.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[7.4995,5.0]},"out":[5.0,{"api":7.4995,"measured":5.0,"used":5.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[6.0,7.0]},"out":[6.0,{"api":6.0,"measured":7.0,"used":6.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[3.0,5.3]},"out":[3.0,{"api":3.0,"measured":5.3,"used":3.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[3.75,7.5]},"out":[3.75,{"api":3.75,"measured":7.5,"used":3.8,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[-1.0,5.0]},"out":[5.0,{"api":null,"measured":5.0,"used":5.0,"status":"已核对","notes":["接口读数 -1.0%/天 超出合理范围 1～15，不用"]}]}
+{"in":{"fn":"choose_rate","args":[-0.0,-1.0]},"out":[5.0,{"api":null,"measured":null,"used":5.0,"status":"未核对","notes":["接口读数 -0.0%/天 超出合理范围 1～15，不用","实测 -1.0%/天 超出合理范围，不用","还没有实测值核对，不超过保守值 5%/天"]}]}
+{"in":{"fn":"choose_rate","args":[5.0,4.0]},"out":[4.0,{"api":5.0,"measured":4.0,"used":4.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[8.8,5.87]},"out":[5.87,{"api":8.8,"measured":5.87,"used":5.9,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[11.0,7.5]},"out":[7.5,{"api":11.0,"measured":7.5,"used":7.5,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[7.5,7.5]},"out":[7.5,{"api":7.5,"measured":7.5,"used":7.5,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[null,15.0]},"out":[15.0,{"api":null,"measured":15.0,"used":15.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[12.0,15.0]},"out":[12.0,{"api":12.0,"measured":15.0,"used":12.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[14.9,12.0]},"out":[12.0,{"api":14.9,"measured":12.0,"used":12.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[10.0,15.0]},"out":[10.0,{"api":10.0,"measured":15.0,"used":10.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[7.5,10.0]},"out":[7.5,{"api":7.5,"measured":10.0,"used":7.5,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[10.0,7.0]},"out":[7.0,{"api":10.0,"measured":7.0,"used":7.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[2.6,2.6]},"out":[2.6,{"api":2.6,"measured":2.6,"used":2.6,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[5.0,5.57]},"out":[5.0,{"api":5.0,"measured":5.57,"used":5.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[0.5,null]},"out":[5.0,{"api":null,"measured":null,"used":5.0,"status":"未核对","notes":["接口读数 0.5%/天 超出合理范围 1～15，不用","还没有实测值核对，不超过保守值 5%/天"]}]}
+{"in":{"fn":"choose_rate","args":[1.0,1.0]},"out":[1.0,{"api":1.0,"measured":1.0,"used":1.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[null,1.0]},"out":[1.0,{"api":null,"measured":1.0,"used":1.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[10.049,6.7]},"out":[6.7,{"api":10.049,"measured":6.7,"used":6.7,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[5.0,9.5]},"out":[5.0,{"api":5.0,"measured":9.5,"used":5.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[8.0,7.5]},"out":[7.5,{"api":8.0,"measured":7.5,"used":7.5,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[5.0,5.0]},"out":[5.0,{"api":5.0,"measured":5.0,"used":5.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[3.0,5.0001]},"out":[3.0,{"api":3.0,"measured":5.0001,"used":3.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[12.0,8.0]},"out":[8.0,{"api":12.0,"measured":8.0,"used":8.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[1.0,1.2]},"out":[1.0,{"api":1.0,"measured":1.2,"used":1.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[5.0,7.86]},"out":[5.0,{"api":5.0,"measured":7.86,"used":5.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[null,6.7]},"out":[6.7,{"api":null,"measured":6.7,"used":6.7,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[10.0,7.5]},"out":[7.5,{"api":10.0,"measured":7.5,"used":7.5,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[4.8,9.6]},"out":[4.8,{"api":4.8,"measured":9.6,"used":4.8,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[7.7,7.0]},"out":[7.0,{"api":7.7,"measured":7.0,"used":7.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[3.0,6.0]},"out":[3.0,{"api":3.0,"measured":6.0,"used":3.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[5.0,10.0]},"out":[5.0,{"api":5.0,"measured":10.0,"used":5.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[null,7.53]},"out":[7.53,{"api":null,"measured":7.53,"used":7.5,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[4.76,4.76]},"out":[4.76,{"api":4.76,"measured":4.76,"used":4.8,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[null,6.47]},"out":[6.47,{"api":null,"measured":6.47,"used":6.5,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[9.76,9.76]},"out":[9.76,{"api":9.76,"measured":9.76,"used":9.8,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[11.25,7.5]},"out":[7.5,{"api":11.25,"measured":7.5,"used":7.5,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[6.0,7.5]},"out":[6.0,{"api":6.0,"measured":7.5,"used":6.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[2.04,3.0]},"out":[2.04,{"api":2.04,"measured":3.0,"used":2.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[7.281,5.0]},"out":[5.0,{"api":7.281,"measured":5.0,"used":5.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[5.48,5.0]},"out":[5.0,{"api":5.48,"measured":5.0,"used":5.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[8.6,15.0]},"out":[8.6,{"api":8.6,"measured":15.0,"used":8.6,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[6.2,8.77]},"out":[6.2,{"api":6.2,"measured":8.77,"used":6.2,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[9.41,7.5]},"out":[7.5,{"api":9.41,"measured":7.5,"used":7.5,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[4.4,8.8]},"out":[4.4,{"api":4.4,"measured":8.8,"used":4.4,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[1.9,3.7]},"out":[1.9,{"api":1.9,"measured":3.7,"used":1.9,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[1.34,2.68]},"out":[1.34,{"api":1.34,"measured":2.68,"used":1.3,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[1.25,2.5]},"out":[1.25,{"api":1.25,"measured":2.5,"used":1.2,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[7.4,9.0]},"out":[7.4,{"api":7.4,"measured":9.0,"used":7.4,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[7.0,5.0]},"out":[5.0,{"api":7.0,"measured":5.0,"used":5.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[5.25,3.5]},"out":[3.5,{"api":5.25,"measured":3.5,"used":3.5,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[null,3.0]},"out":[3.0,{"api":null,"measured":3.0,"used":3.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[7.5,5.07]},"out":[5.07,{"api":7.5,"measured":5.07,"used":5.1,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[1.0,1.1]},"out":[1.0,{"api":1.0,"measured":1.1,"used":1.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[null,2.8]},"out":[2.8,{"api":null,"measured":2.8,"used":2.8,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[1.0,1.131]},"out":[1.0,{"api":1.0,"measured":1.131,"used":1.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[4.94,5.0]},"out":[4.94,{"api":4.94,"measured":5.0,"used":4.9,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[5.107,5.0]},"out":[5.0,{"api":5.107,"measured":5.0,"used":5.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"choose_rate","args":[10.5,7.0]},"out":[7.0,{"api":10.5,"measured":7.0,"used":7.0,"status":"已核对","notes":[]}]}
+{"in":{"fn":"v5_plan","args":[94.0,0.0,0]},"out":{"rate":5.0,"percent":94.0,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[6.59,5.3,9]},"out":{"rate":5.3,"percent":6.59,"global":75,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[93.2,1.0,0]},"out":{"rate":1.0,"percent":93.2,"global":14,"people":10,"each":1}}
+{"in":{"fn":"v5_plan","args":[35.0,-2.0,1]},"out":{"rate":5.0,"percent":35.0,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[20.0,1.0,3]},"out":{"rate":1.0,"percent":20.0,"global":14,"people":10,"each":1}}
+{"in":{"fn":"v5_plan","args":[85.0,5.0,1]},"out":{"rate":5.0,"percent":85.0,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[46.0,0,3]},"out":{"rate":5.0,"percent":46.0,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[55.5,0.1,10]},"out":{"rate":0.1,"percent":55.5,"global":1,"people":10,"each":1}}
+{"in":{"fn":"v5_plan","args":[55.5,0.0,9]},"out":{"rate":5.0,"percent":55.5,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[100.0,0,1]},"out":{"rate":5.0,"percent":100.0,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[84.9,5.8,3]},"out":{"rate":5.8,"percent":84.9,"global":82,"people":10,"each":8}}
+{"in":{"fn":"v5_plan","args":[70.0,0,1]},"out":{"rate":5.0,"percent":70.0,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[null,0,11]},"out":{"rate":5.0,"percent":null,"global":71,"people":11,"each":6}}
+{"in":{"fn":"v5_plan","args":[77.0,0.0,0]},"out":{"rate":5.0,"percent":77.0,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[69.9,16.2,25]},"out":{"rate":16.2,"percent":69.9,"global":230,"people":25,"each":9}}
+{"in":{"fn":"v5_plan","args":[55.5,0.0,1]},"out":{"rate":5.0,"percent":55.5,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[90.0,0.0,9]},"out":{"rate":5.0,"percent":90.0,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[90.0,0,80]},"out":{"rate":5.0,"percent":90.0,"global":71,"people":80,"each":1}}
+{"in":{"fn":"v5_plan","args":[55.5,0,0]},"out":{"rate":5.0,"percent":55.5,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[97.3,1.0,1]},"out":{"rate":1.0,"percent":97.3,"global":14,"people":10,"each":1}}
+{"in":{"fn":"v5_plan","args":[84.9,7.0,0]},"out":{"rate":7.0,"percent":84.9,"global":99,"people":10,"each":9}}
+{"in":{"fn":"v5_plan","args":[48.11,0,9]},"out":{"rate":5.0,"percent":48.11,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[44.9,0,11]},"out":{"rate":5.0,"percent":44.9,"global":71,"people":11,"each":6}}
+{"in":{"fn":"v5_plan","args":[93.74,0,3]},"out":{"rate":5.0,"percent":93.74,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[97.3,0,3]},"out":{"rate":5.0,"percent":97.3,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[0.0,4.37,10]},"out":{"rate":4.4,"percent":0.0,"global":62,"people":10,"each":6}}
+{"in":{"fn":"v5_plan","args":[40.0,-2.0,10]},"out":{"rate":5.0,"percent":40.0,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[20.0,0.6,11]},"out":{"rate":0.6,"percent":20.0,"global":8,"people":11,"each":1}}
+{"in":{"fn":"v5_plan","args":[57.0,1.0,9]},"out":{"rate":1.0,"percent":57.0,"global":14,"people":10,"each":1}}
+{"in":{"fn":"v5_plan","args":[null,0,3]},"out":{"rate":5.0,"percent":null,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[0.98,0,25]},"out":{"rate":5.0,"percent":0.98,"global":71,"people":25,"each":2}}
+{"in":{"fn":"v5_plan","args":[null,0,1]},"out":{"rate":5.0,"percent":null,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[0.0,0,0]},"out":{"rate":5.0,"percent":0.0,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[0.0,6.0,25]},"out":{"rate":6.0,"percent":0.0,"global":85,"people":25,"each":3}}
+{"in":{"fn":"v5_plan","args":[0.0,2.7,10]},"out":{"rate":2.7,"percent":0.0,"global":38,"people":10,"each":3}}
+{"in":{"fn":"v5_plan","args":[0.0,1.0,3]},"out":{"rate":1.0,"percent":0.0,"global":14,"people":10,"each":1}}
+{"in":{"fn":"v5_plan","args":[8.0,null,0]},"out":{"rate":5.0,"percent":8.0,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[61.0,0,1]},"out":{"rate":5.0,"percent":61.0,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[2.0,4.37,9]},"out":{"rate":4.4,"percent":2.0,"global":62,"people":10,"each":6}}
+{"in":{"fn":"v5_plan","args":[97.3,4.37,11]},"out":{"rate":4.4,"percent":97.3,"global":62,"people":11,"each":5}}
+{"in":{"fn":"v5_plan","args":[69.9,1.9,11]},"out":{"rate":1.9,"percent":69.9,"global":26,"people":11,"each":2}}
+{"in":{"fn":"v5_plan","args":[2.6,0.0,25]},"out":{"rate":5.0,"percent":2.6,"global":71,"people":25,"each":2}}
+{"in":{"fn":"v5_plan","args":[0.0,0,1]},"out":{"rate":5.0,"percent":0.0,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[0.0,4.37,0]},"out":{"rate":4.4,"percent":0.0,"global":62,"people":10,"each":6}}
+{"in":{"fn":"v5_plan","args":[84.9,0.5,0]},"out":{"rate":0.5,"percent":84.9,"global":7,"people":10,"each":1}}
+{"in":{"fn":"v5_plan","args":[6.0,0,10]},"out":{"rate":5.0,"percent":6.0,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[2.4,5.0,10]},"out":{"rate":5.0,"percent":2.4,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[70.0,0,9]},"out":{"rate":5.0,"percent":70.0,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[2.91,0,1]},"out":{"rate":5.0,"percent":2.91,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[0.0,0,10]},"out":{"rate":5.0,"percent":0.0,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[55.5,0,25]},"out":{"rate":5.0,"percent":55.5,"global":71,"people":25,"each":2}}
+{"in":{"fn":"v5_plan","args":[90.0,0,9]},"out":{"rate":5.0,"percent":90.0,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[0.0,1.0,1]},"out":{"rate":1.0,"percent":0.0,"global":14,"people":10,"each":1}}
+{"in":{"fn":"v5_plan","args":[39.4,0,10]},"out":{"rate":5.0,"percent":39.4,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[20.0,0,10]},"out":{"rate":5.0,"percent":20.0,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[7.0,5.0,25]},"out":{"rate":5.0,"percent":7.0,"global":71,"people":25,"each":2}}
+{"in":{"fn":"v5_plan","args":[0.0,7.0,11]},"out":{"rate":7.0,"percent":0.0,"global":99,"people":11,"each":9}}
+{"in":{"fn":"v5_plan","args":[8.0,0.044,9]},"out":{"rate":0.0,"percent":8.0,"global":0,"people":10,"each":1}}
+{"in":{"fn":"v5_plan","args":[2.5,5.0,1]},"out":{"rate":5.0,"percent":2.5,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[84.9,0,80]},"out":{"rate":5.0,"percent":84.9,"global":71,"people":80,"each":1}}
+{"in":{"fn":"v5_plan","args":[0.0,5.0,1]},"out":{"rate":5.0,"percent":0.0,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[69.9,0,0]},"out":{"rate":5.0,"percent":69.9,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[69.0,0,10]},"out":{"rate":5.0,"percent":69.0,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[89.3,0,1]},"out":{"rate":5.0,"percent":89.3,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[58.7,0,1]},"out":{"rate":5.0,"percent":58.7,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[97.3,0,14]},"out":{"rate":5.0,"percent":97.3,"global":71,"people":14,"each":5}}
+{"in":{"fn":"v5_plan","args":[53.9,0,25]},"out":{"rate":5.0,"percent":53.9,"global":71,"people":25,"each":2}}
+{"in":{"fn":"v5_plan","args":[0.0,2.0,14]},"out":{"rate":2.0,"percent":0.0,"global":28,"people":14,"each":2}}
+{"in":{"fn":"v5_plan","args":[1.5,null,3]},"out":{"rate":5.0,"percent":1.5,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[40.0,0,9]},"out":{"rate":5.0,"percent":40.0,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[0.0,3.7,10]},"out":{"rate":3.7,"percent":0.0,"global":52,"people":10,"each":5}}
+{"in":{"fn":"v5_plan","args":[97.3,0,10]},"out":{"rate":5.0,"percent":97.3,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[69.9,0,14]},"out":{"rate":5.0,"percent":69.9,"global":71,"people":14,"each":5}}
+{"in":{"fn":"v5_plan","args":[55.5,0,11]},"out":{"rate":5.0,"percent":55.5,"global":71,"people":11,"each":6}}
+{"in":{"fn":"v5_plan","args":[1.8,0.0,3]},"out":{"rate":5.0,"percent":1.8,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[0.0,5.0,14]},"out":{"rate":5.0,"percent":0.0,"global":71,"people":14,"each":5}}
+{"in":{"fn":"v5_plan","args":[3.0,4.37,3]},"out":{"rate":4.4,"percent":3.0,"global":62,"people":10,"each":6}}
+{"in":{"fn":"v5_plan","args":[20.0,0,3]},"out":{"rate":5.0,"percent":20.0,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[47.6,0,3]},"out":{"rate":5.0,"percent":47.6,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[45.1,0,1]},"out":{"rate":5.0,"percent":45.1,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[14.0,0,14]},"out":{"rate":5.0,"percent":14.0,"global":71,"people":14,"each":5}}
+{"in":{"fn":"v5_plan","args":[97.6,0.3,0]},"out":{"rate":0.3,"percent":97.6,"global":4,"people":10,"each":1}}
+{"in":{"fn":"v5_plan","args":[0.6,1.9,25]},"out":{"rate":1.9,"percent":0.6,"global":26,"people":25,"each":1}}
+{"in":{"fn":"v5_plan","args":[8.3,0.0,10]},"out":{"rate":5.0,"percent":8.3,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[2.1,5.0,10]},"out":{"rate":5.0,"percent":2.1,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[84.9,0,14]},"out":{"rate":5.0,"percent":84.9,"global":71,"people":14,"each":5}}
+{"in":{"fn":"v5_plan","args":[5.6,0,10]},"out":{"rate":5.0,"percent":5.6,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[85.0,0,14]},"out":{"rate":5.0,"percent":85.0,"global":71,"people":14,"each":5}}
+{"in":{"fn":"v5_plan","args":[90.0,0,10]},"out":{"rate":5.0,"percent":90.0,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[0.0,4.37,1]},"out":{"rate":4.4,"percent":0.0,"global":62,"people":10,"each":6}}
+{"in":{"fn":"v5_plan","args":[null,null,9]},"out":{"rate":5.0,"percent":null,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[0.0,4.0,14]},"out":{"rate":4.0,"percent":0.0,"global":56,"people":14,"each":4}}
+{"in":{"fn":"v5_plan","args":[40.3,0,80]},"out":{"rate":5.0,"percent":40.3,"global":71,"people":80,"each":1}}
+{"in":{"fn":"v5_plan","args":[7.8,0.0,0]},"out":{"rate":5.0,"percent":7.8,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[11.0,0,25]},"out":{"rate":5.0,"percent":11.0,"global":71,"people":25,"each":2}}
+{"in":{"fn":"v5_plan","args":[0.0,7.0,3]},"out":{"rate":7.0,"percent":0.0,"global":99,"people":10,"each":9}}
+{"in":{"fn":"v5_plan","args":[70.0,0,11]},"out":{"rate":5.0,"percent":70.0,"global":71,"people":11,"each":6}}
+{"in":{"fn":"v5_plan","args":[97.3,0,80]},"out":{"rate":5.0,"percent":97.3,"global":71,"people":80,"each":1}}
+{"in":{"fn":"v5_plan","args":[0.0,0,9]},"out":{"rate":5.0,"percent":0.0,"global":71,"people":10,"each":7}}
+{"in":{"fn":"v5_plan","args":[55.5,18.1,0]},"out":{"rate":18.1,"percent":55.5,"global":257,"people":10,"each":25}}
+{"in":{"fn":"quota_notice","args":[126,{"each":null,"global":null},0],"kwargs":{"today":"2026-01-02","review":null,"reset_hour":9,"anlas":-5}},"out":"今日额度：V4.5 每人 126 张/天（每日 9 点重置） · V5 每人 0 张"}
+{"in":{"fn":"quota_notice","args":[79,{"each":9,"global":5},30],"kwargs":{"today":"2026-12-31","review":{},"reset_hour":5,"anlas":0}},"out":"今日额度：V4.5 每人 79 张/天（每日 5 点重置） · V5 每人 9 张（全站今日共 5 张，先到先得）"}
+{"in":{"fn":"quota_notice","args":[100,{"each":0.5,"global":5},59],"kwargs":{"today":"2026-01-02","review":null,"reset_hour":14,"anlas":1}},"out":"今日额度：V4.5 每人 100 张/天（每日 14 点重置） · V5 每人 0 张 · Anlas 每人 1/天"}
+{"in":{"fn":"quota_notice","args":[-3,{},14],"kwargs":{"today":"2026-12-31","review":null,"reset_hour":22,"anlas":0}},"out":"今日额度：V4.5 每人 -3 张/天（每日 22 点重置） · V5 每人 0 张"}
+{"in":{"fn":"quota_notice","args":[0,{"each":9,"global":5},5],"kwargs":{"today":"2027-03-09","review":null,"reset_hour":7,"anlas":50}},"out":"今日额度：V4.5 每人 0 张/天（每日 7 点重置） · V5 每人 9 张（全站今日共 5 张，先到先得） · Anlas 每人 50/天"}
+{"in":{"fn":"quota_notice","args":[127,{"each":0,"global":5},1],"kwargs":{"today":"2027-03-09","review":null,"reset_hour":5,"anlas":0}},"out":"今日额度：V4.5 每人 127 张/天（每日 5 点重置） · V5 每人 0 张"}
+{"in":{"fn":"quota_notice","args":[125,{},14],"kwargs":{"today":"2026-12-31","review":{"reasons":["x"]},"reset_hour":0,"anlas":1}},"out":"今日额度：V4.5 每人 125 张/天（每日 0 点重置） · V5 每人 0 张 · Anlas 每人 1/天"}
+{"in":{"fn":"quota_notice","args":[0,{"each":3,"global":260},57],"kwargs":{"today":"2026-10-14","review":null,"reset_hour":5,"anlas":0}},"out":"今日额度：V4.5 每人 0 张/天（每日 5 点重置） · V5 每人 3 张"}
+{"in":{"fn":"quota_notice","args":[30,{"each":11,"global":100},14],"kwargs":{"today":"2026-10-14","review":null,"reset_hour":18,"anlas":25}},"out":"今日额度：V4.5 每人 30 张/天（每日 18 点重置） · V5 每人 11 张（全站今日共 100 张，先到先得） · Anlas 每人 25/天"}
+{"in":{"fn":"quota_notice","args":[-3,{},40],"kwargs":{"today":"2026-10-14","review":{"from":[175],"to":[175],"reasons":[]},"reset_hour":0,"anlas":0}},"out":"今日额度：V4.5 每人 -3 张/天（每日 0 点重置） · V5 每人 0 张"}
+{"in":{"fn":"quota_notice","args":[126,{"each":0,"global":5},5],"kwargs":{"today":"2027-03-09","review":null,"reset_hour":7,"anlas":1}},"out":"今日额度：V4.5 每人 126 张/天（每日 7 点重置） · V5 每人 0 张 · Anlas 每人 1/天"}
+{"in":{"fn":"quota_notice","args":[183,{"each":30.0,"global":0},14],"kwargs":{"today":"2026-01-02","review":{"from":[100],"to":[100],"reasons":["每人每天 150 张。还有余量"]},"reset_hour":20,"anlas":0}},"out":"今日额度：V4.5 每人 183 张/天（每日 20 点重置） · V5 每人 30 张"}
+{"in":{"fn":"quota_notice","args":[-3,{"each":11,"global":0},0],"kwargs":{"today":"2026-12-31","review":null,"reset_hour":7,"anlas":0}},"out":"今日额度：V4.5 每人 -3 张/天（每日 7 点重置） · V5 每人 11 张"}
+{"in":{"fn":"quota_notice","args":[150,{"each":18,"global":0},5],"kwargs":{"today":"2026-12-31","review":{},"reset_hour":7,"anlas":0}},"out":"今日额度：V4.5 每人 150 张/天（每日 7 点重置） · V5 每人 18 张"}
+{"in":{"fn":"quota_notice","args":[0,{"each":3,"global":260},40],"kwargs":{"today":"2026-10-14","review":null,"reset_hour":0,"anlas":-5}},"out":"今日额度：V4.5 每人 0 张/天（每日 0 点重置） · V5 每人 3 张"}
+{"in":{"fn":"quota_notice","args":[100,{"each":3,"global":100},40],"kwargs":{"today":"2026-12-31","review":{"from":[100],"to":[150],"reasons":["a"]},"reset_hour":1,"anlas":25}},"out":"12月31日 算法调整：a。今日额度：V4.5 每人 100 张/天（每日 1 点重置） · V5 每人 3 张（全站今日共 100 张，先到先得） · Anlas 每人 25/天"}
+{"in":{"fn":"quota_notice","args":[0,{"each":11,"global":5},5],"kwargs":{"today":"2026-12-31","review":{"from":[150],"to":[150],"reasons":["a"]},"reset_hour":7,"anlas":0}},"out":"今日额度：V4.5 每人 0 张/天（每日 7 点重置） · V5 每人 11 张（全站今日共 5 张，先到先得）"}
+{"in":{"fn":"quota_notice","args":[-3,{"each":30,"global":0},40],"kwargs":{"today":"2026-10-14","review":{"reasons":["x"]},"reset_hour":5,"anlas":-5}},"out":"今日额度：V4.5 每人 -3 张/天（每日 5 点重置） · V5 每人 30 张"}
+{"in":{"fn":"quota_notice","args":[126,{},40],"kwargs":{"today":"2026-01-02","review":{},"reset_hour":5,"anlas":0}},"out":"今日额度：V4.5 每人 126 张/天（每日 5 点重置） · V5 每人 0 张"}
+{"in":{"fn":"quota_notice","args":[100,{"each":3,"global":5},1],"kwargs":{"today":"2027-03-09","review":null,"reset_hour":4,"anlas":0}},"out":"今日额度：V4.5 每人 100 张/天（每日 4 点重置） · V5 每人 3 张"}
+{"in":{"fn":"quota_notice","args":[150,{},5],"kwargs":{"today":"2026-10-14","review":{},"reset_hour":7,"anlas":0}},"out":"今日额度：V4.5 每人 150 张/天（每日 7 点重置） · V5 每人 0 张"}
+{"in":{"fn":"quota_notice","args":[49,{"each":9,"global":130},5],"kwargs":{"today":"2026-01-02","review":{},"reset_hour":7,"anlas":50}},"out":"今日额度：V4.5 每人 49 张/天（每日 7 点重置） · V5 每人 9 张 · Anlas 每人 50/天"}
+{"in":{"fn":"quota_notice","args":[125,{"each":0,"global":0},5],"kwargs":{"today":"2026-12-31","review":null,"reset_hour":7,"anlas":0}},"out":"今日额度：V4.5 每人 125 张/天（每日 7 点重置） · V5 每人 0 张"}
+{"in":{"fn":"quota_notice","args":[21,{},40],"kwargs":{"today":"2027-03-09","review":null,"reset_hour":0,"anlas":1}},"out":"今日额度：V4.5 每人 21 张/天（每日 0 点重置） · V5 每人 0 张 · Anlas 每人 1/天"}
+{"in":{"fn":"quota_notice","args":[0,{"each":9.0,"global":0},1],"kwargs":{"today":"2026-12-31","review":null,"reset_hour":7,"anlas":0}},"out":"今日额度：V4.5 每人 0 张/天（每日 7 点重置） · V5 每人 9 张"}
+{"in":{"fn":"quota_notice","args":[30,{"each":30,"global":39},0],"kwargs":{"today":"2026-10-14","review":{},"reset_hour":7,"anlas":0}},"out":"今日额度：V4.5 每人 30 张/天（每日 7 点重置） · V5 每人 30 张"}
+{"in":{"fn":"quota_notice","args":[127,{},0],"kwargs":{"today":"2026-10-14","review":null,"reset_hour":7,"anlas":-5}},"out":"今日额度：V4.5 每人 127 张/天（每日 7 点重置） · V5 每人 0 张"}
+{"in":{"fn":"quota_notice","args":[0,{"each":0,"global":150},5],"kwargs":{"today":"2027-03-09","review":{"reasons":["x"]},"reset_hour":7,"anlas":1}},"out":"今日额度：V4.5 每人 0 张/天（每日 7 点重置） · V5 每人 0 张 · Anlas 每人 1/天"}
+{"in":{"fn":"quota_notice","args":[-3,{"each":10,"global":100},0],"kwargs":{"today":"2026-01-02","review":{"from":[175],"to":[150],"reasons":["a"]},"reset_hour":3,"anlas":50}},"out":"01月02日 算法调整：a。今日额度：V4.5 每人 -3 张/天（每日 3 点重置） · V5 每人 10 张 · Anlas 每人 50/天"}
+{"in":{"fn":"quota_notice","args":[127,{},0],"kwargs":{"today":"2026-10-14","review":null,"reset_hour":7,"anlas":0}},"out":"今日额度：V4.5 每人 127 张/天（每日 7 点重置） · V5 每人 0 张"}
+{"in":{"fn":"quota_notice","args":[126,{"each":9,"global":464},5],"kwargs":{"today":"2026-10-14","review":null,"reset_hour":21,"anlas":0}},"out":"今日额度：V4.5 每人 126 张/天（每日 21 点重置） · V5 每人 9 张"}
+{"in":{"fn":"quota_notice","args":[30,{},0],"kwargs":{"today":"2026-01-02","review":null,"reset_hour":7,"anlas":0}},"out":"今日额度：V4.5 每人 30 张/天（每日 7 点重置） · V5 每人 0 张"}
+{"in":{"fn":"quota_notice","args":[30,{"each":10,"global":130},84],"kwargs":{"today":"2026-10-14","review":null,"reset_hour":12,"anlas":-5}},"out":"今日额度：V4.5 每人 30 张/天（每日 12 点重置） · V5 每人 10 张（全站今日共 130 张，先到先得）"}
+{"in":{"fn":"quota_notice","args":[0,{"each":0,"global":439},1],"kwargs":{"today":"2026-01-02","review":{"from":[175],"to":[175],"reasons":[]},"reset_hour":7,"anlas":0}},"out":"今日额度：V4.5 每人 0 张/天（每日 7 点重置） · V5 每人 0 张"}
+{"in":{"fn":"quota_notice","args":[30,{"each":9,"global":100},14],"kwargs":{"today":"2026-12-31","review":null,"reset_hour":12,"anlas":25}},"out":"今日额度：V4.5 每人 30 张/天（每日 12 点重置） · V5 每人 9 张（全站今日共 100 张，先到先得） · Anlas 每人 25/天"}
+{"in":{"fn":"quota_notice","args":[127,{"each":9,"global":100},5],"kwargs":{"today":"2026-12-31","review":{"from":[100],"to":[100],"reasons":["甲","乙"]},"reset_hour":10,"anlas":0}},"out":"今日额度：V4.5 每人 127 张/天（每日 10 点重置） · V5 每人 9 张"}
+{"in":{"fn":"quota_notice","args":[300,{"each":null,"global":null},14],"kwargs":{"today":"2026-12-31","review":null,"reset_hour":1,"anlas":50}},"out":"今日额度：V4.5 每人 300 张/天（每日 1 点重置） · V5 每人 0 张 · Anlas 每人 50/天"}
+{"in":{"fn":"quota_notice","args":[-3,{"each":11,"global":100},5],"kwargs":{"today":"2026-01-02","review":null,"reset_hour":16,"anlas":1}},"out":"今日额度：V4.5 每人 -3 张/天（每日 16 点重置） · V5 每人 11 张 · Anlas 每人 1/天"}
+{"in":{"fn":"quota_notice","args":[0,{"each":3,"global":260},40],"kwargs":{"today":"2026-01-02","review":{"from":[100],"to":[200],"reasons":[]},"reset_hour":7,"anlas":0}},"out":"01月02日 算法调整：。今日额度：V4.5 每人 0 张/天（每日 7 点重置） · V5 每人 3 张"}
+{"in":{"fn":"quota_notice","args":[0,{"each":10,"global":5},1],"kwargs":{"today":"2026-01-02","review":{"from":[175],"to":[100],"reasons":[]},"reset_hour":5,"anlas":0}},"out":"01月02日 算法调整：。今日额度：V4.5 每人 0 张/天（每日 5 点重置） · V5 每人 10 张（全站今日共 5 张，先到先得）"}
+{"in":{"fn":"quota_notice","args":[100,{"each":18.0,"global":0},42],"kwargs":{"today":"2026-10-14","review":{"from":[100],"to":[150],"reasons":["甲","乙"]},"reset_hour":23,"anlas":0}},"out":"10月14日 算法调整：甲；乙。今日额度：V4.5 每人 100 张/天（每日 23 点重置） · V5 每人 18 张"}
+{"in":{"fn":"quota_notice","args":[300,{"each":18,"global":130},40],"kwargs":{"today":"2026-01-02","review":null,"reset_hour":8,"anlas":1}},"out":"今日额度：V4.5 每人 300 张/天（每日 8 点重置） · V5 每人 18 张（全站今日共 130 张，先到先得） · Anlas 每人 1/天"}
+{"in":{"fn":"quota_notice","args":[127,{},0],"kwargs":{"today":"2026-01-02","review":null,"reset_hour":23,"anlas":0}},"out":"今日额度：V4.5 每人 127 张/天（每日 23 点重置） · V5 每人 0 张"}
+{"in":{"fn":"quota_notice","args":[30,{"each":9,"global":0},30],"kwargs":{"today":"2026-01-02","review":{},"reset_hour":22,"anlas":1}},"out":"今日额度：V4.5 每人 30 张/天（每日 22 点重置） · V5 每人 9 张 · Anlas 每人 1/天"}
+{"in":{"fn":"quota_notice","args":[-3,{},72],"kwargs":{"today":"2026-10-14","review":null,"reset_hour":2,"anlas":25}},"out":"今日额度：V4.5 每人 -3 张/天（每日 2 点重置） · V5 每人 0 张 · Anlas 每人 25/天"}
+{"in":{"fn":"quota_notice","args":[0,{"each":30,"global":0},0],"kwargs":{"today":"2026-10-14","review":null,"reset_hour":5,"anlas":-5}},"out":"今日额度：V4.5 每人 0 张/天（每日 5 点重置） · V5 每人 30 张"}
+{"in":{"fn":"quota_notice","args":[0,{"each":18,"global":0},47],"kwargs":{"today":"2026-10-14","review":null,"reset_hour":7,"anlas":0}},"out":"今日额度：V4.5 每人 0 张/天（每日 7 点重置） · V5 每人 18 张"}
+{"in":{"fn":"quota_notice","args":[125,{"each":3,"global":5},40],"kwargs":{"today":"2026-10-14","review":{"reasons":["x"]},"reset_hour":23,"anlas":0}},"out":"今日额度：V4.5 每人 125 张/天（每日 23 点重置） · V5 每人 3 张（全站今日共 5 张，先到先得）"}
+{"in":{"fn":"quota_notice","args":[300,{},30],"kwargs":{"today":"2026-12-31","review":null,"reset_hour":23,"anlas":-5}},"out":"今日额度：V4.5 每人 300 张/天（每日 23 点重置） · V5 每人 0 张"}
+{"in":{"fn":"quota_notice","args":[0,{"each":30,"global":5},40],"kwargs":{"today":"2026-12-31","review":{"from":[175],"to":[175],"reasons":[]},"reset_hour":7,"anlas":1}},"out":"今日额度：V4.5 每人 0 张/天（每日 7 点重置） · V5 每人 30 张（全站今日共 5 张，先到先得） · Anlas 每人 1/天"}
+{"in":{"fn":"quota_notice","args":[-3,{"each":0,"global":5},30],"kwargs":{"today":"2026-10-14","review":null,"reset_hour":5,"anlas":0}},"out":"今日额度：V4.5 每人 -3 张/天（每日 5 点重置） · V5 每人 0 张"}
+{"in":{"fn":"quota_notice","args":[95,{"each":0.0,"global":0},30],"kwargs":{"today":"2026-12-31","review":null,"reset_hour":16,"anlas":0}},"out":"今日额度：V4.5 每人 95 张/天（每日 16 点重置） · V5 每人 0 张"}
+{"in":{"fn":"quota_notice","args":[126,{"each":10,"global":100},40],"kwargs":{"today":"2026-01-02","review":null,"reset_hour":20,"anlas":1}},"out":"今日额度：V4.5 每人 126 张/天（每日 20 点重置） · V5 每人 10 张（全站今日共 100 张，先到先得） · Anlas 每人 1/天"}
+{"in":{"fn":"quota_notice","args":[30,{"each":9.5,"global":130},30],"kwargs":{"today":"2026-12-31","review":{"from":[100],"to":[150],"reasons":["a"]},"reset_hour":7,"anlas":50}},"out":"12月31日 算法调整：a。今日额度：V4.5 每人 30 张/天（每日 7 点重置） · V5 每人 9 张（全站今日共 130 张，先到先得） · Anlas 每人 50/天"}
+{"in":{"fn":"quota_notice","args":[30,{"each":3,"global":0},5],"kwargs":{"today":"2027-03-09","review":null,"reset_hour":7,"anlas":0}},"out":"今日额度：V4.5 每人 30 张/天（每日 7 点重置） · V5 每人 3 张"}
+{"in":{"fn":"quota_notice","args":[126,{"each":18,"global":130},29],"kwargs":{"today":"2026-12-31","review":{"from":[150],"to":[200],"reasons":["a"]},"reset_hour":13,"anlas":50}},"out":"12月31日 算法调整：a。今日额度：V4.5 每人 126 张/天（每日 13 点重置） · V5 每人 18 张（全站今日共 130 张，先到先得） · Anlas 每人 50/天"}
+{"in":{"fn":"quota_notice","args":[-3,{},0],"kwargs":{"today":"2026-12-31","review":null,"reset_hour":7,"anlas":0}},"out":"今日额度：V4.5 每人 -3 张/天（每日 7 点重置） · V5 每人 0 张"}
+{"in":{"fn":"quota_notice","args":[0,{},14],"kwargs":{"today":"2026-12-31","review":{"from":[100],"to":[175],"reasons":[]},"reset_hour":0,"anlas":1}},"out":"12月31日 算法调整：。今日额度：V4.5 每人 0 张/天（每日 0 点重置） · V5 每人 0 张 · Anlas 每人 1/天"}
+{"in":{"fn":"quota_notice","args":[30,{"each":11,"global":0},0],"kwargs":{"today":"2026-12-31","review":{"from":[175],"to":[200],"reasons":["a"]},"reset_hour":4,"anlas":0}},"out":"12月31日 算法调整：a。今日额度：V4.5 每人 30 张/天（每日 4 点重置） · V5 每人 11 张"}
+{"in":{"fn":"quota_notice","args":[-3,{"each":11,"global":0},40],"kwargs":{"today":"2027-03-09","review":{},"reset_hour":7,"anlas":0}},"out":"今日额度：V4.5 每人 -3 张/天（每日 7 点重置） · V5 每人 11 张"}
+{"in":{"fn":"quota_notice","args":[-3,{"each":3,"global":97},5],"kwargs":{"today":"2026-12-31","review":null,"reset_hour":7,"anlas":0}},"out":"今日额度：V4.5 每人 -3 张/天（每日 7 点重置） · V5 每人 3 张"}
+{"in":{"fn":"quota_notice","args":[100,{"each":10,"global":100},90],"kwargs":{"today":"2026-01-02","review":null,"reset_hour":15,"anlas":-5}},"out":"今日额度：V4.5 每人 100 张/天（每日 15 点重置） · V5 每人 10 张（全站今日共 100 张，先到先得）"}
+{"in":{"fn":"quota_notice","args":[30,{"each":9,"global":0},30],"kwargs":{"today":"2026-12-31","review":{"from":[150],"to":[150],"reasons":[]},"reset_hour":2,"anlas":0}},"out":"今日额度：V4.5 每人 30 张/天（每日 2 点重置） · V5 每人 9 张"}
+{"in":{"fn":"quota_notice","args":[-3,{},78],"kwargs":{"today":"2027-03-09","review":null,"reset_hour":7,"anlas":0}},"out":"今日额度：V4.5 每人 -3 张/天（每日 7 点重置） · V5 每人 0 张"}
+{"in":{"fn":"quota_notice","args":[150,{},14],"kwargs":{"today":"2026-10-14","review":{"from":[175],"to":[175],"reasons":[]},"reset_hour":7,"anlas":1}},"out":"今日额度：V4.5 每人 150 张/天（每日 7 点重置） · V5 每人 0 张 · Anlas 每人 1/天"}
+{"in":{"fn":"quota_notice","args":[125,{},14],"kwargs":{"today":"2026-10-14","review":null,"reset_hour":5,"anlas":0}},"out":"今日额度：V4.5 每人 125 张/天（每日 5 点重置） · V5 每人 0 张"}
+{"in":{"fn":"quota_notice","args":[126,{},14],"kwargs":{"today":"2026-01-02","review":null,"reset_hour":10,"anlas":-5}},"out":"今日额度：V4.5 每人 126 张/天（每日 10 点重置） · V5 每人 0 张"}
+{"in":{"fn":"quota_notice","args":[126,{},30],"kwargs":{"today":"2026-10-14","review":null,"reset_hour":7,"anlas":-5}},"out":"今日额度：V4.5 每人 126 张/天（每日 7 点重置） · V5 每人 0 张"}
+{"in":{"fn":"quota_notice","args":[127,{"each":18,"global":5},5],"kwargs":{"today":"2026-12-31","review":{},"reset_hour":17,"anlas":0}},"out":"今日额度：V4.5 每人 127 张/天（每日 17 点重置） · V5 每人 18 张（全站今日共 5 张，先到先得）"}
+{"in":{"fn":"quota_notice","args":[0,{"each":11,"global":130},5],"kwargs":{"today":"2026-12-31","review":{},"reset_hour":18,"anlas":0}},"out":"今日额度：V4.5 每人 0 张/天（每日 18 点重置） · V5 每人 11 张"}
+{"in":{"fn":"quota_notice","args":[30,{"each":0,"global":260},5],"kwargs":{"today":"2027-03-09","review":{"reasons":["x"]},"reset_hour":7,"anlas":0}},"out":"今日额度：V4.5 每人 30 张/天（每日 7 点重置） · V5 每人 0 张"}
+{"in":{"fn":"quota_notice","args":[150,{"each":30,"global":130},1],"kwargs":{"today":"2026-01-02","review":null,"reset_hour":9,"anlas":0}},"out":"今日额度：V4.5 每人 150 张/天（每日 9 点重置） · V5 每人 30 张"}
+{"in":{"fn":"quota_notice","args":[150,{"each":18.5,"global":260},0],"kwargs":{"today":"2026-10-14","review":{"from":[150],"to":[200],"reasons":["甲","乙"]},"reset_hour":3,"anlas":0}},"out":"10月14日 算法调整：甲；乙。今日额度：V4.5 每人 150 张/天（每日 3 点重置） · V5 每人 18 张"}
+{"in":{"fn":"quota_notice","args":[-3,{"each":23,"global":260},40],"kwargs":{"today":"2026-01-02","review":null,"reset_hour":13,"anlas":50}},"out":"今日额度：V4.5 每人 -3 张/天（每日 13 点重置） · V5 每人 23 张（全站今日共 260 张，先到先得） · Anlas 每人 50/天"}
+{"in":{"fn":"quota_notice","args":[127,{"each":30,"global":5},1],"kwargs":{"today":"2026-01-02","review":null,"reset_hour":6,"anlas":50}},"out":"今日额度：V4.5 每人 127 张/天（每日 6 点重置） · V5 每人 30 张（全站今日共 5 张，先到先得） · Anlas 每人 50/天"}
+{"in":{"fn":"quota_notice","args":[300,{"each":30,"global":5},30],"kwargs":{"today":"2026-01-02","review":null,"reset_hour":17,"anlas":25}},"out":"今日额度：V4.5 每人 300 张/天（每日 17 点重置） · V5 每人 30 张（全站今日共 5 张，先到先得） · Anlas 每人 25/天"}
+{"in":{"fn":"quota_notice","args":[0,{"each":9,"global":589},0],"kwargs":{"today":"2026-01-02","review":{"from":[100],"to":[100],"reasons":[]},"reset_hour":7,"anlas":50}},"out":"今日额度：V4.5 每人 0 张/天（每日 7 点重置） · V5 每人 9 张 · Anlas 每人 50/天"}
+{"in":{"fn":"quota_notice","args":[300,{"each":9,"global":260},40],"kwargs":{"today":"2026-10-14","review":null,"reset_hour":21,"anlas":50}},"out":"今日额度：V4.5 每人 300 张/天（每日 21 点重置） · V5 每人 9 张（全站今日共 260 张，先到先得） · Anlas 每人 50/天"}
+{"in":{"fn":"quota_notice","args":[108,{},1],"kwargs":{"today":"2027-03-09","review":null,"reset_hour":5,"anlas":-5}},"out":"今日额度：V4.5 每人 108 张/天（每日 5 点重置） · V5 每人 0 张"}
+{"in":{"fn":"quota_notice","args":[-3,{"each":0.0,"global":130},14],"kwargs":{"today":"2026-12-31","review":null,"reset_hour":15,"anlas":25}},"out":"今日额度：V4.5 每人 -3 张/天（每日 15 点重置） · V5 每人 0 张 · Anlas 每人 25/天"}
+{"in":{"fn":"quota_notice","args":[0,{"each":11.0,"global":100},24],"kwargs":{"today":"2026-12-31","review":null,"reset_hour":11,"anlas":25}},"out":"今日额度：V4.5 每人 0 张/天（每日 11 点重置） · V5 每人 11 张（全站今日共 100 张，先到先得） · Anlas 每人 25/天"}
+{"in":{"fn":"quota_notice","args":[30,{"each":0,"global":5},38],"kwargs":{"today":"2026-01-02","review":null,"reset_hour":6,"anlas":0}},"out":"今日额度：V4.5 每人 30 张/天（每日 6 点重置） · V5 每人 0 张"}
+{"in":{"fn":"quota_notice","args":[126,{},40],"kwargs":{"today":"2026-12-31","review":{},"reset_hour":5,"anlas":-5}},"out":"今日额度：V4.5 每人 126 张/天（每日 5 点重置） · V5 每人 0 张"}
+{"in":{"fn":"quota_notice","args":[-3,{},14],"kwargs":{"today":"2026-10-14","review":{},"reset_hour":14,"anlas":1}},"out":"今日额度：V4.5 每人 -3 张/天（每日 14 点重置） · V5 每人 0 张 · Anlas 每人 1/天"}
+{"in":{"fn":"quota_notice","args":[-3,{"each":3,"global":100},5],"kwargs":{"today":"2026-10-14","review":null,"reset_hour":19,"anlas":-5}},"out":"今日额度：V4.5 每人 -3 张/天（每日 19 点重置） · V5 每人 3 张"}
+{"in":{"fn":"quota_notice","args":[300,{"each":14,"global":0},93],"kwargs":{"today":"2026-12-31","review":{"from":[100],"to":[100],"reasons":[]},"reset_hour":11,"anlas":0}},"out":"今日额度：V4.5 每人 300 张/天（每日 11 点重置） · V5 每人 14 张"}
+{"in":{"fn":"quota_notice","args":[187,{"each":30,"global":130},50],"kwargs":{"today":"2026-12-31","review":{"from":[175],"to":[100],"reasons":["每人每天 150 张。还有余量"]},"reset_hour":6,"anlas":25}},"out":"12月31日 算法调整：每人每天 150 张。还有余量。今日额度：V4.5 每人 187 张/天（每日 6 点重置） · V5 每人 30 张（全站今日共 130 张，先到先得） · Anlas 每人 25/天"}
+{"in":{"fn":"quota_notice","args":[0,{"each":3,"global":5},30],"kwargs":{"today":"2026-10-14","review":null,"reset_hour":7,"anlas":0}},"out":"今日额度：V4.5 每人 0 张/天（每日 7 点重置） · V5 每人 3 张（全站今日共 5 张，先到先得）"}
+{"in":{"fn":"quota_notice","args":[41,{"each":9,"global":0},30],"kwargs":{"today":"2026-12-31","review":null,"reset_hour":19,"anlas":0}},"out":"今日额度：V4.5 每人 41 张/天（每日 19 点重置） · V5 每人 9 张"}
+{"in":{"fn":"quota_notice","args":[0,{"each":0,"global":100},1],"kwargs":{"today":"2027-03-09","review":null,"reset_hour":7,"anlas":-5}},"out":"今日额度：V4.5 每人 0 张/天（每日 7 点重置） · V5 每人 0 张"}
+{"in":{"fn":"quota_notice","args":[30,{"each":0,"global":0},5],"kwargs":{"today":"2026-10-14","review":null,"reset_hour":7,"anlas":0}},"out":"今日额度：V4.5 每人 30 张/天（每日 7 点重置） · V5 每人 0 张"}
+{"in":{"fn":"quota_notice","args":[0,{"each":3,"global":123},0],"kwargs":{"today":"2026-10-14","review":null,"reset_hour":7,"anlas":0}},"out":"今日额度：V4.5 每人 0 张/天（每日 7 点重置） · V5 每人 3 张"}
+{"in":{"fn":"quota_notice","args":[0,{"each":0,"global":0},5],"kwargs":{"today":"2026-10-14","review":null,"reset_hour":23,"anlas":0}},"out":"今日额度：V4.5 每人 0 张/天（每日 23 点重置） · V5 每人 0 张"}
+{"in":{"fn":"quota_notice","args":[150,{"each":null,"global":null},1],"kwargs":{"today":"2026-12-31","review":{},"reset_hour":5,"anlas":0}},"out":"今日额度：V4.5 每人 150 张/天（每日 5 点重置） · V5 每人 0 张"}
+{"in":{"fn":"quota_notice","args":[127,{},30],"kwargs":{"today":"2027-03-09","review":null,"reset_hour":7,"anlas":-5}},"out":"今日额度：V4.5 每人 127 张/天（每日 7 点重置） · V5 每人 0 张"}
+{"in":{"fn":"quota_notice","args":[0,{"each":18,"global":5},5],"kwargs":{"today":"2026-01-02","review":{},"reset_hour":7,"anlas":50}},"out":"今日额度：V4.5 每人 0 张/天（每日 7 点重置） · V5 每人 18 张（全站今日共 5 张，先到先得） · Anlas 每人 50/天"}
+{"in":{"fn":"quota_notice","args":[0,{"each":9,"global":5},40],"kwargs":{"today":"2026-12-31","review":{"reasons":["x"]},"reset_hour":0,"anlas":50}},"out":"今日额度：V4.5 每人 0 张/天（每日 0 点重置） · V5 每人 9 张（全站今日共 5 张，先到先得） · Anlas 每人 50/天"}
+{"in":{"fn":"quota_notice","args":[0,{"each":3,"global":100},0],"kwargs":{"today":"2026-12-31","review":{"from":[100],"to":[175],"reasons":[]},"reset_hour":0,"anlas":1}},"out":"12月31日 算法调整：。今日额度：V4.5 每人 0 张/天（每日 0 点重置） · V5 每人 3 张 · Anlas 每人 1/天"}
+{"in":{"fn":"quota_notice","args":[0,{},1],"kwargs":{"today":"2026-12-31","review":{"from":[150],"to":[175],"reasons":[]},"reset_hour":0,"anlas":0}},"out":"12月31日 算法调整：。今日额度：V4.5 每人 0 张/天（每日 0 点重置） · V5 每人 0 张"}
+{"in":{"fn":"quota_notice","args":[126,{"each":11,"global":130},79],"kwargs":{"today":"2026-10-14","review":{"reasons":["x"]},"reset_hour":8,"anlas":0}},"out":"今日额度：V4.5 每人 126 张/天（每日 8 点重置） · V5 每人 11 张（全站今日共 130 张，先到先得）"}
