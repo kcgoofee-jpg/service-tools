@@ -1013,7 +1013,6 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "clap",
- "flate2",
  "futures",
  "gate-core",
  "gate-db",
@@ -1053,8 +1052,6 @@ dependencies = [
 name = "gate-snapshot"
 version = "3.0.0"
 dependencies = [
- "fancy-regex",
- "flate2",
  "serde_json",
 ]
 

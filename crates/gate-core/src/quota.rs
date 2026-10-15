@@ -7,7 +7,7 @@
 //! 旧版 `run(state)` 把数据库查询和决策混在一起。这里拆成：
 //! - 纯函数（`water_fill` / `simple` / `choose_rate` / `v5_plan` / `quota_notice` /
 //!   `day_coverage` / `yesterday_stats` / `v5_used_equiv` / `quiet_recovery` / `allowance_summary` …），
-//!   每个都有 golden 对拍；
+//!   每个都有快照测试；
 //! - 决策核心 [`decide`]：`QuotaInputs`（`run` 读到的一切）→ `QuotaOutputs`（`run` 做的每一次写入，
 //!   按发生顺序，设置值是**精确字符串**）。服务层只负责「按下面的清单取数 → 调 `decide` → 按顺序执行 `effects`」。
 //!
@@ -119,7 +119,7 @@ pub const SETTING_KEYS_READ: [&str; 11] = [
 // 错误与副作用
 // ---------------------------------------------------------------------------
 
-/// 旧版会抛出的异常（只区分 golden 里记录的类型名）。
+/// 旧版会抛出的异常（只区分类型名）。
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DecideError {
     #[error("ValueError: {0}")]

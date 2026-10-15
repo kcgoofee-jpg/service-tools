@@ -1,6 +1,6 @@
 //! 核心策略：Opus 免费档判定、Anlas 估算、参数钳制（移植自 `app/policy.py`；文本生成部分已随文本接口删除）。
 //!
-//! 行为与旧 Python 逐字一致，对拍夹具见 `tests/golden/policy/`。要点：
+//! 行为与旧 Python 逐字一致，快照见 `tests/snapshots/policy/`。要点：
 //! - 请求体是任意 JSON（`serde_json::Value`，保序）；会转发给上游的 body，键顺序与 Python dict 完全一致；
 //! - 原地修改入参的函数（`normalize_image_request` / `fix_name_digit_weights` / `sanitize_and_translate_prompts`）
 //!   取 `&mut Value`；Python 里「浅拷贝后改副本」的函数（`clamp_*` / `fill_v4_prompt` / `medium_normalize` /

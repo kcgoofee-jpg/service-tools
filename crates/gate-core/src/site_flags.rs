@@ -117,7 +117,7 @@ pub static REGISTER_OPEN: Spec = spec(
     "register_open",
     Kind::Flag,
     SpecDefault::Bool(false),
-    "modules / registration",
+    "registration",
     "开放 /register 领取",
 );
 /// 动态额度每轮写入；没设过按 150。2.x 的默认值取环境变量 `GLOBAL_DAILY_V5`，3.0 删了这个环境变量。

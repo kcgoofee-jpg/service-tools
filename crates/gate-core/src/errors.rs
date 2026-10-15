@@ -12,7 +12,7 @@
 //! 该自动关闭（[`auto_resolve_reason`]）。I/O 在 gate-db（查询 / 更新）与 gate-server（`bugs.rs`、维护循环）。
 //!
 //! 特征码 = `sha1(basis)` 的前 12 个十六进制字符。SHA-1 在这里只是去重用的指纹，不涉及安全，
-//! 所以用一个自带的小实现（工作区依赖里没有 sha1），并用 golden 对拍保证与 `hashlib.sha1` 一致。
+//! 所以用一个自带的小实现（工作区依赖里没有 sha1），上线期间与 `hashlib.sha1` 逐条对拍过。
 
 use crate::pyc;
 

@@ -8,7 +8,7 @@
 //!
 //! 调用点（出图成功后的后台任务、后台画廊接口）不在这里。
 //!
-//! 与旧版一致的怪癖（都是故意的，见 golden 夹具 `tests/fixtures/audit_*.jsonl*`）：
+//! 与旧版一致的怪癖（都是故意的，见快照 `tests/snapshots/audit/`）：
 //! - 请求体里字段类型不对时，旧版直接对它 `.get(...)` / 迭代，抛 `AttributeError` / `TypeError`，
 //!   调用方（`audit_generation`）把整条记录丢掉并记一条 bug。所以 [`capture_prompts`] 返回 `PyResult`，
 //!   调用方要照样处理 `Err`（丢掉这次记录、记 bug），不能当成「没有提示词」；

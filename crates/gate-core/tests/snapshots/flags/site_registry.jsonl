@@ -1,6 +1,6 @@
 {"in":{"fn":"spec","key":"member_sweep"},"out":{"key":"member_sweep","kind":"flag","default":true,"owner":"registration","doc":"退群回收：每人每天核对一次是否还在服务器，不在就删 Key","lo":null,"hi":null,"choices":[],"env":""}}
 {"in":{"fn":"spec","key":"issue_hourly_cap"},"out":{"key":"issue_hourly_cap","kind":"int","default":12,"owner":"registration","doc":"每小时最多发放的新 Key","lo":0,"hi":500,"choices":[],"env":""}}
-{"in":{"fn":"spec","key":"register_open"},"out":{"key":"register_open","kind":"flag","default":false,"owner":"modules / registration","doc":"开放 /register 领取","lo":null,"hi":null,"choices":[],"env":""}}
+{"in":{"fn":"spec","key":"register_open"},"out":{"key":"register_open","kind":"flag","default":false,"owner":"registration","doc":"开放 /register 领取","lo":null,"hi":null,"choices":[],"env":""}}
 {"in":{"fn":"spec","key":"global_daily_v5"},"out":{"key":"global_daily_v5","kind":"int","default":150,"owner":"额度 / 首页 / 客户端","doc":"全站每日 V5 张数（0 = 不限）","lo":0,"hi":100000,"choices":[],"env":""}}
 {"in":{"fn":"spec","key":"global_daily_anlas"},"out":{"key":"global_daily_anlas","kind":"int","default":200,"owner":"额度 / Vibe PVP","doc":"全站每日 Anlas 额度（0 = 不开放 Vibe；Vibe PVP 抢额度）","lo":0,"hi":100000,"choices":[],"env":""}}
 {"in":{"fn":"spec","key":"global_monthly_anlas"},"out":{"key":"global_monthly_anlas","kind":"float","default":10000.0,"owner":"额度 / Anlas 池","doc":"全站每月 Anlas 预算（0 = 不限）","lo":0,"hi":1000000,"choices":[],"env":""}}

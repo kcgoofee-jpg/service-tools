@@ -192,7 +192,7 @@ pub fn setting_key(name: &str) -> String {
     format!("guard_{name}")
 }
 
-/// Python 异常的类型（golden 只对拍类型）。
+/// Python 异常的类型（测试只比对类型）。
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum GuardError {
     #[error("ValueError: {0}")]

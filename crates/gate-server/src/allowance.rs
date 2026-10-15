@@ -1,5 +1,5 @@
 //! V5 官方免费额度缓存的 IO 层（旧版 `app/allowance.py` 的 `AllowanceCache`）。判定逻辑在
-//! `gate_core::allowance::AllowanceCore`（golden 对拍过）；这里负责按账号串行、读阈值、请求订阅接口、
+//! `gate_core::allowance::AllowanceCore`（纯逻辑）；这里负责按账号串行、读阈值、请求订阅接口、
 //! 回写恢复周期读数；额度偏低时写一行日志（后台「上游」页另有「低」标记）。
 //!
 //! 只有真实的出图请求会刷新缓存（订阅接口本身不消耗额度，但频繁查询像机器人）。

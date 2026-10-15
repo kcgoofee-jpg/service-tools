@@ -45,7 +45,7 @@ pub enum JsonError {
 }
 
 impl JsonError {
-    /// 对应的 Python 异常类型名（golden 夹具里记录的 `err.type`）。
+    /// 对应的 Python 异常类型名（Python `json.loads` 抛出的异常类型）。
     pub fn py_type(&self) -> &'static str {
         match self {
             JsonError::Syntax => "JSONDecodeError",

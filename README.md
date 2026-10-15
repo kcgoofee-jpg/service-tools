@@ -61,15 +61,17 @@ cd web && pnpm vite                         # 前端热更新 :5173，接口代�
 
 ```bash
 cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace                      # 单元、golden 对拍（冻结的 2.x 输出）、集成（假上游）
+cargo test --workspace                      # 单元、快照、手写规则测试、集成（假上游）
 cd web && pnpm biome check . && pnpm tsc --noEmit && pnpm vitest run
 cd web && E2E_BASE=http://localhost:5174 pnpm exec playwright test   # 先跑 cargo xtask dev 和 vite --port 5174
 tools/ci/check-fixtures.sh                  # 公开仓库红线：夹具只许合成数据
 ```
 
 `web/e2e/layout.spec.ts` 是排版硬规则：各宽度下不许出现「最后一行只剩一两个字」、同一行控件必须等高对齐。
-2.x 的 Python 代码、pytest 和生成 golden 夹具的脚本都在 git 标签 `py-final` 里；行为有意改动时写进
-[CHANGELOG.md](CHANGELOG.md)。
+快照测试：输入与当前输出存在各 crate 的 `tests/snapshots/**/*.jsonl`，一行一例。行为有意改动时跑
+`UPDATE_SNAPSHOT=1 cargo test -p <crate> --test <名字>` 重写快照，在 PR 里写明改了哪些快照、为什么；CI 不许更新快照。
+行为改动同时写进 [CHANGELOG.md](CHANGELOG.md)。2.x 的 Python 代码和上线期间的逐位对拍夹具在 git 标签 `py-final`、
+`v3-deviations-final` 里。
 
 ## 文档
 

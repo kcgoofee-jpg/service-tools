@@ -724,7 +724,7 @@ async fn client_error(State(state): State<AppState>, req: Request) -> Response {
 
 // ------------------------------------------------------------------ 客户端兼容视图（/user/*）
 
-/// 虚拟订阅视图：数字由 gate_core 算（纯函数，golden 对拍过），这里只负责把库里的数查好。
+/// 虚拟订阅视图：数字由 gate_core 算（纯函数），这里只负责把库里的数查好。
 async fn subscription(state: &AppState, key: &Key) -> Result<Value, InternalError> {
     let (day, month) = (state.day(), state.month());
     let data = gate_core::client_views::SubscriptionData {

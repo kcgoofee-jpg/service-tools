@@ -1,30 +1,20 @@
-//! 测试用的快照与旧 golden 夹具工具。
+//! 测试快照：把当前 Rust 输出存成 `tests/snapshots/<套件>/<名字>.jsonl`，一行一个用例 `{"in": ..., "out": ...}`。
 //!
-//! - [`snapshot`]：对当前 Rust 输出的快照（`tests/snapshots/**/*.jsonl`，`UPDATE_SNAPSHOT=1` 更新），第四批起新套件都用它；
-//! - [`convert`]：把旧夹具一次性转成快照时用的抽样和红线过滤（`#[doc(hidden)]`，转换完成后随旧 API 一起删除）；
-//! - 本文件里的 `load` / `Case` / `diff` / `assert_eq_py*` 等旧 API：读取旧 Python 生成的 golden 夹具并按 Python 语义比较，
-//!   各套件快照化之后删除。
+//! - [`snapshot`]：`check` / `Suite`，默认模式逐行比对，`UPDATE_SNAPSHOT=1` 重写（CI 里禁止更新）；
+//! - 本文件：用例 [`Case`]（数据来自 `"in"`）、JSON 差异定位 [`diff`]、特殊浮点编码 [`f`] / [`as_f64`]。
 //!
-//! # 旧 golden 夹具
-//!
-//! 夹具由旧 Python 代码生成（3.0 上线后 Python 已整体删除，生成脚本和旧代码都在
-//! git 标签 `py-final` 里；夹具从此冻结，不再重新生成——行为有意改动时，在测试里把期望侧对应部分去掉并注明
-//! 原因）。一行一个用例：
-//! `{"fn": "...", "args": [...], "kwargs": {...}, "out": ..., "err": null | {"type": "...", "msg": "..."}}`
-//! 另可带 `"after": {...}`（原地修改型函数：调用后的入参）与 `"note"`。
-//!
-//! 编码约定（与 py-final 标签里生成脚本的 `enc()` 一一对应）：
-//! - int → JSON 整数，float → 带小数点或指数的 JSON 数（Python repr），二者类型不混；
+//! 编码约定：
+//! - int → JSON 整数，float → 带小数点或指数的 JSON 数，二者类型不混；
 //! - 非有限浮点 → `{"$f": "inf" | "-inf" | "nan"}`；
-//! - bytes → `{"$b": "<base64>"}`；tuple / set / frozenset → 列表（set 已排序）；
+//! - bytes → `{"$b": "<base64>"}`；
 //! - dict 的非 str 键 → `{"$map": [[k, v], ...]}`。
+//!
+//! 3.0 上线期间这里还有一套读 2.x Python 冻结夹具、按 Python 语义比对的 golden API，第四批对拍退役后删除
+//! （生成脚本和旧代码在 git 标签 `py-final`，逐条偏差表在标签 `v3-deviations-final`）。
 
-#[doc(hidden)]
-pub mod convert;
 pub mod snapshot;
 
 use serde_json::Value;
-use std::path::{Path, PathBuf};
 
 /// 一个用例。
 #[derive(Debug, Clone)]
@@ -71,38 +61,6 @@ impl Case {
     pub fn get(&self, key: &str) -> Option<&Value> {
         self.raw.get(key)
     }
-}
-
-/// 夹具根目录：`crates/gate-core/tests/golden`（相对调用方 crate 的 CARGO_MANIFEST_DIR）。
-pub fn dir(manifest_dir: &str) -> PathBuf {
-    Path::new(manifest_dir).join("tests").join("golden")
-}
-
-/// 读取 `<dir>/<name>.jsonl`（或压缩后的 `<name>.jsonl.gz`）的全部用例；文件不存在直接 panic（夹具必须入库）。
-pub fn load(manifest_dir: &str, name: &str) -> Vec<Case> {
-    let base = dir(manifest_dir).join(format!("{name}.jsonl"));
-    let gz = dir(manifest_dir).join(format!("{name}.jsonl.gz"));
-    let (path, text) = if gz.exists() {
-        let file =
-            std::fs::File::open(&gz).unwrap_or_else(|e| panic!("读不到夹具 {}: {e}", gz.display()));
-        let mut text = String::new();
-        std::io::Read::read_to_string(&mut flate2::read::GzDecoder::new(file), &mut text)
-            .unwrap_or_else(|e| panic!("解压夹具 {} 失败: {e}", gz.display()));
-        (gz, text)
-    } else {
-        let text = std::fs::read_to_string(&base)
-            .unwrap_or_else(|e| panic!("读不到夹具 {}: {e}", base.display()));
-        (base, text)
-    };
-    text.lines()
-        .enumerate()
-        .filter(|(_, l)| !l.trim().is_empty())
-        .map(|(i, l)| Case {
-            line: i + 1,
-            raw: serde_json::from_str(l)
-                .unwrap_or_else(|e| panic!("{}:{} 不是合法 JSON: {e}", path.display(), i + 1)),
-        })
-        .collect()
 }
 
 /// 解码特殊浮点：`{"$f": "inf"}` → f64。普通数字原样返回。
@@ -190,22 +148,6 @@ pub fn diff(actual: &Value, expected: &Value, ordered: bool) -> Option<String> {
         }
     }
     walk(actual, expected, "$", ordered)
-}
-
-/// 断言相等；失败时带上用例行号和输入。
-#[track_caller]
-pub fn assert_eq_py(case: &Case, actual: &Value, expected: &Value) {
-    if let Some(d) = diff(actual, expected, false) {
-        panic!("golden 第 {} 行不一致：{d}\n输入：{}", case.line, case.raw);
-    }
-}
-
-/// 断言相等且对象键顺序一致。
-#[track_caller]
-pub fn assert_eq_py_ordered(case: &Case, actual: &Value, expected: &Value) {
-    if let Some(d) = diff(actual, expected, true) {
-        panic!("golden 第 {} 行不一致：{d}\n输入：{}", case.line, case.raw);
-    }
 }
 
 /// 把 f64 编成与夹具同样的 JSON（非有限值用 `$f` 标记）。

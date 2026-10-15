@@ -58,7 +58,6 @@ tokio = { workspace = true, features = ["test-util"] }
 gate-testkit = { path = "../gate-testkit" }
 gate-snapshot = { path = "../gate-snapshot" }
 tempfile = "3"
-flate2 = "1"
 rmpv.workspace = true
 
 [lints]
