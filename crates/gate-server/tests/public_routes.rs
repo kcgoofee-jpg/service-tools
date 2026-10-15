@@ -744,18 +744,7 @@ async fn user_compat_routes_require_key_and_keep_panel_schema() {
     }
 
     // 用掉的 V5 体现在 v5LeftToday 里
-    e.state
-        .db
-        .bump_counters(
-            1,
-            &e.state.day(),
-            &gate_db::repo::counters::CounterDelta {
-                v5: 3,
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
+    common::add_usage(&e.state.db, 1, &e.state.day(), 3, 0.0).await;
     let (_, body) = get("/user/subscription").await;
     assert_eq!(json_of(&body)["naiGate"]["v5LeftToday"], 7);
 

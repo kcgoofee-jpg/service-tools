@@ -237,13 +237,4 @@ impl Db {
         })
         .await
     }
-
-    /// 删除 30 天前的状态码统计。
-    pub async fn purge_status_hourly(&self, before_hour: i64) -> Result<()> {
-        self.write(move |tx| {
-            tx.execute("DELETE FROM status_hourly WHERE hour<?", [before_hour])?;
-            Ok(())
-        })
-        .await
-    }
 }

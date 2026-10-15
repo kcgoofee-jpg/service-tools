@@ -54,7 +54,6 @@ struct Inner {
     rule_version: RwLock<String>,
     writer: std::sync::mpsc::SyncSender<Job>,
     readers: Mutex<Vec<Connection>>,
-    reader_count: usize,
     /// 测试 / 对拍用：开启后按发生顺序记下每一次对 `site_settings` 的写入（见 [`SettingWrite`]）。
     setting_log: Mutex<Option<Vec<SettingWrite>>>,
 }
@@ -124,7 +123,6 @@ impl Db {
                 image_dir,
                 rule_version: RwLock::new(String::new()),
                 writer: tx,
-                reader_count: pool.len(),
                 readers: Mutex::new(pool),
                 setting_log: Mutex::new(None),
             }),
@@ -253,11 +251,6 @@ impl Db {
         })
         .await
         .map_err(|_| DbError::ReaderPanicked)?
-    }
-
-    /// 读连接数量（测试与诊断用）。
-    pub fn reader_count(&self) -> usize {
-        self.inner.reader_count
     }
 }
 

@@ -125,12 +125,7 @@ async fn idle_recycle_switched_off_never_deletes_anything() {
     assert!(key_exists(&e, 1).await && key_exists(&e, 2).await);
     settle().await;
     assert!(
-        e.state
-            .db
-            .list_admin_actions(10, 0)
-            .await
-            .unwrap()
-            .is_empty(),
+        common::admin_actions(&e.state.db, 10).await.is_empty(),
         "什么都没做就不该有操作日志"
     );
     assert!(discord.requests().is_empty(), "不删 Key 就不碰 Discord");
@@ -253,7 +248,7 @@ async fn idle_recycle_deletes_bans_and_logs_when_switched_on() {
         );
     }
     // 操作日志
-    let rows = e.state.db.list_admin_actions(10, 0).await.unwrap();
+    let rows = common::admin_actions(&e.state.db, 10).await;
     let del: Vec<&Value> = rows
         .iter()
         .filter(|r| r["action"] == "闲置回收 Key")

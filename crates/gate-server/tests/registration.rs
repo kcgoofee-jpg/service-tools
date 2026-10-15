@@ -267,7 +267,7 @@ fn user(id: &str) -> DiscordUser {
 }
 
 async fn actions(e: &Env) -> Vec<Value> {
-    let mut v = e.state.db.list_admin_actions(200, 0).await.unwrap();
+    let mut v = common::admin_actions(&e.state.db, 200).await;
     v.reverse();
     v
 }
@@ -2086,19 +2086,7 @@ async fn public_me_matches_legacy_and_coupons_work() {
     assert_eq!(me.2["coupons"][0]["by"], "奶妹");
     let use_path = format!("/public/me/coupons/{}/use", c.id);
     // 先用掉一些额度，确认用券会重置
-    e.state
-        .db
-        .bump_counters(
-            key_id,
-            &e.state.day(),
-            &gate_db::repo::counters::CounterDelta {
-                v5: 3,
-                anlas: 9.0,
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
+    common::add_usage(&e.state.db, key_id, &e.state.day(), 3, 9.0).await;
     let anon = parse(Call::new("POST", &use_path).send(&e.state).await);
     assert_eq!((anon.0, anon.2), (401, json!({"detail": "请先登录"})));
     let used = parse(

@@ -178,7 +178,7 @@ async fn quota_algo_put_saves_and_recomputes() {
     );
     // 后台操作日志：谁改了什么
     settle().await;
-    let rows = e.state.db.list_admin_actions(10, 0).await.unwrap();
+    let rows = common::admin_actions(&e.state.db, 10).await;
     assert!(
         rows.iter().any(|r| r["action"] == "修改动态额度参数"
             && r["target"] == "动态额度参数"
@@ -421,7 +421,7 @@ async fn modules_list_toggle_and_run() {
 
     // 操作日志：「模块 容量」这种对象名
     settle().await;
-    let rows = e.state.db.list_admin_actions(20, 0).await.unwrap();
+    let rows = common::admin_actions(&e.state.db, 20).await;
     assert!(
         rows.iter()
             .any(|r| r["action"] == "启用 / 关闭模块" && r["target"] == "模块 分配"),

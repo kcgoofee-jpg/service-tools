@@ -149,10 +149,7 @@ async fn snapshot(db: &Db, errors: bool) -> Value {
         .copied()
         .chain(errors.then_some(ERRORS_TABLE));
     for t in tables {
-        let rows = db
-            .execute_fetchall_compat(&format!("SELECT * FROM {t} ORDER BY rowid"), &[])
-            .await
-            .unwrap();
+        let rows = common::query(db, &format!("SELECT * FROM {t} ORDER BY rowid")).await;
         let rows: Vec<Value> = rows
             .into_iter()
             .map(|mut r| {

@@ -920,7 +920,7 @@ async fn admin_actions_are_logged() {
         .await;
     settle().await;
 
-    let rows = e.state.db.list_admin_actions(50, 0).await.unwrap();
+    let rows = common::admin_actions(&e.state.db, 50).await;
     let mut got: Vec<(String, String, bool, String)> = rows
         .iter()
         .filter(|r| r["action"] != "登录后台")

@@ -1,36 +1,12 @@
 //! 每日计数器、额度基线、全站汇总。
 
-use super::{PyMap, UPSERT_COUNTERS, marks};
+use super::{PyMap, marks};
 use crate::{Db, DbError, Result, value};
 use gate_core::{clock::Clock, pyc};
 use rusqlite::params;
 use serde::ser::SerializeMap;
 use serde::{Serialize, Serializer};
 use serde_json::Value;
-
-/// `bump_counters` 的增量（缺省值与旧版一致：requests 默认 1，其余 0）。
-#[derive(Debug, Clone, Copy)]
-pub struct CounterDelta {
-    pub images: i64,
-    pub anlas: f64,
-    pub text_tokens: i64,
-    pub requests: i64,
-    pub v5: i64,
-    pub legacy_free_images: i64,
-}
-
-impl Default for CounterDelta {
-    fn default() -> Self {
-        Self {
-            images: 0,
-            anlas: 0.0,
-            text_tokens: 0,
-            requests: 1,
-            v5: 0,
-            legacy_free_images: 0,
-        }
-    }
-}
 
 /// `get_counter` 的结果：已扣除「重置额度」基线后的当日用量。
 ///
@@ -134,28 +110,6 @@ pub struct Overview {
 }
 
 impl Db {
-    pub async fn bump_counters(&self, key_id: i64, day: &str, d: &CounterDelta) -> Result<()> {
-        let day = day.to_string();
-        let d = *d;
-        self.write(move |tx| {
-            tx.execute(
-                UPSERT_COUNTERS,
-                params![
-                    key_id,
-                    day,
-                    d.images,
-                    d.anlas,
-                    d.text_tokens,
-                    d.requests,
-                    d.v5,
-                    d.legacy_free_images
-                ],
-            )?;
-            Ok(())
-        })
-        .await
-    }
-
     pub async fn get_counter(&self, key_id: i64, day: &str) -> Result<Counter> {
         let day = day.to_string();
         self.read(move |c| {

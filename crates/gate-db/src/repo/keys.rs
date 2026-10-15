@@ -276,45 +276,6 @@ impl Db {
         .await
     }
 
-    /// 根据 key 字段与标签判断当前身份组（admin > test > invite > regular）。
-    /// `key` 是 `get_key` 返回的整行；`tags` 给了就不再查库。
-    pub async fn get_key_role(&self, key: &Value, tags: Option<&[String]>) -> Result<String> {
-        let field = |name: &str| key.as_object().and_then(|m| m.get(name));
-        if field("is_admin").is_some_and(pyval::truthy) {
-            return Ok(ROLE_ADMIN.into());
-        }
-        if field("is_test").is_some_and(pyval::truthy) {
-            return Ok(ROLE_TEST.into());
-        }
-        match tags {
-            Some(tags) => {
-                if tags.iter().any(|t| t == INVITE_TAG) {
-                    return Ok(ROLE_INVITE.into());
-                }
-            }
-            None => {
-                // 旧版 key["id"]：缺失时抛 IndexError
-                let id = field("id")
-                    .ok_or_else(|| DbError::Invalid("key 缺少 id 字段".into()))
-                    .and_then(json_to_sql)?;
-                let found = self
-                    .read(move |c| {
-                        c.query_row(
-                            "SELECT 1 FROM key_tags WHERE key_id=? AND tag=?",
-                            params![id, INVITE_TAG],
-                            |_| Ok(()),
-                        )
-                        .optional()
-                    })
-                    .await?;
-                if found.is_some() {
-                    return Ok(ROLE_INVITE.into());
-                }
-            }
-        }
-        Ok(ROLE_REGULAR.into())
-    }
-
     /// 原子切换账号身份组：regular / invite / test / admin。未知身份组在动库之前就报错。
     pub async fn set_key_role(&self, key_id: i64, role: &str, now: f64) -> Result<()> {
         let role = match role {

@@ -59,7 +59,7 @@ async fn login_session_and_action_log() {
     );
 
     settle().await;
-    let rows = e.state.db.list_admin_actions(10, 0).await.unwrap();
+    let rows = common::admin_actions(&e.state.db, 10).await;
     let actions: Vec<(String, bool)> = rows
         .iter()
         .map(|r| {

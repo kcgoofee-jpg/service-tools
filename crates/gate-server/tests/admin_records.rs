@@ -22,7 +22,7 @@ async fn ready() -> (Env, Admin) {
 }
 
 async fn rows(state: &AppState, sql: &str) -> Vec<Value> {
-    state.db.execute_fetchall_compat(sql, &[]).await.unwrap()
+    common::query(&state.db, sql).await
 }
 
 fn zip_files(blob: &[u8]) -> Vec<(String, Vec<u8>)> {

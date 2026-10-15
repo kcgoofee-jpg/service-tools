@@ -99,11 +99,8 @@ impl<'a> Api<'a> {
 
 /// `site_settings` 全部行。
 async fn settings(e: &Env) -> BTreeMap<String, String> {
-    e.state
-        .db
-        .execute_fetchall_compat("SELECT key, value FROM site_settings", &[])
+    common::query(&e.state.db, "SELECT key, value FROM site_settings")
         .await
-        .unwrap()
         .into_iter()
         .map(|r| {
             (
@@ -135,7 +132,7 @@ fn map(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
 
 /// 操作日志（旧→新）：(操作者, 操作, 对象, 详情, 成功?)。
 async fn actions(e: &Env) -> Vec<(String, String, String, String, bool)> {
-    let mut rows = e.state.db.list_admin_actions(200, 0).await.unwrap();
+    let mut rows = common::admin_actions(&e.state.db, 200).await;
     rows.reverse();
     rows.iter()
         .map(|r| {

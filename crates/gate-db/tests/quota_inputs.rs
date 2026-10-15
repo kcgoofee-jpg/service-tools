@@ -3,7 +3,7 @@
 use gate_db::Db;
 use gate_db::repo::keys::NewKey;
 use gate_db::repo::usage::NewLog;
-use serde_json::json;
+use serde_json::{Value, json};
 
 fn rejected(key_id: i64, reason: &str, detail: &str) -> NewLog {
     NewLog {
@@ -85,11 +85,13 @@ async fn upstream_counter_is_plain_image_count() {
         .await
         .unwrap();
     assert_eq!((c.images, c.v5), (5, 0));
-    let rows = db
-        .execute_fetchall_compat(
-            "SELECT images, units FROM upstream_token_counters WHERE token_id=?",
-            &[json!("token-synthetic")],
-        )
+    let rows: Vec<Value> = db
+        .read(|c| {
+            let mut stmt =
+                c.prepare("SELECT images, units FROM upstream_token_counters WHERE token_id=?")?;
+            stmt.query_map(["token-synthetic"], gate_db::value::row_json)?
+                .collect()
+        })
         .await
         .unwrap();
     assert_eq!(rows, vec![json!({"images": 5, "units": 5.0})]);

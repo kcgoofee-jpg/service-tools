@@ -24,7 +24,7 @@ async fn mk_key(state: &AppState, name: &str, token: &str) -> i64 {
 }
 
 async fn rows(state: &AppState, sql: &str) -> Vec<Value> {
-    state.db.execute_fetchall_compat(sql, &[]).await.unwrap()
+    common::query(&state.db, sql).await
 }
 
 async fn ready() -> (Env, Admin) {

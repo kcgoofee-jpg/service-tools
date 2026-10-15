@@ -26,7 +26,6 @@ pub mod feedback;
 pub mod guard;
 pub mod kernel;
 pub mod keys;
-pub mod misc;
 pub mod public;
 pub mod reconciliation;
 pub mod registration;

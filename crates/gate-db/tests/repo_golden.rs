@@ -7,7 +7,6 @@ use base64::{Engine, engine::general_purpose::STANDARD as B64};
 use gate_core::{clock::Clock, pyc, pyval};
 use gate_db::repo::{
     audit::NewAudit,
-    counters::CounterDelta,
     discord::BanInfo,
     feedback::Survey,
     keys::NewKey,
@@ -480,11 +479,6 @@ async fn call(db: &Db, c: &Case) -> Out {
             .await?;
             Value::Null
         }
-        "list_admin_actions" => json!(
-            db.list_admin_actions(int(a(0, "limit"), 30), int(a(1, "offset"), 0))
-                .await?
-        ),
-        "count_admin_actions" => json!(db.count_admin_actions().await?),
         "purge_admin_actions" => json!(db.purge_admin_actions(num(a(0, "older_than"), 0.0)).await?),
         // ---------------- discord
         "forget_registration_for_key" => {
@@ -543,17 +537,6 @@ async fn call(db: &Db, c: &Case) -> Out {
                     .await?
             )
         }
-        // ---------------- misc
-        "execute_fetchall_compat" => {
-            let args = a(1, "args")
-                .and_then(Value::as_array)
-                .cloned()
-                .unwrap_or_default();
-            json!(
-                db.execute_fetchall_compat(&s(a(0, "sql"), ""), &args)
-                    .await?
-            )
-        }
         // ---------------- keys
         "create_key" => {
             let nk: NewKey = serde_json::from_value(c.arg(0).clone())
@@ -584,32 +567,12 @@ async fn call(db: &Db, c: &Case) -> Out {
             db.touch_key(int(a(0, "key_id"), 0), now).await?;
             Value::Null
         }
-        "get_key_role" => {
-            let tags = match a(1, "tags") {
-                None | Some(Value::Null) => None,
-                Some(v) => Some(str_list(v)),
-            };
-            json!(db.get_key_role(c.arg(0), tags.as_deref()).await?)
-        }
         "set_key_role" => {
             db.set_key_role(int(a(0, "key_id"), 0), &s(a(1, "role"), ""), now)
                 .await?;
             Value::Null
         }
         // ---------------- counters
-        "bump_counters" => {
-            let d = CounterDelta {
-                images: int(a(2, "images"), 0),
-                anlas: num(a(3, "anlas"), 0.0),
-                text_tokens: int(a(4, "text_tokens"), 0),
-                requests: int(a(5, "requests"), 1),
-                v5: int(a(6, "v5"), 0),
-                legacy_free_images: int(a(7, "legacy_free_images"), 0),
-            };
-            db.bump_counters(int(a(0, "key_id"), 0), &s(a(1, "day"), ""), &d)
-                .await?;
-            Value::Null
-        }
         "get_counter" => js(&db
             .get_counter(int(a(0, "key_id"), 0), &s(a(1, "day"), ""))
             .await?),
@@ -775,16 +738,6 @@ async fn call(db: &Db, c: &Case) -> Out {
                 .await?;
             json!([rows, total])
         }
-        "list_audit" => {
-            let (rows, total) = db
-                .list_audit(
-                    int(a(0, "limit"), 0),
-                    int(a(1, "offset"), 0),
-                    opt_int(a(2, "key_id")),
-                )
-                .await?;
-            json!([rows, total])
-        }
         "audit_thumb" => blob(db.audit_thumb(int(a(0, "audit_id"), 0)).await?),
         "audit_image" => {
             let (data, ty) = db.audit_image(int(a(0, "audit_id"), 0)).await?;
@@ -866,7 +819,15 @@ fn last_image_at(tables: &Value, key_id: i64) -> Option<Value> {
 /// 已删除的方法：冻结夹具里还有它们的用例，逐条跳过。
 /// - `latest_member_clients`：每把 Key 最近一次请求的客户端（docs/v3-deviations.md #50）；
 /// - 其余：没有生产调用方的死代码（docs/v3-deviations.md #101）。
-const REMOVED_METHODS: [&str; 2] = ["latest_member_clients", "shadow_rows"];
+const REMOVED_METHODS: [&str; 7] = [
+    "latest_member_clients",
+    "shadow_rows",
+    "bump_counters",
+    "get_key_role",
+    "list_admin_actions",
+    "count_admin_actions",
+    "list_audit",
+];
 
 async fn run_case(case: &Case) {
     if case
@@ -962,7 +923,6 @@ area_tests!(
     admin_actions,
     discord,
     feedback,
-    misc,
     keys,
     counters,
     usage,

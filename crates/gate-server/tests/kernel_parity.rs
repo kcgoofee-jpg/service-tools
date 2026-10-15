@@ -518,30 +518,36 @@ mod v3 {
         autopilot_hours: Vec<String>,
     }
 
+    /// 一条按服务日过滤的聚合查询（只有一行），列名为键。
+    async fn row_of_day(db: &gate_db::Db, sql: &'static str, day: &str) -> Value {
+        let day = day.to_string();
+        db.read(move |c| c.query_row(sql, [&day], gate_db::value::row_json))
+            .await
+            .unwrap()
+    }
+
     /// 这些服务日里，旧版的复盘会按账号层面「`units` / `images`」折算 `used`（`units < images`）的，
     /// 以及 3.0 应得的实际张数（不含测试号、站长号的成员计数之和）。测试自己写 SQL 算，不用被测代码。
     pub async fn raw_used_days(db: &gate_db::Db, days: &[String]) -> HashMap<String, i64> {
         let mut out = HashMap::new();
         for day in days {
-            let up = db
-                .execute_fetchall_compat(
-                    "SELECT COALESCE(SUM(images),0) AS i, COALESCE(SUM(COALESCE(units, images)),0) AS u \
-                     FROM upstream_token_counters WHERE day=?",
-                    &[json!(day)],
-                )
-                .await
-                .unwrap();
-            let (i, u) = (up[0]["i"].as_f64().unwrap(), up[0]["u"].as_f64().unwrap());
+            let up = row_of_day(
+                db,
+                "SELECT COALESCE(SUM(images),0) AS i, COALESCE(SUM(COALESCE(units, images)),0) AS u \
+                 FROM upstream_token_counters WHERE day=?",
+                day,
+            )
+            .await;
+            let (i, u) = (up["i"].as_f64().unwrap(), up["u"].as_f64().unwrap());
             if i != 0.0 && u < i {
-                let used = db
-                    .execute_fetchall_compat(
-                        "SELECT COALESCE(SUM(c.images),0) AS n FROM counters c JOIN api_keys k ON k.id=c.key_id \
-                         WHERE c.day=? AND k.is_test=0 AND k.is_admin=0",
-                        &[json!(day)],
-                    )
-                    .await
-                    .unwrap();
-                out.insert(day.clone(), used[0]["n"].as_i64().unwrap());
+                let used = row_of_day(
+                    db,
+                    "SELECT COALESCE(SUM(c.images),0) AS n FROM counters c JOIN api_keys k ON k.id=c.key_id \
+                     WHERE c.day=? AND k.is_test=0 AND k.is_admin=0",
+                    day,
+                )
+                .await;
+                out.insert(day.clone(), used["n"].as_i64().unwrap());
             }
         }
         out

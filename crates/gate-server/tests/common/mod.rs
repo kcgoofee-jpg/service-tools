@@ -116,3 +116,39 @@ impl<'a> Call<'a> {
 pub async fn settle() {
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 }
+
+/// 测试里直接查库：一条只读 SELECT，取全部行（每行一个 JSON 对象，列名为键）。
+pub async fn query(db: &gate_db::Db, sql: &str) -> Vec<Value> {
+    let sql = sql.to_string();
+    db.read(move |c| {
+        let mut stmt = c.prepare(&sql)?;
+        stmt.query_map([], gate_db::value::row_json)?.collect()
+    })
+    .await
+    .unwrap()
+}
+
+/// 后台操作记录，最新的在前，最多 `limit` 条。
+pub async fn admin_actions(db: &gate_db::Db, limit: i64) -> Vec<Value> {
+    query(
+        db,
+        &format!("SELECT * FROM admin_actions ORDER BY id DESC LIMIT {limit}"),
+    )
+    .await
+}
+
+/// 给某把 Key 某一天的计数器直接加上 V5 张数与 Anlas（准备「已经用掉一些额度」的场景）。
+pub async fn add_usage(db: &gate_db::Db, key_id: i64, day: &str, v5: i64, anlas: f64) {
+    let day = day.to_string();
+    db.write(move |tx| {
+        tx.execute(
+            "INSERT INTO counters (key_id, day, requests, v5, anlas) VALUES (?, ?, 1, ?, ?) \
+             ON CONFLICT(key_id, day) DO UPDATE SET requests = requests + 1, \
+             v5 = v5 + excluded.v5, anlas = anlas + excluded.anlas",
+            (key_id, &day, v5, anlas),
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+}

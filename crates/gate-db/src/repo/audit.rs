@@ -225,7 +225,7 @@ impl Db {
         res
     }
 
-    /// 同 `list_audit`，但按多把 Key（同一成员重置 / 换 Key 后的历史）一起查；`key_ids` 为空表示不筛。
+    /// 生成记录分页，按多把 Key（同一成员重置 / 换 Key 后的历史）一起查；`key_ids` 为空表示不筛。
     pub async fn list_audit_ids(
         &self,
         limit: i64,
@@ -252,35 +252,6 @@ impl Db {
             let mut args: Vec<SqlValue> = key_ids.iter().map(|k| SqlValue::Integer(*k)).collect();
             args.push(SqlValue::Integer(limit));
             args.push(SqlValue::Integer(offset));
-            let rows = stmt
-                .query_map(rusqlite::params_from_iter(args.iter()), value::row_json)?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            Ok((rows, total))
-        })
-        .await
-    }
-
-    pub async fn list_audit(
-        &self,
-        limit: i64,
-        offset: i64,
-        key_id: Option<i64>,
-    ) -> Result<(Vec<Value>, i64)> {
-        self.read(move |c| {
-            let where_ = if key_id.is_some() { "WHERE key_id=?" } else { "" };
-            let mut args: Vec<SqlValue> = key_id.map(SqlValue::Integer).into_iter().collect();
-            let total: i64 = c.query_row(
-                &format!("SELECT COUNT(*) FROM generation_audit {where_}"),
-                rusqlite::params_from_iter(args.iter()),
-                |r| value::i64_or(r, 0, 0),
-            )?;
-            args.push(SqlValue::Integer(limit));
-            args.push(SqlValue::Integer(offset));
-            let mut stmt = c.prepare(&format!(
-                "SELECT id,ts,key_id,key_name,kind,model,status,prompt,negative,extra, \
-                        (thumb IS NOT NULL) AS has_thumb, (image IS NOT NULL OR image_file IS NOT NULL) AS has_image \
-                 FROM generation_audit {where_} ORDER BY id DESC LIMIT ? OFFSET ?"
-            ))?;
             let rows = stmt
                 .query_map(rusqlite::params_from_iter(args.iter()), value::row_json)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
