@@ -7,13 +7,12 @@
 //! 测试告警的 10 秒节流、运行期限制的写锁、Anlas 核对的互斥锁。
 
 use crate::audit::{audit_flags, audit_image_cap_mb, audit_image_keep_hours};
-use crate::auth::site_flag;
 use crate::env::RegistrationEnv;
 use crate::error::{ApiError, HttpError, InternalError};
 use crate::state::AppState;
 use gate_core::features::{self, FEATURES, GLOBAL_KEY};
 use gate_core::pyext::{self, PyErr};
-use gate_core::site_flags::{self, GLOBAL_DAILY_V5, REGISTER_OPEN};
+use gate_core::site_flags::{self, REGISTER_OPEN};
 use gate_core::{jsondump, pyc, pyval};
 use gate_db::{Db, DbError};
 use serde_json::{Map, Value, json};
@@ -175,27 +174,8 @@ pub async fn registration_settings_for(
     })
 }
 
-/// 名额 × 每人每日 V5 是否超过全站 V5 日限；超过时后来的人当天可能用不到 V5。全站日限不随名额自动变化。
-pub async fn v5_capacity(state: &AppState) -> Result<Value, DbError> {
-    let reg = registration_settings(state).await?;
-    let glob = site_flag(state, &GLOBAL_DAILY_V5).await?;
-    let glob_n = glob.as_i64().unwrap_or(0);
-    let (seats, per) = (reg.max_users, reg.daily_v5);
-    let need = if reg.image_scope == "all" && seats != 0 && per != 0 {
-        seats.saturating_mul(per)
-    } else {
-        0
-    };
-    let short = need != 0 && glob_n != 0 && need > glob_n;
-    let message = if short {
-        format!(
-            "名额 {seats} × 每人 V5 {per} = {need} 张/天，超过全站 V5 日限 {glob_n}：先用的人用满后，后面的人当天没有 V5。建议把全站 V5 调到 {need}，或降低每人 V5。"
-        )
-    } else {
-        String::new()
-    };
-    Ok(json!({"need": need, "global": glob, "short": short, "message": message}))
-}
+// 2.x 这里还有 `v5_capacity`（「名额 × 每人 V5 是否超过全站 V5 日限」的超卖提示）。额度是 PVP，
+// 每人上限只是上限，「名额 × 每人」本来就可以超过全站池；3.0 删除（docs/v3-deviations.md #69）。
 
 /// 占用名额的人数（旧版 `_active_count`，与实际名额检查同一口径）。
 pub async fn active_count(state: &AppState) -> Result<i64, DbError> {

@@ -379,21 +379,13 @@ async fn run_op(state: &AppState, svc: &RegistrationService, op: &Op<'_>) -> Api
             .collect();
             // 旧版这里的校验失败是未捕获的 ValueError（500）；`ops` 回 422 + 原因，机器人把 detail 原样转给管理员
             ops::set_registration(state, &body).await?;
-            let cap = ops::v5_capacity(state).await?;
-            let tip = if cap["short"].as_bool().unwrap_or(false) {
-                format!(
-                    "\n⚠ {}（全站 V5 在网页后台「设置」修改）",
-                    cap["message"].as_str().unwrap_or("")
-                )
-            } else {
-                String::new()
-            };
+            // 「名额 × 每人 V5 超过全站 V5 日限」的提醒已删除（docs/v3-deviations.md #69）
             let shown = if n == 0 {
                 "不限".to_string()
             } else {
                 n.to_string()
             };
-            message(format!("名额上限已设为 {shown}。{tip}"))
+            message(format!("名额上限已设为 {shown}。"))
         }
         "grant" => {
             let Some((_, label)) = features::FEATURES.iter().find(|(n, _)| *n == op.feature) else {

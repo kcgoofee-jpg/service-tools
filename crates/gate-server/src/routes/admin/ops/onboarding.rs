@@ -65,7 +65,6 @@ async fn snapshot(state: &AppState) -> Result<Value, ApiError> {
                 .map_or("", |r| r.reset_at.as_str())
         ),
     );
-    registration.insert("v5_capacity".into(), ops::v5_capacity(state).await?);
     let (prompts, thumbs, days) = audit_flags(&state.db, &state.env).await?;
     let labels: Map<String, Value> = FEATURES
         .iter()

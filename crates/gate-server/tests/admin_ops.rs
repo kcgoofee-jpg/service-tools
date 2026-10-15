@@ -241,7 +241,7 @@ async fn every_endpoint_needs_a_session_and_same_origin_writes() {
 
 // ------------------------------------------------------------------ 预算
 
-const SETTINGS_DEFAULT: &str = r#"{"global_monthly_anlas":10000.0,"global_daily_v5":150,"member_daily_anlas":50,"v5_alert_threshold":20,"v5_capacity":{"need":0,"global":150,"short":false,"message":""}}"#;
+const SETTINGS_DEFAULT: &str = r#"{"global_monthly_anlas":10000.0,"global_daily_v5":150,"member_daily_anlas":50,"v5_alert_threshold":20}"#;
 
 #[tokio::test]
 async fn settings_get_put_and_stored_strings() {
@@ -258,7 +258,7 @@ async fn settings_get_put_and_stored_strings() {
     assert_eq!(s, 200);
     assert_eq!(
         t,
-        r#"{"ok":true,"global_monthly_anlas":10000.0,"global_daily_v5":150,"member_daily_anlas":50,"v5_alert_threshold":20,"v5_capacity":{"need":0,"global":150,"short":false,"message":""}}"#
+        r#"{"ok":true,"global_monthly_anlas":10000.0,"global_daily_v5":150,"member_daily_anlas":50,"v5_alert_threshold":20}"#
     );
     assert_eq!(
         changed(&before, &settings(&e).await),
@@ -275,40 +275,40 @@ async fn settings_get_put_and_stored_strings() {
     let ok_cases: Vec<(Value, &str, [&str; 4])> = vec![
         (
             json!({"global_monthly_anlas": 5000, "global_daily_v5": 200, "member_daily_anlas": 40, "v5_alert_threshold": 30}),
-            r#"{"ok":true,"global_monthly_anlas":5000.0,"global_daily_v5":200,"member_daily_anlas":40,"v5_alert_threshold":30,"v5_capacity":{"need":0,"global":200,"short":false,"message":""}}"#,
+            r#"{"ok":true,"global_monthly_anlas":5000.0,"global_daily_v5":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
             ["5000.0", "200", "40", "30"],
         ),
         // 字符串数字也收（与旧版 float("1e3") 一致）
         (
             json!({"global_monthly_anlas": "1e3"}),
-            r#"{"ok":true,"global_monthly_anlas":1000.0,"global_daily_v5":200,"member_daily_anlas":40,"v5_alert_threshold":30,"v5_capacity":{"need":0,"global":200,"short":false,"message":""}}"#,
+            r#"{"ok":true,"global_monthly_anlas":1000.0,"global_daily_v5":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
             ["1000.0", "200", "40", "30"],
         ),
         // 0 被夹到下限：库里是整数 "0"，响应仍是请求值的浮点写法（旧版怪癖）
         (
             json!({"global_monthly_anlas": 0}),
-            r#"{"ok":true,"global_monthly_anlas":0.0,"global_daily_v5":200,"member_daily_anlas":40,"v5_alert_threshold":30,"v5_capacity":{"need":0,"global":200,"short":false,"message":""}}"#,
+            r#"{"ok":true,"global_monthly_anlas":0.0,"global_daily_v5":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
             ["0", "200", "40", "30"],
         ),
         (
             json!({"global_monthly_anlas": 1000000}),
-            r#"{"ok":true,"global_monthly_anlas":1000000.0,"global_daily_v5":200,"member_daily_anlas":40,"v5_alert_threshold":30,"v5_capacity":{"need":0,"global":200,"short":false,"message":""}}"#,
+            r#"{"ok":true,"global_monthly_anlas":1000000.0,"global_daily_v5":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
             ["1000000", "200", "40", "30"],
         ),
         (
             json!({"global_monthly_anlas": 12.5}),
-            r#"{"ok":true,"global_monthly_anlas":12.5,"global_daily_v5":200,"member_daily_anlas":40,"v5_alert_threshold":30,"v5_capacity":{"need":0,"global":200,"short":false,"message":""}}"#,
+            r#"{"ok":true,"global_monthly_anlas":12.5,"global_daily_v5":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
             ["12.5", "200", "40", "30"],
         ),
         (
             json!({"global_daily_v5": "150"}),
-            r#"{"ok":true,"global_monthly_anlas":12.5,"global_daily_v5":150,"member_daily_anlas":40,"v5_alert_threshold":30,"v5_capacity":{"need":0,"global":150,"short":false,"message":""}}"#,
+            r#"{"ok":true,"global_monthly_anlas":12.5,"global_daily_v5":150,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
             ["12.5", "150", "40", "30"],
         ),
         // 12.0 作为整数字段：存 "12"
         (
             json!({"global_monthly_anlas": 7.0, "global_daily_v5": 12.0}),
-            r#"{"ok":true,"global_monthly_anlas":7.0,"global_daily_v5":12,"member_daily_anlas":40,"v5_alert_threshold":30,"v5_capacity":{"need":0,"global":12,"short":false,"message":""}}"#,
+            r#"{"ok":true,"global_monthly_anlas":7.0,"global_daily_v5":12,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
             ["7.0", "12", "40", "30"],
         ),
     ];
@@ -707,7 +707,7 @@ async fn ops_snapshot_defaults() {
         json!({
             "registration": {"configured": false, "open": false, "max_users": 0, "features": null, "daily_images": 30,
                 "daily_v5": 0, "image_scope": "legacy", "expires_days": 30, "role_guild": "", "role_id": "", "role_note": "",
-                "active": 0, "reset_at": "", "v5_capacity": {"need": 0, "global": 150, "short": false, "message": ""}},
+                "active": 0, "reset_at": ""},
             "features": {
                 "global": {"image": true, "upscale": true, "augment": true, "vibe": true, "tags": true, "text": true, "voice": true},
                 "labels": {"image": "文生图", "upscale": "放大", "augment": "导演工具（线稿、上色等）", "vibe": "Vibe 编码",
@@ -746,8 +746,7 @@ async fn ops_snapshot_defaults() {
             "role_id",
             "role_note",
             "active",
-            "reset_at",
-            "v5_capacity"
+            "reset_at"
         ]
     );
 }
@@ -786,14 +785,10 @@ async fn ops_registration_put() {
             ("register_image_scope", "all"),
         ])
     );
-    // 名额 20 × 每人 V5 15 = 300 > 全站 V5 日限 150
-    assert_eq!(
-        reg(&v)["v5_capacity"],
-        json!({"need": 300, "global": 150, "short": true,
-               "message": "名额 20 × 每人 V5 15 = 300 张/天，超过全站 V5 日限 150：先用的人用满后，后面的人当天没有 V5。建议把全站 V5 调到 300，或降低每人 V5。"})
-    );
-    // 全站 V5 日限同步出现在预算接口里
-    assert_eq!(api.get("/settings").await["v5_capacity"]["short"], true);
+    // 名额 20 × 每人 V5 15 = 300 > 全站 V5 日限 150：不再有「超卖」提示（docs/v3-deviations.md #69），
+    // 注册设置和预算接口都不带 v5_capacity
+    assert!(reg(&v).get("v5_capacity").is_none());
+    assert!(api.get("/settings").await.get("v5_capacity").is_none());
 
     // 功能清单：列表 / null（全部）/ 空列表（一个都不开）
     let feats = |v: &Value| (reg(v)["features"].clone(), v["features"]["new_key"].clone());
@@ -995,8 +990,7 @@ async fn ops_registration_uses_env_defaults_when_configured() {
         v["registration"],
         json!({"configured": true, "open": false, "max_users": 12, "features": ["image", "vibe"], "daily_images": 40,
                "daily_v5": 5, "image_scope": "all", "expires_days": 14, "role_guild": "", "role_id": "", "role_note": "",
-               "active": 2, "reset_at": "每日 7 点",
-               "v5_capacity": {"need": 60, "global": 150, "short": false, "message": ""}})
+               "active": 2, "reset_at": "每日 7 点"})
     );
     // 站长在后台改过的值优先于 .env
     api.json("PUT", "/ops/registration", Some(json!({"max_users": 3})))

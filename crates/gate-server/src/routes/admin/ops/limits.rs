@@ -37,7 +37,6 @@ async fn get_settings(State(state): State<AppState>, _s: AdminSession) -> ApiRes
         "global_daily_v5": site_flag(&state, &GLOBAL_DAILY_V5).await?,
         "member_daily_anlas": site_flag(&state, &MEMBER_DAILY_ANLAS).await?,
         ALERT_THRESHOLD: read_alert_threshold(&state.db).await?,
-        "v5_capacity": crate::ops::v5_capacity(&state).await?,
     })))
 }
 
@@ -96,7 +95,6 @@ async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Requ
         "global_daily_v5": daily_v5,
         "member_daily_anlas": member,
         ALERT_THRESHOLD: threshold,
-        "v5_capacity": crate::ops::v5_capacity(&state).await?,
     })))
 }
 

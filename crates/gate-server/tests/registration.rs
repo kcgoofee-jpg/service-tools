@@ -2649,10 +2649,10 @@ async fn registration_settings_ops_match_legacy() {
         .set_setting("register_daily_v5", "3")
         .await
         .unwrap();
-    // 名额 × 每人 V5 超过全站 V5 日限（150）：回复里带提醒
+    // 名额 × 每人 V5 超过全站 V5 日限（150）：不再带「超卖」提醒（docs/v3-deviations.md #69）
     assert_eq!(
         op(json!({"action": "limit", "value": "60"})).await.2,
-        json!({"message": "名额上限已设为 60。\n⚠ 名额 60 × 每人 V5 3 = 180 张/天，超过全站 V5 日限 150：先用的人用满后，后面的人当天没有 V5。建议把全站 V5 调到 180，或降低每人 V5。（全站 V5 在网页后台「设置」修改）"})
+        json!({"message": "名额上限已设为 60。"})
     );
     assert_eq!(
         op(json!({"action": "limit", "value": "50"})).await.2,
