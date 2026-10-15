@@ -135,6 +135,16 @@ export const GUARD_COPY: Record<string, { label: string; hint: string; unit?: st
     hint: "两次出图间隔额外随机增加 0～N 秒，避免节奏过于规整",
     unit: "秒",
   },
+  post_jitter_min: {
+    label: "出图后至少静默",
+    hint: "一张图结束后，这个账号至少歇几秒才开始下一张；实际在最少～最多之间随机，不超过出图间隔",
+    unit: "秒",
+  },
+  post_jitter_max: {
+    label: "出图后最多静默",
+    hint: "小于最少时按最少；两项都为 0 = 出图后不静默",
+    unit: "秒",
+  },
   key_image_queue: {
     label: "每把 Key 额外可排队",
     hint: "每把 Key 在生成中的那张之外，最多再排几张",
@@ -163,6 +173,8 @@ export const GUARD_ADVANCED = [
   "quiet_end",
   "quiet_hourly_cap",
   "interval_jitter",
+  "post_jitter_min",
+  "post_jitter_max",
   "key_image_queue",
   "queue_per_account",
   "hourly_min",
