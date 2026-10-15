@@ -383,6 +383,4 @@ async fn audit_queries_bind_the_key_id_as_text_like_the_old_gateway() {
             .unwrap()
             .is_empty()
     );
-    // 整数版本不变
-    assert_eq!(db.audit_images_for(a, 0, 0.0).await.unwrap().len(), 1);
 }

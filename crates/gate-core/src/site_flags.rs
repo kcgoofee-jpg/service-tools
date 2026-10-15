@@ -271,13 +271,6 @@ pub static IMAGE_KEEP_HOURS: Spec = bounded(
     0,
     8760,
 );
-pub static MEMBER_DOWNLOAD: Spec = spec(
-    "member_image_download",
-    Kind::Flag,
-    SpecDefault::Bool(false),
-    "audit",
-    "成员在首页打包下载自己最近的原图（10-11 站长：先关）",
-);
 pub static MEMBER_SWEEP: Spec = spec(
     "member_sweep",
     Kind::Flag,
@@ -287,7 +280,7 @@ pub static MEMBER_SWEEP: Spec = spec(
 );
 
 /// 登记表（顺序与旧版 `ALL` 一致，`facts_table` 按这个顺序出行）。
-pub static ALL: [&Spec; 16] = [
+pub static ALL: [&Spec; 15] = [
     &MEMBER_SWEEP,
     &WEB_LOGIN_PAUSED,
     &DM_ENABLED,
@@ -303,7 +296,6 @@ pub static ALL: [&Spec; 16] = [
     &IMAGE_RETENTION,
     &IMAGE_CAP_MB,
     &IMAGE_KEEP_HOURS,
-    &MEMBER_DOWNLOAD,
 ];
 
 /// `default_of(spec, settings)`。`settings` 是 `config.Settings` 的 JSON 视图（对象；属性存在 = 键存在）。

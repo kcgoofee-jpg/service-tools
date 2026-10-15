@@ -22,7 +22,6 @@ export type AuditInfo = {
   prompts: boolean;
   thumbs: boolean;
   retention_days: number;
-  image_retention_days: number;
   image_cap_mb: number;
   image_bytes: number;
   image_keep_hours: number;
@@ -159,7 +158,6 @@ export function v5Need(seats: number, perV5: number, scope: string): number {
 export const AUDIT_SPECS: Record<string, FieldSpec> = {
   prompts: { kind: "bool", label: "记录提示词" },
   thumbs: { kind: "bool", label: "保存原图" },
-  member_download: { kind: "bool", label: "成员打包下载原图" },
   image_keep_hours: {
     kind: "int",
     label: "原图保存时长",
@@ -183,7 +181,6 @@ export function auditServer(a: AuditInfo): Record<string, unknown> {
   return {
     prompts: a.prompts,
     thumbs: a.thumbs,
-    member_download: a.image_retention_days > 0,
     image_keep_hours: a.image_keep_hours,
     retention_days: a.retention_days,
     image_cap_mb: a.image_cap_mb,

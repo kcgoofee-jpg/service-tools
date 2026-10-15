@@ -369,7 +369,8 @@ async fn generation_audit_records_prompt_and_image() {
     .await;
     assert_eq!(status, 200);
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    assert_eq!(e.state.db.audit_image_count(1, 0.0).await.unwrap(), 1);
+    let (_, total) = e.state.db.list_audit(10, 0, Some(1)).await.unwrap();
+    assert_eq!(total, 1);
     assert!(e.state.db.audit_image_bytes().await.unwrap() > 0);
 }
 

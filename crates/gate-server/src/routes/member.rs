@@ -1,10 +1,8 @@
 //! 成员网页接口（旧版 `app/registration_routes.py` 的下半部分）：用 Discord 登录、个人状态、重置券、
-//! 捐赠 Key、原图打包。会话 Cookie 的签发 / 校验见 `crate::session`。
+//! 捐赠 Key。会话 Cookie 的签发 / 校验见 `crate::session`。
 
-use super::EXPORT_PER_MEMBER_SECS;
 use super::registration::{no_store, read_model};
 use crate::action_log::log_action;
-use crate::audit::audit_image_days;
 use crate::auth::{client_ip, header_str, site_flag};
 use crate::error::{ApiError, ApiResult, HttpError, InternalError, ok_json};
 use crate::registration::RegErr;
@@ -23,7 +21,6 @@ use gate_core::pyc::{len_chars, strip};
 use gate_core::pyval;
 use serde_json::json;
 use std::collections::HashMap;
-use std::sync::atomic::Ordering;
 use subtle::ConstantTimeEq;
 
 pub fn router() -> Router<AppState> {
@@ -34,7 +31,6 @@ pub fn router() -> Router<AppState> {
         .route("/public/donate", post(public_donate))
         .route("/public/me", get(public_me))
         .route("/public/me/coupons/{coupon_id}/use", post(use_my_coupon))
-        .route("/public/my-export", get(my_export))
 }
 
 /// 每 IP 每小时最多提交几次捐赠。
@@ -310,102 +306,4 @@ async fn use_my_coupon(
     )
     .await;
     Ok(no_store(ok_json(&json!({"ok": true}))))
-}
-
-// ------------------------------------------------------------------ 原图打包
-
-#[derive(serde::Deserialize, Default)]
-struct ExportQuery {
-    format: Option<String>,
-}
-
-/// 成员自助打包自己的全部原图：format=epub（电子书）或 zip（原图）。单次一种。
-///
-/// 上限（线上 bug 修复：2.x 里这三个全局量被误删，接口必定 500）：单次最多打包最新的 200MB 原图；
-/// 全站同一时刻只打包一份；每人每 60 秒一次（失败的请求不占用这个间隔）。
-async fn my_export(
-    State(state): State<AppState>,
-    Query(q): Query<ExportQuery>,
-    headers: HeaderMap,
-) -> ApiResult {
-    let format = q.format.unwrap_or_else(|| "zip".into());
-    let Some((discord_id, key)) = member_state(&state, &headers).await? else {
-        return Err(HttpError::new(401, "请先用 Discord 登录").into());
-    };
-    if format != "zip" && format != "epub" {
-        return Err(HttpError::new(400, "format 只能是 zip 或 epub").into());
-    }
-    let now = state.now();
-    {
-        let mut at = state.member_web.export_at.lock().expect("export");
-        at.retain(|_, t| now - *t < EXPORT_PER_MEMBER_SECS);
-        if at
-            .get(&discord_id)
-            .is_some_and(|t| now - *t < EXPORT_PER_MEMBER_SECS)
-        {
-            return Err(HttpError::new(429, "打包有点重，请 1 分钟后再试").into());
-        }
-    }
-    let Some(key) = key.filter(|k| k.enabled()) else {
-        return Err(HttpError::new(404, "你还没有可用的 Key").into());
-    };
-    // 全站同时只打包一份
-    let Ok(_guard) = state.member_web.export_lock.try_lock() else {
-        return Err(HttpError::new(429, "有人正在打包，请过半分钟再试").into());
-    };
-    let days = audit_image_days(&state.db).await?;
-    if days <= 0 {
-        return Err(HttpError::new(403, "原图下载暂未开放").into());
-    }
-    let rows = state
-        .db
-        .audit_images_for(
-            key.id(),
-            state.member_web.export_max_bytes.load(Ordering::Relaxed),
-            now - (days * 86400) as f64,
-        )
-        .await?;
-    if rows.is_empty() {
-        return Err(HttpError::new(
-            404,
-            "最近 2 天没有可打包的原图（打包只用来找回最近误删的图）",
-        )
-        .into());
-    }
-    state
-        .member_web
-        .export_at
-        .lock()
-        .expect("export")
-        .insert(discord_id, now);
-    let who = if key.name().is_empty() {
-        "我的作品".to_string()
-    } else {
-        key.name().to_string()
-    };
-    let count = rows.len();
-    let clock = state.clock.clone();
-    let as_epub = format == "epub";
-    let blob = tokio::task::spawn_blocking(move || {
-        if as_epub {
-            crate::exporter::build_epub(&rows, &who, &clock, now)
-        } else {
-            crate::exporter::build_zip(&rows, &who, &clock, now)
-        }
-    })
-    .await
-    .map_err(internal)?;
-    let (media, ext) = if as_epub {
-        ("application/epub+zip", "epub")
-    } else {
-        ("application/zip", "zip")
-    };
-    let mut resp = Response::new(Body::from(blob));
-    let h = resp.headers_mut();
-    h.insert("content-type", HeaderValue::from_static(media));
-    if let Ok(v) = HeaderValue::from_str(&format!("attachment; filename=\"owl-{count}.{ext}\"")) {
-        h.insert("content-disposition", v);
-    }
-    h.insert("cache-control", HeaderValue::from_static("no-store"));
-    Ok(resp)
 }

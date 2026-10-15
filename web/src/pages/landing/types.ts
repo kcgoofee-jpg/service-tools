@@ -105,8 +105,6 @@ export type MeMember = {
   };
   queue?: MineItem[];
   coupons?: Coupon[];
-  images_stored?: number;
-  image_retention_days?: number;
   timing?: Timing | null;
 };
 export type Me = MeGuest | MeMember;

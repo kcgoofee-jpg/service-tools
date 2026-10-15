@@ -115,7 +115,6 @@ export type OpsSnapshot = {
     prompts: boolean;
     thumbs: boolean;
     retention_days: number;
-    image_retention_days: number;
     image_cap_mb: number;
     image_bytes: number;
     image_keep_hours: number;

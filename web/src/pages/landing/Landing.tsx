@@ -1,6 +1,6 @@
 /**
  * 成员首页（/）。
- * 登录成员：额度卡在第一屏，Key / 重置券 / 作品备份在下面；游客：登录与加入入口 + 三步上手 + 客户端设置 + 使用须知。
+ * 登录成员：额度卡在第一屏，Key / 重置券在下面；游客：登录与加入入口 + 三步上手 + 客户端设置 + 使用须知。
  * 所有人都有：实时状态卡、站长公告（有的话）、捐赠。
  */
 import { useEffect, useState } from "preact/hooks";
@@ -10,7 +10,7 @@ import { StoreCtx } from "./ctx";
 import { Donate } from "./Donate";
 import { GuestGuides, GuestHero, Steps } from "./Guest";
 import { displayName } from "./helpers";
-import { Backup, Coupons, KeyCard, NoKeyCard, QuotaCard, SurveyLink } from "./Member";
+import { Coupons, KeyCard, NoKeyCard, QuotaCard, SurveyLink } from "./Member";
 import { StatusCard } from "./StatusCard";
 import { createStore, type Store } from "./store";
 import { SiteFooter, Topbar } from "./Topbar";
@@ -90,11 +90,6 @@ function MemberView({ me }: { me: MeMember }) {
         </div>
         {me.has_key && (
           <div class="lp-o5">
-            <Backup me={me} />
-          </div>
-        )}
-        {me.has_key && (
-          <div class="lp-o6">
             <SurveyLink />
           </div>
         )}

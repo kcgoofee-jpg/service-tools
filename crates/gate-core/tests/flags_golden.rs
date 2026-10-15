@@ -198,6 +198,25 @@ const DOC_FIXES: [(&str, &str); 1] = [(
     "网页 Discord 登录暂停（Discord 回调修复 / 审核期间）。网页只有 Discord 登录，暂停期间成员只能在 Discord 里用 /quota 看额度",
 )];
 
+/// 3.0 删掉的设置（docs/v3-deviations.md #49：成员自助导出原图）。冻结夹具里还有它的用例，登记表里已经没有，
+/// 逐个用例跳过；`all_keys` / `facts_table` 在期望值一侧去掉它。
+const REMOVED_KEY: &str = "member_image_download";
+
+/// 夹具用例的 Spec 引用的是不是已删除的设置。
+fn removed_spec(c: &Case) -> bool {
+    c.raw["spec"]["ref"].as_str() == Some(REMOVED_KEY)
+}
+
+/// 期望值一侧去掉已删除设置的 `facts_table` 行。
+fn drop_removed_row(table: &str) -> String {
+    let prefix = format!("| `{REMOVED_KEY}` |");
+    let rows: Vec<&str> = table
+        .split('\n')
+        .filter(|l| !l.starts_with(&prefix))
+        .collect();
+    rows.join("\n")
+}
+
 fn fix_docs(v: &Value) -> Value {
     let mut text = v.to_string();
     for (old, new) in DOC_FIXES {
@@ -213,16 +232,24 @@ fn site_registry_golden() {
         match c.raw["fn"].as_str().unwrap() {
             "spec" => {
                 let key = c.out()["key"].as_str().unwrap();
+                if key == REMOVED_KEY {
+                    continue;
+                }
                 let s = ALL.iter().find(|s| s.key == key).expect("缺少这个键");
                 assert_eq_py(&c, &spec_json(s), &fix_docs(c.out()));
                 n += 1;
             }
             "all_keys" => {
                 let keys: Vec<Value> = ALL.iter().map(|s| json!(s.key)).collect();
-                assert_eq_py(&c, &Value::Array(keys), c.out());
+                let mut want = c.out().clone();
+                want.as_array_mut()
+                    .unwrap()
+                    .retain(|k| k.as_str() != Some(REMOVED_KEY));
+                assert_eq_py(&c, &Value::Array(keys), &want);
             }
             "facts_table" => {
-                assert_eq_py(&c, &json!(site_flags::facts_table()), &fix_docs(c.out()))
+                let want = json!(drop_removed_row(c.out().as_str().unwrap()));
+                assert_eq_py(&c, &json!(site_flags::facts_table()), &fix_docs(&want))
             }
             other => panic!("未知 {other}"),
         }
@@ -235,6 +262,9 @@ fn site_parse_golden() {
     let cases = load(M, "flags/site_parse");
     assert!(cases.len() > 10000);
     for c in cases {
+        if removed_spec(&c) {
+            continue;
+        }
         let spec = spec_of(&c.raw["spec"]);
         let got = site_flags::parse(&spec, c.arg(0), c.arg(1).clone());
         check(&c, Ok(got), false, false);
@@ -244,6 +274,9 @@ fn site_parse_golden() {
 #[test]
 fn site_default_of_golden() {
     for c in load(M, "flags/site_default_of") {
+        if removed_spec(&c) {
+            continue;
+        }
         let spec = spec_of(&c.raw["spec"]);
         let env = c.raw.get("env").filter(|e| !e.is_null());
         check(&c, Ok(site_flags::default_of(&spec, env)), false, false);
@@ -253,6 +286,9 @@ fn site_default_of_golden() {
 #[test]
 fn site_get_golden() {
     for c in load(M, "flags/site_get") {
+        if removed_spec(&c) {
+            continue;
+        }
         let spec = spec_of(&c.raw["spec"]);
         let env = c.raw.get("env").filter(|e| !e.is_null());
         let raw = c.raw["present"]
@@ -271,6 +307,9 @@ fn site_get_golden() {
 #[test]
 fn site_encode_golden() {
     for c in load(M, "flags/site_encode") {
+        if removed_spec(&c) {
+            continue;
+        }
         let spec = spec_of(&c.raw["spec"]);
         let got = site_flags::encode(&spec, c.arg(0))
             .map(Value::String)

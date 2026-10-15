@@ -620,8 +620,7 @@ async fn ops_grant_ban_unban_audit() {
     assert_eq!(
         on.2,
         json!({"message": "已开启生成记录并通知成员。", "prompts": true, "thumbs": true,
-               "retention_days": 7, "image_retention_days": 0, "image_cap_mb": 8192,
-               "image_keep_hours": 24, "member_download": false})
+               "retention_days": 7, "image_cap_mb": 8192, "image_keep_hours": 24})
     );
     assert_eq!(
         e.state
@@ -2185,8 +2184,6 @@ async fn public_me_matches_legacy_and_coupons_work() {
             "today",
             "queue",
             "coupons",
-            "images_stored",
-            "image_retention_days",
             "timing"
         ]
     );
@@ -2210,8 +2207,6 @@ async fn public_me_matches_legacy_and_coupons_work() {
     );
     assert_eq!(me.2["queue"], json!([]));
     assert_eq!(me.2["coupons"], json!([]));
-    assert_eq!(me.2["images_stored"], 0);
-    assert_eq!(me.2["image_retention_days"], 0);
     assert_eq!(
         me.2["timing"],
         json!({"count": 0, "avg_dur_s": null, "avg_wait_s": null, "site_avg_dur_s": 9.0})
@@ -2450,223 +2445,6 @@ async fn donate_limit_is_per_source_ip() {
     assert_eq!(send("203.0.113.2").await, 200, "换一个来源地址不受影响");
 }
 
-// ------------------------------------------------------------------ 原图打包
-
-const PNG: &[u8] = &[
-    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d, 0x49, 0x48, 0x44, 0x52, 0, 0, 0,
-    1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 0x1f, 0x15, 0xc4, 0x89,
-];
-
-async fn add_image(e: &Env, key_id: i64, prompt: &str, size: usize, age_secs: f64) {
-    let mut img = PNG.to_vec();
-    img.resize(size.max(PNG.len()), 0);
-    e.state
-        .db
-        .add_audit(
-            &gate_db::repo::audit::NewAudit {
-                key_id: Some(key_id),
-                key_name: "k",
-                kind: "image",
-                model: "m",
-                status: "ok",
-                prompt,
-                negative: "lowres",
-                extra: r#"{"params":{"seed":1,"width":832,"height":1216}}"#,
-                image: Some(&img),
-                image_type: "image/png",
-                ..Default::default()
-            },
-            e.state.now() - age_secs,
-            &e.state.clock,
-        )
-        .await
-        .unwrap();
-}
-
-fn zip_names(bytes: &[u8]) -> Vec<String> {
-    let z = zip::ZipArchive::new(std::io::Cursor::new(bytes.to_vec())).unwrap();
-    z.file_names()
-        .filter_map(Result::ok)
-        .map(|c| c.into_owned())
-        .collect()
-}
-
-#[tokio::test]
-async fn export_enforces_session_format_switch_and_per_member_interval() {
-    let (e, _d) = setup_reg(&[]).await;
-    open_registration(&e).await;
-    issue(&e, MEMBER).await;
-    let cookie = login_member(&e, MEMBER).await;
-    let get = |path: &str, c: Option<&str>| {
-        let (st, path, c) = (e.state.clone(), path.to_string(), c.map(str::to_string));
-        async move {
-            let mut call = Call::new("GET", &path);
-            if let Some(c) = &c {
-                call = call.header("cookie", c.clone());
-            }
-            let r = call.send(&st).await;
-            (r.0.as_u16(), r.1, r.2)
-        }
-    };
-    let j = |b: &[u8]| serde_json::from_slice::<Value>(b).unwrap();
-    // 没登录 / 格式不对 / 下载没开
-    let r = get("/public/my-export", None).await;
-    assert_eq!(
-        (r.0, j(&r.2)),
-        (401, json!({"detail": "请先用 Discord 登录"}))
-    );
-    let r = get("/public/my-export?format=pdf", Some(&cookie)).await;
-    assert_eq!(
-        (r.0, j(&r.2)),
-        (400, json!({"detail": "format 只能是 zip 或 epub"}))
-    );
-    let r = get("/public/my-export", Some(&cookie)).await;
-    assert_eq!((r.0, j(&r.2)), (403, json!({"detail": "原图下载暂未开放"})));
-    e.state
-        .db
-        .set_setting("member_image_download", "1")
-        .await
-        .unwrap();
-    let r = get("/public/my-export", Some(&cookie)).await;
-    assert_eq!(
-        (r.0, j(&r.2)),
-        (
-            404,
-            json!({"detail": "最近 2 天没有可打包的原图（打包只用来找回最近误删的图）"})
-        )
-    );
-    // 打包成功：zip，内容是原图 + prompts.txt；Content-Disposition 里是张数
-    let key_id = e
-        .state
-        .db
-        .key_row_for_discord(MEMBER)
-        .await
-        .unwrap()
-        .unwrap()["id"]
-        .as_i64()
-        .unwrap();
-    add_image(&e, key_id, "1girl, forest", 100, 60.0).await;
-    let r = get("/public/my-export?format=zip", Some(&cookie)).await;
-    assert_eq!(r.0, 200);
-    assert_eq!(r.1["content-type"], "application/zip");
-    assert_eq!(
-        r.1["content-disposition"],
-        "attachment; filename=\"owl-1.zip\""
-    );
-    assert_eq!(r.1["cache-control"], "no-store");
-    let names = zip_names(&r.2);
-    assert_eq!(names.len(), 2);
-    assert!(names[0].starts_with("0001_") && names[0].ends_with(".png"));
-    assert_eq!(names[1], "prompts.txt");
-    // 每人 60 秒一次（429 不吃掉重新计时）
-    let r = get("/public/my-export?format=zip", Some(&cookie)).await;
-    assert_eq!(
-        (r.0, j(&r.2)),
-        (429, json!({"detail": "打包有点重，请 1 分钟后再试"}))
-    );
-    // 过了 60 秒可以再打；epub 同样
-    e.state
-        .member_web
-        .export_at
-        .lock()
-        .unwrap()
-        .insert(MEMBER.to_string(), e.state.now() - 61.0);
-    let r = get("/public/my-export?format=epub", Some(&cookie)).await;
-    assert_eq!(r.0, 200);
-    assert_eq!(r.1["content-type"], "application/epub+zip");
-    assert_eq!(
-        r.1["content-disposition"],
-        "attachment; filename=\"owl-1.epub\""
-    );
-    let names = zip_names(&r.2);
-    assert_eq!(names[0], "mimetype");
-    assert!(names.contains(&"OEBPS/content.opf".to_string()));
-}
-
-#[tokio::test]
-async fn export_is_serial_site_wide_and_capped() {
-    let (e, _d) = setup_reg(&[]).await;
-    open_registration(&e).await;
-    e.state
-        .db
-        .set_setting("member_image_download", "1")
-        .await
-        .unwrap();
-    issue(&e, MEMBER).await;
-    issue(&e, OTHER).await;
-    let (a, b) = (
-        login_member(&e, MEMBER).await,
-        login_member(&e, OTHER).await,
-    );
-    let key_id = e
-        .state
-        .db
-        .key_row_for_discord(MEMBER)
-        .await
-        .unwrap()
-        .unwrap()["id"]
-        .as_i64()
-        .unwrap();
-    for (i, age) in [300.0, 200.0, 100.0].iter().enumerate() {
-        add_image(&e, key_id, &format!("p{i}"), 1000, *age).await;
-    }
-    // 全站同一时刻只打一份：别人正在打包时回 429，且不占用这位成员的 60 秒间隔
-    {
-        let _busy = e.state.member_web.export_lock.lock().await;
-        let r = Call::new("GET", "/public/my-export")
-            .header("cookie", b.clone())
-            .send(&e.state)
-            .await;
-        assert_eq!(r.0, 429);
-        assert_eq!(
-            serde_json::from_slice::<Value>(&r.2).unwrap(),
-            json!({"detail": "有人正在打包，请过半分钟再试"})
-        );
-        assert!(
-            e.state
-                .member_web
-                .export_at
-                .lock()
-                .unwrap()
-                .get(OTHER)
-                .is_none()
-        );
-    }
-    // 总字节数上限：只打最新的、合计不超过上限的那些（至少一张）。线上上限是 200 MB（常量见下），测试里调小
-    assert_eq!(gate_server::routes::EXPORT_MAX_BYTES, 200 * 1024 * 1024);
-    assert_eq!(
-        e.state
-            .member_web
-            .export_max_bytes
-            .load(std::sync::atomic::Ordering::Relaxed),
-        200 * 1024 * 1024
-    );
-    e.state
-        .member_web
-        .export_max_bytes
-        .store(2500, std::sync::atomic::Ordering::Relaxed);
-    let r = Call::new("GET", "/public/my-export")
-        .header("cookie", a.clone())
-        .send(&e.state)
-        .await;
-    assert_eq!(r.0, 200);
-    assert_eq!(
-        r.1["content-disposition"],
-        "attachment; filename=\"owl-2.zip\""
-    );
-    let mut z = zip::ZipArchive::new(std::io::Cursor::new(r.2.clone())).unwrap();
-    let mut prompts = String::new();
-    std::io::Read::read_to_string(&mut z.by_name("prompts.txt").unwrap(), &mut prompts).unwrap();
-    assert!(
-        prompts.contains("正面：p1\n")
-            && prompts.contains("正面：p2\n")
-            && !prompts.contains("正面：p0\n"),
-        "{prompts}"
-    );
-    // 锁用完就放开了
-    assert!(e.state.member_web.export_lock.try_lock().is_ok());
-}
-
 // ------------------------------------------------------------------ 没有请求会发到真实 Discord
 
 #[tokio::test]
@@ -2805,28 +2583,18 @@ fn export_archives_match_legacy_golden() {
         .collect();
     let clock = gate_core::clock::Clock::new("Asia/Shanghai", 7);
     let (now, who) = (ex["now"].as_f64().unwrap(), ex["who"].as_str().unwrap());
-    for (kind, bytes) in [
-        (
-            "zip",
-            gate_server::exporter::build_zip(&rows, who, &clock, now),
-        ),
-        (
-            "epub",
-            gate_server::exporter::build_epub(&rows, who, &clock, now),
-        ),
-    ] {
-        let (names, files) = archive(bytes);
-        let want = &ex[kind];
-        let want_names: Vec<String> = want["names"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|n| n.as_str().unwrap().to_string())
-            .collect();
-        assert_eq!(names, want_names, "{kind} 条目顺序");
-        for (name, content) in want["files"].as_object().unwrap() {
-            assert_eq!(&files[name], content, "{kind}: {name}");
-        }
+    // 夹具里还有旧版的 epub 条目：成员自助导出（EPUB）3.0 删了（docs/v3-deviations.md #49），只对拍后台导出用的 zip
+    let (names, files) = archive(gate_server::exporter::build_zip(&rows, who, &clock, now));
+    let want = &ex["zip"];
+    let want_names: Vec<String> = want["names"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| n.as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(names, want_names, "zip 条目顺序");
+    for (name, content) in want["files"].as_object().unwrap() {
+        assert_eq!(&files[name], content, "zip: {name}");
     }
 }
 
@@ -2916,19 +2684,17 @@ async fn registration_settings_ops_match_legacy() {
         .set_setting("guard_base_daily_images", "20")
         .await
         .unwrap();
-    // 记录开关：提示词记录 5 天 + 成员下载开
+    // 记录开关：提示词记录 5 天
     let audit = gate_server::ops::set_audit(
         &e.state,
-        &obj(
-            json!({"prompts": true, "thumbs": false, "retention_days": 5, "member_download": true}),
-        ),
+        &obj(json!({"prompts": true, "thumbs": false, "retention_days": 5})),
     )
     .await
     .unwrap();
     assert_eq!(
         audit,
-        json!({"prompts": true, "thumbs": false, "retention_days": 5, "image_retention_days": 2,
-               "image_cap_mb": 8192, "image_keep_hours": 24, "member_download": true})
+        json!({"prompts": true, "thumbs": false, "retention_days": 5,
+               "image_cap_mb": 8192, "image_keep_hours": 24})
     );
     // 欢迎文案：保底 20 张、全部功能、没有有效期这一行、带记录声明
     let r = bridge(
@@ -2969,8 +2735,8 @@ async fn registration_settings_ops_match_legacy() {
     .unwrap();
     assert_eq!(
         audit,
-        json!({"prompts": true, "thumbs": false, "retention_days": 3650, "image_retention_days": 2,
-               "image_cap_mb": 7, "image_keep_hours": 8760, "member_download": true})
+        json!({"prompts": true, "thumbs": false, "retention_days": 3650,
+               "image_cap_mb": 7, "image_keep_hours": 8760})
     );
 }
 

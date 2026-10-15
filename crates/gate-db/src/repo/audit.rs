@@ -27,7 +27,7 @@ pub struct NewAudit<'a> {
     pub image_type: &'a str,
 }
 
-/// `audit_images_for` 产出的一条：(id, ts, image_type, prompt, negative, extra, 原图字节)。
+/// `audit_images_for_text` 产出的一条：(id, ts, image_type, prompt, negative, extra, 原图字节)。
 #[derive(Debug, Clone, PartialEq)]
 pub struct AuditImage {
     pub id: i64,
@@ -347,25 +347,17 @@ impl Db {
         })
     }
 
-    /// 导出用：某成员带原图的记录。`max_bytes > 0` 时只取最新的、原图合计不超过这么多字节的那些
+    /// 后台导出用：某成员带原图的记录。`max_bytes > 0` 时只取最新的、原图合计不超过这么多字节的那些
     /// （至少给一条），防止一次打包把内存撑爆。文件丢了的记录跳过。
-    pub async fn audit_images_for(
+    ///
+    /// `key_id` 按文本绑定：旧版传的是查询串原文，`"3,5"` 查不到任何东西。
+    pub async fn audit_images_for_text(
         &self,
-        key_id: i64,
+        key_id: &str,
         max_bytes: i64,
         since: f64,
     ) -> Result<Vec<AuditImage>> {
-        self.audit_images_for_bound(SqlValue::Integer(key_id), max_bytes, since)
-            .await
-    }
-
-    /// [`Db::audit_images_for`] 的实现：`key_id` 由调用方决定绑定成整数还是文本（后台导出沿用旧版，传查询串原文）。
-    pub(super) async fn audit_images_for_bound(
-        &self,
-        key_id: SqlValue,
-        max_bytes: i64,
-        since: f64,
-    ) -> Result<Vec<AuditImage>> {
+        let key_id = key_id.to_string();
         let cols = "SELECT id, ts, image_type, prompt, negative, extra, image, image_file FROM generation_audit ";
         let raw: Vec<RawAuditRow> = self
             .read(move |c| {
@@ -442,19 +434,6 @@ impl Db {
                 }
             }
             out
-        })
-        .await
-    }
-
-    pub async fn audit_image_count(&self, key_id: i64, since: f64) -> Result<i64> {
-        self.read(move |c| {
-            c.query_row(
-                &format!(
-                    "SELECT COUNT(*) FROM generation_audit WHERE key_id=? AND {HAS_IMAGE} AND ts>=?"
-                ),
-                params![key_id, since],
-                |r| value::i64_or(r, 0, 0),
-            )
         })
         .await
     }

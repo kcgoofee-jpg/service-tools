@@ -447,26 +447,6 @@ test.describe("登录成员", () => {
     await expect(page.getByRole("heading", { name: "重置券" })).toHaveCount(0);
   });
 
-  test("作品备份：有可打包的图时显示保留天数与 EPUB / ZIP 链接；没有时整块不显示", async ({ page }) => {
-    await patch(page, ME, (b) => ({ ...b, images_stored: 12, image_retention_days: 2 }));
-    await page.goto("/");
-    const card = page.locator("section", { has: page.getByRole("heading", { name: /作品备份/ }) });
-    await expect(card).toContainText("最近 2 天的 12 张原图");
-    await expect(card.getByRole("link", { name: /EPUB/ })).toHaveAttribute(
-      "href",
-      "/public/my-export?format=epub",
-    );
-    await expect(card.getByRole("link", { name: /ZIP/ })).toHaveAttribute(
-      "href",
-      "/public/my-export?format=zip",
-    );
-
-    await page.unroute(ME);
-    await patch(page, ME, (b) => ({ ...b, images_stored: 0, image_retention_days: 0 }));
-    await page.reload();
-    await expect(page.getByRole("heading", { name: /作品备份/ })).toHaveCount(0);
-  });
-
   test("问卷入口与捐赠都在", async ({ page }) => {
     await page.goto("/");
     await expect(page.getByRole("link", { name: "去填写" })).toHaveAttribute("href", "/survey");
@@ -507,7 +487,6 @@ test.describe("登录成员", () => {
 
   test("手机 375px：无横向滚动；额度卡在状态卡之前", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
-    await patch(page, ME, (b) => ({ ...b, images_stored: 3, image_retention_days: 2 }));
     await page.goto("/");
     await expect(page.locator(".lp-quota")).toBeVisible();
     expect(await noHorizontalScroll(page)).toBe(true);
@@ -525,8 +504,6 @@ test.describe("登录成员", () => {
       const now = Math.floor(Date.now() / 1000);
       await patch(page, ME, (b) => ({
         ...b,
-        images_stored: 5,
-        image_retention_days: 2,
         coupons: [{ id: 1, kind: "reset", note: "测试", expires_at: now + 86400 }],
       }));
       await page.goto("/");
@@ -569,8 +546,6 @@ test.describe("截图", () => {
             const now = Math.floor(Date.now() / 1000);
             await patch(page, ME, (b) => ({
               ...b,
-              images_stored: 8,
-              image_retention_days: 2,
               coupons: [{ id: 1, kind: "reset", note: "补偿 10-13", expires_at: now + 3 * 86400 }],
             }));
           }

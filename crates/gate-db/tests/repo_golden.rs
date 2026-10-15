@@ -782,9 +782,11 @@ async fn call(db: &Db, c: &Case) -> Out {
             let (data, ty) = db.audit_image(int(a(0, "audit_id"), 0)).await?;
             json!([blob(data), ty])
         }
+        // 成员自助导出删了（docs/v3-deviations.md #49），整数绑定的 `audit_images_for` 没有了，只剩后台导出的文本绑定版；
+        // 夹具里的 key_id 都是整数，换成文本绑定，SQLite 的列亲和性转回整数，结果相同
         "audit_images_for" => json!(
-            db.audit_images_for(
-                int(a(0, "key_id"), 0),
+            db.audit_images_for_text(
+                &int(a(0, "key_id"), 0).to_string(),
                 int(a(1, "max_bytes"), 0),
                 num(a(2, "since"), 0.0)
             )
@@ -800,10 +802,6 @@ async fn call(db: &Db, c: &Case) -> Out {
                 blob(Some(i.image))
             ]))
             .collect::<Vec<_>>()
-        ),
-        "audit_image_count" => json!(
-            db.audit_image_count(int(a(0, "key_id"), 0), num(a(1, "since"), 0.0))
-                .await?
         ),
         "audit_image_bytes" => json!(db.audit_image_bytes().await?),
         "purge_audit_images_to_cap" => json!(
@@ -868,6 +866,10 @@ async fn run_area(area: &str) {
     let cases = load(env!("CARGO_MANIFEST_DIR"), area);
     assert!(!cases.is_empty());
     for case in &cases {
+        // `audit_image_count` 只给成员自助导出的保留天数用，已随导出一起删除（docs/v3-deviations.md #49）
+        if case.get("method").and_then(Value::as_str) == Some("audit_image_count") {
+            continue;
+        }
         run_case(case).await;
     }
 }

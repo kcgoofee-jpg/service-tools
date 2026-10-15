@@ -2,7 +2,7 @@
 
 use super::upstream_health;
 use crate::action_log::log_action;
-use crate::audit::{audit_flags, audit_image_cap_mb, audit_image_days, audit_image_keep_hours};
+use crate::audit::{audit_flags, audit_image_cap_mb, audit_image_keep_hours};
 use crate::body::read_json_body;
 use crate::error::{ApiError, ApiResult, HttpError, ok_json};
 use crate::ops;
@@ -83,7 +83,6 @@ async fn snapshot(state: &AppState) -> Result<Value, ApiError> {
             "prompts": prompts,
             "thumbs": thumbs,
             "retention_days": days,
-            "image_retention_days": audit_image_days(&state.db).await?,
             "image_cap_mb": audit_image_cap_mb(&state.db).await?,
             "image_bytes": state.db.audit_image_bytes().await?,
             "image_keep_hours": audit_image_keep_hours(&state.db).await?,

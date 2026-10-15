@@ -938,7 +938,6 @@ pub(super) async fn me_payload(
         .cloned()
         .unwrap_or(json!([]));
     let now = state.now();
-    let img_days = crate::audit::audit_image_days(&state.db).await?;
     out.insert("has_key".into(), json!(true));
     out.insert("key".into(), key.get("token").clone());
     out.insert("name".into(), key.get("name").clone());
@@ -959,16 +958,6 @@ pub(super) async fn me_payload(
         "coupons".into(),
         json!(state.db.list_coupons(key.id(), true, now).await?),
     );
-    out.insert(
-        "images_stored".into(),
-        json!(
-            state
-                .db
-                .audit_image_count(key.id(), now - img_days as f64 * 86400.0)
-                .await?
-        ),
-    );
-    out.insert("image_retention_days".into(), json!(img_days));
     out.insert(
         "timing".into(),
         match state.db.user_image_timing(key.id(), now).await {

@@ -197,15 +197,4 @@ impl Db {
         })
         .await
     }
-
-    /// 成员导出：同 `audit_images_for`，但 `key_id` 按文本绑定（旧版传的是查询串原文，`"3,5"` 查不到任何东西）。
-    pub async fn audit_images_for_text(
-        &self,
-        key_id: &str,
-        max_bytes: i64,
-        since: f64,
-    ) -> Result<Vec<super::audit::AuditImage>> {
-        self.audit_images_for_bound(SqlValue::Text(key_id.to_string()), max_bytes, since)
-            .await
-    }
 }

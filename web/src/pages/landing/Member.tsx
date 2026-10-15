@@ -1,8 +1,8 @@
-import { BookOpen, Eye, EyeOff, FileArchive, Ticket } from "lucide-preact";
-import { useEffect, useRef, useState } from "preact/hooks";
+import { Eye, EyeOff, Ticket } from "lucide-preact";
+import { useRef, useState } from "preact/hooks";
 import { ApiError, sendJSON } from "../../lib/api";
 import { dayOf } from "../../lib/format";
-import { Badge, Button, Card, CopyField, Dialog, toast } from "../../ui";
+import { Button, Card, CopyField, Dialog, toast } from "../../ui";
 import { useStore } from "./ctx";
 import { couponLeft, maskKey, quotaRows, resetHour } from "./helpers";
 import type { Coupon, MeMember } from "./types";
@@ -186,52 +186,6 @@ export function Coupons({ coupons }: { coupons: Coupon[] }) {
         </p>
         <p class="muted small">一张券只能用一次，用掉后不能撤销。</p>
       </Dialog>
-    </Card>
-  );
-}
-
-/* ---------------- 作品备份 ---------------- */
-
-export function Backup({ me }: { me: MeMember }) {
-  const days = me.image_retention_days ?? 0;
-  const stored = me.images_stored ?? 0;
-  const [locked, setLocked] = useState(false);
-  useEffect(() => {
-    if (!locked) return;
-    // 打包较重：点一次后两个按钮都锁一分钟，避免连点撞上服务端限流
-    const t = setTimeout(() => setLocked(false), 60_000);
-    return () => clearTimeout(t);
-  }, [locked]);
-  if (days <= 0 || stored <= 0) return null;
-  const click = (e: Event) => {
-    if (locked) {
-      e.preventDefault();
-      return;
-    }
-    toast("正在打包，下载马上开始…");
-    setLocked(true);
-  };
-  const a11y = locked ? { "aria-disabled": "true" as const, tabIndex: -1 } : {};
-  return (
-    <Card
-      title={
-        <>
-          作品备份 <Badge tone="accent">beta</Badge>
-        </>
-      }
-      sub={`可以打包你最近 ${days} 天的 ${stored} 张原图，用来找回客户端里误删的图。这不是长期相册，请自己保存好；打包较重，每分钟限 1 次。`}
-    >
-      <div class="lp-export">
-        <a class="btn" href="/public/my-export?format=epub" onClick={click} {...a11y}>
-          <BookOpen size={16} aria-hidden="true" /> EPUB 画册
-        </a>
-        <a class="btn" href="/public/my-export?format=zip" onClick={click} {...a11y}>
-          <FileArchive size={16} aria-hidden="true" /> 原图 ZIP
-        </a>
-      </div>
-      <p class="muted small lp-export__hint">
-        EPUB：一图一页，附提示词和参数，图书 App 都能打开；ZIP：PNG 原图 + prompts.txt，适合存档或二次编辑。
-      </p>
     </Card>
   );
 }

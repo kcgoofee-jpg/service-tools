@@ -177,7 +177,6 @@
 |---|---|---|
 | 提示词 | 开关 `audit_prompts`（线 1 = 记录）；保留天数 `audit_retention_days`（线 0 = 长期保留；环境变量 `AUDIT_RETENTION_DAYS` 默认 7，被站点设置压过；范围 0～3650） | 线 / 码 |
 | 原图 | 开关 `audit_thumbs`（线 1 = 保存成功结果的原图，设置名沿用旧名）；`audit_image_keep_hours`（码 24，线 0 = 只按容量上限删）；`audit_image_cap_mb`（码 8192，线 8192）：超过后从最旧的开始删到约 90%；没有记录指向的原图文件（崩溃残留）超过 1 小时清掉 | 线 / 码 |
-| 成员下载原图 | `member_image_download`（线 0 = 关）；开启时可打包最近 2 天（`MEMBER_DOWNLOAD_DAYS`），单次最多 200 MB，全站同一时刻只打包一份，每人每 60 秒一次 | 线 / 码 |
 | 用量日志 | `USAGE_LOG_RETENTION_DAYS` 默认 0 = 长期保留；大于 0 时按 max(7, N) 天清理。线上未核对。每日计数器和账本不受影响 | 码 |
 | 后台操作日志 | 180 天 | 码 |
 | 状态码统计 / 已处理的 Bug | 状态码统计保留 30 天；已处理的 Bug 超过 30 天没再出现才清理 | 码 |
@@ -237,7 +236,7 @@
 
 ## 9. 共用站点设置（登记表 `site_flags.rs`）
 
-读写只走 `site_flags::get / put`；缺失或格式不对一律回到默认值（默认值按 fail-closed 选）。下表是登记表的全部 17 项：前 16 项是 `ALL`，第 17 项 `member_daily_anlas` 已登记在表里但没列进 `ALL`（所以 `facts_table()` 不会生成它）。各模块自己的参数组不在此表，见表后。
+读写只走 `site_flags::get / put`；缺失或格式不对一律回到默认值（默认值按 fail-closed 选）。下表是登记表的全部 16 项：前 15 项是 `ALL`，第 16 项 `member_daily_anlas` 已登记在表里但没列进 `ALL`（所以 `facts_table()` 不会生成它）。各模块自己的参数组不在此表，见表后。
 
 | 键 | 类型 | 默认 | 范围 | 说明 | 线上当前值（2026-10-15） |
 |---|---|---|---|---|---|
@@ -256,8 +255,7 @@
 | `audit_image_retention_days` | int | 3 | 0–365 | 已停用（原图按容量上限和保存小时数清理） | 未设置 |
 | `audit_image_cap_mb` | int | 8192 | 0–500000 | 原图占用上限（MB）：超过后自动删掉最旧的；0 = 不限 | 8192 |
 | `audit_image_keep_hours` | int | 24 | 0–8760 | 原图在服务器上保存几小时；0 = 只按容量上限删 | 0 |
-| `member_image_download` | flag | False | | 成员在首页打包下载自己最近的原图 | 0 |
-| `member_daily_anlas`（第 17 项） | int | 50 | 0–100000 | 每人每日 Anlas 上限（仅对未手动设置 Anlas 日额度的 Key 生效；0 = 不限） | 未设置，按默认（首页文案核对为 50） |
+| `member_daily_anlas`（第 16 项） | int | 50 | 0–100000 | 每人每日 Anlas 上限（仅对未手动设置 Anlas 日额度的 Key 生效；0 = 不限） | 未设置，按默认（首页文案核对为 50） |
 
 其他参数组（都存在 `site_settings`，键名带前缀）：
 

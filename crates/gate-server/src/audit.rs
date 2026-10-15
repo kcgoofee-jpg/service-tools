@@ -47,8 +47,6 @@ pub const MAX_IMAGE_BYTES: usize = 15 * 1024 * 1024;
 pub const IMAGE_RETENTION_KEY: &str = "audit_image_retention_days";
 /// 原图占用上限（MB）；见 [`site_flags::IMAGE_CAP_MB`]。
 pub const IMAGE_CAP_KEY: &str = "audit_image_cap_mb";
-/// 成员只能打包下载最近 2 天的原图：只用来找回客户端里误删的图。
-pub const MEMBER_DOWNLOAD_DAYS: i64 = 2;
 
 /// Pillow 的 `Image.MAX_IMAGE_PIXELS`：超过即报错（默认只是警告），防止解压炸弹。
 /// 旧版同时把 `DecompressionBombWarning` 升级成错误，所以「超过 1 倍」就已经拒绝。
@@ -382,16 +380,10 @@ pub fn full_image(payload: &[u8]) -> (Option<Vec<u8>>, String) {
 // ----------------------------------------------------------------------------- 披露文案
 
 /// 向成员披露记录范围（提示词、原图各自保留多久）；未开启记录则返回空串。
-/// 「记录生成结果」开关只保存原图（不再另存缩略图），保留天数单独设置；0 天 = 不存图。
+/// 「记录生成结果」开关只保存原图（不再另存缩略图）；原图只有站长能看，成员没有下载入口。
 ///
-/// 旧版 `image_days=0, keep_hours=24` 是参数默认值；这里调用方显式传。
-pub fn audit_notice(
-    prompts: bool,
-    thumbs: bool,
-    days: i64,
-    image_days: i64,
-    keep_hours: i64,
-) -> String {
+/// 旧版 `keep_hours=24` 是参数默认值；这里调用方显式传。
+pub fn audit_notice(prompts: bool, thumbs: bool, days: i64, keep_hours: i64) -> String {
     let keep = |d: i64| {
         if d > 0 {
             format!("{d} 天后自动删除")
@@ -409,18 +401,7 @@ pub fn audit_notice(
         } else {
             "服务器空间满了会自动删掉最旧的".to_string()
         };
-        // image_days * 24 在极端大值下可能溢出 i64（Python 是大整数）：饱和即可，比较结果不变
-        let window = if 0 < keep_hours && keep_hours < image_days.saturating_mul(24) {
-            format!("{keep_hours} 小时")
-        } else {
-            format!("{image_days} 天")
-        };
-        let download = if image_days > 0 {
-            format!("；在这之前可在首页打包下载最近 {window} 的，用来找回误删的图")
-        } else {
-            String::new()
-        };
-        parts.push(format!("生成的原图（{keep_txt}{download}）"));
+        parts.push(format!("生成的原图（{keep_txt}）"));
     }
     if parts.is_empty() {
         return String::new();
@@ -449,16 +430,6 @@ async fn site_int(db: &Db, spec: &site_flags::Spec) -> Result<i64, DbError> {
     Ok(value.as_i64().unwrap_or(fallback))
 }
 
-/// 成员能打包下载最近几天的原图：开了下载就是 2 天，关了是 0（首页显示「未开启」，下载接口拒绝）。
-pub async fn audit_image_days(db: &Db) -> Result<i64, DbError> {
-    let on = site_value(db, &site_flags::MEMBER_DOWNLOAD).await?;
-    Ok(if pyval::truthy(&on) {
-        MEMBER_DOWNLOAD_DAYS
-    } else {
-        0
-    })
-}
-
 /// 原图在服务器上保存几小时（0 = 只按容量上限删）。
 pub async fn audit_image_keep_hours(db: &Db) -> Result<i64, DbError> {
     site_int(db, &site_flags::IMAGE_KEEP_HOURS).await
@@ -472,9 +443,8 @@ pub async fn audit_image_cap_mb(db: &Db) -> Result<i64, DbError> {
 /// 所有给成员看的「本站记录了什么」都走这一个函数，避免各处文案再各写一套。
 pub async fn audit_disclosure(db: &Db, env: &EnvConfig) -> Result<String, DbError> {
     let (prompts, thumbs, days) = audit_flags(db, env).await?;
-    let image_days = audit_image_days(db).await?;
     let keep_hours = audit_image_keep_hours(db).await?;
-    Ok(audit_notice(prompts, thumbs, days, image_days, keep_hours))
+    Ok(audit_notice(prompts, thumbs, days, keep_hours))
 }
 
 /// 旧版 `truth()`：`str(value).strip().lower() in ("1", "true", "yes", "on")`。
@@ -686,14 +656,14 @@ mod tests {
 
     #[test]
     fn notice_wording() {
-        assert_eq!(audit_notice(false, false, 7, 0, 24), "");
+        assert_eq!(audit_notice(false, false, 7, 24), "");
         assert_eq!(
-            audit_notice(true, false, 7, 0, 24),
+            audit_notice(true, false, 7, 24),
             "为防止滥用和优化调度，本站会保留你的图片提示词（7 天后自动删除），仅站长可见。"
         );
         assert_eq!(
-            audit_notice(true, true, 0, 2, 24),
-            "为防止滥用和优化调度，本站会保留你的图片提示词（长期保存）、生成的原图（24 小时后自动删除；在这之前可在首页打包下载最近 24 小时 的，用来找回误删的图），仅站长可见。"
+            audit_notice(true, true, 0, 24),
+            "为防止滥用和优化调度，本站会保留你的图片提示词（长期保存）、生成的原图（24 小时后自动删除），仅站长可见。"
         );
     }
 }

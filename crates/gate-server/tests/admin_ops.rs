@@ -783,7 +783,7 @@ async fn ops_snapshot_defaults() {
                     "tags": "标签补全", "text": "文本生成 / OpenAI 兼容聊天", "voice": "语音合成"},
                 "new_key": ["image"],
             },
-            "audit": {"prompts": false, "thumbs": false, "retention_days": 7, "image_retention_days": 0, "image_cap_mb": 8192,
+            "audit": {"prompts": false, "thumbs": false, "retention_days": 7, "image_cap_mb": 8192,
                 "image_bytes": 0, "image_keep_hours": 24, "announce_configured": false},
         })
     );
@@ -1166,16 +1166,15 @@ async fn ops_audit_put() {
             ("audit_retention_days", "7"),
             ("audit_image_cap_mb", "8192"),
             ("audit_image_keep_hours", "24"),
-            ("member_image_download", "0"),
         ])
     );
-    // 夹到范围内；浮点取整；member_download 决定 image_retention_days
+    // 夹到范围内；浮点取整
     let (_, v) = api
-        .json("PUT", "/ops/audit", Some(json!({"thumbs": 1, "retention_days": 99999, "image_cap_mb": -5, "image_keep_hours": 100000, "member_download": true})))
+        .json("PUT", "/ops/audit", Some(json!({"thumbs": 1, "retention_days": 99999, "image_cap_mb": -5, "image_keep_hours": 100000})))
         .await;
     assert_eq!(
         audit(&v),
-        json!({"prompts": true, "thumbs": true, "retention_days": 3650, "image_retention_days": 2, "image_cap_mb": 0,
+        json!({"prompts": true, "thumbs": true, "retention_days": 3650, "image_cap_mb": 0,
                "image_bytes": 0, "image_keep_hours": 8760, "announce_configured": false})
     );
     let s = settings(&e).await;
@@ -1184,24 +1183,22 @@ async fn ops_audit_put() {
             &s["audit_retention_days"],
             &s["audit_image_cap_mb"],
             &s["audit_image_keep_hours"],
-            &s["member_image_download"]
         ],
-        ["3650", "0", "8760", "1"]
+        ["3650", "0", "8760"]
     );
     api.json(
         "PUT",
         "/ops/audit",
-        Some(json!({"image_cap_mb": 10.9, "member_download": false, "prompts": 0})),
+        Some(json!({"image_cap_mb": 10.9, "prompts": 0})),
     )
     .await;
     let s = settings(&e).await;
     assert_eq!(
         (
             s["audit_image_cap_mb"].as_str(),
-            s["audit_prompts"].as_str(),
-            s["member_image_download"].as_str()
+            s["audit_prompts"].as_str()
         ),
-        ("10", "0", "0")
+        ("10", "0")
     );
 
     let frozen = settings(&e).await;
@@ -2624,7 +2621,7 @@ async fn server_status_reports_alerts_audit_protection_disk() {
     assert_eq!(v["alerts"], json!({"configured": false, "sent": 0}));
     assert_eq!(
         v["audit"],
-        json!({"prompts": false, "thumbs": false, "retention_days": 7, "image_retention_days": 0, "image_cap_mb": 8192,
+        json!({"prompts": false, "thumbs": false, "retention_days": 7, "image_cap_mb": 8192,
                "image_bytes": 0, "image_keep_hours": 24})
     );
     assert_eq!(
@@ -2656,20 +2653,10 @@ async fn server_status_reports_alerts_audit_protection_disk() {
     );
     assert!((88..=90).contains(&v["upstream"]["image_cooldown_seconds"].as_i64().unwrap()));
     // 记录开关改了，状态里跟着变
-    api.json(
-        "PUT",
-        "/ops/audit",
-        Some(json!({"prompts": true, "member_download": true})),
-    )
-    .await;
+    api.json("PUT", "/ops/audit", Some(json!({"prompts": true})))
+        .await;
     let v = api.get("/status").await;
-    assert_eq!(
-        (
-            v["audit"]["prompts"].clone(),
-            v["audit"]["image_retention_days"].clone()
-        ),
-        (json!(true), json!(2))
-    );
+    assert_eq!(v["audit"]["prompts"], json!(true));
 }
 
 #[tokio::test]
