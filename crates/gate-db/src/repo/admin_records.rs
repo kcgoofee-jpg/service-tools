@@ -42,7 +42,7 @@ pub struct ClientExportData {
     pub keys: Vec<Vec<Value>>,
     /// key_id, discord_id, username, display_name
     pub registrations: Vec<Vec<Value>>,
-    /// ts, key_id, key_name, kind, model, status, images, anlas, wait_ms, dur_ms, up_status, client, detail, reason, rid
+    /// ts, key_id, key_name, kind, model, status, images, anlas, wait_ms, dur_ms, up_status, detail, reason, rid
     pub usage: Vec<Vec<Value>>,
     /// key_id, tag, note
     pub tags: Vec<(i64, String, String)>,
@@ -128,9 +128,9 @@ impl Db {
             let usage = c
                 .prepare(
                     "SELECT ts, key_id, key_name, kind, model, status, images, anlas, wait_ms, dur_ms, up_status, \
-                     client, detail, reason, rid FROM usage_log WHERE ts>=? ORDER BY ts",
+                     detail, reason, rid FROM usage_log WHERE ts>=? ORDER BY ts",
                 )?
-                .query_map([since], |r| cells(r, 15))?
+                .query_map([since], |r| cells(r, 14))?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             let tags = c
                 .prepare("SELECT key_id, tag, note FROM key_tags")?

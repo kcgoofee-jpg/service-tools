@@ -48,7 +48,6 @@ export type UsageLog = {
   reason: string;
   wait_ms: number;
   dur_ms: number;
-  client: string;
   up_status: number;
   rid: string;
 };

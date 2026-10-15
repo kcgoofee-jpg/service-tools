@@ -447,7 +447,6 @@ fn seed_members(c: &Connection) {
             c,
             &Log1 {
                 wait_ms: wait,
-                client: "TavernAI/1.0",
                 ..Log1::image_ok(NOW - dt, 1)
             },
         );
@@ -456,7 +455,6 @@ fn seed_members(c: &Connection) {
         c,
         &Log1 {
             wait_ms: 130_000,
-            client: "Mozilla/5.0 (test)",
             ..Log1::image_ok(NOW - 500.0, 2)
         },
     );
@@ -530,11 +528,6 @@ fn members_full_picture() {
                 "成员",
                 "近 1 小时间隔疑似被绕过（同 Key <12 秒连发）：1 次".to_string()
             ),
-            (
-                Sev::Ok,
-                "成员",
-                "24 小时客户端：(未记录) ×11、TavernAI/1.0 ×3、Mozilla/5.0 (test) ×1".to_string()
-            ),
         ]
     );
     assert_eq!(rep.data["hour_ok"], json!(4));
@@ -552,13 +545,9 @@ fn members_full_picture() {
         json!(2),
         "测试 Key 不算活跃成员"
     );
-    assert_eq!(
-        rep.data["clients_24h"],
-        json!([
-            ["(未记录)", 11],
-            ["TavernAI/1.0", 3],
-            ["Mozilla/5.0 (test)", 1]
-        ])
+    assert!(
+        rep.data.get("clients_24h").is_none(),
+        "客户端分布已删除（docs/v3-deviations.md #50）"
     );
 }
 

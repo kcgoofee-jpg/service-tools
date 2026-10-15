@@ -15,7 +15,7 @@ import {
   useMedia,
   usePageData,
 } from "../members/shared";
-import { FEATURES, formatClient, kindLabel, shortModel, timing } from "./format";
+import { FEATURES, kindLabel, shortModel, timing } from "./format";
 import { intParam, useQueryState } from "./query";
 import type { LogsResp, UsageLog } from "./types";
 
@@ -226,12 +226,6 @@ export function Usage() {
                   </div>
                   <div>
                     <b>{l.key_name}</b>
-                    {l.client && (
-                      <span class="small muted" title={l.client}>
-                        {" "}
-                        · {formatClient(l.client)}
-                      </span>
-                    )}
                   </div>
                   <div class="small">
                     {kindLabel(l.kind)}
@@ -271,14 +265,7 @@ export function Usage() {
                       <td class="nowrap" title={fullTime(l.ts)}>
                         {fullTime(l.ts)}
                       </td>
-                      <td>
-                        <div>{l.key_name}</div>
-                        {l.client && (
-                          <div class="small muted" title={l.client}>
-                            {formatClient(l.client)}
-                          </div>
-                        )}
-                      </td>
+                      <td>{l.key_name}</td>
                       <td class="nowrap">{kindLabel(l.kind)}</td>
                       <td class="nowrap" title={l.model}>
                         {shortModel(l.model)}

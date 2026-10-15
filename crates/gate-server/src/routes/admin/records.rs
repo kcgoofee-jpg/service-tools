@@ -518,14 +518,13 @@ requests.csv（每次请求一行，按时间升序）
   time 时间 · key_id / key_name / discord_id / discord_user 是谁
   kind 功能（image / image_stream / chat …）· model 模型 · status 结果（ok / rejected / error / cancelled）
   images 张数 · anlas 消耗 · wait_ms 排队 · dur_ms 生成耗时 · up_status 上游状态码
-  user_agent 客户端自报的 UA · detail / reason 网关备注、拒绝原因 · rid 错误编号
+  detail / reason 网关备注、拒绝原因 · rid 错误编号
 
 keys.csv（每把 Key 一行）
-  ok_images 成功出图张数 · client_kinds 用过的客户端种类（UA 去重）
+  ok_images 成功出图张数
   tags 后台标签 · quota_auto 1=算法管、-1=手动 · is_test 测试 Key
 
 怎么看「蛀虫」（思路，不是结论）：
-  - 一把 Key 的 client_kinds 明显偏多（同一人在多个软件间切换是少数，转卖/共用往往多种客户端混用）
   - 24 小时不停、节奏像机器（间隔几乎恒定）
   - 深夜高频、拒绝（rejected）远多于成功
 ";
@@ -557,16 +556,12 @@ fn build_client_zip(
     let empty = Value::String(String::new());
     let mut req_rows: Vec<Vec<String>> = Vec::new();
     let mut ok_images: HashMap<i64, i64> = HashMap::new();
-    let mut clients: HashMap<i64, std::collections::HashSet<String>> = HashMap::new();
     for u in &d.usage {
         let kid = u[1].as_i64();
         if u[5].as_str() == Some("ok")
             && let Some(k) = kid
         {
             *ok_images.entry(k).or_insert(0) += u[6].as_i64().unwrap_or(0);
-        }
-        if let (Some(k), Some(c)) = (kid, u[11].as_str().filter(|c| !c.is_empty())) {
-            clients.entry(k).or_default().insert(c.to_string());
         }
         let r = kid
             .and_then(|k| reg.get(&k))
@@ -590,7 +585,6 @@ fn build_client_zip(
             cell(&u[11]),
             cell(&u[12]),
             cell(&u[13]),
-            cell(&u[14]),
         ]);
     }
     let mut tags: HashMap<i64, Vec<String>> = HashMap::new();
@@ -618,7 +612,6 @@ fn build_client_zip(
             ts_text(state, &k[6]),
             ts_text(state, &k[7]),
             ok_images.get(&kid).copied().unwrap_or(0).to_string(),
-            clients.get(&kid).map_or(0, |s| s.len()).to_string(),
             safe_cell(&tags.get(&kid).map(|t| t.join("；")).unwrap_or_default()),
         ]);
     }
@@ -655,7 +648,6 @@ fn build_client_zip(
             "wait_ms",
             "dur_ms",
             "up_status",
-            "user_agent",
             "detail",
             "reason",
             "rid",
@@ -677,7 +669,6 @@ fn build_client_zip(
             "created",
             "last_used",
             "ok_images",
-            "client_kinds",
             "tags",
         ],
         &key_rows,
@@ -690,7 +681,7 @@ fn build_client_zip(
 static LAST_LOG_EXPORT: LazyLock<Mutex<HashMap<PathBuf, f64>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-/// 客户端日志导出（zip：请求、Key、客户端种类），给站长定期独立复核。只读，不含提示词和 Key 原文。
+/// 客户端日志导出（zip：请求、Key），给站长定期独立复核。只读，不含提示词和 Key 原文。
 async fn logs_export(State(state): State<AppState>, req: Request) -> R {
     let mut cx = Ctx::new(state, req).await?;
     let days = cx.query_int("days", 30);

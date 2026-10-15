@@ -1,6 +1,8 @@
 //! 用量日志：成功记账、拒绝 / 失败日志、各类统计查询。
 
-use super::{INSERT_LOG, INSERT_REJECT, NOT_TEST, PyMap, SqlValue, UPSERT_COUNTERS, marks};
+use super::{
+    INSERT_LOG, INSERT_REJECT, LOG_COLUMNS, NOT_TEST, PyMap, SqlValue, UPSERT_COUNTERS, marks,
+};
 use crate::{Db, Result, value};
 use gate_core::pyc;
 use rusqlite::params;
@@ -24,7 +26,6 @@ pub struct Success {
     pub unconfirmed_anlas: f64,
     pub wait_ms: i64,
     pub dur_ms: i64,
-    pub client: String,
     pub up_status: i64,
     pub rid: String,
     pub src: String,
@@ -45,7 +46,6 @@ pub struct NewLog {
     pub unconfirmed_anlas: f64,
     pub wait_ms: i64,
     pub dur_ms: i64,
-    pub client: String,
     pub up_status: i64,
     pub rid: String,
     pub src: String,
@@ -154,7 +154,6 @@ impl Db {
                     s.unconfirmed_anlas,
                     s.wait_ms.max(0),
                     s.dur_ms.max(0),
-                    pyc::take_chars(&s.client, 256),
                     s.up_status,
                     pyc::take_chars(&s.rid, 16),
                     pyc::take_chars(&s.src, 40),
@@ -204,7 +203,6 @@ impl Db {
                     l.unconfirmed_anlas,
                     l.wait_ms.max(0),
                     l.dur_ms.max(0),
-                    pyc::take_chars(&l.client, 256),
                     l.up_status,
                     pyc::take_chars(&l.rid, 16),
                     pyc::take_chars(&l.src, 40),
@@ -231,7 +229,7 @@ impl Db {
         args.push(SqlValue::Integer(offset));
         self.read(move |c| {
             let mut stmt = c.prepare(&format!(
-                "SELECT * FROM usage_log{where_} ORDER BY id DESC LIMIT ? OFFSET ?"
+                "SELECT {LOG_COLUMNS} FROM usage_log{where_} ORDER BY id DESC LIMIT ? OFFSET ?"
             ))?;
             stmt.query_map(rusqlite::params_from_iter(args.iter()), value::row_json)?
                 .collect()
@@ -362,32 +360,6 @@ impl Db {
             slot(&mut out, key_id).rejected_why = Some(items);
         }
         Ok(out)
-    }
-
-    /// 每把 Key 最近一次请求自报的客户端（User-Agent 摘要）。
-    pub async fn latest_member_clients(&self) -> Result<PyMap<i64, String>> {
-        self.read(|c| {
-            let mut stmt = c.prepare(
-                "SELECT u.key_id, u.client FROM usage_log u \
-                 JOIN (SELECT key_id, MAX(id) AS max_id FROM usage_log \
-                       WHERE key_id IS NOT NULL AND client != '' \
-                       GROUP BY key_id) m \
-                 ON u.id = m.max_id",
-            )?;
-            let rows = stmt.query_map([], |r| {
-                Ok((value::i64_or(r, 0, 0)?, value::text_or(r, 1, "None")?))
-            })?;
-            let mut out: PyMap<i64, String> = Vec::new();
-            for row in rows {
-                let (k, v) = row?;
-                match out.iter_mut().find(|(ek, _)| *ek == k) {
-                    Some(slot) => slot.1 = v,
-                    None => out.push((k, v)),
-                }
-            }
-            Ok(out)
-        })
-        .await
     }
 
     /// 出图请求的 (ts, model, status, images, wait_ms, dur_ms, up_status, detail)，供上游表现分析（不含测试 Key）。

@@ -1454,7 +1454,6 @@ async fn members(State(state): State<AppState>, req: Request) -> R {
         .await?
         .into_iter()
         .collect();
-    let clients: HashMap<i64, String> = st.db.latest_member_clients().await?.into_iter().collect();
     // 旧版 `paused if paused > time.time() else 0`：过期的是整数 0，没过期的是浮点
     let pause_map: HashMap<i64, Value> = st
         .db
@@ -1623,10 +1622,6 @@ async fn members(State(state): State<AppState>, req: Request) -> R {
             Value::Array(auto_tags.get(&id).cloned().unwrap_or_default()),
         );
         put(
-            "last_client",
-            json!(clients.get(&id).cloned().unwrap_or_default()),
-        );
-        put(
             "hours24",
             json!(rate_map.get(&id).cloned().unwrap_or_default()),
         );
@@ -1729,9 +1724,6 @@ async fn members(State(state): State<AppState>, req: Request) -> R {
                     "first_image_at".into(),
                     if fnum(&b) < fnum(&a) { b } else { a },
                 );
-            }
-            if !pyval::truthy(&head["last_client"]) {
-                head.insert("last_client".into(), other["last_client"].clone());
             }
             let seen: Vec<Value> = head["tags"]
                 .as_array()

@@ -87,7 +87,7 @@ pub fn ctx_of(parts: &Parts) -> ReqCtx {
         .extensions
         .get::<ReqCtx>()
         .cloned()
-        .unwrap_or_else(|| ReqCtx::new(String::new()))
+        .unwrap_or_else(ReqCtx::new)
 }
 
 /// `Authorization: Bearer <key>` 里的 Key（大小写不敏感；没有为空串）。

@@ -702,16 +702,17 @@ async fn client_log_export_is_a_zip_with_csvs_and_rate_limited() {
         "{readme}"
     );
     assert!(readme.contains("（UTC+8）  范围：最近 7 天\n"), "{readme}");
+    assert!(!readme.contains("client_kinds") && !readme.contains("user_agent"));
+    assert!(!String::from_utf8_lossy(&files[2].1).contains("client_kinds"));
     let req = String::from_utf8(files[1].1.clone()).unwrap();
     let lines: Vec<&str> = req.trim_end().split("\r\n").collect();
     assert!(
         lines[0].starts_with('\u{feff}')
-            && lines[0].ends_with("wait_ms,dur_ms,up_status,user_agent,detail,reason,rid")
+            && lines[0].ends_with("wait_ms,dur_ms,up_status,detail,reason,rid")
     );
     assert_eq!(lines.len(), 3, "只有最近 7 天的 2 条请求：{req}");
     assert!(
-        lines[1]
-            .contains(",1,测试成员,900000000000000001,u1,image,m,ok,2,0.0,10,20,200,柏宝绘,,,r1"),
+        lines[1].contains(",1,测试成员,900000000000000001,u1,image,m,ok,2,0.0,10,20,200,,,r1"),
         "{}",
         lines[1]
     );
@@ -727,8 +728,8 @@ async fn client_log_export_is_a_zip_with_csvs_and_rate_limited() {
         "{k1}"
     );
     assert!(
-        k1.ends_with(",3,2,观察（备注）；常驻"),
-        "成功出图 3 张、客户端 2 种、标签：{k1}"
+        k1.ends_with(",3,观察（备注）；常驻"),
+        "成功出图 3 张、标签（不再导出客户端种类，docs/v3-deviations.md #50）：{k1}"
     );
     // 全站每分钟 1 次
     a.get(&format!("{A}/logs/export"))

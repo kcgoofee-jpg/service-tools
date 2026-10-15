@@ -73,7 +73,6 @@ const PROMPTS: [(&str, &str); 4] = [
         "lowres, text",
     ),
 ];
-const CLIENTS: [&str; 4] = ["柏宝绘", "柏宝绘", "智绘姬", "SillyTavern"];
 
 pub struct SeededKey {
     pub id: i64,
@@ -268,7 +267,6 @@ async fn seed_usage(
             key.name.to_string(),
             e.kind.to_string(),
             model.to_string(),
-            pick(rng, &CLIENTS).to_string(),
             rid(rng),
             "203.0.*.*".to_string(),
         );
@@ -288,10 +286,9 @@ async fn seed_usage(
                         legacy_free_images: i64::from(image && v5 == 0),
                         wait_ms: rng.random_range(0..20000),
                         dur_ms: rng.random_range(3000..9000),
-                        client: common.4,
                         up_status: 200,
-                        rid: common.5,
-                        src: common.6,
+                        rid: common.4,
+                        src: common.5,
                         ..Default::default()
                     },
                     e.ts,
@@ -330,9 +327,8 @@ async fn seed_usage(
                         detail: detail.into(),
                         reason: reason.into(),
                         wait_ms: rng.random_range(0..3000),
-                        client: common.4,
-                        rid: common.5,
-                        src: common.6,
+                        rid: common.4,
+                        src: common.5,
                         ..Default::default()
                     },
                     e.ts,
@@ -351,10 +347,9 @@ async fn seed_usage(
                         detail: detail.into(),
                         wait_ms: rng.random_range(0..20000),
                         dur_ms: rng.random_range(3000..9000),
-                        client: common.4,
                         up_status: up,
-                        rid: common.5,
-                        src: common.6,
+                        rid: common.4,
+                        src: common.5,
                         ..Default::default()
                     },
                     e.ts,

@@ -49,7 +49,6 @@ export type Member = {
   reset_today: { count: number; last_ts: number } | null;
   tags: Tag[];
   auto_tags: AutoTag[];
-  last_client: string;
   hours24: number[];
   key_count: number;
   all_key_ids: number[];

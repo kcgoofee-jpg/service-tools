@@ -1,4 +1,4 @@
-//! 每个请求的上下文：请求编号、计时（排队 / 上游耗时）、客户端名、上游状态码、当前 Key、是否已记日志。
+//! 每个请求的上下文：请求编号、计时（排队 / 上游耗时）、上游状态码、当前 Key、是否已记日志。
 //!
 //! 旧版用 ContextVar + 共享 dict（`request_timing.py`、`core/context.py`），子任务里写的值外层也能看到。
 //! 这里用 `Arc<Mutex<..>>` 放进请求扩展，同时用 tokio task-local 让错误响应等「拿不到 Request 的地方」
@@ -24,7 +24,6 @@ struct Inner {
     rid: String,
     t0: Instant,
     sent: Option<Instant>,
-    client: String,
     up_status: u16,
     logged: bool,
     /// 本请求的 5xx 是上游造成的（见 `error::upstream_transport`）：错误账本不记 Bug。
@@ -42,19 +41,23 @@ struct Inner {
 pub struct Timing {
     pub wait_ms: i64,
     pub dur_ms: i64,
-    pub client: String,
     pub up_status: u16,
     pub rid: String,
     pub src: String,
 }
 
+impl Default for ReqCtx {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ReqCtx {
-    pub fn new(client: String) -> Self {
+    pub fn new() -> Self {
         Self(Arc::new(Mutex::new(Inner {
             rid: new_rid(),
             t0: Instant::now(),
             sent: None,
-            client,
             up_status: 0,
             logged: false,
             upstream_fault: false,
@@ -92,16 +95,6 @@ impl ReqCtx {
     /// 登记「第一次发往上游」的回调（只保留最后一次登记的）。
     pub fn on_sent(&self, hook: impl FnOnce() + Send + 'static) {
         self.with(|i| i.on_sent = Some(Box::new(hook)));
-    }
-
-    /// 无明确自报 UA 的客户端，按请求体参数指纹识别（小白盒、dsh-tavern-image 等）。
-    pub fn refine_client_from_payload(&self, body: &serde_json::Value) {
-        self.with(|i| {
-            if let Some(c) = gate_core::request_timing::refine_client_from_payload(&i.client, body)
-            {
-                i.client = c;
-            }
-        });
     }
 
     pub fn was_sent(&self) -> bool {
@@ -151,14 +144,6 @@ impl ReqCtx {
         self.with(|i| i.key_id.map(|id| (id, i.key_name.clone())))
     }
 
-    pub fn client(&self) -> String {
-        self.with(|i| i.client.clone())
-    }
-
-    pub fn set_client(&self, client: String) {
-        self.with(|i| i.client = client);
-    }
-
     /// wait_ms：收到请求到发往上游；dur_ms：上游耗时（没发到上游为 0）。
     pub fn snapshot(&self) -> Timing {
         self.with(|i| {
@@ -170,7 +155,6 @@ impl ReqCtx {
             Timing {
                 wait_ms: wait.as_millis() as i64,
                 dur_ms: dur.as_millis() as i64,
-                client: i.client.clone(),
                 up_status: i.up_status,
                 rid: i.rid.clone(),
                 src: i.src.clone(),

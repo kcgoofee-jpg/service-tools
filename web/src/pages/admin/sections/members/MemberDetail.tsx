@@ -3,7 +3,6 @@ import { ExternalLink, Plus } from "lucide-preact";
 import { useState } from "preact/hooks";
 import { dayOf, fullTime, rel } from "../../../../lib/format";
 import { Badge, Button, copyText, Menu, toast } from "../../../../ui";
-import { formatClient } from "../logs/format";
 import {
   type Issue,
   type IssueAction,
@@ -280,12 +279,6 @@ export function MemberDetail(props: { m: MemberRow; now: number; act: DetailActi
             <dd title={fullTime(m.registered_at)}>{m.registered_at ? rel(m.registered_at, now) : "—"}</dd>
             <dt>最近使用</dt>
             <dd title={fullTime(k.last_used_at)}>{k.last_used_at ? rel(k.last_used_at, now) : "从未使用"}</dd>
-            {m.last_client && (
-              <>
-                <dt>常用设备</dt>
-                <dd title={m.last_client}>{formatClient(m.last_client)}</dd>
-              </>
-            )}
             <dt>标签</dt>
             <dd>
               <span class="mb-chips">

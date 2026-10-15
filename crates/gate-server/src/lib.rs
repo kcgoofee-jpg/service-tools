@@ -10,7 +10,6 @@ pub mod auth;
 pub mod body;
 pub mod bot_config;
 pub mod bugs;
-pub mod clients;
 pub mod env;
 pub mod error;
 pub mod exporter;

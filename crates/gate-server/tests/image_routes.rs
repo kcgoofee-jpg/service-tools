@@ -87,6 +87,40 @@ async fn generate_image_ok_records_usage() {
     assert_eq!((c.images, c.legacy_free_images), (1, 1));
 }
 
+/// 不识别客户端、不记设备（docs/v3-deviations.md #50）：不管 User-Agent、启动器请求头还是请求体长什么样，
+/// 用量日志的 client 列都是空串，后台日志接口也不返回这个字段。
+#[tokio::test]
+async fn usage_log_never_records_a_client() {
+    let e = setup(&[]).await;
+    let mut body = image_body("nai-diffusion-4-5-full", 1);
+    body["parameters"]["ucPresetId"] = json!(1);
+    let req = Request::builder()
+        .method("POST")
+        .uri("/ai/generate-image")
+        .header("authorization", format!("Bearer {TOKEN}"))
+        .header("content-type", "application/json")
+        .header("user-agent", "DSH-Tavern-Image/1.2 (Windows NT 10.0)")
+        .header("x-correlation-id", "synthetic")
+        .header("x-initiated-at", "1")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+    let resp = gate_server::app(e.state.clone())
+        .oneshot(req)
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let rows = logs(&e.state).await;
+    assert_eq!(rows.len(), 1);
+    assert!(rows[0].get("client").is_none(), "{}", rows[0]);
+    let stored = e
+        .state
+        .db
+        .execute_fetchall_compat("SELECT client FROM usage_log", &[])
+        .await
+        .unwrap();
+    assert_eq!(stored, [json!({"client": ""})]);
+}
+
 #[tokio::test]
 async fn auth_errors_have_novelai_shape() {
     let e = setup(&[]).await;

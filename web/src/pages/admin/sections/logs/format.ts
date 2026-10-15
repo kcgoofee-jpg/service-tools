@@ -1,4 +1,4 @@
-/** 日志相关的显示格式化（纯函数）：客户端 UA、模型短名、功能名、耗时。 */
+/** 日志相关的显示格式化（纯函数）：模型短名、功能名、耗时。 */
 
 /** 功能 id → 完整名 / 短名（后端 features.FEATURES 的副本） */
 export const FEATURES: Array<{ id: string; label: string; short: string }> = [
@@ -53,74 +53,6 @@ export function shortModel(model: string | null | undefined): string {
                   : "";
   if (!base) return m.length > 18 ? `${m.slice(0, 16)}…` : m;
   return base + (/curated/.test(m) ? " Curated" : "") + (/inpainting/.test(m) ? " 重绘" : "");
-}
-
-/**
- * 客户端摘要：先认「客户端家族」（自报 UA 或按参数指纹识别），再补系统与软件细节。
- * 例：「DSH Tavern 配图插件 · Android · App 内置页」。
- * 括号里带浏览器 UA 的插件是按参数指纹认出来的，不是它自报的名字，所以系统 / 外壳一并显示。
- * undici 是 Node 自带的 fetch 标识，不是酒馆专属。
- */
-function clientShell(ua: string): string {
-  const os = /Windows/i.test(ua)
-    ? "Windows"
-    : /Android/i.test(ua)
-      ? "Android"
-      : /iPhone|iPad|iOS/i.test(ua)
-        ? "iOS"
-        : /Macintosh|Mac OS X/i.test(ua)
-          ? "Mac"
-          : /Linux/i.test(ua)
-            ? "Linux"
-            : "";
-  const shell = /Edg[A-Z]?\//i.test(ua)
-    ? "Edge"
-    : /MicroMessenger/i.test(ua)
-      ? "微信内置"
-      : /HeyTapBrowser/i.test(ua)
-        ? "OPPO 浏览器"
-        : /Quark/i.test(ua)
-          ? "夸克"
-          : /MiuiBrowser/i.test(ua)
-            ? "小米浏览器"
-            : /; wv\)|Version\/[0-9]/i.test(ua)
-              ? "App 内置页"
-              : /Chrome\//i.test(ua)
-                ? "Chrome"
-                : /Firefox\//i.test(ua)
-                  ? "Firefox"
-                  : /Safari\//i.test(ua)
-                    ? "Safari"
-                    : /Dalvik/i.test(ua)
-                      ? "安卓 App 直连"
-                      : /CFNetwork|^App\//i.test(ua)
-                        ? "iOS App"
-                        : "";
-  return [os, shell].filter(Boolean).join(" · ");
-}
-
-export function formatClient(raw: string | null | undefined): string {
-  const ua = String(raw ?? "").trim();
-  if (!ua) return "";
-  const tail = clientShell(ua);
-  const named = (name: string) => (tail ? `${name} · ${tail}` : name);
-  if (/Aaalice|Aaalice_NAI_Launcher/i.test(ua)) return named("Aaalice NAI 启动器");
-  if (/Luker/i.test(ua)) return named("Luker 酒馆客户端");
-  if (/TauriTavern|Tauri/i.test(ua)) return named("TauriTavern");
-  if (/NAI-Workbench|workbench/i.test(ua)) return named("NAI 工作台");
-  if (/DSH-Tavern|dsh-tavern-image|dsh-tavern/i.test(ua)) return named("DSH Tavern 配图插件");
-  if (/SillyTavern/i.test(ua)) return named("SillyTavern");
-  if (/undici/i.test(ua)) return "Node 脚本（undici，未自报客户端）";
-  if (/^node(\/|$)/i.test(ua)) return "Node 脚本（未自报客户端）";
-  if (/axios/i.test(ua)) return "axios（聊天前端 / 脚本）";
-  if (/NAI-Launcher/i.test(ua)) return named("NAI-Launcher");
-  if (/python-requests|python-httpx|urllib|python/i.test(ua)) return "Python 脚本（工具 / 巡检）";
-  if (/curl/i.test(ua)) return "curl";
-  if (/Postman/i.test(ua)) return "Postman";
-  if (/ComfyUI/i.test(ua)) return "ComfyUI";
-  if (/^Mozilla\/5\.0$/i.test(ua)) return "通用 UA（客户端没填完整）";
-  if (tail) return tail;
-  return ua.length > 28 ? `${ua.slice(0, 26)}…` : ua;
 }
 
 /** 耗时：生成 4.2s、等 12s（等待 < 100ms 不显示） */

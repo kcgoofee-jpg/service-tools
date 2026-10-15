@@ -324,6 +324,13 @@ async fn client_export_rows() {
     );
     assert_eq!(d.usage.len(), 1, "since 之前的不要");
     assert_eq!(
+        d.usage[0].len(),
+        14,
+        "不导出 client 列（docs/v3-deviations.md #50）：{:?}",
+        d.usage[0]
+    );
+    assert!(!d.usage[0].contains(&json!("ua")));
+    assert_eq!(
         d.usage[0][..4],
         [json!(10.0), json!(a), json!("甲"), json!("image")]
     );

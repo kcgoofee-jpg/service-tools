@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { autoReason, bugSource, formatClient, kindLabel, shortModel, timing } from "./format";
+import { autoReason, bugSource, kindLabel, shortModel, timing } from "./format";
 
 describe("shortModel", () => {
   it("把 NovelAI 模型名缩成版本号", () => {
@@ -9,17 +9,6 @@ describe("shortModel", () => {
     expect(shortModel("nai-diffusion-3-inpainting")).toBe("V3 重绘");
     expect(shortModel("")).toBe("");
     expect(shortModel("some-very-long-unknown-model-name")).toBe("some-very-long-u…");
-  });
-});
-
-describe("formatClient", () => {
-  it("认出家族并补系统 / 外壳", () => {
-    expect(formatClient("DSH-Tavern/2.6 (Linux; Android 14; wv) Chrome/120")).toBe(
-      "DSH Tavern 配图插件 · Android · App 内置页",
-    );
-    expect(formatClient("")).toBe("");
-    expect(formatClient("undici")).toContain("Node 脚本");
-    expect(formatClient("Mozilla/5.0")).toBe("通用 UA（客户端没填完整）");
   });
 });
 

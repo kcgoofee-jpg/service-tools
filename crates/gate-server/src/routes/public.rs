@@ -12,7 +12,6 @@
 //! `/healthz`、`/`、`/survey`、`/admin*`、`/_owl/*`、图标在 pages.rs。
 
 use crate::auth::{authenticate, client_ip, ctx_of, header_str, site_flag_f64};
-use crate::clients::client_name;
 use crate::error::{ApiError, ApiResult, HttpError, InternalError, json_response, ok_json};
 use crate::key::Key;
 use crate::live::{self, Snapshot, StreamKind, StreamSlot, wire_text};
@@ -656,6 +655,24 @@ fn injected_script_error(msg: &str, stack: &str, host: &str) -> bool {
     !frames.iter().any(|f| ours.iter().any(|o| f.contains(o)))
 }
 
+/// 报错上报里的文本：连续的控制字符（`\x00-\x1f` `\x7f`）换成一个空格，去首尾空白，最多 256 个字符。
+fn one_line(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut in_ctrl = false;
+    for c in text.chars() {
+        if c <= '\u{1f}' || c == '\u{7f}' {
+            if !in_ctrl {
+                out.push(' ');
+                in_ctrl = true;
+            }
+        } else {
+            out.push(c);
+            in_ctrl = false;
+        }
+    }
+    take_chars(strip(&out), 256).to_string()
+}
+
 /// 首页 / 后台网页的脚本报错上报（只收本站页面的错误；每 IP 每 10 分钟 10 条，全站每 10 分钟 100 条）。
 ///
 /// 3.0 起另外丢弃两类（docs/v3-deviations.md #45）：浏览器网络失败（断网 / 请求被取消，不是我们的缺陷），
@@ -694,11 +711,11 @@ async fn client_error(State(state): State<AppState>, req: Request) -> Response {
     } else {
         "other".to_string()
     };
-    let msg = client_name(&text_of(d, "msg"));
+    let msg = one_line(&text_of(d, "msg"));
     let msg = take_chars(&msg, 200);
     let msg = if msg.is_empty() { "unknown" } else { msg };
     let src = text_of(d, "src");
-    let place = client_name(&format!("{src}:{}", text_of(d, "line")));
+    let place = one_line(&format!("{src}:{}", text_of(d, "line")));
     let stack = take_chars(&text_of(d, "stack"), 1500).to_string();
     // 3.0 前端对脚本错误（ErrorEvent）带 `filename`，Promise 拒绝没有
     let filename = match d.get("filename") {
@@ -711,7 +728,7 @@ async fn client_error(State(state): State<AppState>, req: Request) -> Response {
     {
         return no_content();
     }
-    let ua = client_name(&header_str(h, "user-agent"));
+    let ua = one_line(&header_str(h, "user-agent"));
     let source = format!("web:{page}");
     let detail = format!("{place}\n{ua}\n{stack}");
     state.bugs.capture(crate::bugs::Report {

@@ -51,7 +51,6 @@ function mk(p: Partial<Member> = {}): Member {
     reset_today: null,
     tags: [],
     auto_tags: [],
-    last_client: "",
     hours24: [],
     key_count: 1,
     all_key_ids: [id],
