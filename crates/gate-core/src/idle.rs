@@ -21,6 +21,25 @@ pub const RECENT_OK_WINDOW: f64 = 3600.0;
 
 const DAY: f64 = 86400.0;
 
+/// 闲置回收拉黑时写进黑名单的理由（2.x 也是这个写法，库里已有的行能认出来）。
+pub fn ban_reason(days: i64) -> String {
+    format!("连续 {days} 天未活动自动回收")
+}
+
+/// 被拉黑的人再来领 Key 时看到的话：闲置回收拉黑的说明原因，其余（站长手动拉黑）照旧。不提解封。
+pub fn banned_notice(reason: &str) -> String {
+    let idle_days = reason
+        .strip_prefix("连续 ")
+        .and_then(|r| r.strip_suffix(" 天未活动自动回收"))
+        .and_then(|d| d.parse::<i64>().ok());
+    match idle_days {
+        Some(days) => format!(
+            "你之前的 Key 连续 {days} 天没有出图，已被自动回收，这个 Discord 账号不能再领取 Key。"
+        ),
+        None => "这个 Discord 账号已被站长停用，无法领取 Key。".to_string(),
+    }
+}
+
 /// 一个已完结的服务日 `[start, end)` 与当天全站成功出图张数。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ServedDay {
@@ -78,6 +97,24 @@ pub fn idle_window(now: f64, idle_days: i64, days: &[ServedDay]) -> IdleWindow {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn banned_notice_explains_idle_recycling_and_never_mentions_unbanning() {
+        // 2.x 写进库里的理由也是这个写法
+        assert_eq!(ban_reason(3), "连续 3 天未活动自动回收");
+        let idle = banned_notice(&ban_reason(3));
+        assert_eq!(
+            idle,
+            "你之前的 Key 连续 3 天没有出图，已被自动回收，这个 Discord 账号不能再领取 Key。"
+        );
+        for manual in ["站长手动封禁", "", "连续 x 天未活动自动回收"] {
+            assert_eq!(
+                banned_notice(manual),
+                "这个 Discord 账号已被站长停用，无法领取 Key。"
+            );
+        }
+        assert!(!idle.contains("解封") && !idle.contains("联系"));
+    }
 
     /// 2026-10-14 07:00 +08:00（服务日 10-14 的起点）
     const D0: f64 = 1_791_932_400.0;

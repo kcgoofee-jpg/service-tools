@@ -515,3 +515,50 @@ async fn a_panic_becomes_a_job_error() {
     let r = jobs::guarded(async { Ok::<_, JobError>("好".to_string()) }).await;
     assert_eq!(r.unwrap(), "好");
 }
+
+// ------------------------------------------------------------------ 停机检测
+
+/// 重启前网关「最后一次有动静」的时间：请求日志在 `log_ago` 秒前，定时任务在 `job_ago` 秒前跑完。
+async fn restart_after(log_ago: f64, job_ago: f64) -> (Option<String>, usize) {
+    let now = 1_900_000_000.0;
+    let _c = clock(Some(now)).await;
+    let e = setup(&[]).await;
+    let job_last =
+        json!({"maintenance": {"at": now - job_ago, "ok": true, "ms": 3, "summary": "全部完成"}});
+    e.state
+        .db
+        .write(move |tx| {
+            tx.execute(
+                "INSERT INTO usage_log(ts, key_id, key_name, kind, status) VALUES (?, 1, 'k', 'image', 'ok')",
+                [now - log_ago],
+            )?;
+            tx.execute(
+                "INSERT OR REPLACE INTO site_settings(key, value) VALUES ('job_last', ?)",
+                [job_last.to_string()],
+            )
+        })
+        .await
+        .unwrap();
+    let st = e.restart().await;
+    let grace = setting(&st, "key_inactivity_grace_started_at").await;
+    let resets = admin_actions(&st.db, 50)
+        .await
+        .iter()
+        .filter(|a| a["action"] == "闲置计时重置")
+        .count();
+    (grace, resets)
+}
+
+/// 安静时段凌晨没人发请求、但定时任务一直在跑：重启不算停机，闲置计时不重置（10-14 清晨就这样误判过）。
+#[tokio::test]
+async fn restart_after_a_quiet_night_keeps_the_idle_timer() {
+    assert_eq!(restart_after(2.0 * 3600.0, 120.0).await, (None, 0));
+}
+
+/// 真停机：请求日志和定时任务都停了超过 1 小时，重启时从现在重新起算闲置天数。
+#[tokio::test]
+async fn restart_after_real_downtime_resets_the_idle_timer() {
+    let (grace, resets) = restart_after(2.0 * 3600.0, 2.0 * 3600.0).await;
+    assert_eq!(grace.as_deref(), Some("1900000000.0"));
+    assert_eq!(resets, 1);
+}

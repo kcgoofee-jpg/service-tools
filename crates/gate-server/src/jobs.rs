@@ -415,7 +415,7 @@ pub async fn recycle_inactive_keys(state: &AppState) -> Result<Recycle, JobError
                 .ban_discord(
                     &reg.discord_id,
                     &BanInfo {
-                        reason: format!("连续 {days} 天未活动自动回收"),
+                        reason: gate_core::idle::ban_reason(days),
                         username: reg.username,
                         display_name: reg.display_name,
                         avatar: reg.avatar,

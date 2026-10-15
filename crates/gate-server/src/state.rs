@@ -267,8 +267,23 @@ impl AppState {
                 .as_deref(),
             now,
         );
-        // 停机检测：最后一条请求日志距今超过 1 小时 → 从现在重新起算闲置天数（不然停机 ≥ 回收天数后一重启就把所有人删光）
-        if let Some(last) = self.db.last_log_ts().await?
+        // 停机检测：网关最后一次有动静（请求日志、定时任务跑完）距今超过 1 小时 → 从现在重新起算闲置天数
+        // （不然停机 ≥ 回收天数后一重启就把所有人删光）。只看请求日志的话，安静时段凌晨没人发请求时的
+        // 一次重启也会被当成停机（10-14 清晨就这样把所有人的闲置天数重置了一次）。
+        let last_job = crate::jobs::JobsState::latest_run_at(
+            self.db
+                .get_setting(crate::jobs::registry::STATE_KEY)
+                .await?
+                .as_deref(),
+        );
+        let last_seen = self
+            .db
+            .last_log_ts()
+            .await?
+            .into_iter()
+            .chain(last_job)
+            .reduce(f64::max);
+        if let Some(last) = last_seen
             && now - last > 3600.0
         {
             self.db
