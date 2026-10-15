@@ -1,4 +1,4 @@
-//! params / site_flags / features / bot_config 与旧 Python 的对拍（夹具：tools/parity/golden/flags.py）。
+//! params / site_flags / features / bot_config 与旧 Python 的对拍（夹具生成脚本见标签 py-final）。
 
 use gate_core::bot_config::{self, BotConfigError};
 use gate_core::features::{self, FeaturesError, VibeAnlas};

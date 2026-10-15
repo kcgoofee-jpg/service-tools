@@ -1,4 +1,4 @@
-//! 内核整轮回放对拍（milestone M6）：夹具由 `tools/parity/golden/kernel_tick.py` 在旧 Python 上、真实 SQLite 库里生成。
+//! 内核整轮回放对拍（milestone M6）：夹具由旧 Python 在真实 SQLite 库里生成（脚本见标签 py-final）。
 //!
 //! 每个场景：新建网关（假上游 + 假告警 webhook）→ 执行同一批 `seed_sql` → 冻结时钟 → 按 `steps` 依次执行
 //! （tick_all / quota_run / autopilot_run / snapshot / set_enabled / sql / probe）→ 逐步比较

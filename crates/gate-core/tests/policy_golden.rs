@@ -1,4 +1,4 @@
-//! `policy` 与旧 Python（app/policy.py）对拍：夹具由 tools/parity/golden/policy.py 生成。
+//! `policy` 与旧 Python（app/policy.py）对拍：夹具由旧 Python 生成（脚本见标签 py-final）。
 //! 每个移植的函数都有一个测试；请求体类函数同时比较返回值和（原地修改后的）入参，键顺序也要一致。
 
 use gate_core::policy::{self, ImageCost};

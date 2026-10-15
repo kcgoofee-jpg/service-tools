@@ -2216,7 +2216,7 @@ async fn issue_result_enum_is_provisioned_for_plain_requests() {
 
 // ------------------------------------------------------------------ 成员名 / 打包：对拍旧版 golden
 
-/// `tools/parity/golden/registration.py` 在旧 Python 上生成：欢迎文案、成员名、zip / epub 的条目与文本内容。
+/// 旧 Python 生成的夹具（脚本见标签 py-final）：成员名、zip / epub 的条目与文本内容（欢迎文案不再对拍，见 docs/v3-deviations.md #75）。
 fn golden() -> Value {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),

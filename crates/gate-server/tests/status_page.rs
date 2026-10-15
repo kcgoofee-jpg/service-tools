@@ -1,6 +1,6 @@
 //! 公开状态页与后台事件接口（旧版 `app/status_page.py`）。
 //!
-//! 对拍夹具 `tests/fixtures/status_page.jsonl` 由 `tools/parity/golden/status_page.py` 在旧 Python 上生成
+//! 对拍夹具 `tests/fixtures/status_page.jsonl` 由旧 Python 生成（脚本见标签 py-final）
 //! （合成事件 / 小时计数 / 上游请求 / 官方状态 → 旧版的 `/status.json`、Atom、页面文本、后台列表）：
 //! - `/status.json`、`/status/feed.xml`、`/admin/api/incidents`：与旧版逐字节相同；
 //! - `/status` HTML：3.0 改了样式 / 脚本的加载方式，不比整页——旧页渲染出的每一个可见字符串（文本节点按顺序，

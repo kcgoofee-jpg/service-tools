@@ -146,7 +146,7 @@ impl serde_json::ser::Formatter for PyPretty<'_> {
     }
 }
 
-/// 读取 `.env` 风格文件里的某个键（与 patrol.py 的 `env_value` 一致：取第一处命中，
+/// 读取 `.env` 风格文件里的某个键（与旧版 patrol.py 的 `env_value` 一致，见标签 py-final：取第一处命中，
 /// 去掉首尾空白与成对引号字符；文件读不到按空串）。
 pub fn env_file_value(path: &Path, key: &str) -> String {
     let Ok(bytes) = std::fs::read(path) else {

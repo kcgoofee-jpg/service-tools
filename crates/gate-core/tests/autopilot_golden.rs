@@ -1,4 +1,4 @@
-//! 自动驾驶对拍：`tools/parity/golden/autopilot.py` 生成的夹具（旧 Python 的真实输出）。
+//! 自动驾驶对拍：旧 Python 生成的夹具（真实输出，生成脚本见标签 py-final）。
 //!
 //! 2.x 单 Key 守护的「换网段」「多客户端全天在用」两条规则（输入 `events`，恒为空）在 3.0 已删除
 //! （docs/v3-deviations.md #51）。夹具是冻结的 Python 输出，不改，在这里按输入过滤：

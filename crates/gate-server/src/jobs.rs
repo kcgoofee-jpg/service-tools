@@ -342,7 +342,7 @@ async fn inactive_key_cleanup_loop(state: AppState) {
 
 /// 永久回收长期未使用的普通 Key，并拉入黑名单（由站长在后台管理与解封）。
 ///
-/// **`KEY_INACTIVITY_DELETE_DAYS=0` 表示关闭：这时无论库里有什么都不会删任何 Key**（线上 10-11 起就是 0）。
+/// **`KEY_INACTIVITY_DELETE_DAYS=0` 表示关闭：这时无论库里有什么都不会删任何 Key**（线上现在是 3，10-13 起开着）。
 /// 返回删掉的 Key 数。
 pub async fn delete_inactive_keys(state: &AppState) -> Result<usize, KernelError> {
     let days = std::cmp::max(0, state.env.key_inactivity_delete_days);

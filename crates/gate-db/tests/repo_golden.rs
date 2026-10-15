@@ -1,4 +1,4 @@
-//! `Database` 全部方法的 golden 对拍：夹具由 `tools/parity/golden/db_methods.py` 在旧 Python 上生成。
+//! `Database` 全部方法的 golden 对拍：夹具由旧 Python 生成（脚本见标签 py-final）。
 //!
 //! 每个用例：新建空库 → 执行 `seed_sql`（以及原图目录快照）→ 调用同名 Rust 方法 →
 //! 比较返回值（含键顺序）、调用后所有非空表的整表内容、原图目录。浮点逐位相等。

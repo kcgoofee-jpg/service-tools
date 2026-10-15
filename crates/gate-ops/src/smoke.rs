@@ -1,4 +1,4 @@
-//! 线上冒烟（取代 deploy/live_smoke.py 与已删除的 smoke_test.py）：只做**不出图**的检查，
+//! 线上冒烟（取代旧版的 live_smoke.py 与 smoke_test.py，见标签 py-final）：只做**不出图**的检查，
 //! 不消耗任何 Anlas / 免费额度，也不会触发出图间隔。
 //!
 //! 检查：`/healthz`、`/public/status`、`/public/live`、`/status.json`、`/v1/models`；
