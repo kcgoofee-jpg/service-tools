@@ -2,6 +2,7 @@
 import { fullTime, num } from "../../../../lib/format";
 import { Card, cx } from "../../../../ui";
 import { TableWrap } from "../_kit";
+import { isLiveFeature } from "../members/types";
 import type { FeatBucket, Overview } from "./types";
 
 export function output(b: FeatBucket): string {
@@ -51,26 +52,28 @@ export function FeatureUsage(props: { rows: Overview["feature_usage"]; logSince:
             </tr>
           </thead>
           <tbody>
-            {props.rows.map((f) => {
-              const idle = !f.week.ok && !f.week.error && !f.week.rejected;
-              return (
-                <tr key={f.id} class={cx(idle && "ov-idle")}>
-                  <th scope="row">
-                    <a href={`/admin/logs/usage?feature=${f.id}`} title="查看这项功能的用量日志">
-                      {f.label}
-                    </a>
-                  </th>
-                  <td>
-                    <Triple b={f.today} />
-                    <span class="ov-sub">{output(f.today)}</span>
-                  </td>
-                  <td>
-                    <Triple b={f.week} />
-                    <span class="ov-sub">{output(f.week)}</span>
-                  </td>
-                </tr>
-              );
-            })}
+            {props.rows
+              .filter((f) => isLiveFeature(f.id))
+              .map((f) => {
+                const idle = !f.week.ok && !f.week.error && !f.week.rejected;
+                return (
+                  <tr key={f.id} class={cx(idle && "ov-idle")}>
+                    <th scope="row">
+                      <a href={`/admin/logs/usage?feature=${f.id}`} title="查看这项功能的用量日志">
+                        {f.label}
+                      </a>
+                    </th>
+                    <td>
+                      <Triple b={f.today} />
+                      <span class="ov-sub">{output(f.today)}</span>
+                    </td>
+                    <td>
+                      <Triple b={f.week} />
+                      <span class="ov-sub">{output(f.week)}</span>
+                    </td>
+                  </tr>
+                );
+              })}
           </tbody>
         </table>
       </TableWrap>

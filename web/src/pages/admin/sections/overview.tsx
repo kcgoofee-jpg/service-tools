@@ -12,6 +12,18 @@ import type { BotResp, BugsResp, Overview as OverviewData } from "./overview/typ
 import { Verdict } from "./overview/Verdict";
 import "./overview.css";
 
+/** 一行小字里的几段：每段不拆开（不让「测试」折成「测 / 试」），段与段之间可以换行 */
+const Parts = (props: { items: string[] }) => (
+  <>
+    {props.items.map((t, i) => (
+      <span key={t}>
+        {i > 0 && " · "}
+        <span style={{ whiteSpace: "nowrap" }}>{t}</span>
+      </span>
+    ))}
+  </>
+);
+
 const Of = (props: { children: string | number }) => <small class="ov-of">/ {props.children}</small>;
 
 export default function Overview() {
@@ -50,14 +62,27 @@ export default function Overview() {
         <Stat
           label="今日出图"
           value={<>{num(d.today.images)} 张</>}
-          hint={`成员 ${num(d.today.member_images)} · 站长 / 测试 ${num(d.today.images - d.today.member_images)} · V5 ${num(d.today.v5)}${d.v5_limit ? ` / ${num(d.v5_limit)}` : ""}`}
+          hint={
+            <Parts
+              items={[
+                `成员 ${num(d.today.member_images)}`,
+                `站长 / 测试 ${num(d.today.images - d.today.member_images)}`,
+                `V5 ${num(d.today.v5)}${d.v5_limit ? ` / ${num(d.v5_limit)}` : ""}`,
+              ]}
+            />
+          }
         />
         <Stat
           label="今天在用的成员"
           value={
             <>
               {d.active_members ?? 0}
-              {members > 0 && <Of>{members}</Of>}
+              {members > 0 && (
+                <>
+                  {" "}
+                  <Of>{members}</Of>
+                </>
+              )}
             </>
           }
           hint={`有效 Key ${d.keys_active} / ${d.keys_total}`}
