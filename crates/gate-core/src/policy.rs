@@ -1007,18 +1007,23 @@ pub fn has_paid_extras(params: &Value) -> PyResult<bool> {
     Ok(reference_surcharge(params)? != 0)
 }
 
+/// 免费出图的步数上限（上游 Opus 免费条件；也是本站免费档钳制的上限）。
+pub const FREE_MAX_STEPS: i64 = 28;
+/// 免费出图的面积上限 1024×1024（同上）。
+pub const FREE_MAX_PIXELS: i64 = 1024 * 1024;
+
 /// 首张是否符合免费条件；批次内其余图片仍按张计费。
 pub fn opus_free_eligible(params: &Value) -> PyResult<bool> {
     let p = params_of(params)?;
     if has_paid_extras(params)? {
         return Ok(false);
     }
-    if int_or(p.get("steps"), 28, 0)? > 28 {
+    if int_or(p.get("steps"), 28, 0)? > i128::from(FREE_MAX_STEPS) {
         return Ok(false);
     }
     let w = int_or(p.get("width"), 0, 0)?;
     let h = int_or(p.get("height"), 0, 0)?;
-    if w <= 0 || h <= 0 || w.saturating_mul(h) > 1024 * 1024 {
+    if w <= 0 || h <= 0 || w.saturating_mul(h) > i128::from(FREE_MAX_PIXELS) {
         return Ok(false);
     }
     Ok(true)
@@ -1254,7 +1259,7 @@ pub fn clamp_image_params(
                 .iter()
                 .any(|&(pw, ph)| w <= i128::from(pw) && h <= i128::from(ph))
         } else {
-            w.saturating_mul(h) <= 1024 * 1024
+            w.saturating_mul(h) <= i128::from(FREE_MAX_PIXELS)
         };
         let (pw, ph) = if eligible {
             (w, h)

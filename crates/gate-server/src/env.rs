@@ -150,11 +150,6 @@ pub struct EnvConfig {
     pub audit_thumbs: bool,
     pub audit_retention_days: i64,
     pub usage_log_retention_days: i64,
-    // 免费规格
-    pub safe_clamp: bool,
-    pub max_pixels: i64,
-    pub max_steps: i64,
-    pub allow_img2img: bool,
     // 全站预算
     pub global_monthly_anlas: f64,
     pub global_daily_anlas: i64,
@@ -309,10 +304,6 @@ impl EnvConfig {
             audit_thumbs: r.bool("AUDIT_THUMBS", false),
             audit_retention_days: r.int("AUDIT_RETENTION_DAYS", 7),
             usage_log_retention_days: r.int("USAGE_LOG_RETENTION_DAYS", 0),
-            safe_clamp: r.bool("SAFE_CLAMP", true),
-            max_pixels: r.int("MAX_PIXELS", 1024 * 1024),
-            max_steps: r.int("MAX_STEPS", 28),
-            allow_img2img: r.bool("ALLOW_IMG2IMG", false),
             global_monthly_anlas: r.float("GLOBAL_MONTHLY_ANLAS", 10000.0),
             global_daily_anlas: r.int("GLOBAL_DAILY_ANLAS", 200),
             default_daily_images: r.int("DEFAULT_DAILY_IMAGES", 100),

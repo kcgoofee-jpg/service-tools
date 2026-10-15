@@ -91,12 +91,12 @@
 
 价格（码 `policy.rs`）：Vibe 编码 2 Anlas/张；精确参考 5 Anlas/张/图；V4 / V4.5 的 Vibe 超过 4 张，每多 1 张 +2/图。Anlas 自动分配（旧的分配池）已删除，快照里残留的 `anlas_pool_last` 等键不再被读取。
 
-### 2.5 免费规格（对没有 Anlas 权限的 Key 生效，`SAFE_CLAMP` 默认开）
+### 2.5 免费规格（对没有 Anlas 权限的 Key 生效；数值写死在 `policy.rs`，没有环境变量）
 
-- 每次 1 张（`n_samples` 强制为 1）；步数 ≤ 28（`MAX_STEPS`）；SMEA 关闭。
-- V4.5 及更早的模型：总像素 ≤ 1024×1024 = 1048576（`MAX_PIXELS`），宽高取 64 的倍数，超出等比缩小。
+- 每次 1 张（`n_samples` 强制为 1）；步数 ≤ 28（`FREE_MAX_STEPS`）；SMEA 关闭。
+- V4.5 及更早的模型：总像素 ≤ 1024×1024 = 1048576（`FREE_MAX_PIXELS`），宽高取 64 的倍数，超出等比缩小。
 - V5：不超过三个预设之一——832×1216、1216×832、1024×1024，超出按长宽比吸附（> 1.1 → 1216×832，< 0.9 → 832×1216，其余 1024×1024）。
-- 图生图 / 局部重绘不开放（`ALLOW_IMG2IMG` 默认 0，回 400）；ControlNet 回 400；角色参考（`characterReferences`）被移除。
+- 图生图 / 局部重绘只对后台勾了「允许图生图」（`allow_img2img`）且有 Anlas 权限的 Key 开放，其余回 400；ControlNet 回 400；角色参考（`characterReferences`）被移除。
 - 新领 Key 开通的功能 `register_features`（线 `image,vibe,tags`；`*` = 不限）；功能可选 `image`、`upscale`、`augment`、`vibe`、`tags`（文本生成 / 语音 / OpenAI 兼容聊天 2026-10-15 已整套删除，库里 Key 的 `features` 或 `features_global` 里残留的 `text` / `voice` 读取时被忽略）。站长还有全局开关 `features_global`（JSON，缺省全开）。
 - 上游对「模型不存在」回的是 403，网关会窥探一小段响应体把「模型级 403」和「账号级 403」分开（只有账号级才计入账号健康度和 403 冷却）。
 

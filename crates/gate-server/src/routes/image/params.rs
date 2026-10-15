@@ -88,7 +88,7 @@ pub(super) async fn prepare(
         return Err(GateError::new(400, problem).into());
     }
     if params_has(&body, &["image", "mask"]) && !key.is_admin() {
-        if !(key.allow_img2img() && state.env.allow_img2img) {
+        if !key.allow_img2img() {
             reject(&model, "img2img 未开放");
             return Err(GateError::new(
                 400,
@@ -103,12 +103,17 @@ pub(super) async fn prepare(
             );
         }
     }
-    // 免费档钳制：只对没有 Anlas 权限的 Key 生效；有 Anlas 的 Key 可以用超规格参数，按 Anlas 扣
+    // 免费档钳制：只对没有 Anlas 权限的 Key 生效；有 Anlas 的 Key 可以用超规格参数，按 Anlas 扣。
+    // 上限写死（与 policy 的免费条件、SYSTEM-FACTS 的文案同一口径），不再读环境变量（docs/v3-deviations.md #105）
     let mut notes: Vec<String> = Vec::new();
-    if state.env.safe_clamp && !key.is_admin() && !key.allow_anlas() {
-        let (b, n, problem) =
-            policy::clamp_image_params(&body, state.env.max_pixels, state.env.max_steps, true)
-                .map_err(|e| pyerr_400(&e, "图片参数无效"))?;
+    if !key.is_admin() && !key.allow_anlas() {
+        let (b, n, problem) = policy::clamp_image_params(
+            &body,
+            policy::FREE_MAX_PIXELS,
+            policy::FREE_MAX_STEPS,
+            true,
+        )
+        .map_err(|e| pyerr_400(&e, "图片参数无效"))?;
         if let Some(problem) = problem {
             reject(&model, &problem);
             return Err(GateError::new(400, problem).into());

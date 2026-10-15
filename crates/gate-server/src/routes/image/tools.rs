@@ -35,7 +35,7 @@ pub(super) async fn tool(
         },
     )
     .await?;
-    if !key.is_admin() && !(key.allow_img2img() && state.env.allow_img2img) {
+    if !key.is_admin() && !key.allow_img2img() {
         return Err(GateError::new(403, "此 Key 或本站未开放图片处理权限（img2img）").into());
     }
     let body = read_image_payload(&parts.headers, body, IMAGE_BODY_LIMIT).await?;
