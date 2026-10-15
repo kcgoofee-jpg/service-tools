@@ -61,7 +61,7 @@ async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Requ
     let threshold = match pyval::strict_int(&threshold) {
         Some(n) if (1..=100).contains(&n) => n,
         _ => {
-            return Err(HttpError::new(422, "V5 告警阈值必须为 1～100 的整数百分比").into());
+            return Err(HttpError::new(422, "V5 余量低提示线必须为 1～100 的整数百分比").into());
         }
     };
     // 缺省字段保持原值（以前缺省会被写成 0 = 不限）

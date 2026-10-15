@@ -245,11 +245,11 @@ export const BUDGET_SPECS: Record<string, FieldSpec> = {
   },
   v5_alert_threshold: {
     kind: "int",
-    label: "V5 官方余量告警阈值",
+    label: "V5 余量低提示线",
     min: 1,
     max: 100,
     unit: "%",
-    hint: "账号 V5 剩余低于这个百分比时告警（1～100）",
+    hint: "账号 V5 官方余量低于这个百分比时，后台标「低」，并且更勤地刷新官方余量（1～100）。不会发告警、不会限制出图",
   },
   member_daily_anlas: {
     kind: "int",

@@ -372,15 +372,15 @@ async fn settings_get_put_and_stored_strings() {
         ),
         (
             json!({"v5_alert_threshold": 0}),
-            "V5 告警阈值必须为 1～100 的整数百分比",
+            "V5 余量低提示线必须为 1～100 的整数百分比",
         ),
         (
             json!({"v5_alert_threshold": 20.0}),
-            "V5 告警阈值必须为 1～100 的整数百分比",
+            "V5 余量低提示线必须为 1～100 的整数百分比",
         ),
         (
             json!({"v5_alert_threshold": "30"}),
-            "V5 告警阈值必须为 1～100 的整数百分比",
+            "V5 余量低提示线必须为 1～100 的整数百分比",
         ),
         (
             json!({"global_monthly_anlas": null}),
