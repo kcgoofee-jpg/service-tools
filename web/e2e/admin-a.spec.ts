@@ -72,7 +72,7 @@ const PAGES: Array<{ name: string; path: string; ready: (p: Page) => ReturnType<
   {
     name: "logs-usage",
     path: "/admin/logs/usage",
-    ready: (p) => p.getByText("暂无记录").or(p.getByRole("combobox", { name: /^功能/ })),
+    ready: (p) => p.getByText("暂无记录").or(p.locator(".lg-listcard")),
   },
   { name: "logs-actions", path: "/admin/logs/actions", ready: (p) => p.getByLabel("操作者") },
   {
