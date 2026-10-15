@@ -8,6 +8,7 @@ pub mod allowance;
 pub mod autopilot;
 pub mod bot_config;
 pub mod clock;
+pub mod discord_ua;
 pub mod features;
 pub mod guard;
 pub mod idle;

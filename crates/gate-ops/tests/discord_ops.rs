@@ -376,6 +376,8 @@ async fn announce_posts_with_no_mentions_allowed() {
     assert_eq!(reqs[0].path, "/channels/900000000000000020/messages");
     assert_eq!(reqs[0].auth, format!("Bot {TOKEN}"));
     assert!(reqs[0].user_agent.starts_with("DiscordBot ("));
+    // 与网关共用的 UA 写法（gate_core::discord_ua）；站点地址只从配置读，代码里不写死域名
+    assert_eq!(reqs[0].user_agent, gate_ops::discord::user_agent_from_env());
     assert_eq!(
         reqs[0].body,
         json!({"content": "@everyone 今晚 23:00 例行维护", "allowed_mentions": {"parse": []}})

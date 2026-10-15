@@ -31,9 +31,6 @@ pub const DM_BURST: usize = 3;
 pub const DM_WINDOW: f64 = 600.0;
 pub const DM_DAILY: usize = 20;
 
-/// Discord 要求机器人带可识别的 User-Agent（空的 / 默认的会被 Cloudflare 拦）。
-const USER_AGENT: &str = concat!("DiscordBot (nai-gate, ", env!("CARGO_PKG_VERSION"), ")");
-
 // ------------------------------------------------------------------ 错误
 
 /// 领 Key 流程里的失败。`Denied` = 旧版 `RegistrationError`（中文原因，直接给成员看）；
@@ -281,7 +278,8 @@ impl RegistrationService {
     pub fn from_env(env: &EnvConfig, db: Db) -> Option<Self> {
         let cfg = env.registration.clone()?;
         let http = reqwest::Client::builder()
-            .user_agent(USER_AGENT)
+            // Discord 要求机器人带可识别的 User-Agent（空的 / 默认的会被 Cloudflare 1010 拦），与告警、运维命令共用
+            .user_agent(gate_core::discord_ua::DISCORD_USER_AGENT)
             // httpx 默认不跟随重定向；也避免把机器人 Token 带到别处
             .redirect(reqwest::redirect::Policy::none())
             .build()
