@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use gate_core::errors::{
     self, Capture, ErrorEvent, ExcInfo, ExcKey, build_event, normalize_title, should_print_stack,
 };
-use gate_golden::{assert_eq_py, load};
+use gate_snapshot::{assert_eq_py, load};
 use serde_json::{Value, json};
 
 const M: &str = env!("CARGO_MANIFEST_DIR");
@@ -50,7 +50,7 @@ fn signature_golden() {
 fn event_json(e: &ErrorEvent) -> Value {
     json!({
         "sig": e.sig, "source": e.source, "level": e.level, "title": e.title, "detail": e.detail,
-        "path": e.path, "key_id": e.key_id, "rid": e.rid, "ts": gate_golden::f(e.ts),
+        "path": e.path, "key_id": e.key_id, "rid": e.rid, "ts": gate_snapshot::f(e.ts),
     })
 }
 

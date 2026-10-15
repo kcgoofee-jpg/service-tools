@@ -20,7 +20,7 @@ rand.workspace = true
 
 [dev-dependencies]
 tempfile = "3"
-gate-golden = { path = "../gate-golden" }
+gate-snapshot = { path = "../gate-snapshot" }
 base64.workspace = true
 
 [lints]

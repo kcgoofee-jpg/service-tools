@@ -9,7 +9,7 @@
 
 use gate_core::autopilot;
 use gate_core::reasons::{self, Reason};
-use gate_golden::{assert_eq_py_ordered, load};
+use gate_snapshot::{assert_eq_py_ordered, load};
 use serde_json::{Map, Value, json};
 
 const M: &str = env!("CARGO_MANIFEST_DIR");

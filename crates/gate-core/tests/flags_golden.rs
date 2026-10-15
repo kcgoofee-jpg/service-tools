@@ -7,7 +7,7 @@ use gate_core::bot_config::{self, BotConfigError};
 use gate_core::features::{self, FeaturesError, VibeAnlas};
 use gate_core::site_flags::{self, Kind, Spec, SpecDefault};
 use gate_core::{pyval, site_flags::ALL};
-use gate_golden::{Case, assert_eq_py, assert_eq_py_ordered, load};
+use gate_snapshot::{Case, assert_eq_py, assert_eq_py_ordered, load};
 use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
 

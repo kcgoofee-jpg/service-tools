@@ -8,7 +8,7 @@
 use gate_core::policy::{self, ImageCost};
 use gate_core::pyc;
 use gate_core::pyext::{PyResult, is_digit, is_nd, json_int};
-use gate_golden::{Case, assert_eq_py_ordered, f, load};
+use gate_snapshot::{Case, assert_eq_py_ordered, f, load};
 use serde_json::{Value, json};
 
 const M: &str = env!("CARGO_MANIFEST_DIR");

@@ -1,7 +1,7 @@
 mod common;
 
 use gate_core::client_views::{SubscriptionData, SubscriptionError, subscription_payload};
-use gate_golden::{as_f64, assert_eq_py_ordered, load};
+use gate_snapshot::{as_f64, assert_eq_py_ordered, load};
 use serde_json::{Value, json};
 
 const M: &str = env!("CARGO_MANIFEST_DIR");

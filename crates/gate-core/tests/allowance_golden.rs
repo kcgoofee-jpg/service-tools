@@ -8,7 +8,7 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use gate_core::allowance::{
     self, AllowanceCore, Begin, Fetched, MAX_BODY, PERIOD_KEY, SETTING, UNAVAILABLE_MSG,
 };
-use gate_golden::{Case, assert_eq_py, assert_eq_py_ordered, f, load};
+use gate_snapshot::{Case, assert_eq_py, assert_eq_py_ordered, f, load};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;

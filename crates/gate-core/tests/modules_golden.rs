@@ -7,7 +7,7 @@
 use gate_core::clock::Clock;
 use gate_core::modules::{self, *};
 use gate_core::quota::{self, AccountAllowance};
-use gate_golden::{Case, as_f64, assert_eq_py_ordered, f, load};
+use gate_snapshot::{Case, as_f64, assert_eq_py_ordered, f, load};
 use serde_json::{Value, json};
 
 const M: &str = env!("CARGO_MANIFEST_DIR");

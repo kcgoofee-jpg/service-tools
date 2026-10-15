@@ -18,13 +18,13 @@ use flate2::read::GzDecoder;
 use futures::future::BoxFuture;
 use gate_core::quota::{AccountAllowance, PyNum};
 use gate_db::SettingWrite;
-use gate_golden::diff as py_diff;
 use gate_server::AppState;
 use gate_server::env::EnvConfig;
 use gate_server::kernel::{
     AllowanceSource, KernelRegistrar, RegistrarSettings, run_autopilot_checked, run_quota_checked,
 };
 use gate_server::web::Assets;
+use gate_snapshot::diff as py_diff;
 use gate_testkit::MockUpstream;
 use serde_json::{Map, Value, json};
 use std::collections::HashMap;
