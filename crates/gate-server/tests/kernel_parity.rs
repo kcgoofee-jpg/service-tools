@@ -1270,9 +1270,6 @@ async fn run_case(case: &Value) -> Result<(), String> {
         ("NAI_TOKENS", tokens.join(",")),
         ("NAI_IMAGE_HOST", mock.url()),
         ("ALERT_WEBHOOK_URL", format!("{}/alert-hook", mock.url())),
-        ("TZ", "Asia/Shanghai".into()),
-        ("DAY_RESET_HOUR", "7".into()),
-        ("IMAGE_MIN_INTERVAL", num("image_min_interval")),
         // 夹具 env 里的 key_image_min_interval：3.0 没有每 Key 出图间隔（docs/v3-deviations.md #64），不再传
         // 夹具 env 里的 default_expires_days：3.0 没有这个环境变量（新 Key 的有效天数是后台「领 Key」的设置，
         // docs/v3-deviations.md #93 #97），「领 Key」模块面板上那一项的期望在 v3::Expect 里改写
@@ -1293,7 +1290,10 @@ async fn run_case(case: &Value) -> Result<(), String> {
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))
     .collect();
-    let state = AppState::build(EnvConfig::load(&vars), Assets::new(None))
+    let mut env_config = EnvConfig::load(&vars);
+    // 每个上游账号的出图间隔是代码常量（docs/v3-deviations.md #95），场景里直接改
+    env_config.image_min_interval = env["image_min_interval"].as_f64().unwrap();
+    let state = AppState::build(env_config, Assets::new(None))
         .await
         .map_err(|e| format!("{name}: 建网关失败 {e}"))?;
     state

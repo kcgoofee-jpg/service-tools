@@ -33,7 +33,7 @@ pub const RUNTIME_LIMIT_BOUNDS: [(&str, i64, i64); 3] = [
     ("image_429_cooldown_seconds", 60, 3600),
 ];
 
-/// 运行期限制的当前值（启动时 env，之后可被后台覆盖）。
+/// 运行期限制的当前值（启动时是 [`crate::env`] 里的代码常量，之后可被后台覆盖）。
 #[derive(Debug, Clone, Copy)]
 pub struct RuntimeLimits {
     pub queue_timeout: f64,
@@ -84,7 +84,7 @@ pub struct Inner {
     /// V5 官方免费额度缓存（只有真实出图会刷新）。
     pub allowance: crate::allowance::ServerAllowance,
     pub health: UpstreamHealth,
-    /// 标签补全等非出图请求的全站并发（旧版 GLOBAL_CONCURRENCY；文本接口已删，docs/v3-deviations.md #81）。
+    /// 标签补全的全站并发（容量是常量 [`crate::runtime::TAG_CONCURRENCY`]；文本接口已删，docs/v3-deviations.md #81）。
     /// 每把 Key 的信号量（`KEY_CONCURRENCY`）已删除：出图由排队管、标签补全由补全队列管（docs/v3-deviations.md #64）。
     pub global_sem: Arc<tokio::sync::Semaphore>,
     pub global_waiting: AtomicI64,
@@ -151,9 +151,8 @@ impl AppState {
         let bugs = Arc::new(Bugs::new(db.clone(), alerter.clone(), tasks.clone()));
         let guard = Arc::new(Guard::new(
             db.clone(),
-            &env.tz,
-            env.day_reset_hour,
-            params.clone(),
+            gate_core::clock::TZ,
+            gate_core::clock::DAY_RESET_HOUR,
         ));
 
         // 上游 Token：后台接管过就以 upstream_tokens.json 为准，否则用 NAI_TOKENS
@@ -197,7 +196,7 @@ impl AppState {
             image_429_cooldown_seconds: env.image_429_cooldown_seconds,
         };
         let secret_key = resolve_secret(&env)?;
-        let global = env.global_concurrency.max(1) as usize;
+        let tag_slots = crate::runtime::TAG_CONCURRENCY as usize;
         let allowance = crate::allowance::ServerAllowance::new(db.clone(), alerter.clone());
         let registration = RegistrationService::from_env(&env, db.clone()).map(Arc::new);
         let state = Self(Arc::new(Inner {
@@ -220,7 +219,7 @@ impl AppState {
             ops: crate::ops::Shared::default(),
             allowance,
             health: UpstreamHealth::default(),
-            global_sem: Arc::new(tokio::sync::Semaphore::new(global)),
+            global_sem: Arc::new(tokio::sync::Semaphore::new(tag_slots)),
             global_waiting: AtomicI64::new(0),
             global_active: AtomicI64::new(0),
             budget: tokio::sync::Mutex::new(Budget::default()),
@@ -311,7 +310,7 @@ impl AppState {
         Ok(())
     }
 
-    /// 后台保存过的运行期限制在每次重启后优先于 .env（越界值忽略）。
+    /// 后台保存过的运行期限制在每次重启后优先于代码常量（越界值忽略）。
     pub async fn load_runtime_limits(&self) -> anyhow::Result<()> {
         let mut values = Vec::new();
         for (name, lo, hi) in RUNTIME_LIMIT_BOUNDS {

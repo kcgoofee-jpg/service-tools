@@ -400,9 +400,9 @@ async fn bridge_checks_body_first_then_secret_then_guild() {
 
 #[tokio::test]
 async fn wrong_bridge_secret_counts_toward_auth_block() {
-    let (e, _d) = setup_reg(&[("AUTH_FAIL_MAX", "3")]).await;
+    let (e, _d) = setup_reg(&[]).await;
     let ip: SocketAddr = "203.0.113.9:4000".parse().unwrap();
-    for _ in 0..3 {
+    for _ in 0..e.state.env.auth_fail_max {
         let mut req = Request::builder()
             .method("POST")
             .uri("/self-register/info")

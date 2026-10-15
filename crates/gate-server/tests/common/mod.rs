@@ -29,10 +29,8 @@ pub async fn setup(extra: &[(&str, &str)]) -> Env {
         ("DATA_DIR", dir.path().to_str().unwrap()),
         ("NAI_TOKENS", "pst-synthetic-upstream-token"),
         ("NAI_IMAGE_HOST", &mock.url()),
-        ("IMAGE_MIN_INTERVAL", "0"),
         ("POST_REQUEST_JITTER_MIN", "0"),
         ("POST_REQUEST_JITTER_MAX", "0"),
-        ("QUEUE_TIMEOUT", "5"),
         ("SECRET_KEY", "test-secret-key-test-secret-key-0123456789"),
         ("ADMIN_PASSWORD", ADMIN_PASSWORD),
         ("UPSTREAM_HTTP2", "0"),
@@ -43,7 +41,10 @@ pub async fn setup(extra: &[(&str, &str)]) -> Env {
     for (k, v) in extra {
         vars.insert(k.to_string(), v.to_string());
     }
-    let env = EnvConfig::load(&vars);
+    let mut env = EnvConfig::load(&vars);
+    // 这两项是代码常量（不读环境变量），测试里直接改：没有出图间隔，排队 5 秒就算超时
+    env.image_min_interval = 0.0;
+    env.queue_timeout = 5;
     let state = AppState::build(env, Assets::new(None)).await.unwrap();
     let key: NewKey = serde_json::from_value(json!({
         "name": "测试成员", "token": TOKEN, "daily_images": 100, "daily_v5": 10,

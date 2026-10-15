@@ -1382,7 +1382,6 @@ async fn setup_page(extra: &[(&str, &str)]) -> Page {
         ),
         ("NAI_TOKENS", "pst-synthetic-upstream-token".into()),
         ("NAI_IMAGE_HOST", mock.url()),
-        ("IMAGE_MIN_INTERVAL", "0".into()),
         (
             "SECRET_KEY",
             "test-secret-key-test-secret-key-0123456789".into(),
@@ -1396,7 +1395,9 @@ async fn setup_page(extra: &[(&str, &str)]) -> Page {
     for (k, v) in extra {
         vars.insert(k.to_string(), v.to_string());
     }
-    let state = AppState::build(EnvConfig::load(&vars), Assets::new(Some(static_dir)))
+    let mut env = EnvConfig::load(&vars);
+    env.image_min_interval = 0.0; // 代码常量，测试里直接改
+    let state = AppState::build(env, Assets::new(Some(static_dir)))
         .await
         .unwrap();
     let key: gate_db::repo::keys::NewKey = serde_json::from_value(json!({

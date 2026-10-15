@@ -40,6 +40,22 @@ fn truthy(v: &str) -> bool {
     )
 }
 
+// ---- 代码常量（原来是环境变量，现在不读环境了）----
+
+/// 一张图在某个排队环节最多等多久（秒）。后台「额度与保护 → 图片排队与冷却」改过的值（`runtime_queue_timeout`）优先。
+pub const QUEUE_TIMEOUT: i64 = 90;
+/// 每个上游账号两次发图的最小间隔（秒）。后台改过的值（`runtime_image_min_interval`）优先。
+pub const IMAGE_MIN_INTERVAL: f64 = 15.0;
+/// 上游 429 后全站暂停出图的最短冷却（秒）。后台改过的值（`runtime_image_429_cooldown_seconds`）优先。
+pub const IMAGE_429_COOLDOWN_SECONDS: f64 = 60.0;
+/// 单 IP 在窗口内使用无效 Key 的次数上限，超过则临时拦截。
+pub const AUTH_FAIL_MAX: i64 = 20;
+pub const AUTH_FAIL_WINDOW: i64 = 600;
+pub const AUTH_BLOCK_SECONDS: i64 = 900;
+/// 后台登录：每 IP 窗口内最多尝试次数。
+pub const LOGIN_MAX_ATTEMPTS: i64 = 5;
+pub const LOGIN_WINDOW_SECONDS: i64 = 300;
+
 struct Reader<'a>(&'a dyn EnvSource);
 
 impl Reader<'_> {
@@ -103,8 +119,6 @@ pub struct EnvConfig {
     pub admin_password: String,
     pub admin_cookie_secure: bool,
     pub secret_key: String,
-    pub tz: String,
-    pub day_reset_hour: i64,
     pub cors_origins: Vec<String>,
     pub admin_allowed_origins: Vec<String>,
     /// 信任哪些直连对端带来的 X-Forwarded-For（uvicorn 的 FORWARDED_ALLOW_IPS，默认只信任本机）。
@@ -120,8 +134,7 @@ pub struct EnvConfig {
     pub post_request_jitter_min: f64,
     pub post_request_jitter_max: f64,
     pub single_image_slot_enforced: bool,
-    // 并发与限速
-    pub global_concurrency: i64,
+    // 以下 8 个是代码常量（见文件开头的 `pub const`），不读环境变量；字段只为让测试和 `cargo xtask dev` 能改
     pub queue_timeout: i64,
     pub image_min_interval: f64,
     pub image_429_cooldown_seconds: f64,
@@ -248,8 +261,6 @@ impl EnvConfig {
                 "0" | "false" | "no" | "off"
             ),
             secret_key: r.str("SECRET_KEY", ""),
-            tz: r.str("TZ", "Asia/Shanghai"),
-            day_reset_hour: r.int("DAY_RESET_HOUR", 7),
             cors_origins: split_list("CORS_ORIGINS", "*"),
             admin_allowed_origins: split_list("ADMIN_ALLOWED_ORIGINS", ""),
             nai_token_v5_daily_limits: per_token_ints("NAI_TOKEN_V5_DAILY_LIMITS", 0),
@@ -262,16 +273,15 @@ impl EnvConfig {
             post_request_jitter_min: r.float("POST_REQUEST_JITTER_MIN", 1.0),
             post_request_jitter_max: r.float("POST_REQUEST_JITTER_MAX", 3.0),
             single_image_slot_enforced: r.bool("SINGLE_IMAGE_SLOT_ENFORCED", false),
-            global_concurrency: r.int("GLOBAL_CONCURRENCY", 1),
-            queue_timeout: r.int("QUEUE_TIMEOUT", 90),
-            image_min_interval: r.float("IMAGE_MIN_INTERVAL", 15.0),
-            image_429_cooldown_seconds: r.float("IMAGE_429_COOLDOWN_SECONDS", 60.0),
-            auth_fail_max: r.int("AUTH_FAIL_MAX", 20),
-            auth_fail_window: r.int("AUTH_FAIL_WINDOW", 600),
-            auth_block_seconds: r.int("AUTH_BLOCK_SECONDS", 900),
-            login_max_attempts: r.int("LOGIN_MAX_ATTEMPTS", 5),
-            login_window_seconds: r.int("LOGIN_WINDOW_SECONDS", 300),
-            key_inactivity_delete_days: r.int("KEY_INACTIVITY_DELETE_DAYS", 3),
+            queue_timeout: QUEUE_TIMEOUT,
+            image_min_interval: IMAGE_MIN_INTERVAL,
+            image_429_cooldown_seconds: IMAGE_429_COOLDOWN_SECONDS,
+            auth_fail_max: AUTH_FAIL_MAX,
+            auth_fail_window: AUTH_FAIL_WINDOW,
+            auth_block_seconds: AUTH_BLOCK_SECONDS,
+            login_max_attempts: LOGIN_MAX_ATTEMPTS,
+            login_window_seconds: LOGIN_WINDOW_SECONDS,
+            key_inactivity_delete_days: r.nonneg("KEY_INACTIVITY_DELETE_DAYS", 3),
             discord_bot_token: r.str("DISCORD_BOT_TOKEN", ""),
             site_url: r.str("SITE_URL", ""),
             alert_user_id: r.str("ALERT_USER_ID", ""),
@@ -319,19 +329,62 @@ mod tests {
             ("NAI_TOKENS", " pst-a ,\npst-b,,"),
             ("NAI_TOKEN_V5_DAILY_LIMITS", "150,x,7,9"),
             ("NAI_TOKEN_ALLOW_ANLAS", "0"),
-            ("QUEUE_TIMEOUT", "  "),
-            ("IMAGE_MIN_INTERVAL", "abc"),
             ("UPSTREAM_HTTP2", "Off"),
             ("ADMIN_COOKIE_SECURE", "nope"),
         ]));
         assert_eq!(c.nai_tokens, ["pst-a", "pst-b"]);
         assert_eq!(c.nai_token_v5_daily_limits, [150, 0]);
         assert_eq!(c.nai_token_allow_anlas, [false, true]);
-        assert_eq!(c.queue_timeout, 90);
-        assert_eq!(c.image_min_interval, 15.0);
         assert!(!c.upstream_http2);
         assert!(c.admin_cookie_secure, "只有 0/false/no/off 才关闭");
         assert!(c.registration.is_none());
+    }
+
+    #[test]
+    fn code_constants_ignore_the_environment() {
+        // 这几个原来是环境变量，现在是代码常量：环境里设了也不读（docs/v3-deviations.md #93 #95）
+        let c = EnvConfig::load(&env(&[
+            ("QUEUE_TIMEOUT", "5"),
+            ("IMAGE_MIN_INTERVAL", "0"),
+            ("IMAGE_429_COOLDOWN_SECONDS", "1"),
+            ("AUTH_FAIL_MAX", "7"),
+            ("LOGIN_MAX_ATTEMPTS", "9"),
+            ("TZ", "UTC"),
+            ("DAY_RESET_HOUR", "3"),
+        ]));
+        assert_eq!(
+            (
+                c.queue_timeout,
+                c.image_min_interval,
+                c.image_429_cooldown_seconds
+            ),
+            (
+                QUEUE_TIMEOUT,
+                IMAGE_MIN_INTERVAL,
+                IMAGE_429_COOLDOWN_SECONDS
+            )
+        );
+        assert_eq!(
+            (c.auth_fail_max, c.login_max_attempts),
+            (AUTH_FAIL_MAX, LOGIN_MAX_ATTEMPTS)
+        );
+    }
+
+    #[test]
+    fn inactivity_days_parse_once() {
+        let days = |v: Option<&str>| {
+            let mut m = env(&[]);
+            if let Some(v) = v {
+                m.insert("KEY_INACTIVITY_DELETE_DAYS".into(), v.into());
+            }
+            EnvConfig::load(&m).key_inactivity_delete_days
+        };
+        assert_eq!(days(None), 3);
+        assert_eq!(days(Some(" 10 ")), 10);
+        assert_eq!(days(Some("0")), 0, "0 = 关闭回收");
+        assert_eq!(days(Some("-5")), 0, "负数按 0 处理");
+        assert_eq!(days(Some("abc")), 3, "读不懂用默认值");
+        assert_eq!(days(Some("")), 3);
     }
 
     #[test]

@@ -2681,6 +2681,7 @@ async fn status_codes_distribution() {
 
 #[tokio::test]
 async fn server_status_reports_alerts_audit_protection_disk() {
+    // 防爆破的几个数是代码常量（原来是环境变量，docs/v3-deviations.md #95）：环境里设了也不读
     let e = setup(&[("AUTH_FAIL_MAX", "7"), ("LOGIN_MAX_ATTEMPTS", "9")]).await;
     let api = Api::login(&e).await;
     let v = api.get("/status").await;
@@ -2698,7 +2699,7 @@ async fn server_status_reports_alerts_audit_protection_disk() {
     );
     assert_eq!(
         v["protection"],
-        json!({"auth_fail_max": 7, "auth_fail_window": 600, "auth_block_seconds": 900, "login_max_attempts": 9})
+        json!({"auth_fail_max": 20, "auth_fail_window": 600, "auth_block_seconds": 900, "login_max_attempts": 5})
     );
     let (free, total) = (
         v["disk"]["free_mb"].as_i64().unwrap(),
