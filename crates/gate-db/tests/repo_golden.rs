@@ -247,13 +247,39 @@ fn set_mtime(p: &Path, secs: f64) {
     std::fs::File::open(p).unwrap().set_modified(t).unwrap();
 }
 
+/// 3.0 新增、冻结的 2.x 夹具里没有的列（docs/v3-deviations.md #47）：比较前从 Rust 这一侧去掉。
+const RUST_ONLY_COLUMNS: [&str; 1] = ["disabled_reason"];
+
+fn strip_rust_only(v: &mut Value) {
+    match v {
+        Value::Object(m) => {
+            for c in RUST_ONLY_COLUMNS {
+                m.remove(c);
+            }
+            m.values_mut().for_each(strip_rust_only);
+        }
+        Value::Array(a) => a.iter_mut().for_each(strip_rust_only),
+        _ => {}
+    }
+}
+
+/// 夹具里 `api_keys` 的种子是 sqlite `.dump` 出来的不带列名整行插入；3.0 多了一列，补一个 NULL。
+fn widen_seed(stmt: &str) -> String {
+    match stmt.strip_suffix(");") {
+        Some(head) if stmt.starts_with("INSERT INTO \"api_keys\" VALUES(") => {
+            format!("{head},NULL);")
+        }
+        _ => stmt.to_string(),
+    }
+}
+
 async fn seed(db: &Db, case: &Case) -> Vec<String> {
     for ddl in case.get("extra_ddl").unwrap().as_array().unwrap() {
         let ddl = ddl.as_str().unwrap().to_string();
         db.write(move |tx| tx.execute_batch(&ddl)).await.unwrap();
     }
     for stmt in case.get("seed_sql").unwrap().as_array().unwrap() {
-        let stmt = stmt.as_str().unwrap().to_string();
+        let stmt = widen_seed(stmt.as_str().unwrap());
         let sql = stmt.clone();
         db.write(move |tx| tx.execute_batch(&sql))
             .await
@@ -824,10 +850,14 @@ async fn run_case(case: &Case) {
             case.line
         ),
         (None, Err(e)) => panic!("golden 第 {} 行：Rust 报错 {e}\n{brief:?}", case.line),
-        (None, Ok(v)) => assert_eq_py_ordered(&brief, &v, case.out()),
+        (None, Ok(mut v)) => {
+            strip_rust_only(&mut v);
+            assert_eq_py_ordered(&brief, &v, case.out())
+        }
     }
 
-    let tables = dump_tables(&db).await;
+    let mut tables = dump_tables(&db).await;
+    strip_rust_only(&mut tables);
     assert_eq_py(&brief, &tables, case.get("tables_after").unwrap());
     let (files, dirs) = snap_files(db.image_dir(), &extra);
     assert_eq_py(&brief, &files, case.get("files_after").unwrap());

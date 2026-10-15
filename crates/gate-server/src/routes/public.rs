@@ -322,7 +322,8 @@ async fn survey_key(state: &AppState, parts: &axum::http::request::Parts) -> Res
     if let Some((_, Some(key))) = session::member_state(state, &parts.headers).await? {
         ctx_of(parts).set_key(key.id(), key.name());
         if !key.enabled() {
-            return Err(HttpError::new(403, "该 Key 已被禁用").into());
+            let why = key.get("disabled_reason").as_str();
+            return Err(HttpError::new(403, gate_core::key_status::disabled_message(why)).into());
         }
         if key.expired(state.now()) {
             return Err(HttpError::new(403, "该 Key 已过期").into());

@@ -133,7 +133,8 @@ pub async fn authenticate(state: &AppState, parts: &Parts, passive: bool) -> Res
     let key = Key(row);
     ctx.set_key(key.id(), key.name());
     if !key.enabled() {
-        return Err(GateError::new(403, "该 Key 已被禁用").into());
+        let why = key.get("disabled_reason").as_str();
+        return Err(GateError::new(403, gate_core::key_status::disabled_message(why)).into());
     }
     if key.expired(now) {
         return Err(GateError::new(403, "该 Key 已过期").into());

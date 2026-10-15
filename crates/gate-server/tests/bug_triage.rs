@@ -37,6 +37,7 @@ async fn report(state: &AppState, body: Value) {
 
 async fn web_titles(state: &AppState) -> Vec<String> {
     settle().await;
+    state.bugs.idle().await;
     let mut titles: Vec<String> = state
         .db
         .list_error_events(true, 100)
@@ -165,7 +166,7 @@ async fn upstream_5xx_is_not_a_bug_but_own_500_is() {
         .map(|b| (b.source.as_str(), b.level.as_str()))
         .collect();
     assert_eq!(got, [("gate", "warn"), ("request", "error")], "{recent:?}");
-    settle().await;
+    e.state.bugs.idle().await;
     assert_eq!(e.state.db.open_error_count().await.unwrap(), 2);
 }
 
@@ -193,7 +194,8 @@ async fn real_upstream_500_through_the_image_route_is_not_a_bug() {
         "{status} {}",
         String::from_utf8_lossy(&body)
     );
-    settle().await;
+    settle().await; // 记账是另一组后台任务
+    e.state.bugs.idle().await;
     // 用量日志里有一条 error，Bug 追踪里什么都没有
     assert!(
         e.state.bugs.recent().is_empty(),
@@ -438,7 +440,7 @@ async fn auto_resolved_bug_reopens_as_regressed() {
         ..Default::default()
     });
     assert_eq!(got, sig);
-    settle().await;
+    e.state.bugs.idle().await;
     assert_eq!(state_of(&e, &sig).await, (false, None));
     let rows = s.db.list_error_events(false, 10).await.unwrap();
     assert_eq!(rows[0]["count"], 5, "3 次种子 + 2 次复发");

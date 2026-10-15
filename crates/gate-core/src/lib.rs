@@ -11,6 +11,7 @@ pub mod clock;
 pub mod features;
 pub mod guard;
 pub mod jsondump;
+pub mod key_status;
 pub mod modules;
 pub mod params;
 pub mod policy;

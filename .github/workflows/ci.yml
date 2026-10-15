@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, rewrite/v3]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -25,11 +25,11 @@ jobs:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: web/package.json
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
@@ -39,7 +39,7 @@ jobs:
       - run: pnpm tsc --noEmit
       - run: pnpm vitest run
       - run: pnpm vite build
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: web-dist
           path: web/dist
@@ -50,12 +50,12 @@ jobs:
     runs-on: ubuntu-24.04
     needs: web
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: BoringSSL 构建依赖
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake clang libclang-dev
       - run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@v2
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: web-dist
           path: web/dist
@@ -68,17 +68,17 @@ jobs:
     runs-on: ubuntu-24.04
     needs: web
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: BoringSSL 构建依赖 + 中文字体（孤字检查要按真实字宽折行）
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake clang libclang-dev fonts-noto-cjk
       - run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@v2
         with:
           key: e2e
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           package_json_file: web/package.json
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
@@ -106,10 +106,10 @@ jobs:
     name: 公开仓库红线（gitleaks + 夹具里不许出现真实 ID / IP）
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@v2
+      - uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: 夹具与测试数据只允许合成数据
@@ -121,14 +121,14 @@ jobs:
     needs: [rust]
     if: github.event_name == 'push'
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends musl-tools
       - run: rustup target add x86_64-unknown-linux-musl
       - uses: Swatinem/rust-cache@v2
         with:
           key: musl
       - run: cargo build --release --locked --target x86_64-unknown-linux-musl -p gate-ops --bin nai-ops
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: nai-ops-linux-musl
           path: target/x86_64-unknown-linux-musl/release/nai-ops
@@ -143,21 +143,21 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v5
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository_owner }}/owl-gate
           tags: |
             type=sha,prefix=,format=short
             type=ref,event=branch
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64
@@ -167,7 +167,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
       # 同一镜像另存为 tar 附件：服务器不放任何 GitHub 凭据，本机用 gh 下载后 scp 过去 docker load
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64
@@ -176,7 +176,7 @@ jobs:
           cache-from: type=gha
           outputs: type=docker,dest=/tmp/owl-gate.tar
       - run: gzip -1 /tmp/owl-gate.tar
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: owl-gate-image
           path: /tmp/owl-gate.tar.gz
