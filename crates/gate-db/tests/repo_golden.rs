@@ -717,21 +717,6 @@ async fn call(db: &Db, c: &Case) -> Out {
                 ]))
                 .collect::<Vec<_>>()
         ),
-        "shadow_rows" => json!(
-            db.shadow_rows(num(a(0, "since"), 0.0))
-                .await?
-                .into_iter()
-                .map(|(ts, key_id, key_name, status, images, wait, dur)| json!([
-                    float(ts),
-                    key_id,
-                    key_name,
-                    status,
-                    images,
-                    wait,
-                    dur
-                ]))
-                .collect::<Vec<_>>()
-        ),
         "image_stability" => js(&db.image_stability(num(a(0, "since"), 0.0)).await?),
         "usage_by_kind" => json!(db.usage_by_kind(num(a(0, "since"), 0.0)).await?),
         "generated_image_totals" => {
@@ -878,9 +863,17 @@ fn last_image_at(tables: &Value, key_id: i64) -> Option<Value> {
         .map(|r| r["last_image_at"].clone())
 }
 
+/// 已删除的方法：冻结夹具里还有它们的用例，逐条跳过。
+/// - `latest_member_clients`：每把 Key 最近一次请求的客户端（docs/v3-deviations.md #50）；
+/// - 其余：没有生产调用方的死代码（docs/v3-deviations.md #101）。
+const REMOVED_METHODS: [&str; 2] = ["latest_member_clients", "shadow_rows"];
+
 async fn run_case(case: &Case) {
-    // 「每把 Key 最近一次请求的客户端」整个方法已删除（docs/v3-deviations.md #50）
-    if case.get("method").and_then(Value::as_str) == Some("latest_member_clients") {
+    if case
+        .get("method")
+        .and_then(Value::as_str)
+        .is_some_and(|m| REMOVED_METHODS.contains(&m))
+    {
         return;
     }
     let dir = tempfile::tempdir().unwrap();
