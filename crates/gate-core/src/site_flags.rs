@@ -10,7 +10,7 @@
 //! 所以 float 类型的设置被夹到边界时得到的是 **int**（`lo` / `hi` 在登记表里都是整数字面量），
 //! `encode` 因此写出 `"0"` 而不是 `"0.0"`；没夹到边界才是 float。
 
-use crate::{pyc, pyext, pyfmt, pyval};
+use crate::{pyc, pyext, pyval};
 use serde_json::Value;
 
 /// 设置项的类型（`Spec.kind`）。
@@ -54,17 +54,6 @@ impl SpecDefault {
             SpecDefault::Int(i) => Value::from(i),
             SpecDefault::Float(f) => pyval::float(f),
             SpecDefault::Str(s) => Value::String(s.into()),
-        }
-    }
-
-    /// `repr(default)`
-    fn repr(self) -> String {
-        match self {
-            SpecDefault::None => "None".into(),
-            SpecDefault::Bool(b) => pyc::bool_str(b).into(),
-            SpecDefault::Int(i) => i.to_string(),
-            SpecDefault::Float(f) => pyc::float_repr(f),
-            SpecDefault::Str(s) => pyext::repr_str(s),
         }
     }
 }
@@ -400,38 +389,6 @@ pub fn encode(spec: &Spec, value: &Value) -> Result<String, EncodeError> {
         }
         Kind::Str => Ok(pyext::py_str(value)),
     }
-}
-
-/// `facts_table()`：SYSTEM-FACTS 里的 Markdown 表格。
-pub fn facts_table() -> String {
-    let mut rows = vec![
-        "| 键 | 类型 | 默认 | 范围 | 归属 | 说明 |".to_string(),
-        "|---|---|---|---|---|---|".to_string(),
-    ];
-    for s in ALL {
-        let d = if s.env.is_empty() {
-            s.default.repr()
-        } else {
-            format!("`.env {}`", s.env)
-        };
-        let rng = if !s.choices.is_empty() {
-            s.choices.join(" / ")
-        } else if let (Some(lo), Some(hi)) = (s.lo, s.hi) {
-            format!("{}–{}", pyfmt::fmt_g(lo as f64), pyfmt::fmt_g(hi as f64))
-        } else {
-            String::new()
-        };
-        rows.push(format!(
-            "| `{}` | {} | {} | {} | {} | {} |",
-            s.key,
-            s.kind.as_str(),
-            d,
-            rng,
-            s.owner,
-            s.doc
-        ));
-    }
-    rows.join("\n")
 }
 
 #[cfg(test)]

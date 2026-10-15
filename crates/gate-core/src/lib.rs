@@ -19,7 +19,6 @@ pub mod params;
 pub mod policy;
 pub mod pyc;
 pub mod pyext;
-pub mod pyfmt;
 pub mod pyjson;
 pub mod pyval;
 pub mod quota;

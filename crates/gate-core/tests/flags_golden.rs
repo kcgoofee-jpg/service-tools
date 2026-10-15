@@ -198,7 +198,7 @@ const DOC_FIXES: [(&str, &str); 1] = [(
     "网页 Discord 登录暂停（Discord 回调修复 / 审核期间）。网页只有 Discord 登录，暂停期间成员只能在 Discord 里用 /quota 看额度",
 )];
 
-/// 3.0 删掉的设置。冻结夹具里还有它们的用例，登记表里已经没有，逐个用例跳过；`all_keys` / `facts_table`
+/// 3.0 删掉的设置。冻结夹具里还有它们的用例，登记表里已经没有，逐个用例跳过；`all_keys`
 /// 在期望值一侧去掉它们：
 /// - `member_image_download`：成员自助导出原图（docs/v3-deviations.md #49）；
 /// - `dm_enabled`：成员私信总闸门，机器人不再私信成员（docs/v3-deviations.md #76）；
@@ -219,7 +219,7 @@ fn removed_spec(c: &Case) -> bool {
 }
 
 /// `global_daily_v5` 的默认值 3.0 不再取环境变量 `GLOBAL_DAILY_V5`、固定为 150（docs/v3-deviations.md #70）：
-/// 登记表与 facts_table 在期望一侧改写；`default_of` / `get` 里结果取决于默认值的用例跳过，另由
+/// 登记表在期望一侧改写；`default_of` / `get` 里结果取决于默认值的用例跳过，另由
 /// [`global_daily_v5_default_is_fixed`] 测。
 const V5_KEY: &str = "global_daily_v5";
 
@@ -247,19 +247,6 @@ fn global_daily_v5_default_is_fixed() {
             json!(90)
         );
     }
-}
-
-/// 期望值一侧去掉已删除设置的 `facts_table` 行。
-fn drop_removed_row(table: &str) -> String {
-    let rows: Vec<&str> = table
-        .split('\n')
-        .filter(|l| {
-            !REMOVED_KEYS
-                .iter()
-                .any(|k| l.starts_with(&format!("| `{k}` |")))
-        })
-        .collect();
-    rows.join("\n")
 }
 
 fn fix_docs(v: &Value) -> Value {
@@ -297,13 +284,8 @@ fn site_registry_golden() {
                     .retain(|k| !k.as_str().is_some_and(is_removed));
                 assert_eq_py(&c, &Value::Array(keys), &want);
             }
-            "facts_table" => {
-                let want = json!(drop_removed_row(c.out().as_str().unwrap()).replace(
-                    "| `global_daily_v5` | int | `.env global_daily_v5` |",
-                    "| `global_daily_v5` | int | 150 |"
-                ));
-                assert_eq_py(&c, &json!(site_flags::facts_table()), &fix_docs(&want))
-            }
+            // SYSTEM-FACTS 的 Markdown 表格生成器没有生产调用方，已删除（docs/v3-deviations.md #101）
+            "facts_table" => {}
             other => panic!("未知 {other}"),
         }
     }
