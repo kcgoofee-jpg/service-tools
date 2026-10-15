@@ -67,7 +67,7 @@ const PAGES: Array<{ name: string; path: string; ready: (p: Page) => ReturnType<
   {
     name: "logs-audit",
     path: "/admin/logs/audit",
-    ready: (p) => p.getByRole("button", { name: "记录设置" }),
+    ready: (p) => p.getByRole("button", { name: "导出该成员全部" }),
   },
   {
     name: "logs-usage",
@@ -145,35 +145,16 @@ test.describe("已登录", () => {
     expect(errs).toEqual([]);
   });
 
-  test("总览：提醒可隐藏 24 小时，隐藏后不显示绿色；可恢复", async ({ page }) => {
-    await page.goto("/admin");
-    await page.evaluate(() => localStorage.removeItem("owlOvHidden"));
-    await page.reload();
-    const verdict = page.locator(".ov-verdict");
-    await expect(verdict).toBeVisible();
-    const hideBtns = page.getByRole("button", { name: /^隐藏「/ });
-    await expect(hideBtns.first()).toBeVisible();
-    // 逐条隐藏
-    while ((await hideBtns.count()) > 0) await hideBtns.first().click();
-    await expect(page.getByRole("heading", { name: "提醒都已隐藏" })).toBeVisible();
-    await expect(verdict).toHaveClass(/is-warn/); // 有被隐藏的提醒：不给绿点
-    await expect(verdict).not.toHaveClass(/is-ok/);
-    await page.reload();
-    await expect(page.getByRole("heading", { name: "提醒都已隐藏" })).toBeVisible(); // 记录在本机，刷新还在
-    await page.getByRole("button", { name: /恢复/ }).click();
-    await expect(page.getByRole("heading", { name: /件事要处理/ })).toBeVisible();
-  });
-
-  test("总览：状态码分布两个视角、四个时间范围都能切换", async ({ page }) => {
+  test("总览：只列要处理的事（没有隐藏机制），统计格只有两个，已删的卡片不在", async ({ page }) => {
     await open(page, "/admin", PAGES[0]?.ready as never);
-    const view = page.getByRole("group", { name: "看哪一段" });
-    await view.getByRole("button", { name: "NovelAI→网关" }).click();
-    await expect(view.getByRole("button", { name: "NovelAI→网关" })).toHaveAttribute("aria-pressed", "true");
-    const range = page.getByRole("group", { name: "时间范围" });
-    for (const r of ["1 小时", "24 小时", "7 天", "今日"]) {
-      await range.getByRole("button", { name: r }).click();
-      await expect(range.getByRole("button", { name: r })).toHaveAttribute("aria-pressed", "true");
-    }
+    await expect(page.getByRole("heading", { name: /件事要处理|一切正常/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /隐藏/ })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /恢复/ })).toHaveCount(0);
+    await expect(page.locator(".ov-stats .stat__label")).toHaveText(["今日出图", "今天在用的成员"]);
+    for (const gone of ["系统状态", "状态码分布", "近 7 天"])
+      await expect(page.getByRole("heading", { name: gone })).toHaveCount(0);
+    // 磁盘 / 预算 / 限流中账号这类非重大事项不在提醒里
+    await expect(page.locator(".ov-issues")).not.toContainText(/磁盘|Anlas|限流中/);
   });
 
   test("成员：展开详情、Key 编辑框校验（空值 / 负数 / Anlas 规则）", async ({ page }) => {
@@ -441,13 +422,8 @@ test.describe("已登录", () => {
       await page.keyboard.press("Escape");
       await expect(lb).toBeHidden();
     }
-    await page.getByRole("button", { name: "记录设置" }).click();
-    const set = page.getByRole("dialog", { name: "生成记录设置" });
-    await expect(set.getByLabel("原图保存小时数")).toBeVisible();
-    await set.getByLabel("提示词保留天数").fill("-1");
-    await set.getByRole("button", { name: "保存" }).click();
-    await expect(set.getByText(/必须在 0～3650 之间/)).toBeVisible();
-    await axe(page, "audit-settings");
+    // 生成记录的设置只在「领 Key 与功能」里改，日志页不再有第二个入口
+    await expect(page.getByRole("button", { name: "记录设置" })).toHaveCount(0);
   });
 
   for (const [vp, size] of [

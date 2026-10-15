@@ -1,10 +1,9 @@
-/** 领 Key 与功能：自助领 Key、首页加入按钮、全站功能开关、生成记录、全站重置。 */
+/** 领 Key 与功能：自助领 Key、首页加入按钮、全站功能开关、生成记录。 */
 import { useAdmin } from "../Admin";
 import { LoadError, Loading, SectionHead } from "./_kit";
 import type { QuotaAlgo } from "./limits/core";
 import AuditCard from "./onboarding/audit";
 import type { Ops } from "./onboarding/core";
-import DangerCard from "./onboarding/danger";
 import { FeaturesCard, HomeJoinCard } from "./onboarding/features";
 import RegistrationCard from "./onboarding/registration";
 import { Sect } from "./system/forms";
@@ -25,7 +24,6 @@ export default function Onboarding() {
           <HomeJoinCard />
           <FeaturesCard ops={ops.data} />
           <AuditCard ops={ops.data} />
-          <DangerCard />
         </>
       )}
     </Sect>
