@@ -1,6 +1,7 @@
 //! 测试用的快照与旧 golden 夹具工具。
 //!
 //! - [`snapshot`]：对当前 Rust 输出的快照（`tests/snapshots/**/*.jsonl`，`UPDATE_SNAPSHOT=1` 更新），第四批起新套件都用它；
+//! - [`convert`]：把旧夹具一次性转成快照时用的抽样和红线过滤（`#[doc(hidden)]`，转换完成后随旧 API 一起删除）；
 //! - 本文件里的 `load` / `Case` / `diff` / `assert_eq_py*` 等旧 API：读取旧 Python 生成的 golden 夹具并按 Python 语义比较，
 //!   各套件快照化之后删除。
 //!
@@ -18,6 +19,8 @@
 //! - bytes → `{"$b": "<base64>"}`；tuple / set / frozenset → 列表（set 已排序）；
 //! - dict 的非 str 键 → `{"$map": [[k, v], ...]}`。
 
+#[doc(hidden)]
+pub mod convert;
 pub mod snapshot;
 
 use serde_json::Value;

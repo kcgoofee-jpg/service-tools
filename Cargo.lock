@@ -1013,6 +1013,7 @@ dependencies = [
 name = "gate-snapshot"
 version = "3.0.0"
 dependencies = [
+ "fancy-regex",
  "flate2",
  "serde_json",
 ]
