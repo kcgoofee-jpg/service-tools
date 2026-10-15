@@ -1,11 +1,11 @@
 //! NovelAI 上游客户端的门面：[`NaiClient`] 与调用方用到的类型。
 //!
 //! 实现按职责分在几个模块里（行为与旧版 `app/nai.py` 的 `NaiClient` 一致，见各模块说明）：
-//! - [`crate::pool`]：Token、令牌池、后台增删改、选号与 V5 预留、健康 / 冷却标记；
-//! - [`crate::scheduler`]：出图节奏——账号出图间隔 + 开始抖动、出图后静默、等槽位；
-//! - [`crate::http`]：wreq 客户端（Chrome 指纹）、组请求、读正文；
-//! - [`crate::account`]：订阅 / 额度查询、Token 校验；
-//! - [`crate::dispatch`]：一次请求的完整流程（`request` / `image_stream`）与取消安全的结算。
+//! - `pool.rs`：Token、令牌池、后台增删改、选号与 V5 预留、健康 / 冷却标记；
+//! - `scheduler.rs`：出图节奏——账号出图间隔 + 开始抖动、出图后静默、等槽位；
+//! - `http.rs`：wreq 客户端（Chrome 指纹）、组请求、读正文；
+//! - `account.rs`：订阅 / 额度查询、Token 校验；
+//! - `dispatch.rs`：一次请求的完整流程（`request` / `image_stream`）与取消安全的结算。
 
 use crate::http::Http;
 use crate::pool::Pool;

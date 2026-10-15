@@ -74,7 +74,7 @@ pub struct BrowserProfile {
     pub sec_ch_ua_platform: String,
     pub accept_encoding: String,
     pub accept_language: String,
-    /// emulation 带不带 `priority`（Chrome 124 起都带）。
+    /// emulation 带不带 `priority`（wreq-util 里 Chrome 129 以后的 profile 都带）。
     pub priority: bool,
 }
 

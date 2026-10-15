@@ -1,7 +1,7 @@
 //! 令牌池：每把上游 Token 的状态、后台增删改、选号（轮询 + 账号保护 + V5 预留）、健康 / 冷却标记。
 //!
 //! 池锁（`tokio::sync::Mutex`）就是旧版 `self._lock`：选号、V5 预留与释放、后台增删改在它下面串行，
-//! 会跨 await 持有（选号时要问账号保护和库里的 V5 计数）。出图节奏不在这里（见 [`crate::scheduler`]）。
+//! 会跨 await 持有（选号时要问账号保护和库里的 V5 计数）。出图节奏不在这里（见 `scheduler.rs`）。
 
 use crate::error::UpstreamError;
 use crate::headers::{self, BrowserProfile};
@@ -23,7 +23,7 @@ pub struct TokenFields {
     pub blocked_until: f64,
     pub disabled: bool,
     pub last_ok: f64,
-    /// 单调时钟（客户端启动以来的秒）：下一张图最早何时可以发。只由 [`crate::scheduler`] 改。
+    /// 单调时钟（客户端启动以来的秒）：下一张图最早何时可以发。只由 `scheduler.rs` 改。
     pub image_next_at: f64,
     pub forbidden_streak: i64,
     pub forbidden_trips: i64,
