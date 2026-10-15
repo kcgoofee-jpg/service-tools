@@ -152,7 +152,8 @@ impl AppState {
             gate_core::clock::DAY_RESET_HOUR,
         ));
 
-        // 上游 Token：后台接管过就以 upstream_tokens.json 为准，否则用 NAI_TOKENS
+        // 上游 Token：后台接管过就以 upstream_tokens.json 为准，否则用 NAI_TOKENS。
+        // V5 日限额、启停、出图并发都在后台按 Token 设（存库，见 startup 的 apply_saved）
         let managed = gate_upstream::token_store::load(&env.upstream_tokens_path());
         let tokens: Vec<(String, i64, bool)> = match &managed {
             Some(entries) => entries
@@ -166,7 +167,7 @@ impl AppState {
                 .map(|(i, t)| {
                     (
                         t.clone(),
-                        env.nai_token_v5_daily_limits.get(i).copied().unwrap_or(0),
+                        0,
                         env.nai_token_allow_anlas.get(i).copied().unwrap_or(true),
                     )
                 })
@@ -177,11 +178,6 @@ impl AppState {
             UpConfig {
                 image_host: env.image_host.clone(),
                 proxy: Some(env.upstream_proxy.clone()).filter(|s| !s.is_empty()),
-                custom_user_agent: Some(env.upstream_user_agent.clone()).filter(|s| !s.is_empty()),
-                http2: env.upstream_http2,
-                post_jitter_min: env.post_request_jitter_min,
-                post_jitter_max: env.post_request_jitter_max,
-                single_slot_enforced: env.single_image_slot_enforced,
                 image_min_interval: env.image_min_interval,
             },
             hooks,

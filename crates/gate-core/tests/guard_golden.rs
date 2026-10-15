@@ -20,6 +20,10 @@
 //! docs/v3-deviations.md #64：10 分钟突发窗口删除（常量 `WINDOW_10M` / `BURST_DIVISOR`，`burst_cap` /
 //! `count_10m` / `burst_blocked` / `minutes_until_free_10m`）。轨迹里这几步同样只重放副作用；
 //! `token_block_reason` 旧版因突发窗口给出的 `burst_cap` 拒绝，3.0 放行（期望一侧换成 None）。
+//!
+//! docs/v3-deviations.md #87：3.0 新增设置 `post_jitter_min` / `post_jitter_max`（出图后静默，原来是环境变量），
+//! 排在 `interval_jitter` 后面。夹具里没有它们，也没有改它们的步骤：设置表、`values`、`describe`、轨迹状态的 `v`
+//! 在期望一侧按默认值补上（[`ADDED`]）；`save` 的写库内容只含请求体里的字段，不受影响。
 
 use gate_core::guard::{
     self, AdaptPlan, FIELDS, GuardCore, GuardError, parse_setting_float, stamps_from_rows,
@@ -57,20 +61,44 @@ fn fix_labels(v: &Value) -> Value {
     serde_json::from_str(&fix_label(&v.to_string())).unwrap()
 }
 
-/// 3.0 新增的设置字段个数（#91；在 `FIELDS` 最后，夹具里没有）。
-const ADDED_FIELDS: usize = 3;
+/// 3.0 新增的设置字段（夹具里没有）：出图后静默两项（docs/v3-deviations.md #87，排在 `interval_jitter` 后面）、
+/// 每小时上限自动调整的下限 / 上限 / 步长（#91，排在最后）。
+const ADDED: [&str; 5] = [
+    "post_jitter_min",
+    "post_jitter_max",
+    "hourly_min",
+    "hourly_max",
+    "hourly_step",
+];
 
-/// 旧版就有的字段（夹具对得上的那些）。
+fn is_added(fl: &guard::Field) -> bool {
+    ADDED.contains(&fl.name)
+}
+
+/// 旧版就有的字段（夹具对得上的那些），保持 `FIELDS` 里的顺序。
 fn legacy_fields() -> impl Iterator<Item = &'static guard::Field> {
-    FIELDS.iter().take(FIELDS.len() - ADDED_FIELDS)
+    FIELDS.iter().filter(|fl| !is_added(fl))
 }
 
-/// 新增字段。
-fn added_fields() -> impl Iterator<Item = &'static guard::Field> {
-    FIELDS.iter().skip(FIELDS.len() - ADDED_FIELDS)
+/// 按 `FIELDS` 的顺序重排 `m`，新增字段的值由 `entry` 给出。
+fn with_added(m: Map<String, Value>, entry: impl Fn(&guard::Field) -> Value) -> Map<String, Value> {
+    let mut out = Map::new();
+    for fl in &FIELDS {
+        if is_added(fl) {
+            out.insert(fl.name.to_string(), entry(fl));
+        } else if let Some(v) = m.get(fl.name) {
+            out.insert(fl.name.to_string(), v.clone());
+        }
+    }
+    for (k, v) in m {
+        if !out.contains_key(&k) {
+            out.insert(k, v);
+        }
+    }
+    out
 }
 
-/// 期望一侧：`values` 去掉已删除的字段，末尾补上新增字段的默认值。
+/// 期望一侧：`values` 去掉已删除的字段，按位置补上新增字段。
 fn without_removed(v: &Value) -> Value {
     without_removed_at(v, None)
 }
@@ -79,24 +107,18 @@ fn without_removed(v: &Value) -> Value {
 fn without_removed_at(v: &Value, g: Option<&GuardCore>) -> Value {
     let mut m = obj(v);
     m.shift_remove(REMOVED_FIELD);
-    for fl in added_fields() {
-        let now = g.map_or(fl.default, |g| g.values[fl.name]);
-        m.insert(fl.name.to_string(), json!(now));
-    }
-    Value::Object(m)
+    Value::Object(with_added(m, |fl| {
+        json!(g.map_or(fl.default, |g| g.values[fl.name]))
+    }))
 }
 
-/// 期望一侧：`describe().fields` 去掉已删除的字段，末尾补上新增字段。
+/// 期望一侧：`describe().fields` 去掉已删除的字段，按位置补上新增字段。
 fn fields_without_removed(v: &Value) -> Value {
     let mut m = obj(v);
     m.shift_remove(REMOVED_FIELD);
-    for fl in added_fields() {
-        m.insert(
-            fl.name.to_string(),
-            json!({"default": fl.default, "min": fl.min, "max": fl.max, "label": fl.label}),
-        );
-    }
-    Value::Object(m)
+    Value::Object(with_added(m, |fl| {
+        json!({"default": fl.default, "min": fl.min, "max": fl.max, "label": fl.label})
+    }))
 }
 
 /// 期望一侧：写库内容里去掉已删除字段的键。
@@ -126,14 +148,15 @@ fn describe_without_removed(v: &Value, g: &GuardCore) -> Value {
     fix_labels(&Value::Object(m))
 }
 
-/// 期望一侧：轨迹状态里的 `v`（按旧版 FIELDS 顺序，已删除的 `base_daily_images` 在最后）。
+/// 期望一侧：轨迹状态里的 `v`（按旧版 FIELDS 顺序，已删除的 `base_daily_images` 在最后；
+/// [`state_json`] 只输出旧版就有的字段）。
 fn state_without_removed(v: &Value) -> Value {
     let mut m = obj(v);
     if let Some(Value::Array(vals)) = m.get_mut("v") {
         assert_eq!(
             vals.len(),
-            FIELDS.len() - ADDED_FIELDS + 1,
-            "夹具里的 v 应带着已删除的字段"
+            FIELDS.len() - ADDED.len() + 1,
+            "夹具里的 v 应带着已删除的字段、没有新增的字段"
         );
         vals.pop();
     }

@@ -6,6 +6,8 @@
 //! - 脚本：`push(path, Reply)` 让该路径的下一次请求按脚本回（429 带 Retry-After、403 模型不存在、5xx、
 //!   流到一半断开、永不结束的流、卡住不回……），用完回到默认行为。
 //! - 记录：每个请求的方法、路径、查询串、请求头（按收到的顺序）、正文都记下来，供对拍上游请求日志。
+//! - 压缩：`set_encoding(Some("br"))` 之后，请求的 Accept-Encoding 里有这一种就把响应按它压缩
+//!   （gzip / deflate / br / zstd），每个分块压完立刻 flush——流式回复照样一块一块到，可以测「边收边转」。
 
 use axum::Router;
 use axum::body::{Body, Bytes};
@@ -104,6 +106,10 @@ struct MockState {
     scripts: Mutex<HashMap<String, VecDeque<Reply>>>,
     /// 订阅查询回的 V5 剩余百分比（默认 80）。
     v5_percent: Mutex<i64>,
+    /// 响应压缩（None = 不压缩）。
+    encoding: Mutex<Option<&'static str>>,
+    /// 实际压缩过的响应：(路径, 编码)。
+    encoded: Mutex<Vec<(String, String)>>,
 }
 
 /// 运行中的假上游。Drop 时服务停止。
@@ -161,6 +167,23 @@ impl MockUpstream {
             .push_back(reply);
     }
 
+    /// 之后的响应按 `encoding`（gzip / deflate / br / zstd）压缩——前提是请求的 Accept-Encoding 里有它。
+    pub fn set_encoding(&self, encoding: Option<&str>) {
+        let e = encoding.map(|e| match e {
+            "gzip" => "gzip",
+            "deflate" => "deflate",
+            "br" => "br",
+            "zstd" => "zstd",
+            other => panic!("假上游不支持的压缩：{other}"),
+        });
+        *self.state.encoding.lock().expect("encoding") = e;
+    }
+
+    /// 实际压缩过的响应：(路径, 编码)，按顺序。
+    pub fn encoded_responses(&self) -> Vec<(String, String)> {
+        self.state.encoded.lock().expect("encoded").clone()
+    }
+
     pub fn set_v5_percent(&self, pct: i64) {
         *self.state.v5_percent.lock().expect("v5") = pct;
     }
@@ -192,6 +215,12 @@ async fn handle(State(state): State<Arc<MockState>>, req: Request) -> Response {
         .iter()
         .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or("").to_string()))
         .collect();
+    let accepted = req
+        .headers()
+        .get("accept-encoding")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
     let body = axum::body::to_bytes(req.into_body(), 256 * 1024 * 1024)
         .await
         .unwrap_or_default();
@@ -208,10 +237,111 @@ async fn handle(State(state): State<Arc<MockState>>, req: Request) -> Response {
         .expect("scripts")
         .get_mut(&path)
         .and_then(VecDeque::pop_front);
-    match scripted {
+    let resp = match scripted {
         Some(reply) => render(reply).await,
         None => default_reply(&state, &method, &path, &query, &body).await,
+    };
+    let encoding = *state.encoding.lock().expect("encoding");
+    match encoding {
+        Some(enc) if accepts(&accepted, enc) => {
+            state
+                .encoded
+                .lock()
+                .expect("encoded")
+                .push((path, enc.to_string()));
+            compress(resp, enc)
+        }
+        _ => resp,
     }
+}
+
+/// `Accept-Encoding` 里有没有这种编码（忽略 q 值与空白）。
+fn accepts(header: &str, encoding: &str) -> bool {
+    header
+        .split(',')
+        .any(|item| item.split(';').next().unwrap_or("").trim() == encoding)
+}
+
+/// 增量压缩器：每块写完就 flush，压出来的字节立刻能被解开。
+enum Coder {
+    Gzip(flate2::write::GzEncoder<Vec<u8>>),
+    Deflate(flate2::write::ZlibEncoder<Vec<u8>>),
+    Br(Box<brotli::CompressorWriter<Vec<u8>>>),
+    Zstd(zstd::stream::write::Encoder<'static, Vec<u8>>),
+}
+
+impl Coder {
+    fn new(encoding: &str) -> Self {
+        let level = flate2::Compression::default();
+        match encoding {
+            "gzip" => Coder::Gzip(flate2::write::GzEncoder::new(Vec::new(), level)),
+            "deflate" => Coder::Deflate(flate2::write::ZlibEncoder::new(Vec::new(), level)),
+            "br" => Coder::Br(Box::new(brotli::CompressorWriter::new(
+                Vec::new(),
+                4096,
+                5,
+                22,
+            ))),
+            _ => Coder::Zstd(zstd::stream::write::Encoder::new(Vec::new(), 3).expect("zstd")),
+        }
+    }
+
+    fn push(&mut self, data: &[u8]) -> Vec<u8> {
+        fn write_flush(w: &mut impl Write, data: &[u8]) {
+            w.write_all(data).expect("压缩");
+            w.flush().expect("压缩");
+        }
+        match self {
+            Coder::Gzip(e) => {
+                write_flush(e, data);
+                std::mem::take(e.get_mut())
+            }
+            Coder::Deflate(e) => {
+                write_flush(e, data);
+                std::mem::take(e.get_mut())
+            }
+            Coder::Br(e) => {
+                write_flush(e.as_mut(), data);
+                std::mem::take(e.get_mut())
+            }
+            Coder::Zstd(e) => {
+                write_flush(e, data);
+                std::mem::take(e.get_mut())
+            }
+        }
+    }
+
+    fn finish(self) -> Vec<u8> {
+        match self {
+            Coder::Gzip(e) => e.finish().expect("压缩"),
+            Coder::Deflate(e) => e.finish().expect("压缩"),
+            Coder::Br(e) => e.into_inner(),
+            Coder::Zstd(e) => e.finish().expect("压缩"),
+        }
+    }
+}
+
+/// 把响应体按 `encoding` 逐块压缩（带 Content-Encoding，去掉 Content-Length）。
+fn compress(resp: Response, encoding: &'static str) -> Response {
+    use futures::StreamExt;
+    let (mut parts, body) = resp.into_parts();
+    parts
+        .headers
+        .insert("content-encoding", HeaderValue::from_static(encoding));
+    parts.headers.remove("content-length");
+    let coder = Arc::new(Mutex::new(Some(Coder::new(encoding))));
+    let tail = coder.clone();
+    let chunks = body.into_data_stream().map(move |chunk| {
+        chunk.map(|data| {
+            let mut c = coder.lock().expect("coder");
+            Bytes::from(c.as_mut().expect("未结束").push(&data))
+        })
+    });
+    let end = futures::stream::once(async move {
+        let c = tail.lock().expect("coder").take().expect("只结束一次");
+        Ok(Bytes::from(c.finish()))
+    });
+    Response::from_parts(parts, Body::from_stream(chunks.chain(end)))
 }
 
 async fn render(reply: Reply) -> Response {

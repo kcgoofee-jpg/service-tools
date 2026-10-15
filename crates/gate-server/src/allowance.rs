@@ -97,7 +97,7 @@ impl ServerAllowance {
             Begin::Cached => return Ok(false),
             Begin::Fetch => {}
         }
-        // 与生图同一套浏览器请求头；旧版固定用第 0 套浏览器特征，原样保留
+        // 与这把 Token 生图时同一个浏览器指纹（旧版固定用第 0 套，docs/v3-deviations.md #86）
         let url = format!(
             "{}/user/subscription",
             nai.image_host().trim_end_matches('/')
@@ -106,7 +106,7 @@ impl ServerAllowance {
             Duration::from_secs(8),
             nai.get_json_with(
                 &token.token,
-                0,
+                token.profile_index(),
                 &url,
                 Duration::from_secs(8),
                 core::MAX_BODY,

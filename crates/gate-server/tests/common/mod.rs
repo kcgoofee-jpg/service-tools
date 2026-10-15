@@ -29,11 +29,8 @@ pub async fn setup(extra: &[(&str, &str)]) -> Env {
         ("DATA_DIR", dir.path().to_str().unwrap()),
         ("NAI_TOKENS", "pst-synthetic-upstream-token"),
         ("NAI_IMAGE_HOST", &mock.url()),
-        ("POST_REQUEST_JITTER_MIN", "0"),
-        ("POST_REQUEST_JITTER_MAX", "0"),
         ("SECRET_KEY", "test-secret-key-test-secret-key-0123456789"),
         ("ADMIN_PASSWORD", ADMIN_PASSWORD),
-        ("UPSTREAM_HTTP2", "0"),
     ]
     .iter()
     .map(|(k, v)| (k.to_string(), v.to_string()))

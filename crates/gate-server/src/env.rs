@@ -9,7 +9,8 @@
 //! - 布尔：`1/true/yes/on/y`（不区分大小写、去空白）为真，其余为假；未设置用默认值；
 //!   例外 `ADMIN_COOKIE_SECURE`：只有 `0/false/no/off` 为假（默认安全）。
 //! - 整数 / 浮点：空串或解析失败都用默认值（`int(os.environ.get(name, "").strip() or default)`）。
-//! - 每 Token 列表（`NAI_TOKEN_V5_DAILY_LIMITS` 等）补齐 / 截断到 Token 个数。
+//! - 每 Token 列表（`NAI_TOKEN_ALLOW_ANLAS`）补齐 / 截断到 Token 个数。
+//! - 3.0 删掉的上游相关变量（[`REMOVED_UPSTREAM_VARS`]）不再读取；还留在 `.env` 里时启动日志提醒一句。
 
 use gate_core::pyc;
 use std::collections::HashMap;
@@ -55,6 +56,29 @@ pub const AUTH_BLOCK_SECONDS: i64 = 900;
 /// 后台登录：每 IP 窗口内最多尝试次数。
 pub const LOGIN_MAX_ATTEMPTS: i64 = 5;
 pub const LOGIN_WINDOW_SECONDS: i64 = 300;
+
+/// 3.0 删掉的上游相关环境变量与替代做法（docs/v3-deviations.md #86 #87 #88）。
+pub const REMOVED_UPSTREAM_VARS: [(&str, &str); 7] = [
+    ("NAI_TOKEN", "改用 NAI_TOKENS（只有一把也用这个名字）"),
+    (
+        "NAI_TOKEN_V5_DAILY_LIMITS",
+        "在后台「上游令牌池」按 Token 设 V5 日限额",
+    ),
+    (
+        "SINGLE_IMAGE_SLOT_ENFORCED",
+        "在后台「上游令牌池」按 Token 设出图并发（1～4）",
+    ),
+    ("UPSTREAM_USER_AGENT", "浏览器指纹不可配置"),
+    ("UPSTREAM_HTTP2", "HTTP/2 由 TLS ALPN 协商"),
+    (
+        "POST_REQUEST_JITTER_MIN",
+        "在后台「额度与保护」设出图后静默",
+    ),
+    (
+        "POST_REQUEST_JITTER_MAX",
+        "在后台「额度与保护」设出图后静默",
+    ),
+];
 
 struct Reader<'a>(&'a dyn EnvSource);
 
@@ -125,15 +149,10 @@ pub struct EnvConfig {
     pub forwarded_allow_ips: Vec<String>,
     // 上游
     pub nai_tokens: Vec<String>,
-    pub nai_token_v5_daily_limits: Vec<i64>,
+    /// 只在没有 `upstream_tokens.json`（后台没接管过令牌池）时用：每把 Token 能不能花 Anlas，默认允许。
     pub nai_token_allow_anlas: Vec<bool>,
     pub image_host: String,
     pub upstream_proxy: String,
-    pub upstream_user_agent: String,
-    pub upstream_http2: bool,
-    pub post_request_jitter_min: f64,
-    pub post_request_jitter_max: f64,
-    pub single_image_slot_enforced: bool,
     // 以下 8 个是代码常量（见文件开头的 `pub const`），不读环境变量；字段只为让测试和 `cargo xtask dev` 能改
     pub queue_timeout: i64,
     pub image_min_interval: f64,
@@ -177,11 +196,12 @@ impl EnvConfig {
 
     pub fn load(src: &dyn EnvSource) -> Self {
         let r = Reader(src);
-        let raw_tokens = src
-            .get("NAI_TOKENS")
-            .filter(|s| !s.is_empty())
-            .or_else(|| src.get("NAI_TOKEN"))
-            .unwrap_or_default();
+        for (name, instead) in REMOVED_UPSTREAM_VARS {
+            if src.get(name).is_some() {
+                tracing::warn!("环境变量 {name} 已删除、不再读取：{instead}");
+            }
+        }
+        let raw_tokens = src.get("NAI_TOKENS").unwrap_or_default();
         let nai_tokens: Vec<String> = raw_tokens
             .replace('\n', ",")
             .split(',')
@@ -189,16 +209,6 @@ impl EnvConfig {
             .filter(|t| !t.is_empty())
             .collect();
         let n = nai_tokens.len();
-        let per_token_ints = |name: &str, default: i64| -> Vec<i64> {
-            let mut v: Vec<i64> = r
-                .str(name, "")
-                .split(',')
-                .map(|item| pyc::parse_int(item).map(|x| x.max(0)).unwrap_or(default))
-                .collect();
-            v.resize(v.len().max(n), default);
-            v.truncate(n);
-            v
-        };
         let per_token_bools = |name: &str, default: bool| -> Vec<bool> {
             let mut v: Vec<bool> = r
                 .str(name, "")
@@ -267,16 +277,10 @@ impl EnvConfig {
             secret_key: r.str("SECRET_KEY", ""),
             cors_origins: split_list("CORS_ORIGINS", "*"),
             admin_allowed_origins: split_list("ADMIN_ALLOWED_ORIGINS", ""),
-            nai_token_v5_daily_limits: per_token_ints("NAI_TOKEN_V5_DAILY_LIMITS", 0),
             nai_token_allow_anlas: per_token_bools("NAI_TOKEN_ALLOW_ANLAS", true),
             nai_tokens,
             image_host: r.str("NAI_IMAGE_HOST", "https://image.novelai.net"),
             upstream_proxy: r.trimmed("UPSTREAM_PROXY"),
-            upstream_user_agent: r.trimmed("UPSTREAM_USER_AGENT"),
-            upstream_http2: r.bool("UPSTREAM_HTTP2", true),
-            post_request_jitter_min: r.float("POST_REQUEST_JITTER_MIN", 1.0),
-            post_request_jitter_max: r.float("POST_REQUEST_JITTER_MAX", 3.0),
-            single_image_slot_enforced: r.bool("SINGLE_IMAGE_SLOT_ENFORCED", false),
             queue_timeout: QUEUE_TIMEOUT,
             image_min_interval: IMAGE_MIN_INTERVAL,
             image_429_cooldown_seconds: IMAGE_429_COOLDOWN_SECONDS,
@@ -334,17 +338,25 @@ mod tests {
     fn parses_like_python() {
         let c = EnvConfig::load(&env(&[
             ("NAI_TOKENS", " pst-a ,\npst-b,,"),
-            ("NAI_TOKEN_V5_DAILY_LIMITS", "150,x,7,9"),
             ("NAI_TOKEN_ALLOW_ANLAS", "0"),
-            ("UPSTREAM_HTTP2", "Off"),
             ("ADMIN_COOKIE_SECURE", "nope"),
         ]));
         assert_eq!(c.nai_tokens, ["pst-a", "pst-b"]);
-        assert_eq!(c.nai_token_v5_daily_limits, [150, 0]);
         assert_eq!(c.nai_token_allow_anlas, [false, true]);
-        assert!(!c.upstream_http2);
         assert!(c.admin_cookie_secure, "只有 0/false/no/off 才关闭");
         assert!(c.registration.is_none());
+    }
+
+    /// 删掉的变量不再读：`NAI_TOKEN` 不再是 `NAI_TOKENS` 的别名（docs/v3-deviations.md #88）。
+    #[test]
+    fn removed_upstream_vars_are_ignored() {
+        let c = EnvConfig::load(&env(&[
+            ("NAI_TOKEN", "pst-only"),
+            ("NAI_TOKEN_V5_DAILY_LIMITS", "150"),
+            ("SINGLE_IMAGE_SLOT_ENFORCED", "1"),
+        ]));
+        assert!(c.nai_tokens.is_empty());
+        assert!(c.nai_token_allow_anlas.is_empty());
     }
 
     #[test]

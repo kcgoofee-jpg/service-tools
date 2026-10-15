@@ -153,4 +153,10 @@ impl Guard {
     pub fn jitter(&self) -> f64 {
         self.with(|g| g.jitter(&mut || rand::random::<f64>()))
     }
+
+    /// 出图后静默的 (最少, 最多) 秒数（后台「额度与保护」可调）。
+    pub fn post_jitter(&self) -> (f64, f64) {
+        let (lo, hi) = self.with(|g| g.post_jitter());
+        (lo as f64, hi as f64)
+    }
 }
