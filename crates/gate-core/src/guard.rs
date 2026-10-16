@@ -12,8 +12,9 @@
 //! - `load()`：对每个字段 `get_setting("guard_<字段>", None)`，读到的键值交给 [`GuardCore::load_settings`]；
 //!   `save(body)`：先 [`GuardCore::validate_save`]，再 `set_settings_bulk(guard_<字段> → str(int))`，
 //!   写成功之后才 [`GuardCore::apply_updates`]（与旧版「先写库后改内存」同序）；`to_settings` 给出全部字段的当前串；
-//! - `seed_hour(db, token_ids)`：`SELECT ts, images FROM usage_log WHERE ts>now-10800 AND status='ok' AND kind LIKE 'image%'
-//!   AND images>0 ORDER BY ts`，行交给 [`stamps_from_rows`] + [`GuardCore::seed_hour`]；
+//! - `seed_hour(db, token_ids)`：`SELECT token_id, ts, images FROM usage_log WHERE ts>now-10800 AND status='ok' AND kind LIKE 'image%'
+//!   AND images>0 ORDER BY ts`，行交给 [`GuardCore::seed_hour_by_account`]（按账号补；旧版不分账号的
+//!   [`stamps_from_rows`] + [`GuardCore::seed_hour`] 只剩对拍快照在用）；
 //! - `token_block_reason(db, token_id, day)` 里的 `db.get_upstream_counter(token_id, day)`
 //!   （`upstream_token_counters` 表的 `images`，没有记录是 0；旧版用节约模式折算后的 `units`，
 //!   节约模式早已删除）：服务层取出 `used` 传进来
@@ -497,22 +498,58 @@ impl GuardCore {
     }
 
     /// 启动时从用量日志补回最近 3 小时的出图（`stamps` 来自 [`stamps_from_rows`]）。
-    /// 日志里没有记是哪个上游账号，所以每个账号都按全站数量计（偏保守）。返回补回的张数。
+    /// 每个账号都按全站数量计（偏保守）。线上用的是 [`GuardCore::seed_hour_by_account`]
+    /// （日志有 token_id 之后按账号分开补）；这个按「不分账号」补的版本留给旧版对拍快照。返回补回的张数。
     pub fn seed_hour(&mut self, token_ids: &[String], stamps: &[f64]) -> usize {
         for tid in token_ids {
-            let q = self.starts.entry(tid.clone()).or_default();
-            let merged: Vec<f64> = if q.is_empty() {
-                stamps.to_vec()
-            } else {
-                // sorted(set(q) | set(stamps))
-                let mut all: Vec<f64> = q.iter().chain(stamps.iter()).copied().collect();
-                all.sort_by(|a, b| a.total_cmp(b));
-                all.dedup();
-                all
-            };
-            self.starts.insert(tid.clone(), merged.into());
+            self.merge_starts(tid, stamps.to_vec());
         }
         stamps.len()
+    }
+
+    /// 启动时按账号补回最近 3 小时的出图。`rows` 是 (token_id, ts, images)，来自用量日志
+    /// （成功的出图请求；token_id 为空 = 3.0 之前的老行，或没记下账号）。规则：
+    /// - 行里有 token_id：只算进那一个账号；不属于当前任何账号的（已删除 / 换掉的 Token）忽略；
+    /// - 行里没有 token_id：**只有一个账号时**算给它（和以前一样偏保守，绝不少算）；
+    ///   **两个及以上账号时**不算给任何账号（无从分辨，全算会让每个账号都被重复计数，
+    ///   平白提前触发每小时上限；这些老行最多只影响升级后的第一个小时）。
+    ///
+    /// 返回补回的总条数（各账号相加）。
+    pub fn seed_hour_by_account(
+        &mut self,
+        token_ids: &[String],
+        rows: &[(Option<String>, f64, i64)],
+    ) -> usize {
+        let single = token_ids.len() == 1;
+        let mut total = 0;
+        for tid in token_ids {
+            let mine: Vec<(f64, i64)> = rows
+                .iter()
+                .filter(|(t, _, _)| match t {
+                    Some(t) => t == tid,
+                    None => single,
+                })
+                .map(|(_, ts, n)| (*ts, *n))
+                .collect();
+            let stamps = stamps_from_rows(&mine);
+            total += stamps.len();
+            self.merge_starts(tid, stamps);
+        }
+        total
+    }
+
+    /// sorted(set(已有) | set(新增))；队列为空时原样放入（与旧版一致，不去重）。
+    fn merge_starts(&mut self, tid: &str, stamps: Vec<f64>) {
+        let q = self.starts.entry(tid.to_string()).or_default();
+        let merged: Vec<f64> = if q.is_empty() {
+            stamps
+        } else {
+            let mut all: Vec<f64> = q.iter().chain(stamps.iter()).copied().collect();
+            all.sort_by(|a, b| a.total_cmp(b));
+            all.dedup();
+            all
+        };
+        self.starts.insert(tid.to_string(), merged.into());
     }
 
     /// `_window`：队首弹掉 3 小时前的时间戳（副作用），返回 `span` 秒内的。
@@ -1046,5 +1083,60 @@ mod tests {
             GuardCore::validate_save(body.as_object().unwrap()).unwrap(),
             vec![("quiet_start".to_string(), 3)]
         );
+    }
+
+    fn ids(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn row(t: Option<&str>, ts: f64, n: i64) -> (Option<String>, f64, i64) {
+        (t.map(str::to_string), ts, n)
+    }
+
+    #[test]
+    fn seed_by_account_splits_tagged_rows() {
+        let mut g = guard();
+        let rows = [
+            row(Some("a"), NOON - 600.0, 2),
+            row(Some("b"), NOON - 500.0, 1),
+            row(Some("a"), NOON - 400.0, 1),
+            row(Some("gone"), NOON - 300.0, 5),
+        ];
+        assert_eq!(g.seed_hour_by_account(&ids(&["a", "b"]), &rows), 4);
+        assert_eq!(g.hour_count("a", NOON), 3);
+        assert_eq!(g.hour_count("b", NOON), 1);
+    }
+
+    #[test]
+    fn seed_by_account_ignores_untagged_rows_with_two_accounts() {
+        let mut g = guard();
+        let rows = [row(None, NOON - 600.0, 3), row(Some("a"), NOON - 100.0, 1)];
+        assert_eq!(g.seed_hour_by_account(&ids(&["a", "b"]), &rows), 1);
+        assert_eq!(g.hour_count("a", NOON), 1);
+        assert_eq!(g.hour_count("b", NOON), 0);
+    }
+
+    #[test]
+    fn seed_by_account_single_account_never_undercounts() {
+        let mut g = guard();
+        let rows = [
+            row(None, NOON - 600.0, 3),
+            row(Some("a"), NOON - 100.0, 1),
+            row(Some("old-token"), NOON - 50.0, 9),
+        ];
+        assert_eq!(g.seed_hour_by_account(&ids(&["a"]), &rows), 4);
+        assert_eq!(g.hour_count("a", NOON), 4);
+    }
+
+    #[test]
+    fn seed_by_account_merges_with_existing_without_duplicates() {
+        let mut g = guard();
+        g.record_start("a", NOON - 100.0, 1);
+        let rows = [
+            row(Some("a"), NOON - 100.0, 1),
+            row(Some("a"), NOON - 200.0, 1),
+        ];
+        g.seed_hour_by_account(&ids(&["a", "b"]), &rows);
+        assert_eq!(g.hour_count("a", NOON), 2);
     }
 }

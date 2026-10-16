@@ -87,8 +87,7 @@ impl Guard {
             .db
             .recent_image_stamps(now - gate_core::guard::WINDOW_3H as f64)
             .await?;
-        let stamps = gate_core::guard::stamps_from_rows(&rows);
-        Ok(self.with(|c| c.seed_hour(token_ids, &stamps)))
+        Ok(self.with(|c| c.seed_hour_by_account(token_ids, &rows)))
     }
 
     /// 这把上游 Token 现在能不能出图（每日 / 每小时 / 安静时段 / 熔断 / 按时段放行）。
