@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use gate_ops::{notify, patrol, sanitize, setting, smoke, snapshot, util};
+use gate_ops::{notify, patrol, report, sanitize, setting, smoke, snapshot, traffic, util};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -68,6 +68,29 @@ enum Cmd {
     },
     /// 读一项后台设置的当前值（名字同 set）
     Get { name: String },
+    /// 只读周报：每把 Key 的滥用 / 健康信号（只输出 Key 编号、显示名和计数，不输出提示词）
+    Report {
+        /// 统计最近几天
+        #[arg(long, default_value_t = report::DEFAULT_DAYS)]
+        days: i64,
+        /// 内容风险词表（默认 $NAI_RISK_TERMS，其次 /opt/owl/risk-terms.txt；不存在就跳过这一节）
+        #[arg(long)]
+        terms: Option<PathBuf>,
+        #[arg(long)]
+        db: Option<PathBuf>,
+    },
+    /// 汇总 Caddy JSON 访问日志：路径分组、状态码、p50 / p95、每分钟峰值（不读 IP，不输出查询参数）
+    Traffic {
+        /// 日志文件或目录，可重复（默认 $CADDY_ACCESS_LOG，其次 /var/log/caddy/access.log）
+        #[arg(long = "log")]
+        logs: Vec<PathBuf>,
+        /// 统计窗口，如 30m / 1h / 24h / 7d
+        #[arg(long, default_value = "1h")]
+        since: String,
+        /// 窗口结束时刻（Unix 秒，默认现在；复盘历史用）
+        #[arg(long)]
+        until: Option<f64>,
+    },
     /// 一致快照（不含审计原图）→ 完整性校验 → gzip（权限 600）
     Snapshot {
         /// 输出文件，如 /opt/backups/daily/nai_gate-2026-10-14.db.gz
@@ -187,6 +210,32 @@ async fn dispatch(cli: Cli) -> Result<i32> {
             let (code, text) = setting::run_get(&name).await?;
             print!("{text}");
             Ok(code)
+        }
+        Cmd::Report { days, terms, db } => {
+            print!(
+                "{}",
+                report::run(&util::resolve_db(db.as_deref()), days, terms)?
+            );
+            Ok(0)
+        }
+        Cmd::Traffic { logs, since, until } => {
+            let Some(span) = traffic::parse_span(&since) else {
+                eprintln!("--since 需要像 30m / 1h / 24h / 7d 这样的写法");
+                return Ok(2);
+            };
+            let logs = if logs.is_empty() {
+                vec![PathBuf::from(
+                    util::env_nonempty("CADDY_ACCESS_LOG")
+                        .unwrap_or_else(|| traffic::DEFAULT_LOG.into()),
+                )]
+            } else {
+                logs
+            };
+            print!(
+                "{}",
+                traffic::run(&logs, span, until.unwrap_or_else(util::now_secs))?
+            );
+            Ok(0)
         }
         Cmd::Snapshot { out, db } => {
             let line = snapshot::run(&util::resolve_db(db.as_deref()), &out)?;
