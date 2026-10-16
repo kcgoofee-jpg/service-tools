@@ -1,0 +1,14 @@
+# /etc/cron.d/nai-notify 的示例（放进去之前先看一遍；仓库里的脚本不会自动安装它）。
+# 每 10 分钟跑一次 `nai-ops notify`：巡检状态变化（正常 ↔ 注意 / 危险）时给站长发一条 Discord 私信，
+# 一直正常时什么都不发；同一级别 60 分钟冷却，危险没解除每 6 小时提醒一次，恢复只发一次。
+# 先用 --dry-run 看看会发什么：  cd /opt/service-tools && /opt/owl/nai-ops notify --dry-run
+#
+# 注意：和 nai-patrol.timer 的 `patrol --alert` 是两套独立的机制（各有各的状态文件）。
+# 想只保留一套，就把其中一个停掉；两个都开的话「危险」会各提醒一次。
+#
+# 以 root 运行（要读 docker、.env、数据库）；工作目录必须是 /opt/service-tools（相对路径 data/ 与 .env 同 patrol）。
+# 状态文件默认 /opt/backups/patrol_notify_state.json，可用环境变量 PATROL_NOTIFY_STATE 改。
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+*/10 * * * * root cd /opt/service-tools && /opt/owl/nai-ops notify >> /var/log/nai-notify.log 2>&1

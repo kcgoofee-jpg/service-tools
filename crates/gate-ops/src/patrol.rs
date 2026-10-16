@@ -12,6 +12,7 @@
 //! 「有警告」和「巡检坏了」）。
 //! 数据库用 `mode=ro` 打开，不写任何业务表；告警冷却状态写在 `PATROL_STATE_DIR`。
 
+use crate::checks::{self, ExtraCtx};
 use crate::discord::{self, Discord};
 use crate::util::{self, sv_str};
 use anyhow::{Context, Result};
@@ -233,7 +234,7 @@ pub struct Infra {
 }
 
 /// 跑外部命令取 stdout；错误用 Python 对应的异常类名表示（报告里会写出来）。
-async fn run_cmd(
+pub(crate) async fn run_cmd(
     prog: &str,
     args: &[&str],
     secs: u64,
@@ -694,7 +695,7 @@ pub struct Args {
 }
 
 /// 只读打开数据库；打不开返回 Err（调用方按旧版打印并退出 2）。
-fn open_ro(path: &Path) -> rusqlite::Result<Connection> {
+pub fn open_ro(path: &Path) -> rusqlite::Result<Connection> {
     let conn = Connection::open_with_flags(
         util::sqlite_uri(path, "mode=ro"),
         OpenFlags::SQLITE_OPEN_READ_ONLY
@@ -718,10 +719,21 @@ pub async fn run(cfg: &Config, args: &Args) -> Result<i32> {
         .timeout(Duration::from_secs(5))
         .build()?;
     let infra = gather_infra(cfg, &http).await;
-    run_with(cfg, args, &conn, &infra, util::now_secs(), util::local_tz()).await
+    let extra = ExtraCtx::gather(cfg).await;
+    run_with_extras(
+        cfg,
+        args,
+        &conn,
+        &infra,
+        Some(&extra),
+        util::now_secs(),
+        util::local_tz(),
+    )
+    .await
 }
 
 /// 拿到系统事实之后的部分：跑检查、打印、（需要时）告警。测试可以直接喂合成的 `Infra`。
+/// 不带扩展检查（输出与旧版逐字一致）；线上入口走 [`run_with_extras`]。
 pub async fn run_with(
     cfg: &Config,
     args: &Args,
@@ -730,8 +742,35 @@ pub async fn run_with(
     now: f64,
     tz: TimeZone,
 ) -> Result<i32> {
+    run_with_extras(cfg, args, conn, infra, None, now, tz).await
+}
+
+/// 跑全部检查（基础检查 + 可选的扩展检查），返回报告。`nai-ops notify` 也用它。
+pub fn build_report(
+    cfg: &Config,
+    conn: &Connection,
+    infra: &Infra,
+    extra: Option<&ExtraCtx>,
+    now: f64,
+) -> Result<Report> {
     let mut rep = Report::default();
     run_checks(&mut rep, conn, infra, now, &cfg.env_file).context("巡检查询失败")?;
+    if let Some(ctx) = extra {
+        checks::run_extra_checks(&mut rep, conn, ctx, now).context("扩展巡检查询失败")?;
+    }
+    Ok(rep)
+}
+
+pub async fn run_with_extras(
+    cfg: &Config,
+    args: &Args,
+    conn: &Connection,
+    infra: &Infra,
+    extra: Option<&ExtraCtx>,
+    now: f64,
+    tz: TimeZone,
+) -> Result<i32> {
+    let rep = build_report(cfg, conn, infra, extra, now)?;
 
     let worst = rep.worst();
     if args.json {

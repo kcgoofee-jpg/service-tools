@@ -46,6 +46,8 @@ compose 的 `stop_grace_period` 是 120 秒，所以发布时进行中的图不�
 依次：在线备份库到 `/opt/backups/pre-v3/` 并做完整性校验 → 停 2.x（最多等 120 秒）→ 起 3.0 → 健康检查 → `nai-ops smoke` 冒烟 →
 写巡检的 systemd drop-in（宿主机上的 `/opt/owl/nai-ops patrol`，检查 3.0 的容器）。**任何一步失败都会自动回到 2.x。**
 
+`load` / `up` / `previous` / `rollback` 之前，`cutover.sh` 会先看最近 10 分钟的出图请求数（只读 sqlite）：超过 `CUTOVER_BUSY_THRESHOLD`（默认 30）、或现在落在 `CUTOVER_BUSY_HOURS`（如 `"20-24"`，默认不设）里，就拒绝执行，加 `--force` 才放行；同时提醒「重启后每小时出图计数由日志补回，跨重启的小时窗口可能多算一次」。
+
 ## 回滚
 
 | 情况 | 命令 | 说明 |
@@ -72,6 +74,132 @@ sudo systemctl daemon-reload && sudo systemctl enable --now nai-patrol.timer
   「注意」只记在巡检日志里，后台总览的「有 N 件事要处理」能看到同样的情况。网关自己的告警同理：
   只有上游 Token 失效 / 连续 403 / Token 被改动 / 磁盘不足 10% 会私信，其余只写日志。
 - 默认检查的容器 `owl-gate,owl-naimei,caddy`（第一个是网关），环境变量 `NAI_GATE_CONTAINERS` 可改。
+
+## 巡检的扩展检查
+
+`nai-ops patrol` 在原有的容器 / 健康检查 / 内存磁盘 / 429 / 领 Key 之外，还会（全部只读，输出格式、退出码 0/1/2/3 不变，新行追加在报告末尾）：
+
+| 区域 | 看什么 | 注意 | 危险 |
+|---|---|---|---|
+| 队列 | 近 35 分钟图片请求的等待均值 / p90、拒绝比例、`queue_full` / `queue_timeout` 次数（少于 5 个请求不判断） | p90 ≥ 45 秒；两类拒绝合计 ≥ 5；拒绝比例 ≥ 25% | p90 ≥ 100 秒；两类拒绝合计 ≥ 40 |
+| 账号 | 近 24 小时各上游账号出图占比（需要 `usage_log.token_id` 列，没有就显示 `n/a`） | 最忙账号份额 ≥ 平均份额的 1.8 倍（至少 40 张、2 个账号） | — |
+| Anlas | 最近一次对账快照的余额，减去快照之后的记账消耗，估算当前余额（**近似**）；订阅到期倒计时 | 对账超过 3 天；到期不足 3 天；按近 3 天日均会在到期前耗尽；估算 ≤ 0 | — |
+| 原图 | `audit_images` 目录大小 / `audit_image_cap_mb`，近 1 小时新增 | ≥ 上限的 90% | ≥ 上限的 150%（自动清理没起作用） |
+| 证书 | Caddy 数据目录里站点证书的剩余天数（读 `.crt` 文件，不联网；目录取 `CADDY_DATA_DIR`，没设就用 `docker inspect caddy` 里挂到 `/data` 的目录；域名取 `PUBLIC_HOST` 或 `SITE_URL`） | < 15 天 | < 5 天 |
+| 成员 | 有启用的 Key 但 `role_granted=0` 的人数（只报人数） | ≥ 5 人 | — |
+| 通道 | 近 60 分钟上游 401 / 403 / 429 次数（429 的告警沿用原来的「通道」行） | 401 + 403 ≥ 1 | 401 + 403 ≥ 5 |
+| 系统 | 网关容器 1 小时内启动过的提示（每小时计数重启后由日志补回，跨重启的小时窗口可能多算一次；仅供参考） | — | — |
+
+找不到的东西（没有对账快照、没有证书目录、没有 `token_id` 列）一律写 `n/a` 并跳过，不报警。阈值都是 `crates/gate-ops/src/checks.rs` 顶部的具名常量。
+这些检查里的「危险」同样会触发原有的 `patrol --alert` 私信，所以危险只留给真正的事故。
+
+```text
+$ cd /opt/service-tools && /opt/owl/nai-ops patrol
+=== 巡检 2026-10-16 14:20:01 → OK ===
+  ...（原有各行）
+  [ok  ] 排队：近 35 分钟 42 张 · 等待均值 3.1s / p90 8.0s · 拒绝 1（2%）· queue_full 0 · queue_timeout 0
+  [ok  ] 账号均衡：近 24 小时 880 张分布在 2 个账号，最多的 acct-a 占 52%（均分 50%）
+  [ok  ] Anlas 估算（近似）：0.8 天前对账余额 4200，之后记账消耗 310，约剩 3890 · 距到期约 19.5 天
+  [ok  ] 原图目录：1.2G / 上限 8.0G（15%）· 近 1 小时新增约 38M
+  [ok  ] 证书 owl.example：剩 61.3 天
+  [ok  ] 领了 Key 但身份组还没授予：0 人（只报人数）
+  [ok  ] 近 60 分钟上游 401 × 0 · 403 × 0 · 429 × 0（429 的告警见上面「通道」）
+=== 结论：OK（0 项需要关注）===
+```
+
+## 状态变化通知（`nai-ops notify`）
+
+跑一遍和 `patrol` 同样的检查，**整体级别变化**时给站长（`ALERT_USER_ID`）发一条 Discord 私信，用 `DISCORD_BOT_TOKEN`（环境变量优先，其次 `.env`）。纯中文文本，只含巡检行（计数、容器、证书状态），不含成员信息、Key、令牌；不会私信任何别人。
+
+- 正常 → 注意 / 危险，或 注意 ↔ 危险：发一条；变回正常：只发一次「已恢复」；一直正常：从不发。
+- 同一级别 60 分钟冷却（`--cooldown-min` / `PATROL_NOTIFY_COOLDOWN_MIN`），来回抖动不会连发；「危险」不解除每 360 分钟提醒一次（`--repeat-min`），「注意」不重复提醒。
+- 没发成功不记「已通知」，下一轮重试（退出码 3）。
+- 状态文件默认 `/opt/backups/patrol_notify_state.json`（`--state` / `PATROL_NOTIFY_STATE`，权限 600）：`{level, notified_level, last_sent, since}`。
+- 退出码同 `patrol`：0 正常 / 1 注意 / 2 危险 / 3 出错（含发送失败）。
+
+```text
+$ cd /opt/service-tools && /opt/owl/nai-ops notify --dry-run
+[patrol WARN] 10-16 14:20 证书: 证书 owl.example：剩 12.0 天（少于 15 天，续签可能失败）
+[notify] --dry-run：本轮会发送以下私信（不会真的发，也不改状态文件）：
+【猫头鹰巡检 · 注意】10-16 14:20
+
+- 证书：证书 owl.example：剩 12.0 天（少于 15 天，续签可能失败）
+详细：在服务器上运行 /opt/owl/nai-ops patrol
+```
+
+定时：`deploy/v3/ops/cron.d-nai-notify.example` 是每 10 分钟一次的 `/etc/cron.d` 写法（root、日志写 `/var/log/nai-notify.log`），**只是示例，没有任何脚本会自动安装它**。
+它和 `nai-patrol.timer` 的 `patrol --alert` 是两套互相独立的机制（各有状态文件），想只留一套就停掉另一个，否则「危险」会各提醒一次。
+
+## 改设置（`nai-ops set` / `get`）
+
+后台设置接口的薄客户端：登录 `/admin/api/login`（密码取环境变量 `ADMIN_PASSWORD`，其次 `/opt/service-tools/.env`；接口地址 `ADMIN_API_BASE`，默认 `http://127.0.0.1:3003/admin/api`），再调后台已有的 `PUT` 接口，所以校验、后台操作日志、网关内存的即时生效和后台页面一模一样。不写数据库、不绕过后台。密码和 Cookie 不会出现在任何输出里。后台改过登录密码的话，以库里保存的为准，`.env` 里的值只是初始值，登录会失败并提示。
+
+```text
+$ nai-ops set --list                      # 白名单（只认这些名字）
+$ nai-ops get global_daily_anlas
+global_daily_anlas = 5000
+$ nai-ops set global_daily_anlas 8000     # 没有 --yes：只显示改前 → 改后，不写，退出码 2
+global_daily_anlas: 5000 → 8000
+没有写入：要真的修改请加 --yes（先预览用 --dry-run）
+$ nai-ops set global_daily_anlas 8000 --yes
+global_daily_anlas: 5000 → 8000
+已写入（后台操作日志里可见，网关内存已即时生效）
+```
+
+| 名字 | 走的接口 | 说明 |
+|---|---|---|
+| `global_daily_anlas` `global_monthly_anlas` `member_daily_anlas` `global_daily_v5` `v5_alert_threshold` `v5_medium_mode` | `PUT /settings` | Anlas / V5 预算；`global_daily_v5` 在动态额度开着时服务端会拒绝手改 |
+| `register_max_users` `register_open` `role_note` `role_guild` `role_id` `role_gate` | `PUT /ops/registration` | 领 Key；`role_guild` 和 `role_id` 必须同时有或同时空，推荐用 `role_gate 服务器ID:身份组ID`（传 `""` 清空两者） |
+| `account_daily_cap` `account_hourly_cap` `queue_per_account` `key_image_queue` | `PUT /guard` | 账号保护与排队 |
+| `image_min_interval` `queue_timeout` | `PUT /runtime-limits` | 排队与冷却（秒） |
+| `issue_hourly_cap` | **不支持** | 后台没有这项的修改接口；`nai-ops` 不会直接写数据库，需要先在网关加后台接口 |
+
+未知名字退出码 2。范围以服务端为准（类型不对本地先拒，范围不对原样转述服务端的 422 原因，退出码 1）。`--dry-run` 也会登录一次（后台操作日志里有一条「登录后台」）。
+
+## 周报（`nai-ops report`）
+
+只读。统计最近 N 天（`--days`，默认 7）每把 Key 的滥用 / 健康信号。**输出里只有 Key 编号、显示名和计数**：没有提示词、UA 原文、IP、Discord ID（共用的设备 / 提示词只显示 8 位哈希）。测试 Key 不计入。
+
+| 一节 | 阈值 |
+|---|---|
+| 重试轰炸 | `key_rate` + `key_busy` 拒绝 ≥ 20 次，附中位间隔 |
+| 最长连续使用 | 相邻请求间隔 ≤ 120 秒算连续，最长一段 ≥ 180 分钟 |
+| 个人额度打满的天数 | 有 `member_quota` 拒绝的天数 ≥ 3 |
+| 同一天多种设备类别 | 同一天出现 ≥ 2 类（ios / android / windows / mac / linux；认不出的不算） |
+| 多把 Key 共用同一具体设备 UA | UA 摘要 ≥ 24 字符且 ≥ 2 把 Key 在用 |
+| 多把 Key 相同的长提示词 | 提示词 ≥ 80 字且出现在 ≥ 2 把 Key |
+| 领 Key 时 Discord 账号不足 7 天 | 由 Discord ID 的雪花时间算账号年龄 |
+| 领取突发 | 10 分钟内领了 ≥ 5 把 |
+| 目前被暂停的 Key | `share_state.paused_until` 还没到 |
+| 内容风险 | 见下 |
+
+**内容风险词表放在服务器上，不进仓库**：默认 `/opt/owl/risk-terms.txt`（`NAI_RISK_TERMS` 或 `--terms` 可改，建议权限 600）。格式：`# 分类名` 开一个分类，其后每行一条正则（不区分大小写）；`##` 开头是注释。仓库只带空示例 `deploy/risk-terms.example.txt`（全是注释）。文件不存在就跳过这一节；报告里只有每个分类的命中条数和 Key 编号，不显示提示词。
+
+```text
+$ nai-ops report --days 7
+=== 周报：近 7 天（2026-09-14 22:13 ~ 2026-09-21 22:13）===
+有请求的 Key：3 把（测试 Key 已排除）
+
+[重试轰炸：key_rate + key_busy ≥ 20]
+  #1 alpha  key_rate=22 key_busy=3 中位间隔=2.0s
+...
+[内容风险（只列分类计数和 Key，不显示提示词）]
+  分类甲：1 条 · 1 把 Key：#3 gamma
+```
+
+## 流量（`nai-ops traffic`）
+
+汇总 Caddy 的 JSON 访问日志：按路径分组（`image-gen` / `gate-api` / `admin-api` / `admin-ui` / `public` / `bridge` / `static` / `member` / `workbench` / `other`）的请求数、状态码分类、p50 / p95 耗时、每分钟峰值。只解析时间、状态码、耗时、请求路径，**不读 IP、请求头**，路径在 `?` 处截断，输出里没有查询参数。
+
+```text
+$ nai-ops traffic --log /var/log/caddy --since 1h        # 目录 = 里面所有 .log 和 .log.gz
+=== 流量：近 1 小时（09-21 21:13 ~ 09-21 22:13）· 共 6 个请求 · 峰值 4 次/分钟（09-21 21:57） ===
+分组              请求    2xx   3xx    4xx   5xx     其它    p50ms    p95ms     峰值/分钟
+image-gen        2      2     0      0     0      0     2000     4000         2
+...
+```
+
+日志文件默认 `/var/log/caddy/access.log`（`CADDY_ACCESS_LOG`）。Caddy 一侧要开访问日志：`deploy/Caddyfile.access-log.example` 是一段 `log { ... }`（JSON、写文件、`roll_size` / `roll_keep` 滚动，并用 `filter` 编码器删掉 IP、请求头、响应头、TLS 细节）。**由站长 / 运维手工应用，仓库没有改线上 Caddyfile**：把这段放进站点块，给 caddy 容器挂 `/var/log/caddy`，先 `caddy validate` 再 `caddy reload`。其中去掉 uri 查询参数的 `regexp` 行没有在线上验证过，所以默认注释着——不开也不影响，`traffic` 自己会截掉。
 
 ## 备份与快照
 
@@ -118,6 +246,10 @@ docker logs --since 1h owl-naimei                   # 奶妹日志（出错会�
 journalctl -u nai-patrol -n 20 --no-pager           # 巡检日志
 cd /opt/service-tools && /opt/owl/nai-ops patrol    # 手动跑一次，完整报告（读同一份 .env 和 data/）
 /opt/owl/nai-ops snapshot <目标.db.gz>               # 一致快照（备份脚本用）
+/opt/owl/nai-ops notify --dry-run                  # 看看本轮会不会私信站长（不发、不改状态）
+/opt/owl/nai-ops get queue_timeout                 # 读后台设置；改用 set <名字> <值> --yes
+/opt/owl/nai-ops report                            # 只读周报（滥用 / 健康信号）
+/opt/owl/nai-ops traffic --since 1h                # Caddy 访问日志汇总
 docker exec owl-gate nai-ops smoke http://127.0.0.1:8000   # 线上冒烟（不出图）；地址必填，也可设环境变量 SITE_URL
 curl -s http://127.0.0.1:3003/healthz
 ```

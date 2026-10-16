@@ -40,7 +40,17 @@ fn help_lists_every_subcommand() {
     let o = nai(dir.path()).arg("--help").output().unwrap();
     assert_eq!(code(&o), 0);
     let text = out(&o);
-    for sub in ["patrol", "snapshot", "ro-sanitize", "smoke"] {
+    for sub in [
+        "patrol",
+        "notify",
+        "set",
+        "get",
+        "report",
+        "traffic",
+        "snapshot",
+        "ro-sanitize",
+        "smoke",
+    ] {
         assert!(text.contains(sub), "--help 里没有 {sub}：{text}");
     }
     // 群发私信、公告、状态页事件、提示词统计都已删除（后台有入口或没人用）

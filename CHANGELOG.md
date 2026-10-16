@@ -26,6 +26,15 @@
 - **Anlas 余额与续费倒计时（推算）**：最近一份对账快照（固定 + 购买）减去快照之后账本里记下的 Anlas，给出估计余额、续费日期与剩余天数、近 3 天日均用量、到期预测（「到期前用完」或「到期预计浪费 N」）、上次核对距今。快照里的到期时间已过则只提示「周期已滚动，需要重新核对」，不猜；上次核对超过 3 天提示偏旧。2 个及以上账号时老行归不到账号，余额标「近似」。先扣固定额度再扣购买的是推测，未经官方核实。
 - 开发：`cargo xtask dev` 的演示用量日志带 `token_id`，并写入一份一天前的对账快照；快照测试里 `usage_log` 多一列，种子 SQL 与 `list_logs` 输出相应更新（只多了 `token_id`）。
 
+### 站长 / 运维（运维工具）
+
+- **`nai-ops patrol` 扩展检查**（只读，输出格式与退出码不变）：近 35 分钟排队健康（等待均值 / p90、拒绝比例、`queue_full` / `queue_timeout`）、各上游账号出图占比（需要 `usage_log.token_id`，没有该列显示 `n/a`）、Anlas 估算（最近对账快照余额减去之后的记账，标注近似；对账超 3 天、到期不足 3 天、到期前会耗尽时提醒）、原图目录大小对比 `audit_image_cap_mb`、Caddy 证书剩余天数、领了 Key 但身份组未授予的人数、近 1 小时上游 401 / 403 / 429、网关刚重启的提示。危险只留给证书 < 5 天、原图 ≥ 上限 150%、上游 401 + 403 ≥ 5、排队长期堵死。
+- **`nai-ops notify`**：整体级别变化（正常 ↔ 注意 / 危险）时给站长发一条 Discord 私信；同级别 60 分钟冷却，危险不解除 6 小时提醒一次，恢复只发一次，`--dry-run` 只打印。附 `deploy/v3/ops/cron.d-nai-notify.example`（只是示例，不自动安装）。不私信成员。
+- **`nai-ops set` / `get`**：后台设置接口的薄客户端（白名单，`set --list`），打印 改前 → 改后，没有 `--yes` 不写；校验、操作日志和内存刷新与后台页面一致。`issue_hourly_cap` 因后台没有接口而明确不支持。
+- **`nai-ops report`**：只读周报（重试轰炸、最长连续使用、额度打满天数、多设备、共用 UA、相同长提示词、新号领取、领取突发、现有暂停）；输出只有 Key 编号、显示名和计数。内容风险词表放服务器外部文件，仓库只带空示例 `deploy/risk-terms.example.txt`。
+- **`nai-ops traffic`**：汇总 Caddy JSON 访问日志（路径分组、状态码、p50 / p95、每分钟峰值），不读 IP、不输出查询参数；附 `deploy/Caddyfile.access-log.example`（需运维手工应用）。
+- **`deploy/v3/cutover.sh`**：`load` / `up` / `previous` / `rollback` 之前先看最近 10 分钟出图数，超过 `CUTOVER_BUSY_THRESHOLD`（默认 30）或落在 `CUTOVER_BUSY_HOURS` 内拒绝执行，`--force` 放行。
+
 ## [3.0.0] - 2026-10-15（Rust + Preact 全量重写）
 
 网关、Discord 机器人、运维脚本全部用 Rust 重写，前端用 Vite + TypeScript + Preact 重写。

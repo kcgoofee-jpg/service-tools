@@ -987,6 +987,7 @@ version = "3.0.0"
 dependencies = [
  "anyhow",
  "axum",
+ "base64 0.22.1",
  "clap",
  "flate2",
  "gate-core",
