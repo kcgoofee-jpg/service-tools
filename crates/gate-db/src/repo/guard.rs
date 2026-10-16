@@ -3,13 +3,20 @@
 use crate::{Db, Result, value};
 
 impl Db {
-    /// `seed_hour`：最近 3 小时成功出图的 (ts, images)，按时间排序（旧版 guard.seed_hour）。
-    pub async fn recent_image_stamps(&self, since: f64) -> Result<Vec<(f64, i64)>> {
+    /// `seed_hour`：最近 3 小时成功出图的 (token_id, ts, images)，按时间排序（旧版 guard.seed_hour，
+    /// 3.0 起多取 token_id 以便按账号补回；老行 / 没记账号的为 None）。
+    pub async fn recent_image_stamps(&self, since: f64) -> Result<Vec<(Option<String>, f64, i64)>> {
         self.read(move |c| {
             let mut stmt = c.prepare(
-                "SELECT ts, images FROM usage_log WHERE ts>? AND status='ok' AND kind LIKE 'image%' AND images>0 ORDER BY ts",
+                "SELECT token_id, ts, images FROM usage_log WHERE ts>? AND status='ok' AND kind LIKE 'image%' AND images>0 ORDER BY ts",
             )?;
-            let rows = stmt.query_map([since], |r| Ok((value::f64_or(r, 0, 0.0)?, value::i64_or(r, 1, 0)?)))?;
+            let rows = stmt.query_map([since], |r| {
+                Ok((
+                    r.get::<_, Option<String>>(0)?.filter(|t| !t.is_empty()),
+                    value::f64_or(r, 1, 0.0)?,
+                    value::i64_or(r, 2, 0)?,
+                ))
+            })?;
             rows.collect()
         })
         .await

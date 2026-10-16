@@ -63,6 +63,9 @@ pub const RUST_ADDED_COLUMNS: &[&str] = &[
     "ALTER TABLE error_events ADD COLUMN auto_resolved TEXT",
     // Key 的停用原因（gate_core::key_status）；启用中 / 2.x 停用的为 NULL。
     "ALTER TABLE api_keys ADD COLUMN disabled_reason TEXT",
+    // 这条请求最后由哪个上游账号（token_id）处理；没发到上游（鉴权 / 准入阶段就被拒）和 3.0 之前的老行为 NULL。
+    // 不建索引：按账号统计总是先按 ts 范围缩小（idx_log_ts），范围内再按它过滤。
+    "ALTER TABLE usage_log ADD COLUMN token_id TEXT",
 ];
 
 /// 3.0 新增的表（旧版 Python 不认识；只增不减，回滚到 2.x 不受影响）。同 `RUST_ADDED_COLUMNS`：

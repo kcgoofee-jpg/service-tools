@@ -519,6 +519,7 @@ async fn call(db: &Db, c: &Case) -> Out {
                 dur_ms: int(c.kwarg("dur_ms"), 0),
                 up_status: int(c.kwarg("up_status"), 0),
                 rid: s(c.kwarg("rid"), ""),
+                token_id: None,
             };
             db.record_success(&sc, now).await?;
             Value::Null
@@ -540,6 +541,7 @@ async fn call(db: &Db, c: &Case) -> Out {
                 up_status: int(a(13, "up_status"), 0),
                 rid: s(a(14, "rid"), ""),
                 reason: s(a(16, "reason"), ""),
+                token_id: None,
             };
             db.add_log(&l, now).await?;
             Value::Null

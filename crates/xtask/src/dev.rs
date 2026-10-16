@@ -114,7 +114,7 @@ fn gateway_env(
     [
         ("DATA_DIR", data.to_string_lossy().into_owned()),
         ("ADMIN_PASSWORD", seed::ADMIN_PASSWORD.into()),
-        ("NAI_TOKENS", "pst-devdevdevdevdevdevdev".into()),
+        ("NAI_TOKENS", seed::DEV_UPSTREAM_TOKEN.into()),
         ("NAI_IMAGE_HOST", mock_url),
         // 假 Discord 配置：让自助领 Key / 网页登录处于「已配置」状态；地址是死端口，什么都发不出去
         ("DISCORD_CLIENT_ID", "1".into()),

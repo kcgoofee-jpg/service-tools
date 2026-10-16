@@ -5,6 +5,7 @@
 //! 时间一律由调用方传入（Unix 秒，f64），不在这里读时钟。
 
 pub mod allowance;
+pub mod anlas_estimate;
 pub mod autopilot;
 pub mod bot_config;
 pub mod clock;

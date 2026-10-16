@@ -28,6 +28,8 @@ pub struct Success {
     pub dur_ms: i64,
     pub up_status: i64,
     pub rid: String,
+    /// 处理这条请求的上游账号；没发到上游为 None。
+    pub token_id: Option<String>,
 }
 
 /// 一条拒绝 / 失败日志（`add_log`）。
@@ -48,6 +50,8 @@ pub struct NewLog {
     pub up_status: i64,
     pub rid: String,
     pub reason: String,
+    /// 选中过的上游账号（选号之后才失败的请求有值）；选号之前就被拒为 None。
+    pub token_id: Option<String>,
 }
 
 /// 日志筛选条件（旧版 `_log_filter` 的参数）。
@@ -153,6 +157,7 @@ impl Db {
                     s.dur_ms.max(0),
                     s.up_status,
                     pyc::take_chars(&s.rid, 16),
+                    s.token_id,
                 ],
             )?;
             tx.execute(
@@ -200,6 +205,7 @@ impl Db {
                     l.up_status,
                     pyc::take_chars(&l.rid, 16),
                     pyc::take_chars(&l.reason, 24),
+                    l.token_id,
                 ],
             )?;
             Ok(())

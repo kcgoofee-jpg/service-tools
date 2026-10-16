@@ -2,6 +2,7 @@
 import { useAdmin } from "../Admin";
 import { LoadError, Loading, SectionHead } from "./_kit";
 import { Sect } from "./system/forms";
+import AccountsCard from "./upstream/accounts";
 import AllowanceCard from "./upstream/allowance";
 import type { PoolData } from "./upstream/core";
 import PerfCard from "./upstream/perf";
@@ -17,6 +18,7 @@ export default function Upstream() {
       {loading && !data && <Loading rows={3} />}
       {!data && error && <LoadError error={error} />}
       {data && <TokensCard pool={data.pool} configured={data.pool_configured} />}
+      <AccountsCard />
       <AllowanceCard />
       <PerfCard />
       <ReconcileCard />
