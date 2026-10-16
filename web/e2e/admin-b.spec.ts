@@ -169,6 +169,23 @@ test("额度与保护：改一项运行限制并保存（不合法时不能保�
   await expect(page.getByText("运行限制已保存并生效").first()).toBeVisible();
 });
 
+test("额度与保护：V5 Medium 降档三选一，点选即生效，自动档显示切换条件", async ({ page }) => {
+  await visit(page, "limits", "额度与保护");
+  const group = () => page.getByRole("radiogroup", { name: "V5 Medium 降档" });
+  await expect(group().getByRole("radio")).toHaveCount(3);
+  await expect(group().getByRole("radio", { name: "关闭" })).toBeChecked();
+  await group().getByRole("radio", { name: "自动" }).click();
+  await expect(page.getByText("V5 Medium 降档已设为「自动」").first()).toBeVisible();
+  await expect(group().getByRole("radio", { name: "自动" })).toBeChecked();
+  await expect(page.getByText("现在是否已切换")).toBeVisible();
+  await expect(page.getByText("回升到", { exact: false }).first()).toBeVisible();
+  await page.reload();
+  await expect(group().getByRole("radio", { name: "自动" })).toBeChecked();
+  // 还原
+  await group().getByRole("radio", { name: "关闭" }).click();
+  await expect(page.getByText("V5 Medium 降档已设为「关闭」").first()).toBeVisible();
+});
+
 test("额度与保护：每小时上限填 0 要确认；动态额度推算过程可见", async ({ page }) => {
   await visit(page, "limits", "额度与保护");
   await expect(page.getByText("全站 V5 =", { exact: false }).first()).toBeVisible();

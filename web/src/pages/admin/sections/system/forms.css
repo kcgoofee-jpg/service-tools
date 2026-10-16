@@ -258,3 +258,51 @@
   margin: 0;
   accent-color: var(--accent);
 }
+
+/* 三选一分段控件：等宽等高；原生单选框保证方向键可用 */
+.seg {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--surface-2);
+}
+.seg__opt {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0 var(--sp-3);
+  cursor: pointer;
+  font-weight: 600;
+  font-size: var(--fs-md);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.seg__opt + .seg__opt {
+  border-left: 1px solid var(--border-strong);
+}
+.seg__opt input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.seg__opt:has(input:checked) {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.seg__opt:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: -3px;
+}
+.seg__opt:has(input:disabled) {
+  opacity: 0.6;
+  cursor: wait;
+}
