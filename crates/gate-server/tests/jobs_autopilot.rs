@@ -260,6 +260,21 @@ async fn sixty_member_rejections_within_an_hour_pause_the_key() {
     assert_eq!(again, 1);
 }
 
+/// 「连接测试」被挡（`test_request`）算成员自己的拒绝、计入单 Key 限流：
+/// 正常的新手试几次（线上最多十来次）离 60 次的暂停线很远；只有客户端死循环发测试才会被暂停。
+#[tokio::test]
+async fn connection_test_rejections_count_but_a_few_are_harmless() {
+    let _clock = clock(Some(NOW)).await;
+    let e = setup(&[]).await;
+    let s = &e.state;
+    let (few, loops) = (member_key(s, 1, &[]).await, member_key(s, 2, &[]).await);
+    let mut rows = rejects(few, "test_request", 10, 60.0);
+    rows.extend(rejects(loops, "test_request", 60, 60.0));
+    sql(&e, rows).await;
+    assert_eq!(run_job(s, "key_guard").await.unwrap(), "暂停 1 把：成员02");
+    assert!(!paused(s, few) && paused(s, loops));
+}
+
 #[tokio::test]
 async fn site_level_rejections_do_not_count() {
     let _clock = clock(Some(NOW)).await;

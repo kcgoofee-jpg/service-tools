@@ -32,7 +32,7 @@ use crate::quota::{DecideError, Effect, py_max};
 use crate::reasons::{
     BODY_ABORT, BREAKER, BURST_CAP, CAP_3H, COOLDOWN, DAILY_CAP, FEATURE_OFF, HOURLY_CAP, KEY_BUSY,
     KEY_PAUSED, KEY_RATE, MEMBER_QUOTA, PACED, PARAM, QUEUE_FULL, QUEUE_TIMEOUT, QUIET_CAP,
-    SITE_QUOTA, V5_EXHAUSTED,
+    SITE_QUOTA, TEST_REQUEST, V5_EXHAUSTED,
 };
 use std::collections::HashMap;
 
@@ -58,13 +58,14 @@ pub const KEY_GUARD_SKIP_REASONS: [&str; 13] = [
 ///
 /// 每个原因码都必须归到这里或 [`KEY_GUARD_SKIP_REASONS`] 之一（测试逐个核对 `reasons.rs` 里的常量）：
 /// 新加原因码时必须先想清楚它算不算成员的问题。
-pub const MEMBER_CAUSED: [&str; 6] = [
+pub const MEMBER_CAUSED: [&str; 7] = [
     KEY_BUSY,
     MEMBER_QUOTA,
     KEY_RATE,
     BODY_ABORT,
     FEATURE_OFF,
     PARAM,
+    TEST_REQUEST,
 ];
 
 /// 熔断设置键：上次熔断结束的时间（下次统计从这之后算）。

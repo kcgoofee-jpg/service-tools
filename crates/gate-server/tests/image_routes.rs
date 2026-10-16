@@ -925,3 +925,150 @@ async fn medium_auto_follows_cached_percent_with_hysteresis() {
     assert!(!gate_server::v5_medium::active(&e.state).await);
     assert!(!e.state.ops.v5_medium_auto.load(Ordering::Relaxed));
 }
+
+// ---------------------------------------------------------------- 连接测试请求拦截
+
+const TEST_MESSAGE: &str = "连接正常，Key 有效。这是「测试」请求（尺寸很小、步数很少、提示词很短），本站是共享账号，测试不会出图，以免占用大家的额度。请直接用正常参数生图。";
+
+fn probe_body(model: &str, prompt: &str, steps: i64, w: i64, h: i64) -> Value {
+    json!({
+        "input": prompt, "model": model, "action": "generate",
+        "parameters": {"width": w, "height": h, "steps": steps, "scale": 5, "sampler": "k_euler_ancestral",
+                       "n_samples": 1, "seed": 7},
+    })
+}
+
+/// 连接测试：400 + 说明、上游零调用、所有计数不变、用量日志记 rejected / test_request。
+#[tokio::test]
+async fn connection_test_is_answered_without_touching_upstream_or_quota() {
+    let e = setup(&[]).await;
+    allow_v5(&e.state).await;
+    let cases = [
+        // SillyTavern 预设（V4.5 / V5）和另一个客户端的探测；普通接口、流式接口、/v1 别名都要拦
+        (
+            "/ai/generate-image",
+            "nai-diffusion-4-5-full",
+            "simple circle, white background",
+            4,
+            512,
+            512,
+        ),
+        (
+            "/ai/generate-image-stream",
+            "nai-diffusion-5-full",
+            "simple circle, white background",
+            4,
+            512,
+            512,
+        ),
+        (
+            "/v1/ai/generate-image",
+            "nai-diffusion-4-5-full",
+            "test",
+            1,
+            64,
+            64,
+        ),
+    ];
+    for (path, model, prompt, steps, w, h) in cases {
+        let (status, _, body) = call(
+            &e.state,
+            "POST",
+            path,
+            Some(TOKEN),
+            Some(probe_body(model, prompt, steps, w, h)),
+        )
+        .await;
+        assert_eq!(status, 400, "{path} {}", String::from_utf8_lossy(&body));
+        let v: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["statusCode"], 400);
+        assert_eq!(v["message"], format!("猫头鹰公益站提醒：{TEST_MESSAGE}"));
+    }
+    assert!(e.mock.requests().is_empty(), "上游不该收到任何请求");
+    let rows = logs(&e.state).await;
+    assert_eq!(rows.len(), 3, "{rows:?}");
+    for r in &rows {
+        assert_eq!(r["status"], "rejected");
+        assert_eq!(r["reason"], "test_request");
+        assert_eq!(r["images"], 0);
+    }
+    let c = e.state.db.get_counter(1, &e.state.day()).await.unwrap();
+    assert_eq!(
+        (c.images, c.legacy_free_images, c.v5, c.anlas, c.exists),
+        (0, 0, 0, 0.0, false)
+    );
+    let now = e.state.now();
+    for t in e.state.nai.tokens().await {
+        assert_eq!(e.state.guard.with(|g| g.hour_count(&t.token_id, now)), 0);
+    }
+    let ok = common::query(
+        &e.state.db,
+        "SELECT COUNT(*) AS n FROM usage_log WHERE status='ok'",
+    )
+    .await[0]["n"]
+        .as_i64()
+        .unwrap();
+    assert_eq!(ok, 0);
+}
+
+/// 同样的提示词、正常参数（28 步 832x1216）照常出图。
+#[tokio::test]
+async fn same_prompt_with_normal_params_still_generates() {
+    let e = setup(&[]).await;
+    let (status, _, body) = call(
+        &e.state,
+        "POST",
+        "/ai/generate-image",
+        Some(TOKEN),
+        Some(probe_body(
+            "nai-diffusion-4-5-full",
+            "simple circle, white background",
+            28,
+            832,
+            1216,
+        )),
+    )
+    .await;
+    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
+    assert_eq!(e.mock.requests_to("/ai/generate-image").len(), 1);
+    let c = e.state.db.get_counter(1, &e.state.day()).await.unwrap();
+    assert_eq!(c.images, 1);
+}
+
+/// Key 无效 / 停用时仍然是原来的 401 / 403：测试请求才能如实证明 Key 有效。
+#[tokio::test]
+async fn invalid_key_still_gets_401_on_a_test_request() {
+    let e = setup(&[]).await;
+    for auth in [None, Some("nai-wrong")] {
+        let (status, _, body) = call(
+            &e.state,
+            "POST",
+            "/ai/generate-image",
+            auth,
+            Some(probe_body("nai-diffusion-4-5-full", "test", 1, 64, 64)),
+        )
+        .await;
+        assert_eq!(status, 401);
+        assert!(!String::from_utf8_lossy(&body).contains("连接正常"));
+    }
+    e.state
+        .db
+        .run_script(vec!["UPDATE api_keys SET enabled=0 WHERE id=1".into()])
+        .await
+        .unwrap();
+    let (status, _, body) = call(
+        &e.state,
+        "POST",
+        "/ai/generate-image",
+        Some(TOKEN),
+        Some(probe_body("nai-diffusion-4-5-full", "test", 1, 64, 64)),
+    )
+    .await;
+    assert!(
+        status == 401 || status == 403,
+        "{status} {}",
+        String::from_utf8_lossy(&body)
+    );
+    assert!(!String::from_utf8_lossy(&body).contains("连接正常"));
+    assert!(e.mock.requests().is_empty());
+}

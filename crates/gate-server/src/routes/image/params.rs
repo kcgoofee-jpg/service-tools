@@ -10,7 +10,11 @@ use crate::state::AppState;
 use gate_core::policy::{self, REFERENCE_FIELDS};
 use gate_core::pyc::take_chars;
 use gate_core::pyval::{py_str, truthy};
+use gate_core::reasons;
 use serde_json::{Map, Value, json};
+
+/// 回给「连接测试」请求的说明（Key 有效，但这类请求不出图）。
+pub(super) const CONNECTION_TEST_MESSAGE: &str = "连接正常，Key 有效。这是「测试」请求（尺寸很小、步数很少、提示词很短），本站是共享账号，测试不会出图，以免占用大家的额度。请直接用正常参数生图。";
 
 /// 生图请求经过校验、整理后的结果。
 pub(super) struct Prepared {
@@ -80,6 +84,12 @@ pub(super) async fn prepare(
     if tier == "v5" && !key.is_admin() && key.image_model_scope() != "all" {
         reject(&model, "模型权限：仅允许 V4.5 及更低");
         return Err(GateError::new(403, "你的 Key 目前只能用 V4.5 及更低模型").into());
+    }
+    // 客户端的「连接测试」（小图、几步、短提示词）：Key 已验证有效，在这里直接答复，不出图、不占额度 / 队列 / 上游
+    if policy::is_connection_test(&body, key.is_admin(), key.is_test()) {
+        return Err(
+            GateError::with_code(400, CONNECTION_TEST_MESSAGE, reasons::TEST_REQUEST).into(),
+        );
     }
     if body.get("image").is_some_and(truthy) || body.get("mask").is_some_and(truthy) {
         return Err(GateError::new(400, "生图请求的 image 和 mask 请放在 parameters 中").into());

@@ -1524,10 +1524,197 @@ pub fn gen_key(prefix: &str, random: &[u8; 24]) -> String {
     )
 }
 
+// ----------------------------------------------------------------------------- 连接测试请求
+
+/// 「连接测试」请求的判定阈值。依据（线上日志 7 天、12,650 张成功出图）：流行的 SillyTavern 预设把「测试连接」
+/// 当成真实生图发（提示词 `simple circle, white background`、512x512、4 步，还吃掉过 V5 额度）；
+/// 另有客户端发提示词 `test`、64x64、1 步。7 天里没有任何正常请求同时满足「步数 ≤ 5 且面积 ≤ 512x512」，
+/// 正常提示词平均约 1000 字符。三个阈值必须同时满足（再加「普通生图、单张、无角色」）才算测试。
+pub const TEST_REQUEST_MAX_STEPS: i64 = 5;
+/// 见 [`TEST_REQUEST_MAX_STEPS`]：宽 × 高不超过 512 × 512。
+pub const TEST_REQUEST_MAX_PIXELS: i64 = 512 * 512;
+/// 见 [`TEST_REQUEST_MAX_STEPS`]：提示词（去首尾空白后）不超过 40 个字符。
+pub const TEST_REQUEST_MAX_PROMPT_CHARS: usize = 40;
+
+/// 参数里出现任何一个（值为真）就说明不是单纯的文生图：图生图 / 局部重绘 / ControlNet / 参考图。
+const NON_PLAIN_PARAMS: [&str; 6] = [
+    "image",
+    "mask",
+    "controlnet_condition",
+    "controlnet_model",
+    "controlnet_strength",
+    "reference_image",
+];
+
+/// 这是不是客户端的「连接测试」请求（见 [`TEST_REQUEST_MAX_STEPS`] 的依据）。要在
+/// [`normalize_image_request`] 和提示词清理之后调用（尺寸 / 步数已校验为整数，提示词已按流水线规范化）。
+///
+/// 全部满足才算：动作是普通 generate（没有图生图 / 局部重绘 / 蒙版 / Vibe / 参考图 / ControlNet）、
+/// 步数 ≤ 5、宽 × 高 ≤ 512 × 512、一次 ≤ 1 张、没有角色提示词、提示词 ≤ 40 字符
+/// （V4 / V4.5 结构化提示词取 `base_caption`，否则取 `input`）。
+/// 管理员 Key 和测试 Key 豁免（巡检 / 冒烟会发很小的请求）。缺步数或尺寸（上游按默认值出大图）不算。
+pub fn is_connection_test(body: &Value, key_is_admin: bool, key_is_test: bool) -> bool {
+    if key_is_admin || key_is_test {
+        return false;
+    }
+    let Some(Value::Object(p)) = pyval::get(body, "parameters") else {
+        return false;
+    };
+    let action = pyc::strip(&str_or_empty(pyval::get(body, "action"))).to_lowercase();
+    if !action.is_empty() && action != "generate" {
+        return false;
+    }
+    if NON_PLAIN_PARAMS
+        .iter()
+        .chain(REFERENCE_FIELDS.iter())
+        .any(|k| truthy_opt(p.get(*k)))
+        || ["image", "mask"]
+            .iter()
+            .any(|k| truthy_opt(pyval::get(body, k)))
+    {
+        return false;
+    }
+    let int = |k: &str| p.get(k).and_then(Value::as_i64);
+    let (Some(steps), Some(width), Some(height)) = (int("steps"), int("width"), int("height"))
+    else {
+        return false;
+    };
+    let n = int("n_samples").filter(|n| *n != 0).unwrap_or(1);
+    if steps > TEST_REQUEST_MAX_STEPS
+        || width.saturating_mul(height) > TEST_REQUEST_MAX_PIXELS
+        || n > 1
+    {
+        return false;
+    }
+    if matches!(p.get("characterPrompts"), Some(Value::Array(a)) if !a.is_empty()) {
+        return false;
+    }
+    let v4 = match p.get("v4_prompt") {
+        Some(Value::Object(m)) => match m.get("caption") {
+            Some(Value::Object(cap)) => Some(cap),
+            _ => None,
+        },
+        _ => None,
+    };
+    if let Some(cap) = v4
+        && matches!(cap.get("char_captions"), Some(Value::Array(a)) if !a.is_empty())
+    {
+        return false;
+    }
+    let prompt = match v4.and_then(|c| c.get("base_caption")) {
+        Some(Value::String(s)) => s.as_str(),
+        _ => match pyval::get(body, "input") {
+            Some(Value::String(s)) => s.as_str(),
+            _ => "",
+        },
+    };
+    pyc::len_chars(pyc::strip(prompt)) <= TEST_REQUEST_MAX_PROMPT_CHARS
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn probe(prompt: &str, steps: i64, w: i64, h: i64) -> Value {
+        json!({"input": prompt, "model": "nai-diffusion-4-5-full", "action": "generate",
+               "parameters": {"width": w, "height": h, "steps": steps, "n_samples": 1}})
+    }
+
+    #[test]
+    fn connection_test_known_signatures() {
+        // SillyTavern 预设
+        let st = probe("simple circle, white background", 4, 512, 512);
+        assert!(is_connection_test(&st, false, false));
+        // 另一个客户端
+        assert!(is_connection_test(&probe("test", 1, 64, 64), false, false));
+        // 同样的提示词，正常参数不算
+        let normal = probe("simple circle, white background", 28, 832, 1216);
+        assert!(!is_connection_test(&normal, false, false));
+    }
+
+    #[test]
+    fn connection_test_boundaries() {
+        let t = |p: &Value| is_connection_test(p, false, false);
+        assert!(t(&probe("a", 5, 512, 512)));
+        assert!(!t(&probe("a", 6, 512, 512)));
+        assert!(!t(&probe("a", 5, 513, 512)));
+        assert!(t(&probe("a", 5, 256, 1024))); // 面积相同，形状不限
+        assert!(t(&probe(&"x".repeat(40), 5, 512, 512)));
+        assert!(!t(&probe(&"x".repeat(41), 5, 512, 512)));
+        // 首尾空白不算；按字符数而不是字节数
+        assert!(t(&probe(&format!("  {}  ", "x".repeat(40)), 5, 512, 512)));
+        assert!(t(&probe(&"猫".repeat(40), 5, 512, 512)));
+        assert!(!t(&probe(&"猫".repeat(41), 5, 512, 512)));
+    }
+
+    #[test]
+    fn connection_test_requires_plain_single_generate() {
+        let t = |p: &Value| is_connection_test(p, false, false);
+        let mut p = probe("test", 1, 64, 64);
+        p["action"] = json!("img2img");
+        assert!(!t(&p));
+        p["action"] = json!("infill");
+        assert!(!t(&p));
+        p["action"] = json!("GENERATE");
+        assert!(t(&p));
+        let mut p = probe("test", 1, 64, 64);
+        p["parameters"]["image"] = json!("QUJD");
+        assert!(!t(&p));
+        let mut p = probe("test", 1, 64, 64);
+        p["parameters"]["mask"] = json!("QUJD");
+        assert!(!t(&p));
+        let mut p = probe("test", 1, 64, 64);
+        p["parameters"]["reference_image_multiple"] = json!(["QUJD"]);
+        assert!(!t(&p));
+        let mut p = probe("test", 1, 64, 64);
+        p["parameters"]["director_reference_images_cached"] = json!([{"cache_secret_key": "k"}]);
+        assert!(!t(&p));
+        let mut p = probe("test", 1, 64, 64);
+        p["parameters"]["controlnet_condition"] = json!("QUJD");
+        assert!(!t(&p));
+        // 空的参考图列表不算
+        let mut p = probe("test", 1, 64, 64);
+        p["parameters"]["reference_image_multiple"] = json!([]);
+        assert!(t(&p));
+        let mut p = probe("test", 1, 64, 64);
+        p["parameters"]["n_samples"] = json!(2);
+        assert!(!t(&p));
+        let mut p = probe("test", 1, 64, 64);
+        p["parameters"]["characterPrompts"] = json!([{"prompt": "girl"}]);
+        assert!(!t(&p));
+        // 缺步数 / 尺寸：上游按默认值出大图，不算测试
+        let mut p = probe("test", 1, 64, 64);
+        p["parameters"].as_object_mut().unwrap().remove("steps");
+        assert!(!t(&p));
+        let mut p = probe("test", 1, 64, 64);
+        p["parameters"].as_object_mut().unwrap().remove("width");
+        assert!(!t(&p));
+        assert!(!t(&json!({"input": "test", "model": "x"})));
+    }
+
+    #[test]
+    fn connection_test_uses_v4_base_caption() {
+        let t = |p: &Value| is_connection_test(p, false, false);
+        let mut p = probe("", 4, 512, 512);
+        p["parameters"]["v4_prompt"] =
+            json!({"caption": {"base_caption": "simple circle", "char_captions": []}});
+        assert!(t(&p));
+        p["parameters"]["v4_prompt"]["caption"]["base_caption"] = json!("x".repeat(41));
+        assert!(!t(&p));
+        p["parameters"]["v4_prompt"]["caption"]["base_caption"] = json!("ok");
+        p["parameters"]["v4_prompt"]["caption"]["char_captions"] =
+            json!([{"char_caption": "girl"}]);
+        assert!(!t(&p));
+    }
+
+    #[test]
+    fn connection_test_exempts_admin_and_test_keys() {
+        let p = probe("test", 1, 64, 64);
+        assert!(is_connection_test(&p, false, false));
+        assert!(!is_connection_test(&p, true, false));
+        assert!(!is_connection_test(&p, false, true));
+    }
 
     #[test]
     fn strict_base64_matches_binascii_rules() {
