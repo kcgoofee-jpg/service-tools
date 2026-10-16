@@ -30,26 +30,33 @@ import {
   KeyRevealDialog,
   TagDialog,
 } from "./members/Dialogs";
+import { FilterBar } from "./members/FilterBar";
 import { inviteMessage } from "./members/invite";
 import { KeyDialog } from "./members/KeyDialog";
 import {
   ACK_TAG,
-  allFilters,
+  ALL_FILTER,
   buildFilters,
+  countFilter,
   defaultDir,
   defaultFilter,
   findByKeyId,
+  hasReason,
   isStaff,
   matchesQuery,
   memberIssues,
   memberLabel,
+  normalizeFilter,
+  poolFor,
+  REJECTED_FILTER,
+  rejectReasons,
   SORT_LABEL,
   type SortKey,
   sortMembers,
 } from "./members/logic";
 import type { DetailActions } from "./members/MemberDetail";
 import { MemberList } from "./members/MemberList";
-import { Empty, NARROW, Seg, useMedia } from "./members/shared";
+import { Empty, NARROW, useMedia } from "./members/shared";
 import type { KeysResp, MemberRow, MembersResp } from "./members/types";
 import "./members.css";
 
@@ -69,7 +76,8 @@ export default function Members() {
   const bans = useAdmin<{ total: number }>("/admin/api/bans");
   const narrow = useMedia(NARROW);
 
-  const [filter, setFilter] = useState<string | null>(query.filter ?? null);
+  const [filter, setFilter] = useState<string | null>(normalizeFilter(query.filter));
+  const [reason, setReason] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortKey>("today");
   const [dir, setDir] = useState<"asc" | "desc">("desc");
@@ -88,28 +96,37 @@ export default function Members() {
   }, [mem.data, keys.data]);
   const byId = (id: number) => rows.find((r) => r.id === id);
 
-  const filters = useMemo(() => buildFilters(rows, now, idleDays), [rows, now, idleDays]);
-  const all = allFilters(filters);
-  const members = rows.filter((m) => !isStaff(m));
-  const count = (f: (typeof all)[number]) => (f.allKeys ? rows : members).filter(f.test).length;
+  const filters = useMemo(() => buildFilters(now, idleDays), [now, idleDays]);
+  const all = [...filters.chips, filters.staff];
 
   // 第一次有数据：有要处理的人就直接看「需要处理」
   useEffect(() => {
     if (filter === null && rows.length) setFilter(defaultFilter(rows, now));
   }, [filter, rows, now]);
-  const activeId = all.some((f) => f.id === filter) ? (filter as string) : "all";
-  const active = all.find((f) => f.id === activeId) ?? all[0];
-  const inMore = !filters.main.some((f) => f.id === activeId);
+  const activeId = all.some((f) => f.id === filter) ? (filter as string) : ALL_FILTER;
+  const active = all.find((f) => f.id === activeId) ?? filters.chips[0];
+  // 被拒原因是「24 小时被拒过」之内的第二层；原因随刷新消失（那 24 小时已过）时自动退回
+  const reasons = useMemo(() => rejectReasons(rows), [rows]);
+  const reasonOn = activeId === REJECTED_FILTER && reason !== null && reasons.some((r) => r.tag === reason);
+  const chips = filters.chips.map((f) => ({
+    id: f.id,
+    label: f.label,
+    count: countFilter(rows, f),
+    ...(f.hint ? { hint: f.hint } : {}),
+    ...(f.id === "attention" ? { hot: true } : {}),
+  }));
 
   const list = useMemo(() => {
     if (!active) return [];
-    const pool = active.allKeys ? rows : rows.filter((m) => !isStaff(m));
     return sortMembers(
-      pool.filter(active.test).filter((m) => matchesQuery(m, search)),
+      poolFor(rows, active)
+        .filter(active.test)
+        .filter((m) => !reasonOn || hasReason(m, reason as string))
+        .filter((m) => matchesQuery(m, search)),
       sort,
       dir,
     );
-  }, [rows, active, search, sort, dir]);
+  }, [rows, active, reasonOn, reason, search, sort, dir]);
   const shown = list.slice(0, limit);
 
   /* ?focus=<Key 编号>：展开、滚到视野中央并高亮 */
@@ -120,7 +137,8 @@ export default function Members() {
     const m = findByKeyId(rows, focusParam);
     if (!m) return;
     handled.current = focusParam;
-    setFilter(isStaff(m) ? "staff" : "all");
+    setFilter(isStaff(m) ? "staff" : ALL_FILTER);
+    setReason(null);
     setSearch("");
     setOpen((s) => new Set(s).add(m.id));
     setFocusId(m.id);
@@ -417,13 +435,6 @@ export default function Members() {
   };
 
   /* ---------- 页面 ---------- */
-  const mainFilters = filters.main;
-  const moreGroups = [
-    { label: "状态", list: filters.more },
-    { label: "站长标签", list: filters.userTags },
-    { label: "近 24 小时被拒原因", list: filters.autoTags },
-  ];
-
   return (
     <div class="xa-page">
       <SectionHead
@@ -501,55 +512,23 @@ export default function Members() {
                 </Button>
               </div>
             </div>
-            <div class="xa-toolbar">
-              <Seg
-                label="筛选成员"
-                value={inMore ? "" : activeId}
-                options={mainFilters.map((f) => {
-                  const n = count(f);
-                  return {
-                    id: f.id,
-                    label: (
-                      <>
-                        {f.label} <span class={f.id === "attention" && n ? "mb-n is-hot" : "mb-n"}>{n}</span>
-                      </>
-                    ),
-                  };
-                })}
-                onChange={(v) => {
-                  setFilter(v);
-                  setLimit(PAGE);
-                }}
-              />
-              <select
-                class="select mb-more"
-                aria-label="更多筛选"
-                value={inMore ? activeId : ""}
-                onChange={(e) => {
-                  setFilter(e.currentTarget.value || "all");
-                  setLimit(PAGE);
-                }}
-              >
-                <option value="">{inMore && active ? `更多：${active.label}` : "更多筛选"}</option>
-                {moreGroups.map((g) => {
-                  const opts = g.list.filter((f) => count(f) > 0 || f.id === activeId);
-                  return opts.length ? (
-                    <optgroup key={g.label} label={g.label}>
-                      {opts.map((f) => (
-                        <option key={f.id} value={f.id}>
-                          {f.label}（{count(f)}）
-                        </option>
-                      ))}
-                    </optgroup>
-                  ) : null;
-                })}
-              </select>
-              {inMore && (
-                <Button size="sm" variant="ghost" onClick={() => setFilter("all")}>
-                  清除筛选
-                </Button>
-              )}
-            </div>
+            <FilterBar
+              chips={chips}
+              active={activeId}
+              onToggle={(id) => {
+                // 再点一次选中的标签 = 取消，回到全部成员
+                setFilter(id === activeId ? ALL_FILTER : id);
+                setReason(null);
+                setLimit(PAGE);
+              }}
+              reasonsOf={REJECTED_FILTER}
+              reasons={reasons}
+              reason={reasonOn ? reason : null}
+              onReason={(tag) => {
+                setReason(tag);
+                setLimit(PAGE);
+              }}
+            />
           </div>
 
           {list.length === 0 ? (

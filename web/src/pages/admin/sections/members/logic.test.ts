@@ -2,15 +2,19 @@ import { describe, expect, it } from "vitest";
 import {
   ACK_TAG,
   buildFilters,
+  countFilter,
   DAY,
   defaultFilter,
   findByKeyId,
+  hasReason,
   matchesQuery,
   memberIssues,
   memberLabel,
   memberStatus,
   memberVerdict,
   needsAttention,
+  normalizeFilter,
+  rejectReasons,
   roleOf,
   sortMembers,
 } from "./logic";
@@ -141,45 +145,83 @@ describe("memberVerdict / memberStatus", () => {
   });
 });
 
-describe("筛选", () => {
-  it("「快被回收」按最近一次生图算，豁免邀请 / 测试 / 站长，并用 API 给的天数", () => {
+describe("筛选横栏", () => {
+  const ids = (f: ReturnType<typeof buildFilters>) => f.chips.map((c) => c.id);
+  it("一条横栏按顺序：全部 / 今日 / 没出图 / 新加入 / 被拒 / 快回收 / 邀请 / 需要处理", () => {
+    expect(ids(buildFilters(NOW, 3))).toEqual([
+      "all",
+      "today",
+      "never",
+      "new",
+      "rejected",
+      "reclaim",
+      "invite",
+      "attention",
+    ]);
+  });
+  it("已下线的筛选不在横栏里：普通 / 站长 / 测试身份组、后台手动建的 Key、站长 / 测试 Key、站长标签", () => {
+    const all = ids(buildFilters(NOW, 3)).join(",");
+    for (const gone of ["role:regular", "role:admin", "role:test", "manual", "staff", "tag:"])
+      expect(all).not.toContain(gone);
+  });
+  it("「快被回收」按最近一次生图算，豁免邀请 / 测试 / 站长，标签用 API 给的天数", () => {
     const idle = mk({ last_image_at: NOW - 2.5 * DAY });
     const fresh = mk({ last_image_at: NOW - 3600 });
     const invite = mk({ last_image_at: NOW - 2.5 * DAY, role: "invite" });
     const never = mk({ last_image_at: null, first_image_at: null, created_at: NOW - 2.5 * DAY });
-    const f = buildFilters([idle, fresh, invite, never], NOW, 3);
-    const reclaim = f.more.find((x) => x.id === "reclaim");
-    expect(reclaim?.label).toBe("快被回收（满 3 天未生图）");
+    const reclaim = buildFilters(NOW, 3).chips.find((x) => x.id === "reclaim");
+    expect(reclaim?.label).toBe("快被回收（满 3 天）");
     expect([idle, fresh, invite, never].filter((m) => reclaim?.test(m))).toEqual([idle, never]);
+    expect(buildFilters(NOW, 7).chips.find((x) => x.id === "reclaim")?.label).toBe("快被回收（满 7 天）");
   });
-  it("回收天数为 0（关闭）时没有这个筛选", () => {
-    expect(buildFilters([mk()], NOW, 0).more.some((x) => x.id === "reclaim")).toBe(false);
+  it("回收天数为 0（关闭）时没有「快被回收」", () => {
+    expect(ids(buildFilters(NOW, 0))).not.toContain("reclaim");
   });
-  it("站长标签生成独立筛选，内置名字不重复列", () => {
-    const m = mk({
-      tags: [
-        { tag: "老朋友", note: "", by: "站长", ts: NOW },
-        { tag: "邀请", note: "", by: "站长", ts: NOW },
-      ],
-    });
-    const f = buildFilters([m], NOW, 3);
-    expect(f.userTags.map((x) => x.label)).toEqual(["老朋友"]);
+  it("各标签的人数：只数成员，站长 / 测试 Key 不计入", () => {
+    const rows = [
+      mk({ today: { images: 1, v5: 0, anlas: 0, requests: 2 } }),
+      mk({ first_image_at: null, registered_at: NOW - 3600 }),
+      mk({ role: "invite", tags: [{ tag: "邀请", note: "", by: "", ts: NOW }], rejected_24h: 2 }),
+      mk({
+        is_admin: true,
+        role: "admin",
+        rejected_24h: 9,
+        today: { images: 1, v5: 0, anlas: 0, requests: 1 },
+      }),
+      mk({ is_test: true, role: "test", first_image_at: null }),
+    ];
+    const f = buildFilters(NOW, 3);
+    const n = (id: string) => countFilter(rows, f.chips.find((c) => c.id === id) as never);
+    expect(n("all")).toBe(3);
+    expect(n("today")).toBe(1);
+    expect(n("never")).toBe(1);
+    expect(n("new")).toBe(1);
+    expect(n("rejected")).toBe(1);
+    expect(n("invite")).toBe(1);
+    expect(n("attention")).toBe(0);
+    // 站长 / 测试 Key 只有 ?focus= 跳转时才通过隐藏的 staff 筛选看到
+    expect(countFilter(rows, f.staff)).toBe(2);
   });
-  it("没有「疑似小号 / 同一人」内置筛选：这些只是普通的站长标签，进站长标签分组", () => {
-    const m = mk({
-      tags: [
-        { tag: "疑似小号", note: "", by: "站长", ts: NOW },
-        { tag: "疑似同一人", note: "", by: "站长", ts: NOW },
-      ],
-    });
-    const f = buildFilters([m, mk()], NOW, 3);
-    expect([...f.main, ...f.more].some((x) => x.id === "alt")).toBe(false);
-    const labels = f.userTags.map((x) => x.label);
-    expect(labels).toHaveLength(2);
-    expect(labels).toEqual(expect.arrayContaining(["疑似小号", "疑似同一人"]));
-    const same = f.userTags.find((x) => x.label === "疑似同一人");
-    expect(same?.test(m)).toBe(true);
-    expect(same?.test(mk())).toBe(false);
+  it("被拒原因：只数成员里近 24 小时被拒的，人数多的在前", () => {
+    const tag = (t: string, count = 1) => ({ tag: t, count, note: "" });
+    const rows = [
+      mk({ rejected_24h: 3, auto_tags: [tag("请求过快", 3)] }),
+      mk({ rejected_24h: 1, auto_tags: [tag("传了底图"), tag("请求过快")] }),
+      mk({ rejected_24h: 2, auto_tags: [tag("请求过快", 2)] }),
+      mk({ rejected_24h: 4, is_admin: true, auto_tags: [tag("站长自己")] }),
+      mk({ rejected_24h: 0, auto_tags: [tag("旧标签")] }),
+    ];
+    expect(rejectReasons(rows)).toEqual([
+      { tag: "请求过快", count: 3 },
+      { tag: "传了底图", count: 1 },
+    ]);
+    expect(hasReason(rows[1] as Member, "传了底图")).toBe(true);
+    expect(hasReason(rows[0] as Member, "传了底图")).toBe(false);
+  });
+  it("老链接 ?filter=role:invite 换成「邀请 Key」", () => {
+    expect(normalizeFilter("role:invite")).toBe("invite");
+    expect(normalizeFilter("never")).toBe("never");
+    expect(normalizeFilter(undefined)).toBeNull();
   });
   it("默认筛选：有要处理的人看「需要处理」，否则「全部成员」", () => {
     expect(defaultFilter([mk()], NOW)).toBe("all");

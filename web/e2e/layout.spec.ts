@@ -104,6 +104,24 @@ test.describe("后台", () => {
     await ctx.close();
   });
 
+  // 成员页的筛选横栏：桌面 1280 / 手机 375 下必须是单行（标签同顶同高），并且展开被拒原因后也没有孤字、控件对齐
+  for (const w of [1280, 375]) {
+    test(`成员筛选横栏 ${w}px：单行、等高、无孤字`, async ({ page, context }) => {
+      await context.addCookies(session);
+      await page.setViewportSize({ width: w, height: 900 });
+      await page.goto("/admin/members");
+      await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+      await page.waitForLoadState("networkidle");
+      const bar = page.getByRole("group", { name: "筛选成员" });
+      await bar.getByRole("button", { name: /^24 小时被拒过/ }).click();
+      const tops = await bar.evaluate((el) => [
+        ...new Set([...el.querySelectorAll("button")].map((x) => Math.round(x.getBoundingClientRect().top))),
+      ]);
+      expect(tops, "筛选标签必须在同一行").toHaveLength(1);
+      await check(page, `/admin/members 筛选横栏 ${w}px`);
+    });
+  }
+
   for (const w of [1440, 1024, 390]) {
     test(`各页 ${w}px：无孤字、控件对齐`, async ({ page, context }) => {
       await context.addCookies(session);
