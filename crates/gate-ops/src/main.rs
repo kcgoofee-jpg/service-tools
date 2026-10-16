@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use gate_ops::{notify, patrol, sanitize, smoke, snapshot, util};
+use gate_ops::{notify, patrol, sanitize, setting, smoke, snapshot, util};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -50,6 +50,24 @@ enum Cmd {
         #[arg(long)]
         db: Option<PathBuf>,
     },
+    /// 改一项后台设置（走后台接口，校验与操作日志同后台页面）；先看 `set --list`，没有 --yes 不写
+    Set {
+        /// 设置名（见 --list）
+        name: Option<String>,
+        /// 新值
+        value: Option<String>,
+        /// 列出所有可用设置名
+        #[arg(long)]
+        list: bool,
+        /// 确认写入（不加则只显示 改前 → 改后 并退出 2）
+        #[arg(long)]
+        yes: bool,
+        /// 只预览，不写
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// 读一项后台设置的当前值（名字同 set）
+    Get { name: String },
     /// 一致快照（不含审计原图）→ 完整性校验 → gzip（权限 600）
     Snapshot {
         /// 输出文件，如 /opt/backups/daily/nai_gate-2026-10-14.db.gz
@@ -145,6 +163,30 @@ async fn dispatch(cli: Cli) -> Result<i32> {
                 },
             )
             .await
+        }
+        Cmd::Set {
+            name,
+            value,
+            list,
+            yes,
+            dry_run,
+        } => {
+            if list {
+                print!("{}", setting::list_text());
+                return Ok(0);
+            }
+            let (Some(name), Some(value)) = (name, value) else {
+                eprintln!("用法：nai-ops set <名字> <值> [--dry-run | --yes]；nai-ops set --list");
+                return Ok(2);
+            };
+            let (code, text) = setting::run_set(&name, &value, yes, dry_run).await?;
+            print!("{text}");
+            Ok(code)
+        }
+        Cmd::Get { name } => {
+            let (code, text) = setting::run_get(&name).await?;
+            print!("{text}");
+            Ok(code)
         }
         Cmd::Snapshot { out, db } => {
             let line = snapshot::run(&util::resolve_db(db.as_deref()), &out)?;

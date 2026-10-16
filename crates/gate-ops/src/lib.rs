@@ -10,6 +10,7 @@ pub mod discord;
 pub mod notify;
 pub mod patrol;
 pub mod sanitize;
+pub mod setting;
 pub mod smoke;
 pub mod snapshot;
 pub mod util;
