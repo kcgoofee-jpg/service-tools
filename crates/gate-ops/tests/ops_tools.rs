@@ -174,8 +174,8 @@ fn account_skew_uses_token_id_when_present() {
     let db = new_db(dir.path());
     let w = rw(&db);
     add_key(&w, 1, "tok-1", false, true);
-    w.execute("ALTER TABLE usage_log ADD COLUMN token_id TEXT", [])
-        .unwrap();
+    // 网关 schema 已带 token_id 列；老库没有时才补（重复添加会报 duplicate column）
+    let _ = w.execute("ALTER TABLE usage_log ADD COLUMN token_id TEXT", []);
     for i in 0..110 {
         w.execute(
             "INSERT INTO usage_log(ts, key_id, kind, status, token_id) VALUES (?,?,?,?,?)",
