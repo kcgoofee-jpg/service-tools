@@ -26,6 +26,11 @@ const ALL: &[(&str, &str, Option<&str>)] = &[
     ("SITE_QUOTA", reasons::SITE_QUOTA, Some("全站额度用完")),
     ("KEY_RATE", reasons::KEY_RATE, Some("Key 请求过快")),
     ("BODY_ABORT", reasons::BODY_ABORT, Some("请求体中断")),
+    (
+        "TEST_REQUEST",
+        reasons::TEST_REQUEST,
+        Some("连接测试（未出图）"),
+    ),
     ("FEATURE_OFF", reasons::FEATURE_OFF, None),
     ("PARAM", reasons::PARAM, None),
 ];
@@ -40,7 +45,7 @@ fn codes_are_the_frozen_snake_case_names() {
     codes.sort_unstable();
     codes.dedup();
     assert_eq!(codes.len(), ALL.len(), "原因码不能重复");
-    assert_eq!(ALL.len(), 19);
+    assert_eq!(ALL.len(), 20);
 }
 
 #[test]

@@ -352,7 +352,7 @@ fn all_reason_codes() -> Vec<String> {
 #[test]
 fn every_reason_code_is_classified_exactly_once() {
     let codes = all_reason_codes();
-    assert!(codes.len() >= 19, "{codes:?}");
+    assert!(codes.len() >= 20, "{codes:?}");
     let skip: HashSet<&str> = KEY_GUARD_SKIP_REASONS.into_iter().collect();
     let member: HashSet<&str> = MEMBER_CAUSED.into_iter().collect();
     assert!(skip.is_disjoint(&member), "同一个原因码不能两边都算");

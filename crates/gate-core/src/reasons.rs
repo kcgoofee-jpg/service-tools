@@ -29,6 +29,7 @@ pub const SITE_QUOTA: &str = "site_quota"; // 全站共享额度（全站 V5 / �
 pub const KEY_RATE: &str = "key_rate"; // 这把 Key 的请求频率 / 在途请求数超限（客户端行为）
 pub const BODY_ABORT: &str = "body_abort"; // 请求体传输中断（客户端或网络，不是上游）
 pub const FEATURE_OFF: &str = "feature_off"; // 该功能没给这把 Key 开通 / 全局关闭（成员可控）
+pub const TEST_REQUEST: &str = "test_request"; // 客户端的「连接测试」请求（尺寸很小、步数很少、提示词很短）：在网关挡下，不出图
 pub const PARAM: &str = "param"; // 参数不被支持（模型、采样器、角色数、权重写法……），成员按提示改就好
 
 /// 带原因码的拒绝说明（旧版是 `str` 子类，旧调用方照常当字符串用）。
@@ -131,6 +132,7 @@ pub const LABELS: &[(&str, &str)] = &[
     (SITE_QUOTA, "全站额度用完"),
     (KEY_RATE, "Key 请求过快"),
     (BODY_ABORT, "请求体中断"),
+    (TEST_REQUEST, "连接测试（未出图）"),
 ];
 
 /// `^\d{3}\s*`：开头三个十进制数字（HTTP 状态码）加后面的空白。
