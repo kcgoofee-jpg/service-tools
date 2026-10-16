@@ -754,3 +754,174 @@ async fn accounting_identity_across_counters_logs_and_audit() {
     let cap = e.state.guard.with(|g| g.hourly_cap(now));
     assert!(in_memory <= cap * tokens.len() as i64);
 }
+
+// ---------------------------------------------------------------- V5 Medium 降档
+
+/// 让测试成员能出 V5。
+async fn allow_v5(state: &AppState) {
+    state
+        .db
+        .write(|tx| {
+            tx.execute(
+                "UPDATE api_keys SET image_model_scope='all', daily_v5=10 WHERE id=1",
+                [],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+}
+
+async fn set_mode(state: &AppState, mode: &str) {
+    state.db.set_setting("v5_medium_mode", mode).await.unwrap();
+}
+
+async fn v5_post(e: &common::Env, body: Value) -> (StatusCode, Vec<u8>) {
+    let (status, _, bytes) = call(
+        &e.state,
+        "POST",
+        "/ai/generate-image",
+        Some(TOKEN),
+        Some(body),
+    )
+    .await;
+    (status, bytes)
+}
+
+fn last_sent(e: &common::Env) -> Value {
+    e.mock
+        .requests_to("/ai/generate-image")
+        .last()
+        .expect("上游收到了请求")
+        .json()
+}
+
+#[tokio::test]
+async fn medium_mode_off_leaves_v5_full_untouched() {
+    let e = setup(&[]).await;
+    allow_v5(&e.state).await;
+    let (status, body) = v5_post(&e, image_body("nai-diffusion-5-full", 1)).await;
+    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
+    let sent = last_sent(&e);
+    assert_eq!(sent["model"], "nai-diffusion-5-full");
+    assert_eq!(sent["parameters"]["steps"], 28);
+    let rows = logs(&e.state).await;
+    let detail = rows[0]["detail"].as_str().unwrap();
+    assert!(!detail.contains("Medium"), "{detail}");
+}
+
+#[tokio::test]
+async fn medium_mode_on_rewrites_full_and_still_consumes_v5_quota() {
+    let e = setup(&[]).await;
+    allow_v5(&e.state).await;
+    set_mode(&e.state, "on").await;
+    // 大小写和空白不同的写法也认
+    let (status, body) = v5_post(&e, image_body(" NAI-Diffusion-5-Full ", 1)).await;
+    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
+    let sent = last_sent(&e);
+    assert_eq!(sent["model"], "nai-diffusion-5-full-medium");
+    assert_eq!(sent["parameters"]["steps"], 14);
+    assert_eq!(
+        sent["parameters"]["negative_prompt"],
+        gate_core::policy::V5_MEDIUM_UC
+    );
+    let rows = logs(&e.state).await;
+    assert_eq!(rows[0]["model"], "nai-diffusion-5-full-medium");
+    let detail = rows[0]["detail"].as_str().unwrap();
+    // 按 Medium 估价、仍占 V5 免费额度，并带上说明
+    assert!(detail.starts_with("832x1216/14step V5额度+1"), "{detail}");
+    assert!(detail.contains("站长已临时切到 V5 Medium"), "{detail}");
+    let c = e.state.db.get_counter(1, &e.state.day()).await.unwrap();
+    assert_eq!(c.v5, 1);
+}
+
+#[tokio::test]
+async fn medium_mode_on_leaves_other_models_alone() {
+    let e = setup(&[]).await;
+    allow_v5(&e.state).await;
+    set_mode(&e.state, "on").await;
+    // 已经是 Medium：不再提示
+    let (status, _) = v5_post(&e, image_body("nai-diffusion-5-full-medium", 1)).await;
+    assert_eq!(status, 200);
+    assert_eq!(last_sent(&e)["model"], "nai-diffusion-5-full-medium");
+    // Curated 与 V4.5 不动
+    let (status, _) = v5_post(&e, image_body("nai-diffusion-5-curated", 1)).await;
+    assert_eq!(status, 200);
+    assert_eq!(last_sent(&e)["model"], "nai-diffusion-5-curated");
+    let (status, _) = v5_post(&e, image_body("nai-diffusion-4-5-full", 1)).await;
+    assert_eq!(status, 200);
+    assert_eq!(last_sent(&e)["model"], "nai-diffusion-4-5-full");
+    let rows = logs(&e.state).await;
+    assert!(
+        rows.iter().all(|r| !r["detail"]
+            .as_str()
+            .unwrap_or("")
+            .contains("站长已临时切到")),
+        "没被改写的请求不该带降档说明"
+    );
+}
+
+#[tokio::test]
+async fn medium_mode_applies_to_the_whole_multi_sample_batch() {
+    let e = setup(&[]).await;
+    allow_v5(&e.state).await;
+    // 开 Anlas 权限，多张里首张占 V5 额度、其余按 Anlas
+    e.state
+        .db
+        .write(|tx| {
+            tx.execute("UPDATE api_keys SET allow_anlas=1 WHERE id=1", [])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    set_mode(&e.state, "on").await;
+    let (status, body) = v5_post(&e, image_body("nai-diffusion-5-full", 2)).await;
+    assert_eq!(status, 200, "{}", String::from_utf8_lossy(&body));
+    let sent = last_sent(&e);
+    assert_eq!(sent["model"], "nai-diffusion-5-full-medium");
+    assert_eq!(sent["parameters"]["n_samples"], 2);
+}
+
+#[tokio::test]
+async fn medium_auto_follows_cached_percent_with_hysteresis() {
+    use std::sync::atomic::Ordering;
+    let e = setup(&[]).await;
+    allow_v5(&e.state).await;
+    set_mode(&e.state, "auto").await;
+    // 缓存里还没有任何读数：不降档
+    assert!(!gate_server::v5_medium::active(&e.state).await);
+    e.mock.set_v5_percent(10);
+    // 这一发请求会把读数填进缓存；它自己还是 Full
+    let (status, _) = v5_post(&e, image_body("nai-diffusion-5-full", 1)).await;
+    assert_eq!(status, 200);
+    assert_eq!(last_sent(&e)["model"], "nai-diffusion-5-full");
+    // 读数 10 < 提示线 20：之后的请求降档
+    let (status, _) = v5_post(&e, image_body("nai-diffusion-5-full", 1)).await;
+    assert_eq!(status, 200);
+    assert_eq!(last_sent(&e)["model"], "nai-diffusion-5-full-medium");
+    // 提示线 8：已开着，10 < 8 + 5 → 仍开
+    e.state
+        .db
+        .set_setting("v5_alert_threshold", "8")
+        .await
+        .unwrap();
+    assert!(gate_server::v5_medium::active(&e.state).await);
+    // 提示线 5：已开着，10 >= 5 + 5 → 关；关着时 10 >= 5 → 保持关
+    e.state
+        .db
+        .set_setting("v5_alert_threshold", "5")
+        .await
+        .unwrap();
+    assert!(!gate_server::v5_medium::active(&e.state).await);
+    assert!(!gate_server::v5_medium::active(&e.state).await);
+    // 切到别的档位会清掉自动档的状态
+    e.state
+        .db
+        .set_setting("v5_alert_threshold", "20")
+        .await
+        .unwrap();
+    assert!(gate_server::v5_medium::active(&e.state).await);
+    set_mode(&e.state, "off").await;
+    assert!(!gate_server::v5_medium::active(&e.state).await);
+    assert!(!e.state.ops.v5_medium_auto.load(Ordering::Relaxed));
+}

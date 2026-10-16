@@ -205,8 +205,21 @@ pub static MEMBER_SWEEP: Spec = spec(
     "退群回收：每人每天核对一次是否还在服务器，不在就删 Key",
 );
 
-/// 登记表（顺序与旧版 `ALL` 一致，已删除的设置不在里面）。
-pub static ALL: [&Spec; 9] = [
+/// V5 Medium 降档：`off` 不动（默认）/ `on` 一律改走 Medium / `auto` 官方余量偏低时才改走（见 `v5_medium`）。
+/// 认不出的值一律当 `off`（fail-closed：不会因为写坏了就悄悄改掉成员的模型）。
+pub static V5_MEDIUM_MODE: Spec = Spec {
+    choices: &["off", "on", "auto"],
+    ..spec(
+        "v5_medium_mode",
+        Kind::Choice,
+        SpecDefault::Str("off"),
+        "出图 / 后台额度页",
+        "V5 Medium 降档：off 关闭 / on 全部 V5 Full 请求改走 Medium / auto 官方余量低于提示线时才改走",
+    )
+};
+
+/// 登记表（顺序与旧版 `ALL` 一致，已删除的设置不在里面；新增的追加在末尾）。
+pub static ALL: [&Spec; 10] = [
     &MEMBER_SWEEP,
     &ISSUE_HOURLY_CAP,
     &REGISTER_OPEN,
@@ -216,6 +229,7 @@ pub static ALL: [&Spec; 9] = [
     &ALGO_NOTICE,
     &IMAGE_CAP_MB,
     &IMAGE_KEEP_HOURS,
+    &V5_MEDIUM_MODE,
 ];
 
 /// `default_of(spec, settings)`。`settings` 是 `config.Settings` 的 JSON 视图（对象；属性存在 = 键存在）。
@@ -378,6 +392,21 @@ mod tests {
             encode(&GLOBAL_DAILY_ANLAS, &json!("100001")).unwrap(),
             "100000"
         );
+    }
+
+    #[test]
+    fn v5_medium_mode_fails_closed() {
+        assert_eq!(get_from_raw(&V5_MEDIUM_MODE, None, None), json!("off"));
+        for (raw, want) in [("on", "on"), ("auto", "auto"), (" auto ", "auto")] {
+            assert_eq!(get_from_raw(&V5_MEDIUM_MODE, Some(raw), None), json!(want));
+        }
+        // 大小写不对、空串、乱写都回到 off
+        for raw in ["ON", "Auto", "", "1", "true", "medium"] {
+            assert_eq!(get_from_raw(&V5_MEDIUM_MODE, Some(raw), None), json!("off"));
+        }
+        assert_eq!(encode(&V5_MEDIUM_MODE, &json!("auto")).unwrap(), "auto");
+        assert!(encode(&V5_MEDIUM_MODE, &json!("ON")).is_err());
+        assert!(encode(&V5_MEDIUM_MODE, &json!(true)).is_err());
     }
 
     #[test]

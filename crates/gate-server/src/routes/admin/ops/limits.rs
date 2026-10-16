@@ -16,6 +16,7 @@ use gate_core::guard::GuardError;
 use gate_core::pyval;
 use gate_core::site_flags::{
     self, GLOBAL_DAILY_ANLAS, GLOBAL_DAILY_V5, GLOBAL_MONTHLY_ANLAS, MEMBER_DAILY_ANLAS,
+    V5_MEDIUM_MODE,
 };
 use serde_json::{Value, json};
 
@@ -33,6 +34,16 @@ pub(super) fn router() -> Router<AppState> {
 
 // ------------------------------------------------------------------ 预算
 
+/// V5 Medium 降档的当前状态：模式 + 此刻是否生效 + 最低余量与提示线（只读缓存，不发上游请求）。
+async fn medium_view(state: &AppState) -> Value {
+    let d = crate::v5_medium::describe(state).await;
+    json!({
+        "active": d.active,
+        "lowest_percent": d.lowest_percent,
+        "threshold": d.threshold,
+    })
+}
+
 async fn get_settings(State(state): State<AppState>, _s: AdminSession) -> ApiResult {
     Ok(ok_json(&json!({
         "global_monthly_anlas": pyval::float(site_flag_f64(&state, &GLOBAL_MONTHLY_ANLAS).await?),
@@ -40,6 +51,8 @@ async fn get_settings(State(state): State<AppState>, _s: AdminSession) -> ApiRes
         "global_daily_anlas": site_flag(&state, &GLOBAL_DAILY_ANLAS).await?,
         "member_daily_anlas": site_flag(&state, &MEMBER_DAILY_ANLAS).await?,
         ALERT_THRESHOLD: read_alert_threshold(&state.db).await?,
+        "v5_medium_mode": site_flag(&state, &V5_MEDIUM_MODE).await?,
+        "v5_medium_state": medium_view(&state).await,
     })))
 }
 
@@ -64,6 +77,13 @@ async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Requ
             return Err(HttpError::new(422, "V5 余量低提示线必须为 1～100 的整数百分比").into());
         }
     };
+    // 降档模式：只认 off / on / auto 三个小写字符串，其他一律 422；缺省保持原值
+    let medium_mode = match body.get(V5_MEDIUM_MODE.key) {
+        Some(v) => v.clone(),
+        None => site_flag(&state, &V5_MEDIUM_MODE).await?,
+    };
+    let medium_text =
+        site_flags::encode(&V5_MEDIUM_MODE, &medium_mode).map_err(|e| HttpError::new(422, e.0))?;
     // 缺省字段保持原值（以前缺省会被写成 0 = 不限）
     async fn field(
         state: &AppState,
@@ -105,6 +125,10 @@ async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Requ
         .db
         .set_setting(ALERT_THRESHOLD, &threshold.to_string())
         .await?;
+    state
+        .db
+        .set_setting(V5_MEDIUM_MODE.key, &medium_text)
+        .await?;
     Ok(ok_json(&json!({
         "ok": true,
         "global_monthly_anlas": monthly,
@@ -112,6 +136,7 @@ async fn put_settings(State(state): State<AppState>, _s: AdminSession, req: Requ
         "global_daily_anlas": daily_anlas,
         "member_daily_anlas": member,
         ALERT_THRESHOLD: threshold,
+        "v5_medium_mode": medium_text,
     })))
 }
 

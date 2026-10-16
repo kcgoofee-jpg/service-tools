@@ -1393,6 +1393,15 @@ pub fn fill_v4_prompt(payload: &Value) -> (Value, Vec<String>) {
 
 // ----------------------------------------------------------------------------- V5 Medium
 
+/// V5 Full（含局部重绘）对应的 Medium 模型；不是这两个模型（含已经是 Medium、Curated、别名）返回 None。
+pub fn v5_medium_of(model: &str) -> Option<&'static str> {
+    let m = pyc::strip(model).to_lowercase();
+    V5_MEDIUM_OF
+        .iter()
+        .find(|(full, _)| *full == m)
+        .map(|(_, medium)| *medium)
+}
+
 pub fn is_v5_medium(model: &str) -> bool {
     let m = pyc::strip(model).to_lowercase();
     V5_MEDIUM_OF.iter().any(|(_, medium)| *medium == m)

@@ -236,7 +236,7 @@ async fn every_endpoint_needs_a_session_and_same_origin_writes() {
 
 // ------------------------------------------------------------------ 预算
 
-const SETTINGS_DEFAULT: &str = r#"{"global_monthly_anlas":10000.0,"global_daily_v5":150,"global_daily_anlas":200,"member_daily_anlas":50,"v5_alert_threshold":20}"#;
+const SETTINGS_DEFAULT: &str = r#"{"global_monthly_anlas":10000.0,"global_daily_v5":150,"global_daily_anlas":200,"member_daily_anlas":50,"v5_alert_threshold":20,"v5_medium_mode":"off","v5_medium_state":{"active":false,"lowest_percent":null,"threshold":20}}"#;
 
 #[tokio::test]
 async fn settings_get_put_and_stored_strings() {
@@ -275,7 +275,7 @@ async fn settings_get_put_and_stored_strings() {
     assert_eq!(s, 200);
     assert_eq!(
         t,
-        r#"{"ok":true,"global_monthly_anlas":10000.0,"global_daily_v5":150,"global_daily_anlas":200,"member_daily_anlas":50,"v5_alert_threshold":20}"#
+        r#"{"ok":true,"global_monthly_anlas":10000.0,"global_daily_v5":150,"global_daily_anlas":200,"member_daily_anlas":50,"v5_alert_threshold":20,"v5_medium_mode":"off"}"#
     );
     assert_eq!(
         changed(&before, &settings(&e).await),
@@ -285,6 +285,7 @@ async fn settings_get_put_and_stored_strings() {
             ("global_monthly_anlas", "10000.0"),
             ("member_daily_anlas", "50"),
             ("v5_alert_threshold", "20"),
+            ("v5_medium_mode", "off"),
         ])
     );
 
@@ -293,40 +294,40 @@ async fn settings_get_put_and_stored_strings() {
     let ok_cases: Vec<(Value, &str, [&str; 4])> = vec![
         (
             json!({"global_monthly_anlas": 5000, "global_daily_v5": 200, "member_daily_anlas": 40, "v5_alert_threshold": 30}),
-            r#"{"ok":true,"global_monthly_anlas":5000.0,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
+            r#"{"ok":true,"global_monthly_anlas":5000.0,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"v5_alert_threshold":30,"v5_medium_mode":"off"}"#,
             ["5000.0", "200", "40", "30"],
         ),
         // 字符串数字也收（与旧版 float("1e3") 一致）
         (
             json!({"global_monthly_anlas": "1e3"}),
-            r#"{"ok":true,"global_monthly_anlas":1000.0,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
+            r#"{"ok":true,"global_monthly_anlas":1000.0,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"v5_alert_threshold":30,"v5_medium_mode":"off"}"#,
             ["1000.0", "200", "40", "30"],
         ),
         // 0 被夹到下限：库里是整数 "0"，响应仍是请求值的浮点写法（旧版怪癖）
         (
             json!({"global_monthly_anlas": 0}),
-            r#"{"ok":true,"global_monthly_anlas":0.0,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
+            r#"{"ok":true,"global_monthly_anlas":0.0,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"v5_alert_threshold":30,"v5_medium_mode":"off"}"#,
             ["0", "200", "40", "30"],
         ),
         (
             json!({"global_monthly_anlas": 1000000}),
-            r#"{"ok":true,"global_monthly_anlas":1000000.0,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
+            r#"{"ok":true,"global_monthly_anlas":1000000.0,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"v5_alert_threshold":30,"v5_medium_mode":"off"}"#,
             ["1000000", "200", "40", "30"],
         ),
         (
             json!({"global_monthly_anlas": 12.5}),
-            r#"{"ok":true,"global_monthly_anlas":12.5,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
+            r#"{"ok":true,"global_monthly_anlas":12.5,"global_daily_v5":200,"global_daily_anlas":200,"member_daily_anlas":40,"v5_alert_threshold":30,"v5_medium_mode":"off"}"#,
             ["12.5", "200", "40", "30"],
         ),
         (
             json!({"global_daily_v5": "150"}),
-            r#"{"ok":true,"global_monthly_anlas":12.5,"global_daily_v5":150,"global_daily_anlas":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
+            r#"{"ok":true,"global_monthly_anlas":12.5,"global_daily_v5":150,"global_daily_anlas":200,"member_daily_anlas":40,"v5_alert_threshold":30,"v5_medium_mode":"off"}"#,
             ["12.5", "150", "40", "30"],
         ),
         // 12.0 作为整数字段：存 "12"
         (
             json!({"global_monthly_anlas": 7.0, "global_daily_v5": 12.0}),
-            r#"{"ok":true,"global_monthly_anlas":7.0,"global_daily_v5":12,"global_daily_anlas":200,"member_daily_anlas":40,"v5_alert_threshold":30}"#,
+            r#"{"ok":true,"global_monthly_anlas":7.0,"global_daily_v5":12,"global_daily_anlas":200,"member_daily_anlas":40,"v5_alert_threshold":30,"v5_medium_mode":"off"}"#,
             ["7.0", "12", "40", "30"],
         ),
     ];
@@ -2863,4 +2864,91 @@ async fn allowance_snapshot_is_read_only() {
     api.json("PUT", "/settings", Some(json!({"v5_alert_threshold": 35})))
         .await;
     assert_eq!(api.get("/allowance").await["threshold"], 35);
+}
+
+#[tokio::test]
+async fn v5_medium_mode_is_validated_stored_and_audited() {
+    let e = setup(&[]).await;
+    let api = Api::login(&e).await;
+    assert_eq!(
+        api.json("GET", "/settings", None).await.1["v5_medium_mode"],
+        "off"
+    );
+    // 三个合法值；写进库里的就是原文
+    for mode in ["on", "auto", "off"] {
+        let (s, v) = api
+            .json("PUT", "/settings", Some(json!({"v5_medium_mode": mode})))
+            .await;
+        assert_eq!((s, &v["v5_medium_mode"]), (200, &json!(mode)), "{v}");
+        assert_eq!(settings(&e).await["v5_medium_mode"], mode);
+        assert_eq!(
+            api.json("GET", "/settings", None).await.1["v5_medium_mode"],
+            mode
+        );
+    }
+    // 只改别的字段：模式保持原值
+    api.json("PUT", "/settings", Some(json!({"v5_medium_mode": "auto"})))
+        .await;
+    let (s, v) = api
+        .json("PUT", "/settings", Some(json!({"member_daily_anlas": 41})))
+        .await;
+    assert_eq!((s, &v["v5_medium_mode"]), (200, &json!("auto")));
+    // 非法值：422，什么都不写（包括同一个请求里别的合法字段）
+    let frozen = settings(&e).await;
+    for bad in [
+        json!("ON"),
+        json!("Auto"),
+        json!(" on"),
+        json!(""),
+        json!("medium"),
+        json!(true),
+        json!(1),
+        json!(null),
+        json!(["on"]),
+    ] {
+        api.fails(
+            "PUT",
+            "/settings",
+            Some(json!({"v5_medium_mode": bad, "member_daily_anlas": 7})),
+            422,
+            "v5_medium_mode 只能是 off / on / auto",
+        )
+        .await;
+    }
+    assert_eq!(settings(&e).await, frozen);
+    // 库里被写坏的值按 off 显示（fail-closed）
+    e.state
+        .db
+        .set_setting("v5_medium_mode", "garbage")
+        .await
+        .unwrap();
+    assert_eq!(
+        api.json("GET", "/settings", None).await.1["v5_medium_mode"],
+        "off"
+    );
+    // 操作日志：照常记「修改预算」，摘要里带着模式
+    let rows = actions(&e).await;
+    assert!(
+        rows.iter()
+            .any(|r| r.1 == "修改预算" && r.3 == r#"{"v5_medium_mode":"on"}"# && r.4)
+    );
+}
+
+#[tokio::test]
+async fn v5_medium_state_reports_lowest_percent_for_auto() {
+    let e = setup(&[]).await;
+    let api = Api::login(&e).await;
+    // 还没有读数：不生效，最低余量是 null
+    api.json("PUT", "/settings", Some(json!({"v5_medium_mode": "auto"})))
+        .await;
+    let st = api.json("GET", "/settings", None).await.1["v5_medium_state"].clone();
+    assert_eq!(
+        st,
+        json!({"active": false, "lowest_percent": null, "threshold": 20})
+    );
+    // 手动开：直接生效
+    api.json("PUT", "/settings", Some(json!({"v5_medium_mode": "on"})))
+        .await;
+    let st = api.json("GET", "/settings", None).await.1["v5_medium_state"].clone();
+    assert_eq!(st["active"], true);
 }
