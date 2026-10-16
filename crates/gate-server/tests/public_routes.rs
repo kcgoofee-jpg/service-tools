@@ -202,7 +202,7 @@ async fn terms_and_privacy_pages() {
         );
         assert!(html.contains(&format!("<title>{title} · 猫头鹰公益站</title>")));
         assert!(html.contains(&format!("<h1>{title}</h1>")));
-        assert!(html.contains("猫头鹰公益站（gate.example.top） · 最近更新：2026-10-15"));
+        assert!(html.contains("猫头鹰公益站（gate.example.top） · 最近更新：2026-10-17"));
         assert!(html.contains(discord_only), "{path} 缺 Discord-only 说明");
         assert!(!html.contains("<script"), "文档页不能有脚本");
         // 3.0：不再有「记录证据」「系统记录」的说法
@@ -222,13 +222,13 @@ async fn terms_and_privacy_pages() {
     let privacy = String::from_utf8(Call::new("GET", "/privacy").send(&e.state).await.2).unwrap();
     for kept in [
         "<h2>我们收集什么</h2>",
-        "只申请 identify（身份识别）权限",
+        "申请 identify（身份识别）权限",
         "<h2>你的选择</h2>",
     ] {
         assert!(privacy.contains(kept), "隐私政策缺：{kept}");
     }
-    // 图片保留期与线上一致（168 小时 = 7 天）；机器人不私信、也不做「防多人共用」的行为统计
-    assert!(privacy.contains("生成的图片 7 天后自动删除"));
+    // 保留期与线上设置一致（提示词 30 天、图片 72 小时）；机器人不私信、也不做「防多人共用」的行为统计
+    assert!(privacy.contains("生成的图片保存 3 天后自动删除"));
     for gone in ["防多人共用", "行为统计", "私信通知", "默认保留数天"] {
         assert!(!privacy.contains(gone), "隐私政策还有「{gone}」");
     }
@@ -239,7 +239,7 @@ async fn doc_pages_without_site_url_have_no_domain() {
     let e = setup(&[]).await;
     let terms = String::from_utf8(Call::new("GET", "/terms").send(&e.state).await.2).unwrap();
     assert!(terms.contains("「猫头鹰公益站」（下称「本站」）是由个人运营"));
-    assert!(terms.contains("<p class=\"upd\">猫头鹰公益站 · 最近更新：2026-10-15</p>"));
+    assert!(terms.contains("<p class=\"upd\">猫头鹰公益站 · 最近更新：2026-10-17</p>"));
 }
 
 // ------------------------------------------------------------------ 公告

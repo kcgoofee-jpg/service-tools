@@ -143,7 +143,7 @@ const DOC_HEADERS: [(&str, &str); 4] = [
 ];
 
 /// 两份文档的「最近更新」日期。
-const DOC_UPDATED: &str = "2026-10-15";
+const DOC_UPDATED: &str = "2026-10-17";
 
 fn esc(s: &str) -> String {
     s.replace('&', "&amp;")
@@ -276,7 +276,9 @@ async fn privacy(State(state): State<AppState>) -> Response {
         (
             "保存期限",
             s(&[
-                "用量日志与提示词长期保存（用于审计与防滥用）；生成的图片 7 天后自动删除；Discord 资料与领取记录在 Key 存续期间保存，Key 回收后随之清理或匿名化。",
+                "提示词（含负面提示词）及其缩略图保存 30 天后自动删除；生成的图片保存 3 天后自动删除；用量日志（时间、模型、状态、点数，不含内容）长期保存，用于防滥用与容量规划。",
+                "数据库每日加密备份到海外云存储（亚马逊 AWS S3），备份最长保留 60 天后过期，所以已到期的提示词可能在备份里再留一段时间，之后随备份过期。",
+                "Discord 资料与领取记录在 Key 存续期间保存；因违规被封或闲置回收的账号，其 Discord ID 会保留在黑名单中，用于防止重复领取。",
             ]),
         ),
         (
@@ -289,7 +291,9 @@ async fn privacy(State(state): State<AppState>) -> Response {
                 "本站仅在浏览器写入一个登录态会话 Cookie（HttpOnly，约 30 天），不用于跨站跟踪。",
                 // 3.0：登录方式只有 Discord
                 "网页登录只有 Discord 一种方式，本站不收集你的 Discord 密码。",
-                "网页「用 Discord 登录」通过 Discord OAuth 完成，只申请 identify（身份识别）权限，不读取你的消息、好友或服务器列表；生图请求仅转发给 NovelAI 官方接口。",
+                "网页「用 Discord 登录」通过 Discord OAuth 完成，申请 identify（身份识别）权限；领取 Key 时为核对你是否持有社区要求的身份组，还会申请 guilds.members.read，仅用于读取你在指定服务器的身份组，不读取消息、好友或其他服务器列表。生图请求仅转发给 NovelAI 官方接口。",
+                "为发现违规与滥用，站长可能借助自动化或 AI 辅助筛查提示词，结果仅供站长人工复核参考，不会自动对外公开。",
+                "本站面向年满 18 周岁的社区成员；未成年人请勿使用。",
             ]),
         ),
         (
