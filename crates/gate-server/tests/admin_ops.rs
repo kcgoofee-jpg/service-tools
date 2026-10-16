@@ -183,6 +183,7 @@ const ENDPOINTS: &[(&str, &str)] = &[
     ("GET", "/guard"),
     ("PUT", "/guard"),
     ("GET", "/discord-bot"),
+    ("GET", "/upstream-stats"),
     ("GET", "/reconciliation"),
     ("POST", "/reconciliation"),
 ];

@@ -13,6 +13,7 @@
 //! pending_role_removals / upstream_snapshots / key_tags 的读写）是各业务模块直接用 `db._db` 写的 SQL，
 //! 不在本次移植范围内。
 
+pub mod account_stats;
 pub mod admin_actions;
 pub mod admin_members;
 pub mod admin_ops;

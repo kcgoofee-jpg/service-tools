@@ -92,7 +92,11 @@ pub fn estimate(now: f64, snap: SnapshotAccount, usage: Usage) -> Estimate {
             let left = fixed - avg_daily * d;
             if left < 0.0 {
                 Projection::RunsOut {
-                    days: if avg_daily > 0.0 { fixed / avg_daily } else { d },
+                    days: if avg_daily > 0.0 {
+                        fixed / avg_daily
+                    } else {
+                        d
+                    },
                 }
             } else {
                 Projection::Waste { anlas: left }
