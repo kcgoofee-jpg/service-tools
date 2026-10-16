@@ -22,8 +22,61 @@
   width: 100%;
   padding-left: 32px;
 }
-.mb-more {
+.mb-tools > * {
   min-width: 0;
+}
+
+/* 筛选横栏：永远单行，放不下就横向滚动（不换行、不再分页签和下拉两处） */
+.mb-bar {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  /* 给焦点环 / 阴影留位置，不被 overflow 裁掉 */
+  padding: 2px;
+  margin: -2px;
+}
+.mb-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--control-h);
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font: 600 var(--fs-sm) / 1.2 var(--font);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.mb-chip:hover {
+  color: var(--text);
+}
+.mb-chip[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+.mb-chip.is-sub {
+  background: none;
+  border-style: dashed;
+}
+.mb-chip.is-sub[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-style: solid;
+}
+.mb-bar__lead {
+  flex: none;
+  padding-left: var(--sp-2);
+  border-left: 1px solid var(--border);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
 }
 .mb-n {
   display: inline-block;
@@ -38,7 +91,7 @@
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
-.xa-seg__btn[aria-pressed="true"] .mb-n {
+.mb-chip[aria-pressed="true"] .mb-n {
   background: var(--accent-soft);
   color: var(--accent-text);
 }

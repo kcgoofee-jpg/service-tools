@@ -25,9 +25,6 @@ export function roleOf(m: Pick<Member, "role" | "is_admin" | "is_test" | "tags">
 }
 
 export const isStaff = (m: Pick<Member, "is_admin" | "is_test">): boolean => m.is_admin || m.is_test;
-/** 后台手动建的 Key：没有 Discord 绑定的普通成员 */
-export const isManual = (m: Pick<Member, "is_admin" | "is_test" | "discord" | "discord_id">): boolean =>
-  !m.is_admin && !m.is_test && !m.discord && !m.discord_id;
 
 /** 时长文字：「5 分钟 / 3 小时 / 2 天」 */
 export function ago(sec: number): string {
@@ -177,78 +174,89 @@ export function memberStatus(m: Member, now: number): StatusBadge | null {
 }
 
 /* ---------------- 筛选 / 搜索 / 排序 ---------------- */
-export type FilterDef = { id: string; label: string; test: (m: Member) => boolean; allKeys?: boolean };
-export type FilterSet = {
-  main: FilterDef[];
-  more: FilterDef[];
-  userTags: FilterDef[];
-  autoTags: FilterDef[];
+export type FilterDef = {
+  id: string;
+  label: string;
+  /** 鼠标悬停的完整说明（标签里放不下的口径） */
+  hint?: string;
+  test: (m: Member) => boolean;
+  /** 统计和列表都包含站长 / 测试 Key（默认只看成员） */
+  allKeys?: boolean;
 };
+/** 横栏里每个标签只显示这些；staff 不出现在横栏，只给 ?focus= 跳到站长 / 测试 Key 时用 */
+export type FilterSet = { chips: FilterDef[]; staff: FilterDef };
+/** 筛选栏的「全部」：没有筛选 */
+export const ALL_FILTER = "all";
+/** 「24 小时被拒过」：选中后，横栏里紧跟着出现被拒原因 */
+export const REJECTED_FILTER = "rejected";
 
 const collator = new Intl.Collator(["zh-Hans-CN", "en"], { numeric: true, sensitivity: "base" });
 export const compareText = (a: string, b: string): number => collator.compare(a, b);
 
-/** idleDays：后端「满 N 天未生图」回收的天数；0 = 回收关闭，不出现「快被回收」筛选 */
-export function buildFilters(everyone: Member[], now: number, idleDays: number): FilterSet {
-  const main: FilterDef[] = [
-    { id: "all", label: "全部成员", test: () => true },
-    { id: "attention", label: "需要处理", test: (m) => needsAttention(m, now) },
+/**
+ * 一条横栏的全部筛选，按「站长日常最常看」排序。
+ * idleDays：后端「满 N 天未生图」回收的天数；0 = 回收关闭，不出现「快被回收」。
+ */
+export function buildFilters(now: number, idleDays: number): FilterSet {
+  const chips: FilterDef[] = [
+    { id: ALL_FILTER, label: "全部成员", test: () => true },
     { id: "today", label: "今日活跃", test: (m) => m.today.requests > 0 },
     { id: "never", label: "还没出过图", test: (m) => !m.first_image_at && !m.is_admin },
-  ];
-  const more: FilterDef[] = [
-    { id: "new", label: "24 小时内新加入", test: (m) => !!m.registered_at && now - m.registered_at < DAY },
+    {
+      id: "new",
+      label: "24 小时新加入",
+      test: (m) => !!m.registered_at && now - m.registered_at < DAY,
+    },
+    { id: REJECTED_FILTER, label: "24 小时被拒过", test: (m) => m.rejected_24h > 0 },
   ];
   if (idleDays > 0) {
-    more.push({
+    chips.push({
       id: "reclaim",
-      label: `快被回收（满 ${idleDays} 天未生图）`,
+      label: `快被回收（满 ${idleDays} 天）`,
+      hint: `满 ${idleDays} 天没生过图就会被自动删除并拉黑`,
       // 与后端回收口径一致：只看最近一次成功生图（没生过图的从创建时间算），站长 / 测试 / 邀请 Key 豁免
       test: (m) => roleOf(m) === "regular" && now - (m.last_image_at ?? m.created_at) > (idleDays - 1) * DAY,
     });
   }
-  more.push(
-    { id: "rejected", label: "24 小时被拒过", test: (m) => m.rejected_24h > 0 },
-    { id: "manual", label: "后台手动建的 Key", test: isManual },
-    { id: "staff", label: "站长 / 测试 Key", test: isStaff, allKeys: true },
-    { id: "role:invite", label: "身份组：邀请", test: (m) => roleOf(m) === "invite", allKeys: true },
-    { id: "role:regular", label: "身份组：普通", test: (m) => roleOf(m) === "regular" },
-    { id: "role:test", label: "身份组：测试", test: (m) => roleOf(m) === "test", allKeys: true },
-    { id: "role:admin", label: "身份组：站长", test: (m) => roleOf(m) === "admin", allKeys: true },
+  chips.push(
+    {
+      id: "invite",
+      label: "邀请 Key",
+      hint: "带「邀请」标签的 Key（站长发出的邀请，不参与自动回收）",
+      test: (m) => roleOf(m) === "invite",
+    },
+    { id: "attention", label: "需要处理", test: (m) => needsAttention(m, now) },
   );
-  const builtin = new Set(
-    [...main, ...more].map((f) => f.label.replace(/\s*[（(].*$/, "")).concat(["站长", "邀请"]),
-  );
-  const userSet = [...new Set(everyone.flatMap((m) => userTags(m).map((t) => t.tag)))]
-    .filter((t) => !builtin.has(t))
-    .sort(compareText);
-  const autoSet = [...new Set(everyone.flatMap((m) => m.auto_tags.map((t) => t.tag)))]
-    .filter((t) => !userSet.includes(t) && !builtin.has(t))
-    .sort(compareText);
-  return {
-    main,
-    more,
-    userTags: userSet.map((t) => ({
-      id: `tag:${t}`,
-      label: t,
-      test: (m: Member) => userTags(m).some((x) => x.tag === t),
-      allKeys: true,
-    })),
-    autoTags: autoSet.map((t) => ({
-      id: `auto:${t}`,
-      label: t,
-      test: (m: Member) => m.auto_tags.some((x) => x.tag === t),
-      allKeys: true,
-    })),
-  };
+  return { chips, staff: { id: "staff", label: "站长 / 测试 Key", test: isStaff, allKeys: true } };
 }
 
-export const allFilters = (s: FilterSet): FilterDef[] => [...s.main, ...s.more, ...s.userTags, ...s.autoTags];
+/** 老链接 / 老书签里的筛选 id 换成现在的 */
+export const normalizeFilter = (id: string | null | undefined): string | null =>
+  id === "role:invite" ? "invite" : (id ?? null);
+
+/** 参与这个筛选统计的那批 Key */
+export const poolFor = <T extends Member>(rows: T[], f: FilterDef): T[] =>
+  f.allKeys ? rows : rows.filter((m) => !isStaff(m));
+
+export const countFilter = (rows: Member[], f: FilterDef): number => poolFor(rows, f).filter(f.test).length;
+
+/** 近 24 小时被拒的原因（传了底图、请求过快…）及人数，多的在前；只数成员，口径与「24 小时被拒过」一致 */
+export function rejectReasons(rows: Member[]): Array<{ tag: string; count: number }> {
+  const n = new Map<string, number>();
+  for (const m of rows) {
+    if (isStaff(m) || m.rejected_24h <= 0) continue;
+    for (const t of new Set(m.auto_tags.map((x) => x.tag))) n.set(t, (n.get(t) ?? 0) + 1);
+  }
+  return [...n]
+    .map(([tag, count]) => ({ tag, count }))
+    .sort((a, b) => b.count - a.count || compareText(a.tag, b.tag));
+}
+export const hasReason = (m: Member, tag: string): boolean => m.auto_tags.some((x) => x.tag === tag);
 
 /** 默认筛选：有要处理的人就直接看「需要处理」，否则「全部成员」 */
 export function defaultFilter(everyone: Member[], now: number): string {
   const members = everyone.filter((m) => !isStaff(m));
-  return members.some((m) => needsAttention(m, now)) ? "attention" : "all";
+  return members.some((m) => needsAttention(m, now)) ? "attention" : ALL_FILTER;
 }
 
 export function matchesQuery(m: Member, raw: string): boolean {

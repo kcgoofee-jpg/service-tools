@@ -11,6 +11,7 @@ import { mkdirSync } from "node:fs";
 import AxeBuilder from "@axe-core/playwright";
 import { type Cookie, expect, type Page, test } from "@playwright/test";
 import { COOKIES_FILE, readCreds } from "./devEnv";
+import { orphans } from "./orphans";
 
 const SHOTS = process.env.E2E_SHOTS ?? "/tmp/owl-shots-admin-a";
 const DESKTOP = { width: 1280, height: 900 };
@@ -189,6 +190,151 @@ test.describe("已登录", () => {
     await expect(dlg).toBeHidden();
     expect(errs).toEqual([]);
   });
+
+  /** 拦下成员接口，在真实数据上改一改（让被拒原因、回收天数可预期） */
+  async function mockMembers(
+    page: Page,
+    edit: (body: { members: Array<Record<string, unknown>>; inactivity_days: number }) => void,
+  ) {
+    await page.route("**/admin/api/members", async (route) => {
+      const res = await route.fetch();
+      const body = await res.json();
+      edit(body);
+      await route.fulfill({ response: res, json: body });
+    });
+  }
+  const bar = (page: Page) => page.getByRole("group", { name: "筛选成员" });
+
+  test("成员：筛选是一条横栏——标签带人数、点选高亮、再点取消，没有下拉", async ({ page }) => {
+    const errs = watch(page);
+    await open(page, "/admin/members", PAGES[1]?.ready as never);
+    const b = bar(page);
+    await expect(b.locator("select")).toHaveCount(0);
+    await expect(page.getByRole("combobox", { name: "更多筛选" })).toHaveCount(0);
+    // 已下线的筛选不在
+    for (const gone of [/身份组/, /后台手动建/, /站长 \/ 测试/])
+      await expect(b.getByRole("button", { name: gone })).toHaveCount(0);
+    for (const name of [
+      /^全部成员 \d+$/,
+      /^今日活跃 \d+$/,
+      /^还没出过图 \d+$/,
+      /^24 小时新加入 \d+$/,
+      /^24 小时被拒过 \d+$/,
+      /^邀请 Key \d+$/,
+      /^需要处理 \d+$/,
+    ])
+      await expect(b.getByRole("button", { name })).toBeVisible();
+
+    // 默认：有要处理的人就看「需要处理」，没有就是「全部成员」；点「今日活跃」→ 高亮，再点 → 回到全部
+    const today = b.getByRole("button", { name: /^今日活跃/ });
+    const all = b.getByRole("button", { name: /^全部成员/ });
+    await today.click();
+    await expect(today).toHaveAttribute("aria-pressed", "true");
+    await expect(all).toHaveAttribute("aria-pressed", "false");
+    await today.click();
+    await expect(today).toHaveAttribute("aria-pressed", "false");
+    await expect(all).toHaveAttribute("aria-pressed", "true");
+
+    // 键盘：Tab 到标签、空格 / 回车切换
+    await b.getByRole("button", { name: /^还没出过图/ }).focus();
+    await page.keyboard.press("Enter");
+    await expect(b.getByRole("button", { name: /^还没出过图/ })).toHaveAttribute("aria-pressed", "true");
+    expect(errs).toEqual([]);
+  });
+
+  test("成员：「24 小时被拒过」选中后，被拒原因在同一条横栏里紧跟着出现，可再窄一层", async ({ page }) => {
+    await mockMembers(page, (body) => {
+      const people = body.members.filter((m) => !m.is_admin && !m.is_test);
+      for (const m of people) {
+        m.rejected_24h = 0;
+        m.auto_tags = [];
+      }
+      const rows = people.slice(0, 3);
+      rows.forEach((m, i) => {
+        m.rejected_24h = 2;
+        m.auto_tags = i === 0 ? [{ tag: "传了底图", count: 2 }] : [{ tag: "请求过快", count: 2 }];
+      });
+    });
+    await open(page, "/admin/members", PAGES[1]?.ready as never);
+    const b = bar(page);
+    await expect(b.getByRole("button", { name: /^传了底图/ })).toHaveCount(0);
+    const rejected = b.getByRole("button", { name: /^24 小时被拒过/ });
+    await rejected.click();
+    const slow = b.getByRole("button", { name: /^请求过快 2$/ });
+    const img = b.getByRole("button", { name: /^传了底图 1$/ });
+    await expect(slow).toBeVisible();
+    await expect(img).toBeVisible();
+    // 同一行：和「24 小时被拒过」同高同顶
+    const [r, s] = await Promise.all([rejected.boundingBox(), slow.boundingBox()]);
+    expect(Math.abs((r?.y ?? 0) - (s?.y ?? 99))).toBeLessThan(1.5);
+    await slow.click();
+    await expect(slow).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("button", { name: /展开.*的详情/ })).toHaveCount(2);
+    await slow.click();
+    await expect(page.getByRole("button", { name: /展开.*的详情/ })).toHaveCount(3);
+    // 换掉被拒筛选：原因收起
+    await b.getByRole("button", { name: /^今日活跃/ }).click();
+    await expect(slow).toHaveCount(0);
+  });
+
+  test("成员：回收关闭时没有「快被回收」，开启时标签用设置的天数", async ({ page }) => {
+    await mockMembers(page, (body) => {
+      body.inactivity_days = 0;
+    });
+    await open(page, "/admin/members", PAGES[1]?.ready as never);
+    await expect(bar(page).getByRole("button", { name: /^全部成员/ })).toBeVisible();
+    await expect(bar(page).getByRole("button", { name: /快被回收/ })).toHaveCount(0);
+    await page.unroute("**/admin/api/members");
+    await mockMembers(page, (body) => {
+      body.inactivity_days = 5;
+    });
+    await open(page, "/admin/members", PAGES[1]?.ready as never);
+    await expect(bar(page).getByRole("button", { name: /^快被回收（满 5 天） \d+$/ })).toBeVisible();
+  });
+
+  for (const size of [DESKTOP, MOBILE]) {
+    test(`成员：筛选横栏在 ${size.width}px 是单行，不换行、不出孤字、不撑出横向滚动`, async ({ page }) => {
+      await page.setViewportSize(size);
+      await mockMembers(page, (body) => {
+        // 最长的情形：回收开着、被拒原因展开
+        body.inactivity_days = 3;
+        const m = body.members.find((x) => !x.is_admin && !x.is_test);
+        if (m) {
+          m.rejected_24h = 1;
+          m.auto_tags = [
+            { tag: "传了底图", count: 1 },
+            { tag: "请求过快", count: 1 },
+          ];
+        }
+      });
+      await open(page, "/admin/members", PAGES[1]?.ready as never);
+      const b = bar(page);
+      await b.getByRole("button", { name: /^24 小时被拒过/ }).click();
+      await expect(b.getByRole("button", { name: /^请求过快/ })).toBeVisible();
+      const geo = await b.evaluate((el) => {
+        const chips = [...el.querySelectorAll<HTMLElement>("button")].map((x) => x.getBoundingClientRect());
+        return {
+          tops: [...new Set(chips.map((r) => Math.round(r.top)))],
+          heights: [...new Set(chips.map((r) => Math.round(r.height)))],
+          n: chips.length,
+          fits: el.scrollWidth <= el.clientWidth + 1,
+          noWrap: [...el.querySelectorAll<HTMLElement>("button")].every(
+            (x) => getComputedStyle(x).whiteSpace === "nowrap",
+          ),
+          pageScroll: document.documentElement.scrollWidth <= window.innerWidth + 1,
+        };
+      });
+      expect(geo.n).toBeGreaterThanOrEqual(8);
+      expect(geo.tops, "所有标签同一行").toHaveLength(1);
+      expect(geo.heights, "标签等高").toHaveLength(1);
+      expect(geo.noWrap).toBe(true);
+      expect(geo.pageScroll, "页面不横向滚动").toBe(true);
+      // 放不下（手机，或桌面上原因也展开时）横栏自己横向滚，而不是换行
+      if (!geo.fits) expect(await b.evaluate((el) => getComputedStyle(el).overflowX)).toBe("auto");
+      expect(await orphans(page)).toEqual([]);
+      await axe(page, `members-bar@${size.width}`);
+    });
+  }
 
   test("成员：?focus=<Key 编号> 展开并高亮该成员", async ({ page }) => {
     await open(page, "/admin/members?focus=3", PAGES[1]?.ready as never);
@@ -474,7 +620,7 @@ test.describe("已登录", () => {
         .first()
         .click();
       sizes[name] = await page.evaluate(() =>
-        ["h1", ".mb-name", ".mb-verdict", ".mb-kv", ".xa-seg__btn", ".btn"].map((sel) => {
+        ["h1", ".mb-name", ".mb-verdict", ".mb-kv", ".mb-chip", ".btn"].map((sel) => {
           const el = document.querySelector(sel);
           return el ? getComputedStyle(el).fontSize : "none";
         }),
