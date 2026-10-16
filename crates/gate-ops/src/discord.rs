@@ -103,6 +103,49 @@ impl Discord {
     }
 }
 
+/// 给一个人发私信（先开私信频道再发消息，关掉所有 @ 提及）。失败返回不含密钥的简短原因。
+/// `nai-ops notify` 用它给站长发事故通知；运维命令里没有任何面向成员的私信入口。
+pub async fn send_dm(base: &str, token: &str, user: &str, text: &str) -> Result<(), String> {
+    let transport = |e: &anyhow::Error| {
+        let name = e.downcast_ref::<reqwest::Error>().map_or("Error", |r| {
+            if r.is_timeout() {
+                "TimeoutError"
+            } else if r.is_connect() {
+                "URLError"
+            } else {
+                "Error"
+            }
+        });
+        format!("网络错误 {name}")
+    };
+    let status = |what: &str, r: &Resp| {
+        let hint = if r.status == 403 && gate_core::pyc::take_chars(&r.body, 200).contains("1010") {
+            "（Cloudflare 1010：User-Agent 被拦）"
+        } else {
+            ""
+        };
+        format!("{what} HTTP {}{hint}", r.status)
+    };
+    let d = Discord::new(base, token, Duration::from_secs(10)).map_err(|e| transport(&e))?;
+    let resp = d.create_dm(user).await.map_err(|e| transport(&e))?;
+    if !resp.ok() {
+        return Err(status("创建私信频道", &resp));
+    }
+    let channel = resp
+        .json()
+        .and_then(|j| j.get("id").and_then(Value::as_str).map(String::from))
+        .ok_or_else(|| "创建私信频道：返回里没有 id".to_string())?;
+    let resp = d
+        .post_message(&channel, &message_body(text))
+        .await
+        .map_err(|e| transport(&e))?;
+    if resp.ok() {
+        Ok(())
+    } else {
+        Err(status("发送消息", &resp))
+    }
+}
+
 /// 不允许任何 @ 提及的消息体（公告 / 私信文案里的 @everyone 也不会生效）。
 pub fn message_body(text: &str) -> Value {
     serde_json::json!({

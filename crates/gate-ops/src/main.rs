@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use gate_ops::{patrol, sanitize, smoke, snapshot, util};
+use gate_ops::{notify, patrol, sanitize, smoke, snapshot, util};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -30,6 +30,23 @@ enum Cmd {
         #[arg(long)]
         oneline: bool,
         /// 数据库路径（默认 $NAI_GATE_DB，其次 $DATA_DIR/nai_gate.db）
+        #[arg(long)]
+        db: Option<PathBuf>,
+    },
+    /// 跑一遍巡检，状态变化（正常 ↔ 注意 / 危险）时给站长发一条 Discord 私信；有冷却，正常时从不发
+    Notify {
+        /// 只打印本轮会发什么，不真的发，也不改状态文件
+        #[arg(long)]
+        dry_run: bool,
+        /// 状态文件（默认 /opt/backups/patrol_notify_state.json）
+        #[arg(long, env = "PATROL_NOTIFY_STATE", default_value = notify::DEFAULT_STATE)]
+        state: PathBuf,
+        /// 同一级别两次通知之间的冷却（分钟）
+        #[arg(long, env = "PATROL_NOTIFY_COOLDOWN_MIN", default_value_t = notify::DEFAULT_COOLDOWN_MIN)]
+        cooldown_min: i64,
+        /// 危险一直不解除时的提醒间隔（分钟）
+        #[arg(long, env = "PATROL_NOTIFY_REPEAT_MIN", default_value_t = notify::DEFAULT_RED_REPEAT_MIN)]
+        repeat_min: i64,
         #[arg(long)]
         db: Option<PathBuf>,
     },
@@ -58,7 +75,7 @@ enum Cmd {
 
 fn main() {
     let cli = Cli::parse();
-    let is_patrol = matches!(cli.cmd, Cmd::Patrol { .. });
+    let is_patrol = matches!(cli.cmd, Cmd::Patrol { .. } | Cmd::Notify { .. });
     if is_patrol {
         // 巡检自己 panic 也要退出码 3（systemd 才分得出「巡检坏了」与「有警告」）
         std::panic::set_hook(Box::new(|info| {
@@ -106,6 +123,25 @@ async fn dispatch(cli: Cli) -> Result<i32> {
                     alert,
                     json,
                     oneline,
+                },
+            )
+            .await
+        }
+        Cmd::Notify {
+            dry_run,
+            state,
+            cooldown_min,
+            repeat_min,
+            db,
+        } => {
+            let cfg = patrol::Config::from_env(db.as_deref())?;
+            notify::run(
+                &cfg,
+                &notify::NotifyArgs {
+                    dry_run,
+                    state_path: state,
+                    cooldown_min,
+                    red_repeat_min: repeat_min,
                 },
             )
             .await
