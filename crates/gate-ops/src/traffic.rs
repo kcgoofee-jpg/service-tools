@@ -230,6 +230,10 @@ fn feed(path: &Path, s: &mut Summary, since: f64, until: f64) -> Result<()> {
 }
 
 pub fn run(logs: &[PathBuf], span_s: f64, until: f64) -> Result<String> {
+    run_tz(logs, span_s, until, &util::local_tz())
+}
+
+pub fn run_tz(logs: &[PathBuf], span_s: f64, until: f64, tz: &TimeZone) -> Result<String> {
     let files = expand(logs)?;
     if files.is_empty() {
         bail!("没有找到访问日志文件");
@@ -239,7 +243,7 @@ pub fn run(logs: &[PathBuf], span_s: f64, until: f64) -> Result<String> {
     for f in &files {
         feed(f, &mut s, since, until)?;
     }
-    Ok(render(&mut s, since, until, &util::local_tz()))
+    Ok(render(&mut s, since, until, tz))
 }
 
 #[cfg(test)]

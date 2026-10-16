@@ -744,7 +744,7 @@ fn traffic_summary_strips_ip_and_query() {
         gz.write_all(lines[2].as_bytes()).unwrap();
         gz.finish().unwrap();
     }
-    let text = traffic::run(&[dir.path().to_path_buf()], 3600.0, NOW).unwrap();
+    let text = traffic::run_tz(&[dir.path().to_path_buf()], 3600.0, NOW, &shanghai()).unwrap();
     assert!(!text.contains("203.0.113"), "{text}");
     assert!(!text.contains("secret"), "{text}");
     assert!(!text.contains("Authorization"), "{text}");
