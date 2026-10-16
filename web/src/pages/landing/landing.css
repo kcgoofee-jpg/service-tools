@@ -172,6 +172,10 @@ a.btn:hover {
   display: block;
   overflow-wrap: break-word;
 }
+/* 「 · 」只留在文本里（测试与复制），分行显示时不画出来 */
+.lp-status__sep {
+  display: none;
+}
 .lp-status__detail {
   display: block;
   margin-top: 2px;

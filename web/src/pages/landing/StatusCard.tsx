@@ -57,7 +57,12 @@ export function StatusCard() {
           <span class={cx("dot", "dot--pulse", "lp-dot", `lp-dot--${view.tone}`)} aria-hidden="true" />
           <p class="lp-status__text">
             <strong class="lp-status__head">{view.headline}</strong>
-            {view.detail && <span class="lp-status__detail">{view.detail}</span>}
+            {view.detail && (
+              <span class="lp-status__detail">
+                <span class="lp-status__sep"> · </span>
+                {view.detail}
+              </span>
+            )}
           </p>
         </div>
       ) : (
