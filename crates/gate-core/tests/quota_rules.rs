@@ -197,9 +197,9 @@ fn each_is_pool_over_active_people_without_clamp() {
         (0, 7),   // 不到 10 人按 10 人：⌊71 ÷ 10⌋
         (10, 7),  //
         (20, 3),  // ⌊71 ÷ 20⌋
-        (35, 2),  // 旧版会夹到 3
-        (75, 1),  // ⌊71 ÷ 75⌋ = 0 → 至少 1（旧版夹到 3）
-        (500, 1), //
+        (35, 3),  // ⌊71 ÷ 35⌋ = 2 → 至少 3（10-17 起下限 3，全站池先到先得）
+        (75, 3),  // ⌊71 ÷ 75⌋ = 0 → 至少 3
+        (500, 3), //
     ] {
         let mut v = base_inputs();
         v["active_v5"] = json!(active);
@@ -278,7 +278,7 @@ fn todays_plan_is_fixed_for_the_whole_day() {
     v["settings"][quota::V5_DAY_KEY] = json!(plan);
     v["active_v5"] = json!(40);
     let out = run(v);
-    assert_eq!(v5_of(&out)["each"], 1, "⌊71 ÷ 40⌋ = 1");
+    assert_eq!(v5_of(&out)["each"], 3, "⌊71 ÷ 40⌋ = 1 → 下限 3");
     assert!(
         setting(&out, quota::V5_DAY_KEY)
             .unwrap()
@@ -296,7 +296,7 @@ fn oversell_is_judged_by_active_people_not_all_keys() {
     let v5 = v5_of(&out);
     assert_eq!(v5["oversell"], Value::Null);
     assert!(!setting(&out, "algo_notice").unwrap().contains("先到先得"));
-    // 100 人用过 V5：每人至少 1 张，1 × 100 > 71 → 先到先得
+    // 100 人用过 V5：每人至少 3 张，3 × 100 > 71 → 先到先得
     let mut v = base_inputs();
     v["members"] = json!(200);
     v["active_v5"] = json!(100);
@@ -304,12 +304,12 @@ fn oversell_is_judged_by_active_people_not_all_keys() {
     let v5 = v5_of(&out);
     assert_eq!(
         v5["oversell"],
-        json!({"each": 1, "members": 100, "global": G})
+        json!({"each": 3, "members": 100, "global": G})
     );
     assert!(
         setting(&out, "algo_notice")
             .unwrap()
-            .contains("V5 每人 1 张（全站今日共 71 张，先到先得）")
+            .contains("V5 每人 3 张（全站今日共 71 张，先到先得）")
     );
 }
 
@@ -336,7 +336,7 @@ fn removed_v5_settings_are_not_read() {
     v["settings"]["quota_v5_max"] = json!("2");
     v["active_v5"] = json!(75);
     let out = run(v);
-    assert_eq!(v5_of(&out)["each"], 1);
+    assert_eq!(v5_of(&out)["each"], 3);
     assert!(!quota::SETTING_KEYS_READ.contains(&"quota_v5_min"));
     assert!(!quota::SETTING_KEYS_READ.contains(&"quota_v5_max"));
 }
@@ -706,8 +706,8 @@ proptest! {
         let g = (rate * quota::V5_IMAGES_PER_PERCENT).floor() as i64;
         prop_assert_eq!(r["v5"]["global"].as_i64(), Some(g));
         let each = r["v5"]["each"].as_i64().unwrap();
-        prop_assert!(each >= 1);
-        prop_assert_eq!(each, std::cmp::max(1, g / std::cmp::max(10, c.active)));
+        prop_assert!(each >= quota::V5_MIN_EACH);
+        prop_assert_eq!(each, std::cmp::max(quota::V5_MIN_EACH, g / std::cmp::max(10, c.active)));
         prop_assert_eq!(r["review"].is_object(), c.due);
         assert_db_format(&out)?;
     }

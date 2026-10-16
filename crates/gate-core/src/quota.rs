@@ -59,7 +59,7 @@
 //!
 //! # V5
 //!
-//! 全站 V5 池 G = ⌊恢复速度 × [`V5_IMAGES_PER_PERCENT`]⌋，每人上限 = max(1, ⌊G ÷ max(10, N)⌋)，
+//! 全站 V5 池 G = ⌊恢复速度 × [`V5_IMAGES_PER_PERCENT`]⌋，每人上限 = max(3, ⌊G ÷ max(10, N)⌋)，
 //! N = 前 3 个完整服务日里用过 V5 的人数。两者都在服务日第一次计算时（07:00 后）定下，当天不再改。
 //! 每人上限只是上限：全站池先到先得。
 
@@ -427,6 +427,8 @@ impl Default for QuotaParams {
 
 /// 每人 V5 上限的人数下限：前 3 个完整服务日里用过 V5 的人少于这个数时按它算（站长 10-15 批准的公式）。
 pub const V5_MIN_PEOPLE: i64 = 10;
+/// 每人 V5 上限的下限：全站池本来就先到先得（PVP），个人上限只防一个人吃光，不再保证人人有份（站长 10-17 定 3）。
+pub const V5_MIN_EACH: i64 = 3;
 /// 统计「用过 V5 的人」的完整服务日个数（不含今天）。
 pub const V5_ACTIVE_DAYS: usize = 3;
 
@@ -513,7 +515,7 @@ impl V5Plan {
 }
 
 /// 全站 V5 池 G 与每人上限：
-/// G = ⌊恢复速度 × 每 1% 的张数⌋，每人 = max(1, ⌊G ÷ max(10, N)⌋)。
+/// G = ⌊恢复速度 × 每 1% 的张数⌋，每人 = max(3, ⌊G ÷ max(10, N)⌋)。
 /// `rate` = 采用的恢复 %/天（`None` / ≤ 0 / NaN 用保守的 5）；`active` = N（前 3 个完整服务日用过 V5 的人数）。
 /// 返回的 `rate` 已 `round(rate, 1)`。旧版的电量系数、3～30 夹取、洪峰放宽都已删除。
 pub fn v5_plan(percent: Option<f64>, rate: Option<f64>, active: i64) -> V5Plan {
@@ -523,7 +525,7 @@ pub fn v5_plan(percent: Option<f64>, rate: Option<f64>, active: i64) -> V5Plan {
     };
     let pool = (rate * V5_IMAGES_PER_PERCENT).floor() as i64;
     let people = std::cmp::max(V5_MIN_PEOPLE, active);
-    let each = std::cmp::max(1, pool.div_euclid(people));
+    let each = std::cmp::max(V5_MIN_EACH, pool.div_euclid(people));
     V5Plan {
         rate: pyc::round(rate, 1),
         percent,

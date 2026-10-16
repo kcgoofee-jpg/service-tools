@@ -4,6 +4,19 @@ import { useStore } from "./ctx";
 import { createEstimator, dailyUsage, deriveStatus } from "./status";
 import { UsageMeter } from "./Usage";
 
+/**
+ * 全站算法说明按「。」「 · 」拆成行，括号补充单独成块：窄屏只在这些位置换行，不会把「重置」「10/天」拆开。
+ * 每个块在样式里是 inline-block + nowrap。
+ */
+export function noteLines(note: string): string[][] {
+  return note
+    .split(/[。\n]/)
+    .flatMap((sentence) => sentence.split(" · "))
+    .map((seg) => seg.trim())
+    .filter(Boolean)
+    .map((seg) => seg.split(/(?=（)/).filter(Boolean));
+}
+
 /** 全站实时状态：一句话（能不能马上出图 + 原因）+ 全站今日用量。所有访客都看得到。 */
 export function StatusCard() {
   const { live, me, meta, connection } = useStore();
@@ -43,8 +56,13 @@ export function StatusCard() {
         <div class="lp-status__line">
           <span class={cx("dot", "dot--pulse", "lp-dot", `lp-dot--${view.tone}`)} aria-hidden="true" />
           <p class="lp-status__text">
-            <strong>{view.headline}</strong>
-            {view.detail && <span class="lp-status__detail"> · {view.detail}</span>}
+            <strong class="lp-status__head">{view.headline}</strong>
+            {view.detail && (
+              <span class="lp-status__detail">
+                <span class="lp-status__sep"> · </span>
+                {view.detail}
+              </span>
+            )}
           </p>
         </div>
       ) : (
@@ -64,7 +82,17 @@ export function StatusCard() {
         <UsageMeter label="全站今日已用" used={usage.total.used} cap={usage.total.cap} />
         <UsageMeter label="V5 已用" used={usage.v5.used} cap={usage.v5.cap} base="v5" />
       </div>
-      {algo && !hasKey && <p class="lp-note">{algo}</p>}
+      {algo && !hasKey && (
+        <div class="lp-note lp-note--algo">
+          {noteLines(algo).map((parts) => (
+            <p key={parts.join("")}>
+              {parts.map((s) => (
+                <span key={s}>{s}</span>
+              ))}
+            </p>
+          ))}
+        </div>
+      )}
     </Card>
   );
 }
