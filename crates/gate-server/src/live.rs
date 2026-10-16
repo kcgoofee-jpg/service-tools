@@ -70,6 +70,9 @@ pub struct RegSettings {
     pub max_users: i64,
     /// None = 全部功能（`register_features` 存的是 `*`，或环境变量里没配）。
     pub features: Option<Vec<String>>,
+    /// 限定身份组的名称（后台 register_role_note）；只有身份组门槛配齐（服务器 + 身份组都有）时才是 `Some`。
+    /// 首页登录被挡时要告诉成员「缺哪个身份组」，只暴露这一句名称，不暴露服务器 / 身份组 ID。
+    pub role_note: Option<String>,
 }
 
 /// 生效的注册设置：数据库里保存的优先，其次是环境默认值。读法和后台 / 机器人共用 `ops::registration_settings`，
@@ -83,6 +86,7 @@ pub async fn registration_settings(state: &AppState) -> Result<Option<RegSetting
         open: r.open,
         max_users: r.max_users,
         features: r.features,
+        role_note: (!r.role_guild.is_empty() && !r.role_id.is_empty()).then_some(r.role_note),
     }))
 }
 
@@ -300,6 +304,9 @@ async fn build_meta(state: &AppState) -> Result<Map<String, Value>, InternalErro
     let mut reg = json!({"configured": false, "open": false}); // 没配注册服务 = 关闭（fail-closed）
     if let Some(cfg) = registration_settings(state).await? {
         reg = json!({"configured": true, "open": cfg.open});
+        if let Some(note) = &cfg.role_note {
+            reg["role_note"] = json!(note);
+        }
         if let Some(left) = slots_left(state, &cfg).await? {
             reg["slots_left"] = json!(left);
         }
@@ -362,6 +369,9 @@ pub async fn build_status(state: &AppState) -> Result<Value, InternalError> {
     };
     if let Some(cfg) = registration_settings(state).await? {
         reg = json!({"open": cfg.open, "slots_left": slots_left(state, &cfg).await?});
+        if let Some(note) = &cfg.role_note {
+            reg["role_note"] = json!(note);
+        }
         let names: Vec<String> = match &cfg.features {
             None => FEATURES.iter().map(|(n, _)| n.to_string()).collect(),
             Some(l) => l.clone(),

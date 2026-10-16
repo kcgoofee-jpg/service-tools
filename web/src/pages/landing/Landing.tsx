@@ -17,23 +17,36 @@ import { SiteFooter, Topbar } from "./Topbar";
 import type { MeMember } from "./types";
 import "./landing.css";
 
-/** 验证身份组（/login?verify=1）回到首页时带的结果。 */
-const VERIFY_NOTICE: Record<string, { text: string; error: boolean }> = {
-  ok: { text: "身份组验证通过，现在可以回 Discord 用 /register 领取 Key 了。", error: false },
-  no: {
-    text: "没有检测到所需的身份组（或你不在对应的服务器），暂时不能领取 Key。",
-    error: true,
-  },
-  error: { text: "Discord 暂时无法核验，请稍后再试。", error: true },
-};
+/** 登录时核验身份组（后台设了限定身份组）回到首页带的结果；no 的文案要带上身份组名称。 */
+function verifyNotice(v: string, role: string): { text: string; error: boolean } | undefined {
+  switch (v) {
+    case "ok":
+      return { text: "身份组验证通过，现在可以回 Discord 用 /register 领取 Key 了。", error: false };
+    case "no":
+      return {
+        text: `没有检测到「${role}」，暂时不能领取 Key。请先获得该身份组后再来。`,
+        error: true,
+      };
+    case "error":
+      return { text: "Discord 暂时无法核验，请稍后再试。", error: true };
+    default:
+      return undefined;
+  }
+}
 
 /** /login/callback 回到首页时带的结果（?login=failed 或 ?verify=ok|no|error）：提示一下并把查询参数从地址栏去掉。 */
-function useLoginNotice() {
+function useLoginNotice(role: string, metaReady: boolean) {
+  const [waited, setWaited] = useState(false);
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const v = params.get("login");
     const verify = params.get("verify");
     if (!v && !verify) return;
+    // 「没有身份组」的提示要带名称：站点信息还没到就先等（最多 3 秒，之后用通用说法）
+    if (verify === "no" && !metaReady && !waited) {
+      const t = setTimeout(() => setWaited(true), 3000);
+      return () => clearTimeout(t);
+    }
     if (v === "failed") {
       toast(
         "Discord 登录没有成功。请确认你已加入猫头鹰公益站的 Discord 服务器，然后再点一次「用 Discord 登录」。",
@@ -43,13 +56,13 @@ function useLoginNotice() {
         },
       );
     }
-    const n = verify ? VERIFY_NOTICE[verify] : undefined;
+    const n = verify ? verifyNotice(verify, role) : undefined;
     if (n) toast(n.text, { error: n.error, ms: 9000 });
     params.delete("login");
     params.delete("verify");
     const qs = params.toString();
     history.replaceState(null, "", `${location.pathname}${qs ? `?${qs}` : ""}${location.hash}`);
-  }, []);
+  }, [metaReady, waited, role]);
 }
 
 /** 问卷页让未登录的人先登录：登录回调只会回到首页，这里把人送回去。 */
@@ -106,7 +119,8 @@ function Page({ store }: { store: Store }) {
   const me = store.me.value;
   const member = me?.logged_in ? me : null;
   const webLogin = store.meta.value.web_login === true;
-  useLoginNotice();
+  const reg = store.meta.value.registration;
+  useLoginNotice(reg?.role_note || "指定身份组", reg !== undefined);
   useReturnToSurvey(!!member);
   return (
     <>

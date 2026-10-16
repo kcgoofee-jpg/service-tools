@@ -42,8 +42,8 @@ export type Meta = {
   algo_notice?: string;
   audit_notice?: string;
   web_login?: boolean;
-  /** 加入按钮跟着它走：注册关了就置灰成「关闭注册」 */
-  registration?: { open?: boolean };
+  /** 加入按钮跟着它走：注册关了就置灰成「关闭注册」；role_note = 限定身份组的名称（只有设了门槛才有） */
+  registration?: { open?: boolean; role_note?: string };
   limits?: {
     key_image_queue?: number;
     quiet_start?: number;

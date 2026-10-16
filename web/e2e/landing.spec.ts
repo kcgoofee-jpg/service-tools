@@ -244,7 +244,7 @@ test.describe("游客", () => {
   test("?verify=ok|no|error 各提示一句并清掉地址栏参数", async ({ page }) => {
     const cases: [string, string][] = [
       ["ok", "身份组验证通过"],
-      ["no", "没有检测到所需的身份组"],
+      ["no", "没有检测到「指定身份组」"],
       ["error", "Discord 暂时无法核验"],
     ];
     for (const [v, text] of cases) {
@@ -252,6 +252,17 @@ test.describe("游客", () => {
       await expect(page.getByText(text)).toBeVisible();
       await expect.poll(() => new URL(page.url()).search).toBe("");
     }
+  });
+
+  test("?verify=no 提示里带上站点设置的身份组名称", async ({ page }) => {
+    const withNote = (b: Record<string, unknown>) => ({
+      ...b,
+      registration: { ...(b.registration as object), role_note: "类脑「已验证」身份组" },
+    });
+    await patch(page, STATUS, withNote);
+    await patch(page, LIVE, withNote);
+    await page.goto("/?verify=no");
+    await expect(page.getByText("没有检测到「类脑「已验证」身份组」，暂时不能领取 Key。")).toBeVisible();
   });
 
   test("公告：有公告时在沙箱 iframe 里显示", async ({ page }) => {
