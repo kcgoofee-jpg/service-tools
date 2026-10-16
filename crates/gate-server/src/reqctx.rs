@@ -29,6 +29,8 @@ struct Inner {
     /// 本请求的 5xx 是上游造成的（见 `error::upstream_transport`）：错误账本不记 Bug。
     upstream_fault: bool,
     model: String,
+    /// 最后选中的上游账号（token_id）；没走到选号为 None。
+    token_id: Option<String>,
     key_id: Option<i64>,
     key_name: String,
     /// 第一次发往上游时调用一次（实时图把这张图从「排队」移到「生成中」）。
@@ -42,6 +44,7 @@ pub struct Timing {
     pub dur_ms: i64,
     pub up_status: u16,
     pub rid: String,
+    pub token_id: Option<String>,
 }
 
 impl Default for ReqCtx {
@@ -60,6 +63,7 @@ impl ReqCtx {
             logged: false,
             upstream_fault: false,
             model: String::new(),
+            token_id: None,
             key_id: None,
             key_name: String::new(),
             on_sent: None,
@@ -154,6 +158,7 @@ impl ReqCtx {
                 dur_ms: dur.as_millis() as i64,
                 up_status: i.up_status,
                 rid: i.rid.clone(),
+                token_id: i.token_id.clone(),
             }
         })
     }
@@ -182,6 +187,9 @@ fn new_rid() -> String {
 
 /// 上游观察者：把 gate-upstream 的「已发送 / 状态码」写回请求上下文。
 impl gate_upstream::client::Observer for ReqCtx {
+    fn picked(&self, token_id: &str) {
+        self.with(|i| i.token_id = Some(token_id.to_string()));
+    }
     fn sent(&self) {
         self.mark_sent();
     }

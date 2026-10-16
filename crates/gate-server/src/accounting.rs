@@ -114,6 +114,7 @@ impl AppState {
                             dur_ms: t.dur_ms,
                             up_status: i64::from(t.up_status),
                             rid: t.rid,
+                            token_id: t.token_id,
                         },
                         now,
                     )
@@ -138,6 +139,7 @@ impl AppState {
                             up_status: i64::from(t.up_status),
                             rid: t.rid,
                             reason: e.reason,
+                            token_id: t.token_id,
                         },
                         now,
                     )
@@ -239,6 +241,7 @@ pub async fn error_ledger(State(state): State<AppState>, req: Request, next: Nex
                             status: "error".into(),
                             detail: "500 InternalError".into(),
                             rid: t.rid,
+                            token_id: t.token_id,
                             ..Default::default()
                         },
                         now,

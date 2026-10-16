@@ -59,6 +59,9 @@ pub trait Hooks: Send + Sync + 'static {
 
 /// 单次请求的观察者（旧版 `request_timing` 的 contextvars）：记录「已发往上游」与上游状态码。
 pub trait Observer: Send + Sync {
+    /// 选中了上游账号（`token_id`）：在排队等出图槽位之前调用，所以选号之后才失败的请求也知道是哪个账号。
+    /// 重试换号会再调用一次，以最后一次为准。
+    fn picked(&self, _token_id: &str) {}
     fn sent(&self) {}
     fn status(&self, _code: u16) {}
 }

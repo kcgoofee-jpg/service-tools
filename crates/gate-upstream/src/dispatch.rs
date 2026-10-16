@@ -183,6 +183,7 @@ impl<H: Hooks> NaiClient<H> {
             else {
                 return Err(self.unavailable(o.requires_anlas, o.v5_free).await);
             };
+            obs.picked(&token.token_id);
             let mut fl = InFlight::new(inner.clone(), token.clone(), o.v5_free, o.image_count);
             let outcome = self
                 .request_once(&mut o, cb, allowance, obs, &token, &mut fl)
@@ -388,6 +389,7 @@ impl<H: Hooks> NaiClient<H> {
         else {
             return Err(self.unavailable(requires_anlas, v5_free).await);
         };
+        obs.picked(&token.token_id);
         let mut fl = InFlight::new(inner.clone(), token.clone(), v5_free, 0);
         if !inner
             .scheduler
