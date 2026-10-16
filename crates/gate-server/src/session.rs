@@ -281,6 +281,50 @@ fn member_secret(state: &AppState) -> String {
     format!("{}:member-login", state.secret_key)
 }
 
+/// 登录授权的用途：普通登录只要 identify；验证身份组要多申请 guilds.members.read。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoginMode {
+    Plain,
+    Verify,
+}
+
+/// 授权 state 的有效期（秒）。
+pub const LOGIN_STATE_SECS: i64 = 600;
+
+fn login_state_secret(secret_key: &str) -> String {
+    format!("{secret_key}:login-state")
+}
+
+/// 签一个自带用途和过期时间的 state：`<p|v>.<nonce>.<exp>.<hmac>`。
+/// 不依赖 Cookie，所以 Discord 内置浏览器丢了 Cookie 也能完成回调。
+pub fn sign_login_state(secret_key: &str, mode: LoginMode, nonce: &str, now: i64) -> String {
+    let m = if mode == LoginMode::Verify { 'v' } else { 'p' };
+    let payload = format!("{m}.{nonce}.{}", now + LOGIN_STATE_SECS);
+    let sig = hmac_hex(&login_state_secret(secret_key), &payload);
+    format!("{payload}.{sig}")
+}
+
+/// 验签并检查过期；任何一步不对都是 None。
+pub fn verify_login_state(secret_key: &str, raw: &str, now: i64) -> Option<LoginMode> {
+    let (payload, sig) = raw.rsplit_once('.')?;
+    if !ct_eq(
+        sig.as_bytes(),
+        hmac_hex(&login_state_secret(secret_key), payload).as_bytes(),
+    ) {
+        return None;
+    }
+    let mut it = payload.splitn(3, '.');
+    let (mode, nonce, exp) = (it.next()?, it.next()?, it.next()?);
+    if nonce.is_empty() || gate_core::pyc::parse_int(exp)? <= now {
+        return None;
+    }
+    match mode {
+        "p" => Some(LoginMode::Plain),
+        "v" => Some(LoginMode::Verify),
+        _ => None,
+    }
+}
+
 /// 会话绑定的 Key 指纹：Key 一换（/resetkey、回收后重领），旧会话立刻失效。没有 Key 时为 "-"。
 pub fn key_tag(key: Option<&Key>) -> String {
     match key {
@@ -390,6 +434,24 @@ mod tests {
             ),
             "900000000000000001:1900000000:178b8ba5e5a7866a.385eaae505ec346b943c6e7cdf9fe81368e57b61d2d7c02b4df7572bb4e271b2"
         );
+    }
+
+    #[test]
+    fn login_state_roundtrip_and_tamper() {
+        let k = "test-secret-key-test-secret-key-0123456789";
+        let now = 1_900_000_000;
+        let v = sign_login_state(k, LoginMode::Verify, "abc_-123", now);
+        let p = sign_login_state(k, LoginMode::Plain, "abc_-123", now);
+        assert_eq!(verify_login_state(k, &v, now), Some(LoginMode::Verify));
+        assert_eq!(verify_login_state(k, &p, now + 599), Some(LoginMode::Plain));
+        // 过期（10 分钟）
+        assert_eq!(verify_login_state(k, &v, now + LOGIN_STATE_SECS), None);
+        // 换密钥 / 改用途 / 空串 / 旧式随机串都不认
+        assert_eq!(verify_login_state("other-secret", &v, now), None);
+        assert_eq!(verify_login_state(k, &v.replacen("v.", "p.", 1), now), None);
+        assert_eq!(verify_login_state(k, "", now), None);
+        assert_eq!(verify_login_state(k, "Zm9vYmFyYmF6", now), None);
+        assert_eq!(verify_login_state(k, "x.n.99999999999.00", now), None);
     }
 
     #[test]

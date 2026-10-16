@@ -241,6 +241,19 @@ test.describe("游客", () => {
     await expect.poll(() => new URL(page.url()).search).toBe("");
   });
 
+  test("?verify=ok|no|error 各提示一句并清掉地址栏参数", async ({ page }) => {
+    const cases: [string, string][] = [
+      ["ok", "身份组验证通过"],
+      ["no", "没有检测到所需的身份组"],
+      ["error", "Discord 暂时无法核验"],
+    ];
+    for (const [v, text] of cases) {
+      await page.goto(`/?verify=${v}`);
+      await expect(page.getByText(text)).toBeVisible();
+      await expect.poll(() => new URL(page.url()).search).toBe("");
+    }
+  });
+
   test("公告：有公告时在沙箱 iframe 里显示", async ({ page }) => {
     await page.route("**/announcement", (r) =>
       r.fulfill({ contentType: "text/html; charset=utf-8", body: "<p>今晚 22 点维护</p>" }),

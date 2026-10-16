@@ -17,12 +17,23 @@ import { SiteFooter, Topbar } from "./Topbar";
 import type { MeMember } from "./types";
 import "./landing.css";
 
-/** /login/callback 失败时会回到 /?login=failed：提示一下并把查询参数从地址栏去掉。 */
+/** 验证身份组（/login?verify=1）回到首页时带的结果。 */
+const VERIFY_NOTICE: Record<string, { text: string; error: boolean }> = {
+  ok: { text: "身份组验证通过，现在可以回 Discord 用 /register 领取 Key 了。", error: false },
+  no: {
+    text: "没有检测到所需的身份组（或你不在对应的服务器），暂时不能领取 Key。",
+    error: true,
+  },
+  error: { text: "Discord 暂时无法核验，请稍后再试。", error: true },
+};
+
+/** /login/callback 回到首页时带的结果（?login=failed 或 ?verify=ok|no|error）：提示一下并把查询参数从地址栏去掉。 */
 function useLoginNotice() {
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const v = params.get("login");
-    if (!v) return;
+    const verify = params.get("verify");
+    if (!v && !verify) return;
     if (v === "failed") {
       toast(
         "Discord 登录没有成功。请确认你已加入猫头鹰公益站的 Discord 服务器，然后再点一次「用 Discord 登录」。",
@@ -32,7 +43,10 @@ function useLoginNotice() {
         },
       );
     }
+    const n = verify ? VERIFY_NOTICE[verify] : undefined;
+    if (n) toast(n.text, { error: n.error, ms: 9000 });
     params.delete("login");
+    params.delete("verify");
     const qs = params.toString();
     history.replaceState(null, "", `${location.pathname}${qs ? `?${qs}` : ""}${location.hash}`);
   }, []);

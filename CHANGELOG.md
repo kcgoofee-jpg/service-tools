@@ -4,6 +4,19 @@
 每个版本分「成员可感知」与「站长 / 运维」两部分；成员公告只发前者。
 2.x 及更早的记录见标签 `py-final`。
 
+## [Unreleased]
+
+### 成员可感知
+
+- **限定身份组改成「网页授权验证」。** 后台「领 Key」里设了限定身份组时，先打开 `/login?verify=1` 用 Discord 授权一次，通过后再用 `/register` 领取；没验证过的 `/register` 会给出这个链接。Discord 暂时查不了时提示「Discord 暂时无法核验，请稍后再试」，不会说成「你没有身份组」。已有 Key 的成员、邀请 Key 绑定不受影响。
+- 普通「用 Discord 登录」仍只申请 `identify`，不查身份组，也不会因为没有身份组被拒绝（以前配了身份组门槛后，不在那个服务器的成员连登录都会失败）。
+- 登录回调的 state 改成带签名、10 分钟有效，Discord 内置浏览器丢了 Cookie 也能完成登录（此前日志里的 `state_ok=n`）。
+
+### 站长 / 运维
+
+- 新表 `role_verifications(discord_id, guild_id, role_id, verified_at)`，只增不减，回滚到 2.x 不受影响；机器人不再需要在门槛服务器里，`/guilds/{id}/members/{uid}` 的机器人查询已删除。
+- 设置不变：`register_role_guild` / `register_role_id` / `register_role_note`；上线前仍需站长在后台填写。
+
 ## [3.0.0] - 2026-10-15（Rust + Preact 全量重写）
 
 网关、Discord 机器人、运维脚本全部用 Rust 重写，前端用 Vite + TypeScript + Preact 重写。

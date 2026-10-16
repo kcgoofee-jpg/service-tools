@@ -65,6 +65,15 @@ pub const RUST_ADDED_COLUMNS: &[&str] = &[
     "ALTER TABLE api_keys ADD COLUMN disabled_reason TEXT",
 ];
 
+/// 3.0 新增的表（旧版 Python 不认识；只增不减，回滚到 2.x 不受影响）。同 `RUST_ADDED_COLUMNS`：
+/// 不写进 `schema.sql`，`tests/schema_parity.rs` 的「Python 建的表」一侧也按这份清单补出来。
+pub const RUST_ADDED_TABLES: &[&str] = &[
+    // 成员用 Discord OAuth 授权后核验到的身份组（领 Key 的门槛只认这张表，不再用机器人 Token 查）。
+    "CREATE TABLE IF NOT EXISTS role_verifications (\
+     discord_id TEXT NOT NULL, guild_id TEXT NOT NULL, role_id TEXT NOT NULL, verified_at REAL NOT NULL, \
+     PRIMARY KEY (discord_id, guild_id, role_id))",
+];
+
 /// 触发器每次启动按同一定义重建（旧库里可能还是不写 is_test 的老定义）。
 const REBUILD_TRIGGER: &str = "DROP TRIGGER IF EXISTS preserve_deleted_key_usage; \
     CREATE TRIGGER preserve_deleted_key_usage BEFORE DELETE ON api_keys BEGIN \
@@ -149,6 +158,9 @@ pub fn run(conn: &mut Connection, now: f64, backfill: &[(&str, &str)]) -> rusqli
             Err(e) if is_duplicate_column(&e) => {}
             Err(e) => return Err(e),
         }
+    }
+    for ddl in RUST_ADDED_TABLES {
+        conn.execute(ddl, [])?;
     }
     conn.execute(
         "UPDATE api_keys SET discord_id=\

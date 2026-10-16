@@ -736,61 +736,66 @@ async fn young_discord_accounts_are_refused() {
     assert_eq!(issue(&e, &snowflake(30.0)).await.0, 200);
 }
 
+/// 走一遍「验证身份组」授权：`/login?verify=1` 取 state，再不带 Cookie 回调（模拟丢 Cookie 的内置浏览器）。
+async fn verify_login(e: &Env) -> (u16, HeaderMap) {
+    let (s, h, _) = get_raw(e, "/login?verify=1", None).await;
+    assert_eq!(s, 307);
+    let loc = h["location"].to_str().unwrap();
+    let st = loc.split("state=").nth(1).unwrap().to_string();
+    let (s, h, _) = get_raw(e, &format!("/login/callback?code=ok&state={st}"), None).await;
+    (s, h)
+}
+
+fn member_path(guild: &str) -> String {
+    format!("/users/@me/guilds/{guild}/member")
+}
+
 #[tokio::test]
-async fn role_gate_uses_bot_token_against_the_configured_server() {
+async fn role_gate_needs_oauth_verification_not_the_bot_token() {
     let (e, d) = setup_reg(&[]).await;
     require_role(&e, "900000000000000077").await;
     open_registration(&e).await;
-    let path = format!("/guilds/{GUILD}/members/{MEMBER}");
-    // 不在服务器
-    d.script("GET", &path, 404, json!({"code": 10007}));
+    // 没核验过：拒绝，并给出验证链接；不发任何 Discord 请求（机器人不在那个服务器里）
     let r = issue(&e, MEMBER).await;
     assert_eq!(
         (r.0, detail(&r)),
         (
             403,
-            "目前只开放给「指定身份组」：请先加入对应的社区服务器后再用 /register。"
+            "目前只开放给「指定身份组」：请先打开 https://gate.test/login?verify=1 用 Discord 授权验证身份组，再用 /register 领取。"
         )
     );
-    // 在服务器但没有身份组
+    assert!(d.seen().is_empty());
+    // 授权后没有身份组 → 仍不能领
+    d.script("GET", &member_path(GUILD), 200, json!({"roles": ["1"]}));
+    let (s, h) = verify_login(&e).await;
+    assert_eq!((s, h["location"].to_str().unwrap()), (307, "/?verify=no"));
+    assert_eq!(issue(&e, MEMBER).await.0, 403);
+    // 有身份组 → 记下核验，能领
     d.clear_scripts();
-    d.script("GET", &path, 200, json!({"roles": ["1"]}));
-    let r = issue(&e, MEMBER).await;
-    assert_eq!(
-        (r.0, detail(&r)),
-        (
-            403,
-            "目前只开放给「指定身份组」，没有检测到这个身份组，暂时不能领取 Key。"
-        )
+    d.script(
+        "GET",
+        &member_path(GUILD),
+        200,
+        json!({"roles": ["900000000000000077"]}),
     );
-    // 限流 / 故障：不能误报成「你不在服务器」
-    d.clear_scripts();
-    d.script("GET", &path, 429, json!({"retry_after": 1}));
-    let r = issue(&e, MEMBER).await;
-    assert_eq!(
-        (r.0, detail(&r)),
-        (
-            403,
-            "Discord 暂时无法核验身份组，请过几分钟再用 /register。"
-        )
-    );
+    let (s, h) = verify_login(&e).await;
+    assert_eq!((s, h["location"].to_str().unwrap()), (307, "/?verify=ok"));
     assert!(
         e.state
             .db
-            .key_row_for_discord(MEMBER)
+            .role_verified(MEMBER, GUILD, "900000000000000077")
             .await
             .unwrap()
-            .is_none()
     );
-    d.clear_scripts();
-    d.script("GET", &path, 200, json!({"roles": ["900000000000000077"]}));
     assert_eq!(issue(&e, MEMBER).await.0, 200);
-    let seen = d.seen();
+    // 发请求用的是成员自己的授权，没有一次用机器人 Token 查成员
     assert!(
-        seen.iter()
-            .all(|s| s.auth == "Bot fake-bot-token" && s.path == path)
+        d.seen()
+            .iter()
+            .filter(|s| s.path.ends_with("/member"))
+            .all(|s| s.auth == "Bearer tok")
     );
-    assert_eq!(seen.len(), 4);
+    assert!(d.seen().iter().all(|s| s.auth != "Bot fake-bot-token"));
 }
 
 #[tokio::test]
@@ -805,32 +810,83 @@ async fn role_gate_can_target_another_community_via_settings() {
     ] {
         e.state.db.set_setting(k, v).await.unwrap();
     }
-    let path = format!("/guilds/{other_guild}/members/{MEMBER}");
-    d.script("GET", &path, 404, json!({}));
+    // 别的服务器 / 别的身份组的核验不算数
+    e.state
+        .db
+        .upsert_role_verification(MEMBER, GUILD, "900000000000000333", 1.0)
+        .await
+        .unwrap();
+    e.state
+        .db
+        .upsert_role_verification(MEMBER, other_guild, "1", 1.0)
+        .await
+        .unwrap();
     let r = issue(&e, MEMBER).await;
     assert_eq!(
         (r.0, detail(&r)),
         (
             403,
-            "目前只开放给「创作者」：请先加入对应的社区服务器后再用 /register。"
+            "目前只开放给「创作者」：请先打开 https://gate.test/login?verify=1 用 Discord 授权验证身份组，再用 /register 领取。"
         )
     );
-    d.clear_scripts();
-    d.script("GET", &path, 200, json!({"roles": ["900000000000000333"]}));
+    d.script(
+        "GET",
+        &member_path(other_guild),
+        200,
+        json!({"roles": ["900000000000000333"]}),
+    );
+    assert_eq!(verify_login(&e).await.0, 307);
     assert_eq!(issue(&e, MEMBER).await.0, 200);
 }
 
 #[tokio::test]
+async fn verify_outcomes_never_blame_the_member_for_discord_failures() {
+    let (e, d) = setup_reg(&[]).await;
+    require_role(&e, "900000000000000077").await;
+    let cases: [(u16, Value, &str); 4] = [
+        (404, json!({"code": 10007}), "/?verify=no"),
+        (429, json!({"retry_after": 1}), "/?verify=error"),
+        (500, json!({}), "/?verify=error"),
+        (200, json!("not-an-object"), "/?verify=no"),
+    ];
+    for (status, body, want) in cases {
+        d.clear_scripts();
+        d.script("GET", &member_path(GUILD), status, body);
+        let (s, h) = verify_login(&e).await;
+        assert_eq!(
+            (s, h["location"].to_str().unwrap()),
+            (307, want),
+            "{status}"
+        );
+        // 授权本身成功：照常发会话
+        assert!(cookie_value(&h, "owl_member").contains(MEMBER));
+    }
+    assert!(
+        !e.state
+            .db
+            .role_verified(MEMBER, GUILD, "900000000000000077")
+            .await
+            .unwrap()
+    );
+}
+
+#[tokio::test]
+async fn verify_without_role_setting_passes_without_recording() {
+    let (e, d) = setup_reg(&[]).await;
+    let (s, h) = verify_login(&e).await;
+    assert_eq!((s, h["location"].to_str().unwrap()), (307, "/?verify=ok"));
+    assert!(!d.calls().iter().any(|c| c.ends_with("/member")));
+}
+
+#[tokio::test]
 async fn unreachable_discord_never_mints_when_a_role_is_required() {
-    // 基地址指向没人监听的端口：既证明请求只会发往 DISCORD_API_BASE，也验证网络错误的处理
+    // 门槛只查本地核验记录：Discord 连不上也不会放行没核验的人
     let (e, _d) = setup_reg(&[("DISCORD_API_BASE", "http://127.0.0.1:1")]).await;
     require_role(&e, "900000000000000077").await;
     open_registration(&e).await;
     let r = issue(&e, MEMBER).await;
-    assert_eq!(
-        (r.0, detail(&r)),
-        (403, "Discord 暂时连不上，请过几分钟再用 /register。")
-    );
+    assert_eq!(r.0, 403);
+    assert!(detail(&r).contains("login?verify=1"));
     assert!(
         e.state
             .db
@@ -839,6 +895,58 @@ async fn unreachable_discord_never_mints_when_a_role_is_required() {
             .unwrap()
             .is_none()
     );
+}
+
+#[tokio::test]
+async fn verify_scope_and_state_rules() {
+    let (e, d) = setup_reg(&[]).await;
+    let (_, h, _) = get_raw(&e, "/login?verify=1", None).await;
+    let loc = h["location"].to_str().unwrap().to_string();
+    assert!(
+        loc.contains("&scope=identify+guilds.members.read&state=v."),
+        "{loc}"
+    );
+    // 普通登录仍只要 identify
+    let (_, h, _) = get_raw(&e, "/login", None).await;
+    assert!(
+        h["location"]
+            .to_str()
+            .unwrap()
+            .contains("&scope=identify&state=p.")
+    );
+    // 改过的 state 不认；cookie 对得上的旧式 state 只能是普通登录，不会进入验证模式
+    let st = loc.split("state=").nth(1).unwrap().to_string();
+    let forged = st.replacen("v.", "p.", 1);
+    let (_, h, _) = get_raw(&e, &format!("/login/callback?code=ok&state={forged}"), None).await;
+    assert_eq!(h["location"], "/?login=failed");
+    let (_, h, _) = get_raw(
+        &e,
+        "/login/callback?code=ok&state=v.legacy.1",
+        Some("owl_login_state=v.legacy.1"),
+    )
+    .await;
+    assert_eq!(h["location"], "/");
+    assert!(!d.calls().iter().any(|c| c.ends_with("/member")));
+}
+
+#[tokio::test]
+async fn plain_login_is_never_blocked_by_the_role_gate() {
+    let (e, d) = setup_reg(&[]).await;
+    require_role(&e, "900000000000000077").await;
+    // 不在服务器、没有身份组的老成员照常登录
+    d.script("GET", &member_path(GUILD), 404, json!({"code": 10007}));
+    let (_, h, _) = get_raw(&e, "/login", None).await;
+    let st = h["location"]
+        .to_str()
+        .unwrap()
+        .split("state=")
+        .nth(1)
+        .unwrap()
+        .to_string();
+    let (s, h, _) = get_raw(&e, &format!("/login/callback?code=ok&state={st}"), None).await;
+    assert_eq!((s, h["location"].to_str().unwrap()), (307, "/"));
+    assert!(cookie_value(&h, "owl_member").contains(MEMBER));
+    assert!(!d.calls().iter().any(|c| c.ends_with("/member")));
 }
 
 #[tokio::test]
@@ -1829,7 +1937,7 @@ async fn web_login_flow_matches_legacy() {
     let (s, h, _) = get_raw(&e, "/login", None).await;
     assert_eq!(s, 307);
     let state = cookie_value(&h, "owl_login_state");
-    assert_eq!(state.len(), 32);
+    assert!(state.starts_with("p."), "{state}");
     let loc = h["location"].to_str().unwrap().to_string();
     assert_eq!(
         loc,
@@ -1946,36 +2054,12 @@ async fn web_login_rejections() {
         (307, "/?login=failed")
     );
     d.clear_scripts();
-    // 配了身份组门槛、但账号不在那个服务器 → 不发会话
-    d.script(
-        "GET",
-        &format!("/users/@me/guilds/{GUILD}/member"),
-        404,
-        json!({"code": 10007}),
-    );
-    let (s, h, _) = get_raw(&e, "/login/callback?code=ok&state=st", Some(ck)).await;
-    assert_eq!(
-        (s, h["location"].to_str().unwrap()),
-        (307, "/?login=failed")
-    );
-    assert!(set_cookies(&h).is_empty());
-    // 在服务器（不要求带身份组）→ 发会话
+    // 配了身份组门槛时，普通登录也不查成员、不拒绝（只有「验证身份组」才查）
     d.clear_scripts();
-    d.script(
-        "GET",
-        &format!("/users/@me/guilds/{GUILD}/member"),
-        200,
-        json!({"roles": []}),
-    );
     let (s, h, _) = get_raw(&e, "/login/callback?code=ok&state=st", Some(ck)).await;
     assert_eq!((s, h["location"].to_str().unwrap()), (307, "/"));
     assert_eq!(set_cookies(&h).len(), 2);
-    let me_call = d
-        .seen()
-        .into_iter()
-        .rfind(|s| s.path.ends_with("/member"))
-        .unwrap();
-    assert_eq!(me_call.auth, "Bearer tok");
+    assert!(!d.calls().iter().any(|c| c.ends_with("/member")));
 }
 
 #[tokio::test]
@@ -2332,15 +2416,20 @@ async fn discord_base_comes_from_the_environment() {
     open_registration(&e).await;
     d.script(
         "GET",
-        &format!("/guilds/{GUILD}/members/{MEMBER}"),
+        &member_path(GUILD),
         200,
         json!({"roles": ["900000000000000077"]}),
     );
+    assert_eq!(verify_login(&e).await.0, 307);
     assert_eq!(issue(&e, MEMBER).await.0, 200);
     assert!(svc(&e).revoke(MEMBER, true).await.unwrap());
     let calls = d.calls();
     assert!(calls.len() >= 3, "{calls:?}");
-    assert!(d.seen().iter().all(|s| s.auth == "Bot fake-bot-token"));
+    assert!(
+        d.seen()
+            .iter()
+            .all(|s| s.auth == "Bot fake-bot-token" || s.auth == "Bearer tok" || s.auth.is_empty())
+    );
 }
 
 #[tokio::test]
@@ -2717,10 +2806,18 @@ async fn trailing_slash_in_api_base_is_tolerated() {
     open_registration(&e).await;
     d.script(
         "GET",
-        &format!("/guilds/{GUILD}/members/{MEMBER}"),
+        &member_path(GUILD),
         200,
         json!({"roles": ["900000000000000077"]}),
     );
+    assert_eq!(verify_login(&e).await.0, 307);
     assert_eq!(issue(&e, MEMBER).await.0, 200);
-    assert_eq!(d.calls(), [format!("GET /guilds/{GUILD}/members/{MEMBER}")]);
+    assert_eq!(
+        d.calls(),
+        [
+            "POST /oauth2/token".to_string(),
+            "GET /users/@me".to_string(),
+            format!("GET /users/@me/guilds/{GUILD}/member")
+        ]
+    );
 }

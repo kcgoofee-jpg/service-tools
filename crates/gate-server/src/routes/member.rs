@@ -5,10 +5,10 @@ use super::registration::{no_store, read_model};
 use crate::action_log::log_action;
 use crate::auth::{client_ip, header_str};
 use crate::error::{ApiError, ApiResult, HttpError, InternalError, ok_json};
-use crate::registration::RegErr;
+use crate::registration::{RegErr, RoleCheck};
 use crate::session::{
-    MEMBER_COOKIE, MEMBER_SESSION_DAYS, STATE_COOKIE, cookie, delete_cookie_header, key_tag,
-    member_state, set_cookie_header, sign_member,
+    LoginMode, MEMBER_COOKIE, MEMBER_SESSION_DAYS, STATE_COOKIE, cookie, delete_cookie_header,
+    key_tag, member_state, set_cookie_header, sign_login_state, sign_member, verify_login_state,
 };
 use crate::state::AppState;
 use axum::Router;
@@ -67,16 +67,27 @@ async fn log_member(state: &AppState, who: &str, action: &str, target: &str, det
 
 // ------------------------------------------------------------------ 用 Discord 登录
 
-async fn login_start(State(state): State<AppState>) -> ApiResult {
+/// `/login?verify=1` = 验证身份组（多申请 guilds.members.read）；不带 = 普通登录（只要 identify）。
+async fn login_start(
+    State(state): State<AppState>,
+    Query(q): Query<HashMap<String, String>>,
+) -> ApiResult {
     let Some(svc) = state.registration.as_deref() else {
         return Err(HttpError::new(503, "登录尚未配置").into());
     };
     use base64::Engine;
     let nonce = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(rand::random::<[u8; 24]>());
-    let mut resp = redirect(&svc.web_login_url(&nonce));
+    let mode = if q.get("verify").is_some_and(|v| v == "1") {
+        LoginMode::Verify
+    } else {
+        LoginMode::Plain
+    };
+    // state 自带用途、过期时间和签名；Cookie 里存同一份，两条路任意一条对得上都算数
+    let st = sign_login_state(&state.secret_key, mode, &nonce, state.now() as i64);
+    let mut resp = redirect(&svc.web_login_url(&st, mode == LoginMode::Verify));
     resp.headers_mut().append(
         "set-cookie",
-        set_cookie_header(STATE_COOKIE, &nonce, 600, true, "lax"),
+        set_cookie_header(STATE_COOKIE, &st, 600, true, "lax"),
     );
     Ok(resp)
 }
@@ -94,26 +105,38 @@ async fn login_callback(
     let expected = cookie(&headers, STATE_COOKIE).unwrap_or_default();
     let same =
         given.len() == expected.len() && bool::from(given.as_bytes().ct_eq(expected.as_bytes()));
-    if code.is_empty() || given.is_empty() || !same {
-        // error=access_denied（成员点了取消）/ 缺 state cookie（跨浏览器打开授权页）都会走到这里
+    // 签名 state 不依赖 Cookie（Discord 内置浏览器常丢 Cookie）；它的用途只信签名里的。
+    // 只有 Cookie 对得上的旧式 state 一律当普通登录，不可能借它进入验证模式。
+    let signed = verify_login_state(&state.secret_key, given, state.now() as i64);
+    let mode = match signed {
+        Some(m) => Some(m),
+        None if same && !given.is_empty() => Some(LoginMode::Plain),
+        None => None,
+    };
+    let Some(mode) = mode.filter(|_| !code.is_empty()) else {
+        // error=access_denied（成员点了取消）/ state 过期或被改都会走到这里
         tracing::info!(
-            "[web-login] callback rejected: code={} state_ok=n err={}",
+            "[web-login] callback rejected: code={} state_ok={} err={}",
             if code.is_empty() { 'n' } else { 'y' },
+            if signed.is_some() || same { 'y' } else { 'n' },
             gate_core::pyc::take_chars(q.get("error").map_or("", String::as_str), 40)
         );
         return Ok(redirect("/?login=failed"));
-    }
-    let who = match svc.web_identify(code).await {
+    };
+    let verify = mode == LoginMode::Verify;
+    let who = match svc.web_identify(code, verify).await {
         Ok(w) => w,
         Err(RegErr::Denied(_)) => return Ok(redirect("/?login=failed")),
         Err(RegErr::Internal(m)) => return Err(internal(m)),
     };
-    if !who.in_server {
-        // 不在社区服务器的 Discord 账号不发会话
-        tracing::info!("[web-login] not in server / role gate");
-        return Ok(redirect("/?login=failed"));
-    }
-    let mut resp = redirect("/");
+    // 普通登录不看身份组，绝不因此拒绝；验证模式把结果带回首页
+    let to = match who.role {
+        None => "/",
+        Some(RoleCheck::Verified | RoleCheck::NotRequired) => "/?verify=ok",
+        Some(RoleCheck::Missing) => "/?verify=no",
+        Some(RoleCheck::Unavailable) => "/?verify=error",
+    };
+    let mut resp = redirect(to);
     let exp = state.now() as i64 + MEMBER_SESSION_DAYS * 86400;
     let tag = key_tag(svc.key_row_for(&who.id).await?.as_ref());
     resp.headers_mut().append(
@@ -130,7 +153,23 @@ async fn login_callback(
         "set-cookie",
         delete_cookie_header(STATE_COOKIE, false, "lax", false),
     );
-    log_member(&state, &who.id, "网页登录", "", "").await;
+    log_member(
+        &state,
+        &who.id,
+        if verify {
+            "验证身份组"
+        } else {
+            "网页登录"
+        },
+        "",
+        match who.role {
+            Some(RoleCheck::Verified) => "已核验",
+            Some(RoleCheck::Missing) => "没有身份组",
+            Some(RoleCheck::Unavailable) => "Discord 无法核验",
+            _ => "",
+        },
+    )
+    .await;
     Ok(resp)
 }
 

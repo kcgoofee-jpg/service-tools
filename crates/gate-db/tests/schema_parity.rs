@@ -52,7 +52,7 @@ fn dump_conn(con: &Connection) -> Value {
     json!({"objects": objects, "columns": columns})
 }
 
-/// 旧版 Python 建出来的表结构（冻结的夹具），加上 3.0 新增的列（`bootstrap::RUST_ADDED_COLUMNS`）。
+/// 旧版 Python 建出来的表结构（冻结的夹具），加上 3.0 新增的列和表（`bootstrap::RUST_ADDED_COLUMNS` / `RUST_ADDED_TABLES`）。
 /// 夹具本身不改：按夹具里的 DDL 在内存库里重建，再补列，重新导出。
 fn python_schema_plus_rust_additions() -> Value {
     let master: Value = serde_json::from_str(include_str!("fixtures/python_master.json")).unwrap();
@@ -66,6 +66,9 @@ fn python_schema_plus_rust_additions() -> Value {
     // 重建的结果必须与夹具一致，否则下面补列后的比较没有意义
     assert_eq!(dump_conn(&con), master, "夹具无法原样重建");
     for ddl in gate_db::bootstrap::RUST_ADDED_COLUMNS {
+        con.execute(ddl, []).unwrap();
+    }
+    for ddl in gate_db::bootstrap::RUST_ADDED_TABLES {
         con.execute(ddl, []).unwrap();
     }
     dump_conn(&con)
