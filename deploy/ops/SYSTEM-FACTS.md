@@ -201,7 +201,7 @@
 | （填了邀请 Key 的在这里分流，直接绑定，不看下面三项） | |
 | 每小时最多发放 `issue_hourly_cap` | 码 12，线 0（不限） |
 | `register_open` 与名额 | `register_open` 线 1，关 = 「领 Key 当前已关闭」；名额 `register_max_users`（没设过 = 10；线 0 = 不限，须确认是库里的值），满了先到先得，没有候补 |
-| 可选：身份组门槛 | `register_role_guild` / `register_role_id`，线均为空（不设门槛）；用机器人 Token 核验，不用用户 OAuth |
+| 可选：身份组门槛 | `register_role_guild` / `register_role_id`，线均为空（不设门槛）；机器人不在该服务器里，改由成员打开 `/login?verify=1` 用 Discord 授权（scope `identify guilds.members.read`），网关用成员自己的授权查身份组，核验结果记在 `role_verifications` 表，`/register` 只查这张表；普通登录只要 `identify`、不受门槛影响 |
 
 新 Key 的默认值：每日 V4.5 上限 = `register_daily_images`（线 95，算法同步）、每日 V5 = `register_daily_v5`（线 3，算法同步）、模型范围 `register_image_scope`（线 `all`，`legacy` 则不能用 V5）、有效期 `register_expires_days`（没设过 = 0 不过期；线 0）、每分钟请求数 5（代码常量）、功能 `register_features`（没设过 = `image`；线 `image,vibe,tags`）、无 Anlas 权限、无图生图权限。后台手动新建 Key 和一键邀请 Key 读同一份「新成员默认」（每日 V4.5 / V5 张数、模型范围、有效期、默认功能），弹窗里没填的字段取这些值；只有每日 / 每月 Anlas 上限（默认 0 = 跟随全站每人每日上限 / 2500）和每分钟请求数（10）是代码常量，由 `/admin/api/ops` 带给弹窗。环境变量 `DEFAULT_*` / `REGISTER_*` / `DISCORD_ROLE_ID` 已删除，限定身份组只在后台「领 Key」里设。领取成功的回复只有本人可见，不走 OAuth，不私信。
 
