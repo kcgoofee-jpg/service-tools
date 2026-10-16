@@ -8,6 +8,10 @@
 #   deploy/v3/cutover.sh previous                  3.0 回到上一版 3.0 镜像（owl-gate:previous）
 #   deploy/v3/cutover.sh status
 #
+# load / up / rollback / previous 之前会先看最近 10 分钟的出图请求数（只读 sqlite）：超过阈值
+# （环境变量 CUTOVER_BUSY_THRESHOLD，默认 30）或现在正落在忙时（CUTOVER_BUSY_HOURS，如 "20-24"，默认不设）
+# 就拒绝执行，除非加 --force（放在子命令后面或前面都行）。
+#
 # 2.x 的容器只停不删，回滚只需几秒。巡检跟着切换（systemd drop-in）：3.0 检查 owl-gate / owl-naimei / caddy，
 # 回滚到 2.x 后改查 nai-gate / nai-gate-discord / caddy，不然巡检会把「owl-* 没在跑」当成危险，每 6 小时私信一次站长。
 set -euo pipefail
@@ -25,8 +29,49 @@ PATROL_ROLLBACK_DROPIN=/etc/systemd/system/nai-patrol.service.d/rollback.conf
 PATROL_CONTAINERS_V3=owl-gate,owl-naimei,caddy
 PATROL_CONTAINERS_LEGACY=nai-gate,nai-gate-discord,caddy
 
+BUSY_THRESHOLD=${CUTOVER_BUSY_THRESHOLD:-30}
+BUSY_HOURS=${CUTOVER_BUSY_HOURS:-}
+FORCE=0
+
 log() { printf '[%(%F %T)T] %s\n' -1 "$*"; }
 die() { log "✗ $*"; exit 1; }
+
+# 最近 10 分钟的图片请求数（只读打开库；读不到返回空）
+recent_images() {
+  [[ -f $DB ]] || return 0
+  sqlite3 -readonly "$DB" ".timeout 5000" \
+    "SELECT COUNT(*) FROM usage_log WHERE kind LIKE 'image%' AND ts > CAST(strftime('%s','now') AS INTEGER) - 600;" \
+    2>/dev/null | tail -1
+}
+
+# 现在是不是落在 CUTOVER_BUSY_HOURS（如 "20-24"，含起点、不含终点，可跨午夜 "22-6"）里
+in_busy_hours() {
+  [[ $BUSY_HOURS =~ ^([0-9]{1,2})-([0-9]{1,2})$ ]] || return 1
+  local from=$((10#${BASH_REMATCH[1]})) to=$((10#${BASH_REMATCH[2]})) now
+  now=$((10#$(date +%H)))
+  if ((from <= to)); then ((now >= from && now < to)); else ((now >= from || now < to)); fi
+}
+
+# 部署 / 重启前的忙碌检查：忙就拒绝，--force 才放行
+busy_guard() {
+  local n reason=""
+  n=$(recent_images || true)
+  if [[ -z $n ]]; then
+    log "! 读不到最近 10 分钟的出图数（库不可读？），跳过忙碌检查"
+  else
+    log "最近 10 分钟图片请求：$n（阈值 $BUSY_THRESHOLD）"
+    if ((n > BUSY_THRESHOLD)); then reason="最近 10 分钟有 $n 张图片请求，超过阈值 $BUSY_THRESHOLD"; fi
+  fi
+  if [[ -z $reason ]] && in_busy_hours; then reason="现在（$(date +%H:%M)）在忙时 $BUSY_HOURS 内"; fi
+  if [[ -n $reason ]]; then
+    if ((FORCE)); then
+      log "! $reason；已加 --force，继续"
+    else
+      die "$reason；生成中的图会被打断。等一等再来，或加 --force 强行执行"
+    fi
+  fi
+  log "提醒：重启后每小时出图计数由用量日志补回，跨重启的那个小时窗口可能多算一次（只会更保守）"
+}
 
 wait_healthy() {
   local deadline=$((SECONDS + ${1:-90}))
@@ -163,12 +208,18 @@ cmd_status() {
   fi
 }
 
+args=()
+for a in "$@"; do
+  if [[ $a == --force ]]; then FORCE=1; else args+=("$a"); fi
+done
+set -- "${args[@]+"${args[@]}"}"
+
 case ${1:-status} in
-  load) shift; cmd_load "$@" ;;
+  load) shift; busy_guard; cmd_load "$@" ;;
   install-ops) shift; cmd_install_ops "$@" ;;
-  up) cmd_up ;;
-  rollback) cmd_rollback ;;
-  previous) cmd_previous ;;
+  up) busy_guard; cmd_up ;;
+  rollback) busy_guard; cmd_rollback ;;
+  previous) busy_guard; cmd_previous ;;
   status) cmd_status ;;
   *) die "未知子命令：$1" ;;
 esac
