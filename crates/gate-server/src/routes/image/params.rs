@@ -125,6 +125,14 @@ pub(super) async fn prepare(
     body = b;
     notes.extend(more);
     if tier == "v5" {
+        // 站长临时降档：V5 Full（含局部重绘）改走 Medium，放在整理参数和费用估算之前，这样价格和免费额度都按 Medium 算。
+        if let Some(medium) =
+            policy::v5_medium_of(&py_str(body.get("model").unwrap_or(&Value::Null)))
+            && crate::v5_medium::active(state).await
+        {
+            body["model"] = Value::String(medium.into());
+            notes.push("站长已临时切到 V5 Medium".to_string());
+        }
         if policy::is_v5_medium(&py_str(body.get("model").unwrap_or(&Value::Null))) {
             let (b, more) = policy::medium_normalize(&body);
             body = b;

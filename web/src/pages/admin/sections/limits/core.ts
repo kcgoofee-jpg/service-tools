@@ -309,3 +309,37 @@ export const MANUAL_N_SPEC: Record<string, FieldSpec> = {
     hint: "保存后立即同步给所有由算法管理的 Key；明天 7 点起算法继续按昨天的用量微调（10～2000）",
   },
 };
+
+/** V5 Medium 降档（/admin/api/settings 的 v5_medium_mode / v5_medium_state） */
+export type MediumMode = "off" | "on" | "auto";
+export type MediumState = { active: boolean; lowest_percent: number | null; threshold: number };
+/** 自动档回切要比提示线再高多少个百分点（与后端 gate_core::v5_medium::HYSTERESIS 一致） */
+export const MEDIUM_HYSTERESIS = 5;
+
+export const MEDIUM_MODES: Array<{ value: MediumMode; label: string; desc: string }> = [
+  { value: "off", label: "关闭", desc: "V5 Full 照常出，不改模型（默认）" },
+  { value: "on", label: "开启", desc: "所有 V5 Full 请求都改走 Medium（固定 14 步，约省 42%）" },
+  { value: "auto", label: "自动", desc: "账号 V5 余量低于提示线时才改走 Medium，回升后自动切回" },
+];
+
+export function isMediumMode(v: unknown): v is MediumMode {
+  return v === "off" || v === "on" || v === "auto";
+}
+
+/** 当前生效状态的几行说明（名称 / 值） */
+export function mediumStatus(mode: MediumMode, st: MediumState | null | undefined): Array<[string, string]> {
+  if (mode === "off") return [["当前状态", "未启用，V5 Full 照常出"]];
+  if (mode === "on") return [["当前状态", "已开启，V5 Full 请求都改走 Medium"]];
+  const t = st?.threshold;
+  const low = st?.lowest_percent;
+  return [
+    ["现在是否已切换", st?.active ? "是，V5 Full 请求正在改走 Medium" : "否，V5 Full 照常出"],
+    ["最低的账号 V5 余量", typeof low === "number" ? `${low}%` : "还没读到（有人出过 V5 才有）"],
+    [
+      "切换条件",
+      typeof t === "number"
+        ? `低于 ${t}% 时切换，回升到 ${t + MEDIUM_HYSTERESIS}% 以上切回`
+        : "低于「V5 余量低提示线」时切换",
+    ],
+  ];
+}

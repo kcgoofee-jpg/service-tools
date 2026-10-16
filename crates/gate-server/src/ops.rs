@@ -58,6 +58,8 @@ pub struct Shared {
     pub runtime_limits: tokio::sync::Mutex<()>,
     /// 旧版 `ManualReconciliation.lock`：同一时刻只允许一次 Anlas 核对。
     pub reconcile: tokio::sync::Mutex<()>,
+    /// V5 Medium 自动档此刻是否开着（滞回需要上一次的结果；只在内存里，重启后从关开始）。
+    pub v5_medium_auto: std::sync::atomic::AtomicBool,
 }
 
 // ------------------------------------------------------------------ 动态额度管着的设置

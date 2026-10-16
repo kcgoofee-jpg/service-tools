@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { deriveV5, guardSpecs, imagesPerPercent, pacedText, type V5Plan } from "./core";
+import {
+  deriveV5,
+  guardSpecs,
+  imagesPerPercent,
+  isMediumMode,
+  MEDIUM_MODES,
+  mediumStatus,
+  pacedText,
+  type V5Plan,
+} from "./core";
 
 const plan: V5Plan = { rate: 5, percent: null, global: 71, people: 10, each: 7 };
 
@@ -48,5 +57,30 @@ describe("保护推算", () => {
     });
     expect(Object.keys(specs)).toEqual(["account_daily_cap"]);
     expect(specs.account_daily_cap).toMatchObject({ kind: "int", min: 0, max: 20000 });
+  });
+});
+
+describe("V5 Medium 降档", () => {
+  it("三个模式、识别合法值", () => {
+    expect(MEDIUM_MODES.map((m) => m.value)).toEqual(["off", "on", "auto"]);
+    expect(isMediumMode("auto")).toBe(true);
+    expect(isMediumMode("ON")).toBe(false);
+    expect(isMediumMode(undefined)).toBe(false);
+  });
+  it("关闭 / 开启只有一行状态", () => {
+    expect(mediumStatus("off", null)).toEqual([["当前状态", "未启用，V5 Full 照常出"]]);
+    expect(mediumStatus("on", null)).toHaveLength(1);
+  });
+  it("自动档：是否已切换、最低余量、切换条件（回切线 = 提示线 + 5）", () => {
+    const rows = mediumStatus("auto", { active: true, lowest_percent: 12, threshold: 20 });
+    expect(rows[0]).toEqual(["现在是否已切换", "是，V5 Full 请求正在改走 Medium"]);
+    expect(rows[1]).toEqual(["最低的账号 V5 余量", "12%"]);
+    expect(rows[2]?.[1]).toBe("低于 20% 时切换，回升到 25% 以上切回");
+  });
+  it("自动档：还没读到余量时不假装有数", () => {
+    const rows = mediumStatus("auto", { active: false, lowest_percent: null, threshold: 20 });
+    expect(rows[0]?.[1]).toBe("否，V5 Full 照常出");
+    expect(rows[1]?.[1]).toBe("还没读到（有人出过 V5 才有）");
+    expect(mediumStatus("auto", undefined)[2]?.[1]).toBe("低于「V5 余量低提示线」时切换");
   });
 });

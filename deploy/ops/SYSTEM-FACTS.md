@@ -37,6 +37,7 @@
 | 上游连续 403（图片通道） | — | — | 连续 3 次 → 该 Token 冷却 5 → 15 → 45 → 60 分钟（`min(60, 5×3ⁿ)`），24 小时内没有 403 档位归零；私信站长 |
 | 无效 Key 防爆破 | 同一 IP（IPv6 按 /64）600 秒内 ≥ 20 次无效 Key → 拦截 900 秒（代码常量） | — | 只拦无效 Key；有效 Key 不受影响。后台登录另有一套：每 IP 300 秒内最多 5 次（代码常量） |
 | V5 官方额度查询 | 只在真实 V5 出图时刷新缓存 | 低提示线 20 | 缓存：剩 ≤ 2% 为 15 秒，低于「V5 余量低提示线」（`v5_alert_threshold`，默认 20）为 60 秒，其余 300 秒。定时任务「上游 V5 快照」每小时最多再主动读一次订阅信息 |
+| V5 Medium 降档 `v5_medium_mode` | `off`（后台「额度与保护」页三选一；认不出的值按 `off`） | off | `on`：模型是 V5 Full（`nai-diffusion-5-full`）或其局部重绘版的请求，在费用估算和额度准入之前改成对应的 Medium 模型并按 Medium 整理参数（14 步 / Euler-a / Heavy 负面预设），出图记录的说明写「站长已临时切到 V5 Medium」；仍占成员 V5 额度。已经是 Medium、Curated、别名（`nai-v5` 等）不动。`auto`：只在可用上游账号里最低的 V5 余量（读缓存，不新增上游请求）低于 `v5_alert_threshold` 时才改，回升到「提示线 + 5」以上才切回（滞回；当前状态只在内存里，重启后从关开始）；还没读到任何余量时不改 |
 
 每把 Key 的限速只有上面两层：排队（同时生成 1 张 + 排队 1 张）和每分钟请求数。2.x 的「每把 Key 两张图至少隔 15 秒」（`KEY_IMAGE_MIN_INTERVAL` / `runtime_key_image_min_interval`）、每把 Key 一个信号量（`KEY_CONCURRENCY`）、「同一把 Key 同时在途 ≤ 4」和每个账号的「10 分钟突发窗口」（`burst_cap`）都已删除（与排队重复，或永远触发不了）。
 
@@ -259,7 +260,7 @@
 | `register_*` | `register_open`、`register_max_users`、`register_daily_images`、`register_daily_v5`、`register_image_scope`、`register_expires_days`、`register_features`、`register_role_guild` / `register_role_id` / `register_role_note` | 线 1 / 未设 / 95 / 3 / all / 0 / `image,vibe,tags` / 空 |
 | `audit_*` | `audit_prompts`、`audit_thumbs`、`audit_retention_days`（见 §7） | 线 1 / 1 / 0 |
 | `bot_*` | `bot_status`（机器人心跳，奶妹每分钟经桥接接口写一次：账号 / 服务器 / 网关延迟 / 启动时间 / `seen_at`；3 分钟没更新算离线，后台 Discord 页的「机器人状态」读它） | 随机器人上报 |
-| 其他 | `features_global`（JSON，缺省全开）、`v5_alert_threshold`（后台叫「V5 余量低提示线」，默认 20，范围 1～100；只决定官方余量缓存刷多勤和后台是否标「低」）、`job_last`（定时任务每轮的结果，见 §4） | 线 `v5_alert_threshold` = 20 |
+| 其他 | `features_global`（JSON，缺省全开）、`v5_alert_threshold`（后台叫「V5 余量低提示线」，默认 20，范围 1～100；决定官方余量缓存刷多勤、后台是否标「低」，以及 `v5_medium_mode=auto` 的切换线）、`v5_medium_mode`（`off` / `on` / `auto`，默认 `off`，见 §1）、`job_last`（定时任务每轮的结果，见 §4） | 线 `v5_alert_threshold` = 20 |
 
 线上库里还有一些代码已不再读取的残留键，看到不要当真：`anlas_pool_last`、`anlas_member_daily_cap`、`anlas_min_key_age_days`、`economy_mode`、`autopilot_economy`、`guard_daily_cap_fallback`、`guard_account_3h_cap`、`guard_account_10m_cap`、`ack_*`、`quota_shadow_*`、`guard_base_daily_images`、`quota_base` / `quota_base_min` / `quota_base_step` / `quota_base_now`、`quota_v5_min` / `quota_v5_max`、`runtime_key_image_min_interval`、`autopilot_slots` / `autopilot_breaker` / `autopilot_key_guard` / `autopilot_slots_at`、`autopilot_last` / `autopilot_history`、`kernel_last`、`module_*`（内核模块改成定时任务后不再读写）、`module_allocation`（3.0 额度精简删掉的），以及 `bot_gallery_*`（跑图分享设置）、`bot_events`（机器人最近动作）——后两者随功能一起删除。
 

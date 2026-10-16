@@ -24,6 +24,7 @@ pub mod reasons;
 pub mod site_flags;
 pub mod upstream_errors;
 pub mod upstream_policy;
+pub mod v5_medium;
 
 pub mod client_views;
 pub mod errors;
