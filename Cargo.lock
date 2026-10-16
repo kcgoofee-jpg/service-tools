@@ -3847,6 +3847,7 @@ dependencies = [
  "gate-db",
  "gate-server",
  "gate-testkit",
+ "gate-upstream",
  "rand 0.9.5",
  "serde_json",
  "tempfile",

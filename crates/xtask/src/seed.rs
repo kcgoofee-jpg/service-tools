@@ -109,6 +109,9 @@ enum Outcome {
     Error,
 }
 
+/// 本地网关用的假上游 Token（演示数据里的用量日志按它的 token_id 记账）。
+pub const DEV_UPSTREAM_TOKEN: &str = "pst-devdevdevdevdevdevdev";
+
 pub async fn seed(db: &Db, clock: &Clock, now: f64) -> Result<Seeded> {
     let mut rng = StdRng::seed_from_u64(7);
     let keys = seed_members(db, now).await?;
@@ -118,6 +121,7 @@ pub async fn seed(db: &Db, clock: &Clock, now: f64) -> Result<Seeded> {
     seed_member_extras(db, now, &keys).await?;
     seed_records(db, now, &keys, &mut rng).await?;
     seed_site(db, now).await?;
+    seed_reconciliation(db, now).await?;
     Ok(Seeded { keys })
 }
 
@@ -255,6 +259,7 @@ async fn seed_usage(
         (500, "上游图片服务内部错误（HTTP 500）"),
         (429, "上游限流（HTTP 429），已自动冷却"),
     ];
+    let token_id = gate_upstream::headers::token_id(DEV_UPSTREAM_TOKEN);
     for e in events(now, clock, rng) {
         let key = &keys[e.key];
         let model = if e.kind == "tags" {
@@ -287,6 +292,7 @@ async fn seed_usage(
                         dur_ms: rng.random_range(3000..9000),
                         up_status: 200,
                         rid: common.4,
+                        token_id: Some(token_id.clone()),
                         ..Default::default()
                     },
                     e.ts,
@@ -346,6 +352,7 @@ async fn seed_usage(
                         dur_ms: rng.random_range(3000..9000),
                         up_status: up,
                         rid: common.4,
+                        token_id: Some(token_id.clone()),
                         ..Default::default()
                     },
                     e.ts,
@@ -354,6 +361,20 @@ async fn seed_usage(
             }
         }
     }
+    Ok(())
+}
+
+/// 一份一天前的 Anlas 对账快照：「上游」页的余额推算有数可算。
+async fn seed_reconciliation(db: &Db, now: f64) -> Result<()> {
+    let id = gate_upstream::headers::token_id(DEV_UPSTREAM_TOKEN);
+    let snapshot = serde_json::json!({
+        "checked_at": now - 86400.0,
+        "accounts": {id: {"fixed": 9000, "purchased": 300, "expires_at": (now + 12.0 * 86400.0) as i64}},
+        "ledger": {"anlas": 0, "unconfirmed_anlas": 0, "unconfirmed_requests": 0, "last_log_id": 0},
+        "balance": 9300,
+        "comparison": {"reason": "first"},
+    });
+    db.save_reconciliation(&snapshot).await?;
     Ok(())
 }
 

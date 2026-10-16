@@ -14,6 +14,7 @@ path = "src/main.rs"
 [dependencies]
 gate-core.workspace = true
 gate-db.workspace = true
+gate-upstream.workspace = true
 # 开发专用：只有 xtask 依赖它们，不进发布的二进制（Dockerfile 只构建 nai-gate / nai-bots / nai-ops）
 gate-server = { path = "../gate-server" }
 gate-testkit = { path = "../gate-testkit" }
