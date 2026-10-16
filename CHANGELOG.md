@@ -8,14 +8,15 @@
 
 ### 成员可感知
 
-- **限定身份组改成「网页授权验证」。** 后台「领 Key」里设了限定身份组时，先打开 `/login?verify=1` 用 Discord 授权一次，通过后再用 `/register` 领取；没验证过的 `/register` 会给出这个链接。Discord 暂时查不了时提示「Discord 暂时无法核验，请稍后再试」，不会说成「你没有身份组」。已有 Key 的成员、邀请 Key 绑定不受影响。
-- 普通「用 Discord 登录」仍只申请 `identify`，不查身份组，也不会因为没有身份组被拒绝（以前配了身份组门槛后，不在那个服务器的成员连登录都会失败）。
+- **限定身份组在登录时核验。** 后台「领 Key」里设了限定身份组后，首页「登录」的 Discord 授权页一次就申请 `identify guilds.members.read`（「阅读关于您所在服务器的成员信息，例如昵称、头像、身份组」），回调里当场核验：有身份组就记下并登录，之后用 `/register` 领取；没有身份组又没有 Key 的人不会登录，首页提示「没有检测到「身份组名称」，暂时不能领取 Key」；Discord 暂时查不了时提示「Discord 暂时无法核验，请稍后再试」，不会说成「你没有身份组」。`/register` 里没核验过的人会被告知先到网站点「登录」。
+- 已有 Key 的成员不受影响：核验不到身份组、甚至 Discord 暂时查不了，也照常登录进自己的额度页，不弹提示；邀请 Key 绑定同样不受影响。没设身份组门槛时，登录只申请 `identify`，行为和以前完全一样。
 - 登录回调的 state 改成带签名、10 分钟有效，Discord 内置浏览器丢了 Cookie 也能完成登录（此前日志里的 `state_ok=n`）。
 
 ### 站长 / 运维
 
 - 新表 `role_verifications(discord_id, guild_id, role_id, verified_at)`，只增不减，回滚到 2.x 不受影响；机器人不再需要在门槛服务器里，`/guilds/{id}/members/{uid}` 的机器人查询已删除。
-- 设置不变：`register_role_guild` / `register_role_id` / `register_role_note`；上线前仍需站长在后台填写。
+- 设置不变：`register_role_guild` / `register_role_id` / `register_role_note`；上线前仍需站长在后台填写。门槛配齐（服务器和身份组都非空）后 `/login` 一律走验证模式，`/login?verify=1` 保留兼容。
+- `/public/status`、`/public/live` 的 `registration` 里新增 `role_note`（只有门槛配齐才有，只含后台填的名称，不含服务器 / 身份组 ID），首页被挡时用来说明缺哪个身份组。
 
 ## [3.0.0] - 2026-10-15（Rust + Preact 全量重写）
 

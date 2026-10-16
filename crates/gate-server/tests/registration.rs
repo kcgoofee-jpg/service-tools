@@ -736,9 +736,14 @@ async fn young_discord_accounts_are_refused() {
     assert_eq!(issue(&e, &snowflake(30.0)).await.0, 200);
 }
 
-/// 走一遍「验证身份组」授权：`/login?verify=1` 取 state，再不带 Cookie 回调（模拟丢 Cookie 的内置浏览器）。
+/// 走一遍普通「登录」：`/login` 取 state，再不带 Cookie 回调（模拟丢 Cookie 的内置浏览器）。
+/// 门槛配齐时这一步就会申请并核验身份组。
 async fn verify_login(e: &Env) -> (u16, HeaderMap) {
-    let (s, h, _) = get_raw(e, "/login?verify=1", None).await;
+    login_via(e, "/login").await
+}
+
+async fn login_via(e: &Env, start: &str) -> (u16, HeaderMap) {
+    let (s, h, _) = get_raw(e, start, None).await;
     assert_eq!(s, 307);
     let loc = h["location"].to_str().unwrap();
     let st = loc.split("state=").nth(1).unwrap().to_string();
@@ -761,7 +766,7 @@ async fn role_gate_needs_oauth_verification_not_the_bot_token() {
         (r.0, detail(&r)),
         (
             403,
-            "目前只开放给「指定身份组」：请先打开 https://gate.test/login?verify=1 用 Discord 授权验证身份组，再用 /register 领取。"
+            "目前只开放给「指定身份组」：请先到 https://gate.test/login 用 Discord 登录（授权时会核验身份组），再用 /register 领取。"
         )
     );
     assert!(d.seen().is_empty());
@@ -769,6 +774,11 @@ async fn role_gate_needs_oauth_verification_not_the_bot_token() {
     d.script("GET", &member_path(GUILD), 200, json!({"roles": ["1"]}));
     let (s, h) = verify_login(&e).await;
     assert_eq!((s, h["location"].to_str().unwrap()), (307, "/?verify=no"));
+    assert_eq!(
+        cookie_value(&h, "owl_member"),
+        "",
+        "没有 Key 又没身份组：不发会话"
+    );
     assert_eq!(issue(&e, MEMBER).await.0, 403);
     // 有身份组 → 记下核验，能领
     d.clear_scripts();
@@ -826,7 +836,7 @@ async fn role_gate_can_target_another_community_via_settings() {
         (r.0, detail(&r)),
         (
             403,
-            "目前只开放给「创作者」：请先打开 https://gate.test/login?verify=1 用 Discord 授权验证身份组，再用 /register 领取。"
+            "目前只开放给「创作者」：请先到 https://gate.test/login 用 Discord 登录（授权时会核验身份组），再用 /register 领取。"
         )
     );
     d.script(
@@ -858,8 +868,8 @@ async fn verify_outcomes_never_blame_the_member_for_discord_failures() {
             (307, want),
             "{status}"
         );
-        // 授权本身成功：照常发会话
-        assert!(cookie_value(&h, "owl_member").contains(MEMBER));
+        // 没有 Key 的人被门槛挡在登录这一步：不发会话
+        assert_eq!(cookie_value(&h, "owl_member"), "", "{status}");
     }
     assert!(
         !e.state
@@ -871,10 +881,52 @@ async fn verify_outcomes_never_blame_the_member_for_discord_failures() {
 }
 
 #[tokio::test]
+async fn keyed_members_keep_their_session_without_the_role() {
+    let (e, d) = setup_reg(&[]).await;
+    open_registration(&e).await;
+    // 门槛上线前就已领过 Key 的成员
+    assert_eq!(issue(&e, MEMBER).await.0, 200);
+    require_role(&e, "900000000000000077").await;
+    let cases: [(u16, Value); 4] = [
+        (200, json!({"roles": ["1"]})),
+        (404, json!({"code": 10007})),
+        (429, json!({"retry_after": 1})),
+        (500, json!({})),
+    ];
+    for (status, body) in cases {
+        d.clear_scripts();
+        d.script("GET", &member_path(GUILD), status, body);
+        let (s, h) = verify_login(&e).await;
+        // 照常登录进自己的额度页，不弹吓人的提示
+        assert_eq!((s, h["location"].to_str().unwrap()), (307, "/"), "{status}");
+        assert!(cookie_value(&h, "owl_member").contains(MEMBER), "{status}");
+    }
+    // 有身份组的老成员：同样直接进首页，也记下核验
+    d.clear_scripts();
+    d.script(
+        "GET",
+        &member_path(GUILD),
+        200,
+        json!({"roles": ["900000000000000077"]}),
+    );
+    let (s, h) = verify_login(&e).await;
+    assert_eq!((s, h["location"].to_str().unwrap()), (307, "/"));
+    assert!(cookie_value(&h, "owl_member").contains(MEMBER));
+    assert!(
+        e.state
+            .db
+            .role_verified(MEMBER, GUILD, "900000000000000077")
+            .await
+            .unwrap()
+    );
+}
+
+#[tokio::test]
 async fn verify_without_role_setting_passes_without_recording() {
     let (e, d) = setup_reg(&[]).await;
-    let (s, h) = verify_login(&e).await;
-    assert_eq!((s, h["location"].to_str().unwrap()), (307, "/?verify=ok"));
+    let (s, h) = login_via(&e, "/login?verify=1").await;
+    assert_eq!((s, h["location"].to_str().unwrap()), (307, "/"));
+    assert!(cookie_value(&h, "owl_member").contains(MEMBER));
     assert!(!d.calls().iter().any(|c| c.ends_with("/member")));
 }
 
@@ -886,7 +938,7 @@ async fn unreachable_discord_never_mints_when_a_role_is_required() {
     open_registration(&e).await;
     let r = issue(&e, MEMBER).await;
     assert_eq!(r.0, 403);
-    assert!(detail(&r).contains("login?verify=1"));
+    assert!(detail(&r).contains("https://gate.test/login "));
     assert!(
         e.state
             .db
@@ -906,13 +958,30 @@ async fn verify_scope_and_state_rules() {
         loc.contains("&scope=identify+guilds.members.read&state=v."),
         "{loc}"
     );
-    // 普通登录仍只要 identify
+    // 门槛没配：普通登录仍只要 identify
     let (_, h, _) = get_raw(&e, "/login", None).await;
     assert!(
         h["location"]
             .to_str()
             .unwrap()
             .contains("&scope=identify&state=p.")
+    );
+    // 门槛配齐：普通「登录」一律带 guilds.members.read 并走验证模式；只配一半不算配齐
+    set_db(&e, "register_role_guild", GUILD).await;
+    let (_, h, _) = get_raw(&e, "/login", None).await;
+    assert!(
+        h["location"]
+            .to_str()
+            .unwrap()
+            .contains("&scope=identify&state=p."),
+        "只配服务器、没配身份组 = 不限定"
+    );
+    set_db(&e, "register_role_id", "900000000000000077").await;
+    let (_, h, _) = get_raw(&e, "/login", None).await;
+    let gated = h["location"].to_str().unwrap();
+    assert!(
+        gated.contains("&scope=identify+guilds.members.read&state=v."),
+        "{gated}"
     );
     // 改过的 state 不认；cookie 对得上的旧式 state 只能是普通登录，不会进入验证模式
     let st = loc.split("state=").nth(1).unwrap().to_string();
@@ -930,23 +999,22 @@ async fn verify_scope_and_state_rules() {
 }
 
 #[tokio::test]
-async fn plain_login_is_never_blocked_by_the_role_gate() {
+async fn legacy_cookie_only_state_is_plain_and_never_asks_discord_for_the_role() {
     let (e, d) = setup_reg(&[]).await;
     require_role(&e, "900000000000000077").await;
-    // 不在服务器、没有身份组的老成员照常登录
-    d.script("GET", &member_path(GUILD), 404, json!({"code": 10007}));
-    let (_, h, _) = get_raw(&e, "/login", None).await;
-    let st = h["location"]
-        .to_str()
-        .unwrap()
-        .split("state=")
-        .nth(1)
-        .unwrap()
-        .to_string();
-    let (s, h, _) = get_raw(&e, &format!("/login/callback?code=ok&state={st}"), None).await;
+    // 没签名、只有 Cookie 对得上的旧式 state：当普通登录（授权时没申请 guilds.members.read），不核验也不拦
+    let (s, h, _) = get_raw(
+        &e,
+        "/login/callback?code=ok&state=legacy.1",
+        Some("owl_login_state=legacy.1"),
+    )
+    .await;
     assert_eq!((s, h["location"].to_str().unwrap()), (307, "/"));
     assert!(cookie_value(&h, "owl_member").contains(MEMBER));
     assert!(!d.calls().iter().any(|c| c.ends_with("/member")));
+    // 但 /register 那边仍然只认核验记录
+    open_registration(&e).await;
+    assert_eq!(issue(&e, MEMBER).await.0, 403);
 }
 
 #[tokio::test]
@@ -2820,4 +2888,49 @@ async fn trailing_slash_in_api_base_is_tolerated() {
             format!("GET /users/@me/guilds/{GUILD}/member")
         ]
     );
+}
+
+#[tokio::test]
+async fn public_meta_exposes_only_the_role_note_when_the_gate_is_configured() {
+    async fn fetch(e: &Env, path: &str) -> Value {
+        let r = Call::new("GET", path).send(&e.state).await;
+        serde_json::from_slice::<Value>(&r.2).unwrap()
+    }
+    // status / live 的 meta 带短缓存，每种设置各用一个全新的环境
+    // 没配门槛：registration 里没有这个字段
+    let (e, _d) = setup_reg(&[]).await;
+    assert!(
+        fetch(&e, "/public/status").await["registration"]
+            .get("role_note")
+            .is_none()
+    );
+    assert!(
+        fetch(&e, "/public/live").await["registration"]
+            .get("role_note")
+            .is_none()
+    );
+    // 只配一半不算门槛
+    let (e, _d) = setup_reg(&[]).await;
+    set_db(&e, "register_role_note", "创作者").await;
+    set_db(&e, "register_role_guild", GUILD).await;
+    assert!(
+        fetch(&e, "/public/status").await["registration"]
+            .get("role_note")
+            .is_none()
+    );
+    assert!(
+        fetch(&e, "/public/live").await["registration"]
+            .get("role_note")
+            .is_none()
+    );
+    // 配齐：只给名称，不给服务器 / 身份组 ID
+    let (e, _d) = setup_reg(&[]).await;
+    set_db(&e, "register_role_note", "创作者").await;
+    require_role(&e, "900000000000000077").await;
+    for path in ["/public/status", "/public/live"] {
+        let body = fetch(&e, path).await;
+        assert_eq!(body["registration"]["role_note"], "创作者", "{path}");
+        let all = body.to_string();
+        assert!(!all.contains("900000000000000077") && !all.contains(GUILD));
+    }
 }

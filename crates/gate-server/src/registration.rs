@@ -258,7 +258,7 @@ pub struct WebIdentity {
     pub username: String,
     pub global_name: String,
     pub avatar: String,
-    /// 只有验证身份组的授权（verify=true）才会是 `Some`；普通登录不查成员信息，也绝不因此拒绝登录。
+    /// 只有验证身份组的授权（verify=true）才会是 `Some`；普通登录（门槛没配）不查成员信息，也绝不因此拒绝登录。
     pub role: Option<RoleCheck>,
 }
 
@@ -728,6 +728,12 @@ impl RegistrationService {
         }
     }
 
+    /// 身份组门槛是否配齐（后台「领 Key」的服务器和身份组都非空）：配齐后网页登录一律走验证模式。
+    pub async fn role_gate_configured(&self) -> Result<bool, DbError> {
+        let cfg = self.settings().await?;
+        Ok(!cfg.role_guild.is_empty() && !cfg.role_id.is_empty())
+    }
+
     /// 网页「用 Discord 登录」的授权链接（回调到 /login/callback）。只用于登录看状态，不发 Key。
     pub fn web_login_url(&self, state: &str, verify: bool) -> String {
         let redirect = format!("{}login/callback", self.cfg.site_url);
@@ -993,7 +999,7 @@ impl RegistrationService {
                 &cfg.role_note
             };
             return denied(format!(
-                "目前只开放给「{note}」：请先打开 {}login?verify=1 用 Discord 授权验证身份组，再用 /register 领取。",
+                "目前只开放给「{note}」：请先到 {}login 用 Discord 登录（授权时会核验身份组），再用 /register 领取。",
                 self.cfg.site_url
             ));
         }

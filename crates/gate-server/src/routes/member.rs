@@ -67,7 +67,9 @@ async fn log_member(state: &AppState, who: &str, action: &str, target: &str, det
 
 // ------------------------------------------------------------------ 用 Discord 登录
 
-/// `/login?verify=1` = 验证身份组（多申请 guilds.members.read）；不带 = 普通登录（只要 identify）。
+/// 身份组门槛配齐（后台「领 Key」的服务器和身份组都填了）时，所有网页登录都走验证模式：
+/// 授权页一次申请 `identify guilds.members.read`，回调里就地核验身份组；没配门槛 = 普通登录（只要 identify）。
+/// `/login?verify=1` 仍然有效（旧链接、已发出去的提示），行为同「门槛配齐」。
 async fn login_start(
     State(state): State<AppState>,
     Query(q): Query<HashMap<String, String>>,
@@ -77,7 +79,7 @@ async fn login_start(
     };
     use base64::Engine;
     let nonce = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(rand::random::<[u8; 24]>());
-    let mode = if q.get("verify").is_some_and(|v| v == "1") {
+    let mode = if q.get("verify").is_some_and(|v| v == "1") || svc.role_gate_configured().await? {
         LoginMode::Verify
     } else {
         LoginMode::Plain
@@ -129,16 +131,34 @@ async fn login_callback(
         Err(RegErr::Denied(_)) => return Ok(redirect("/?login=failed")),
         Err(RegErr::Internal(m)) => return Err(internal(m)),
     };
-    // 普通登录不看身份组，绝不因此拒绝；验证模式把结果带回首页
-    let to = match who.role {
-        None => "/",
-        Some(RoleCheck::Verified | RoleCheck::NotRequired) => "/?verify=ok",
-        Some(RoleCheck::Missing) => "/?verify=no",
-        Some(RoleCheck::Unavailable) => "/?verify=error",
+    // 已有 Key 的成员无论身份组结果如何都要能进自己的额度页；没有 Key 的人在这里被身份组门槛挡住：
+    // 不发会话、不记任何东西，只带着原因回首页（/register 那边还会再查一次核验记录）。
+    let key = svc.key_row_for(&who.id).await?;
+    let to = match (who.role, key.is_some()) {
+        (None | Some(RoleCheck::NotRequired), _) => "/",
+        (Some(RoleCheck::Verified), true) => "/",
+        (Some(RoleCheck::Verified), false) => "/?verify=ok",
+        (Some(RoleCheck::Missing), true) | (Some(RoleCheck::Unavailable), true) => "/",
+        (Some(RoleCheck::Missing), false) => "/?verify=no",
+        (Some(RoleCheck::Unavailable), false) => "/?verify=error",
     };
+    let detail = match who.role {
+        Some(RoleCheck::Verified) => "已核验",
+        Some(RoleCheck::Missing) => "没有身份组",
+        Some(RoleCheck::Unavailable) => "Discord 无法核验",
+        _ => "",
+    };
+    let blocked =
+        key.is_none() && matches!(who.role, Some(RoleCheck::Missing | RoleCheck::Unavailable));
     let mut resp = redirect(to);
+    let clear_state = delete_cookie_header(STATE_COOKIE, false, "lax", false);
+    if blocked {
+        resp.headers_mut().append("set-cookie", clear_state);
+        log_member(&state, &who.id, "网页登录被身份组门槛挡下", "", detail).await;
+        return Ok(resp);
+    }
     let exp = state.now() as i64 + MEMBER_SESSION_DAYS * 86400;
-    let tag = key_tag(svc.key_row_for(&who.id).await?.as_ref());
+    let tag = key_tag(key.as_ref());
     resp.headers_mut().append(
         "set-cookie",
         set_cookie_header(
@@ -149,10 +169,7 @@ async fn login_callback(
             "lax",
         ),
     );
-    resp.headers_mut().append(
-        "set-cookie",
-        delete_cookie_header(STATE_COOKIE, false, "lax", false),
-    );
+    resp.headers_mut().append("set-cookie", clear_state);
     log_member(
         &state,
         &who.id,
@@ -162,12 +179,7 @@ async fn login_callback(
             "网页登录"
         },
         "",
-        match who.role {
-            Some(RoleCheck::Verified) => "已核验",
-            Some(RoleCheck::Missing) => "没有身份组",
-            Some(RoleCheck::Unavailable) => "Discord 无法核验",
-            _ => "",
-        },
+        detail,
     )
     .await;
     Ok(resp)
