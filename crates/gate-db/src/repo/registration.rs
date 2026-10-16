@@ -131,6 +131,55 @@ impl Db {
         }
     }
 
+    // ------------------------------------------------------------------ 身份组核验（OAuth）
+
+    /// 记下成员授权核验过的身份组（重复核验只刷新时间）。
+    pub async fn upsert_role_verification(
+        &self,
+        discord_id: &str,
+        guild_id: &str,
+        role_id: &str,
+        now: f64,
+    ) -> Result<()> {
+        let (d, g, r) = (
+            discord_id.to_string(),
+            guild_id.to_string(),
+            role_id.to_string(),
+        );
+        self.write(move |tx| {
+            tx.execute(
+                "INSERT INTO role_verifications(discord_id, guild_id, role_id, verified_at) VALUES (?,?,?,?) \
+                 ON CONFLICT(discord_id, guild_id, role_id) DO UPDATE SET verified_at=excluded.verified_at",
+                params![d, g, r, now],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// 这个账号是否核验过指定服务器的指定身份组。
+    pub async fn role_verified(
+        &self,
+        discord_id: &str,
+        guild_id: &str,
+        role_id: &str,
+    ) -> Result<bool> {
+        let (d, g, r) = (
+            discord_id.to_string(),
+            guild_id.to_string(),
+            role_id.to_string(),
+        );
+        self.read(move |c| {
+            c.query_row(
+                "SELECT EXISTS(SELECT 1 FROM role_verifications WHERE discord_id=? AND guild_id=? AND role_id=?)",
+                params![d, g, r],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|n| n != 0)
+        })
+        .await
+    }
+
     // ------------------------------------------------------------------ 身份组待办
 
     /// `INSERT OR REPLACE INTO pending_role_removals`。

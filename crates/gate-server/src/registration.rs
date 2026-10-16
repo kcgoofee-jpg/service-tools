@@ -258,9 +258,21 @@ pub struct WebIdentity {
     pub username: String,
     pub global_name: String,
     pub avatar: String,
-    pub in_server: bool,
-    pub has_role: bool,
-    pub role_note: String,
+    /// 只有验证身份组的授权（verify=true）才会是 `Some`；普通登录不查成员信息，也绝不因此拒绝登录。
+    pub role: Option<RoleCheck>,
+}
+
+/// 验证身份组授权的结果。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RoleCheck {
+    /// 后台没配身份组门槛，无需核验。
+    NotRequired,
+    /// 已核验有这个身份组（已写入 `role_verifications`）。
+    Verified,
+    /// Discord 明确回答：不在服务器或没有这个身份组。
+    Missing,
+    /// Discord 故障 / 限流 / 网络错误：不能说成「你没有身份组」。
+    Unavailable,
 }
 
 /// Discord REST 调用失败的种类（对应旧版 `_discord` 抛的 RegistrationError / httpx.HTTPError / ValueError）。
@@ -707,13 +719,17 @@ impl RegistrationService {
 
     // ---- 网页登录 ----
 
-    /// 网页登录 OAuth 的 scope：只要 identify（不再申请敏感的 guilds.members.read）。
-    fn oauth_scope(&self) -> &'static str {
-        "identify"
+    /// 网页登录 OAuth 的 scope：普通登录只要 identify；只有「验证身份组」才多要 guilds.members.read。
+    fn oauth_scope(verify: bool) -> &'static str {
+        if verify {
+            "identify guilds.members.read"
+        } else {
+            "identify"
+        }
     }
 
     /// 网页「用 Discord 登录」的授权链接（回调到 /login/callback）。只用于登录看状态，不发 Key。
-    pub fn web_login_url(&self, state: &str) -> String {
+    pub fn web_login_url(&self, state: &str, verify: bool) -> String {
         let redirect = format!("{}login/callback", self.cfg.site_url);
         format!(
             "https://discord.com/oauth2/authorize?{}",
@@ -721,14 +737,15 @@ impl RegistrationService {
                 ("client_id", &self.cfg.client_id),
                 ("redirect_uri", &redirect),
                 ("response_type", "code"),
-                ("scope", self.oauth_scope()),
+                ("scope", Self::oauth_scope(verify)),
                 ("state", state),
             ])
         )
     }
 
-    /// 网页登录：用授权码换身份，返回 Discord 资料 + 是否在服务器 / 有指定身份组。不发 Key。
-    pub async fn web_identify(&self, code: &str) -> Result<WebIdentity, RegErr> {
+    /// 网页登录：用授权码换身份，返回 Discord 资料。`verify=true`（授权时申请了 guilds.members.read）
+    /// 才会再查身份组并记入 `role_verifications`。不发 Key。
+    pub async fn web_identify(&self, code: &str, verify: bool) -> Result<WebIdentity, RegErr> {
         let redirect = format!("{}login/callback", self.cfg.site_url);
         let resp = self
             .http
@@ -779,54 +796,57 @@ impl RegistrationService {
             Err(DiscordErr::Net) => return Err(RegErr::Internal("HTTPError".into())),
             Err(DiscordErr::Json) => return Err(RegErr::Internal("ValueError".into())),
         };
-        let cfg = self.settings().await?;
-        let guild_id = if cfg.role_guild.is_empty() {
-            self.cfg.guild_id.clone()
+        let id = if user.get("id").is_some_and(|v| !v.is_null()) {
+            pyext::py_str(&user["id"])
         } else {
-            cfg.role_guild.clone()
+            "None".into()
         };
-        // 身份组门槛只来自后台「领 Key」（register_role_guild / register_role_id）；没配 = 不限定
-        let role_id = if cfg.role_guild.is_empty() {
-            String::new()
+        let role = if verify {
+            Some(self.check_role(&id, &bearer).await?)
         } else {
-            cfg.role_id.clone()
+            None
         };
-        // 默认只请求 identify，查不到成员信息，一律放行；只有真的配了身份组门槛时才核验
-        // （那时需要在 oauth_scope 里把 guilds.members.read 加回来）。
-        let (mut in_server, mut has_role) = (true, true);
-        if !role_id.is_empty() {
-            let r = self
-                .send(
-                    Method::GET,
-                    &format!("/users/@me/guilds/{guild_id}/member"),
-                    &bearer,
-                    12,
-                    None,
-                )
-                .await
-                .map_err(|e| RegErr::Internal(format!("HTTPError: {e}")))?;
-            in_server = r.status == 200;
-            has_role = in_server
-                && r.json()
-                    .ok_or_else(|| RegErr::Internal("ValueError".into()))?
-                    .get("roles")
-                    .and_then(Value::as_array)
-                    .is_some_and(|roles| roles.iter().any(|x| x.as_str() == Some(&role_id)));
-        }
         let u = DiscordUser::from_json(&user);
         Ok(WebIdentity {
-            id: if user.get("id").is_some_and(|v| !v.is_null()) {
-                pyext::py_str(&user["id"])
-            } else {
-                "None".into()
-            },
+            id,
             username: u.username,
             global_name: u.global_name,
             avatar: u.avatar,
-            in_server,
-            has_role,
-            role_note: cfg.role_note,
+            role,
         })
+    }
+
+    /// 用成员自己的授权查他在门槛服务器里的身份组；有就记入 `role_verifications`。
+    /// 身份组门槛只来自后台「领 Key」（register_role_guild / register_role_id）；没配 = 不限定。
+    async fn check_role(&self, user_id: &str, bearer: &str) -> Result<RoleCheck, RegErr> {
+        let cfg = self.settings().await?;
+        if cfg.role_guild.is_empty() || cfg.role_id.is_empty() {
+            return Ok(RoleCheck::NotRequired);
+        }
+        let path = format!("/users/@me/guilds/{}/member", cfg.role_guild);
+        let Ok(r) = self.send(Method::GET, &path, bearer, 12, None).await else {
+            return Ok(RoleCheck::Unavailable);
+        };
+        match r.status {
+            200 => {}
+            // 10007 Unknown Member：账号不在这个服务器
+            404 => return Ok(RoleCheck::Missing),
+            _ => return Ok(RoleCheck::Unavailable),
+        }
+        let Some(member) = r.json() else {
+            return Ok(RoleCheck::Unavailable);
+        };
+        let has = member
+            .get("roles")
+            .and_then(Value::as_array)
+            .is_some_and(|roles| roles.iter().any(|x| x.as_str() == Some(&cfg.role_id)));
+        if !has {
+            return Ok(RoleCheck::Missing);
+        }
+        self.db
+            .upsert_role_verification(user_id, &cfg.role_guild, &cfg.role_id, now())
+            .await?;
+        Ok(RoleCheck::Verified)
     }
 
     // ---- 发 Key ----
@@ -958,43 +978,24 @@ impl RegistrationService {
             );
         }
         let cfg = self.check_capacity().await?;
-        // 身份组门槛（后台「领 Key」可配，可跨服）：用机器人 Token 查，不需要用户 OAuth
+        // 身份组门槛（后台「领 Key」可配，可跨服）：机器人不在那个服务器里，改查成员网页授权后记下的核验结果
         let (role_guild, role_id) = (cfg.role_guild.clone(), cfg.role_id.clone());
-        if !role_guild.is_empty() && !role_id.is_empty() {
+        if !role_guild.is_empty()
+            && !role_id.is_empty()
+            && !self
+                .db
+                .role_verified(user_id, &role_guild, &role_id)
+                .await?
+        {
             let note = if cfg.role_note.is_empty() {
                 "指定身份组"
             } else {
                 &cfg.role_note
             };
-            let path = format!("/guilds/{role_guild}/members/{user_id}");
-            let resp = match self
-                .send(Method::GET, &path, &self.bot_auth(), 12, None)
-                .await
-            {
-                Ok(r) => r,
-                Err(_) => return denied("Discord 暂时连不上，请过几分钟再用 /register。"),
-            };
-            if resp.status == 404 {
-                return denied(format!(
-                    "目前只开放给「{note}」：请先加入对应的社区服务器后再用 /register。"
-                ));
-            }
-            if resp.status != 200 {
-                // 限流 / Discord 故障：不能误报成「你不在服务器」
-                return denied("Discord 暂时无法核验身份组，请过几分钟再用 /register。");
-            }
-            let Some(member) = resp.json() else {
-                return denied("Discord 暂时无法核验身份组，请过几分钟再用 /register。");
-            };
-            let has = member
-                .get("roles")
-                .and_then(Value::as_array)
-                .is_some_and(|roles| roles.iter().any(|r| r.as_str() == Some(&role_id)));
-            if !has {
-                return denied(format!(
-                    "目前只开放给「{note}」，没有检测到这个身份组，暂时不能领取 Key。"
-                ));
-            }
+            return denied(format!(
+                "目前只开放给「{note}」：请先打开 {}login?verify=1 用 Discord 授权验证身份组，再用 /register 领取。",
+                self.cfg.site_url
+            ));
         }
         let user = DiscordUser {
             id: user_id.to_string(),
