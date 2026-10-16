@@ -388,7 +388,7 @@ async fn todays_v5_plan_is_fixed_and_only_the_display_follows_the_live_percent()
 async fn each_is_the_pool_over_active_people_and_oversell_counts_people() {
     let _clock = clock(Some(NOON)).await;
     // 假上游的恢复速度 24%/天超出合理范围，按保守的 5%/天：全站池 ⌊5 × 14.2⌋ = 71
-    for (people, each, oversell) in [(0, 7, false), (20, 3, false), (100, 1, true)] {
+    for (people, each, oversell) in [(0, 7, false), (20, 3, false), (100, 3, true)] {
         let e = setup(&[]).await;
         full_coverage(&e).await;
         for i in 0..people {

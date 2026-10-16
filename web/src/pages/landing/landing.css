@@ -163,12 +163,19 @@ a.btn:hover {
 .lp-status__text {
   font-size: var(--fs-lg);
   line-height: var(--lh-tight);
-  overflow-wrap: anywhere;
 }
 .lp-status__text strong {
   font-weight: 700;
 }
+/* 标题和说明各占一行，不在词中间断（手机上「开 / 始」那种） */
+.lp-status__head {
+  display: block;
+  overflow-wrap: break-word;
+}
 .lp-status__detail {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--fs-md);
   color: var(--muted);
 }
 .lp-dot {
@@ -198,6 +205,12 @@ a.btn:hover {
   margin-top: var(--sp-4);
   font-size: var(--fs-sm);
   color: var(--muted);
+}
+.lp-note--algo p + p {
+  margin-top: 2px;
+}
+.lp-note--algo span {
+  display: inline-block;
 }
 .lp-keyrow {
   display: flex;
