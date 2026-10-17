@@ -217,7 +217,7 @@ export default function QuotaCard() {
             {rc && <RateLine info={rc} />}
             <div>
               每人 V5 = 全站 <b>{d.global}</b> ÷ <b>{d.people}</b> 人（前 3 天用过 V5 的人数，至少按 10
-              人算），至少 3 张 → <b>{d.each} 张</b>
+              人算），至少 10 张 → <b>{d.each} 张</b>
               {!d.eachMatches && (
                 <>
                   ；实际采用 <b>{v5.each}</b>
