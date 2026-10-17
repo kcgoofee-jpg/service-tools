@@ -96,15 +96,10 @@ export function Steps() {
             <CopyField value="/register" label="领取命令" />
           </div>
           <p class="muted small lp-step__note">
-            {closed ? (
-              "注册当前已关闭，开放时间看站长公告。"
-            ) : (
-              <>
-                <span class="lp-nb">要在本站的服务器里发送，</span>
-                <span class="lp-nb">别的服务器或私聊里不会生效。</span>
-              </>
-            )}
+            <span class="lp-nb">要在本站的服务器里发送，</span>
+            <span class="lp-nb">别的服务器或私聊里不会生效。</span>
           </p>
+          {closed && <p class="muted small">注册当前已关闭，开放时间看站长公告。</p>}
         </li>
         <li class="card lp-step">
           <h3>
