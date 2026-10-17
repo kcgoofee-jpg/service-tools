@@ -2679,7 +2679,9 @@ async fn status_codes_distribution() {
             "total",
             "codes",
             "upstream",
-            "upstream_total"
+            "upstream_total",
+            "reasons",
+            "reasons_total"
         ]
     );
     assert_eq!(
@@ -2687,7 +2689,7 @@ async fn status_codes_distribution() {
         json!([
             {"code": 200, "n": 3, "pct": 60.0, "meaning": "成功"},
             {"code": 429, "n": 1, "pct": 20.0, "meaning": "太频繁 / 排队满 / 每小时上限"},
-            {"code": 500, "n": 1, "pct": 20.0, "meaning": "网关出错"},
+            {"code": 500, "n": 1, "pct": 20.0, "meaning": "服务器返回 500（NovelAI 返回 500 时网关原样转给成员，不一定是网关自己出错）"},
         ])
     );
     assert_eq!(v["total"], 5);
@@ -2707,6 +2709,28 @@ async fn status_codes_distribution() {
         ]
     );
     assert_eq!(v["upstream_total"], 5);
+    // 拒绝与失败原因：有原因码的用码的短说明（不认识的码直接显示码），没有原因码的按详情首句归类
+    assert_eq!(v["reasons_total"], 2);
+    let mut rs: Vec<(String, String, i64)> = v["reasons"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| {
+            (
+                r["label"].as_str().unwrap().to_string(),
+                r["status"].as_str().unwrap().to_string(),
+                r["n"].as_i64().unwrap(),
+            )
+        })
+        .collect();
+    rs.sort();
+    assert_eq!(
+        rs,
+        vec![
+            ("daily_quota".to_string(), "rejected".to_string(), 1),
+            ("上游 429".to_string(), "error".to_string(), 1),
+        ]
+    );
     // 范围参数
     let h = |q: &'static str| sc(&api, q);
     let today = h("").await;

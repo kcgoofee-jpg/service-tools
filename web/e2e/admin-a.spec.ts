@@ -146,13 +146,67 @@ test.describe("已登录", () => {
     expect(errs).toEqual([]);
   });
 
+  test("总览：返回状态码与拒绝原因卡——三个视角、四个时间范围都能切", async ({ page }) => {
+    await open(page, "/admin", PAGES[0]?.ready as never);
+    await expect(page.getByRole("heading", { name: "返回状态码与拒绝原因" })).toBeVisible();
+    const card = page.locator(".ov-card", {
+      has: page.getByRole("heading", { name: "返回状态码与拒绝原因" }),
+    });
+    // 默认「网关→成员」：有请求就有状态码行，没有就是「还没有请求」
+    await expect(card.locator(".ov-sc__row").or(card.getByText("这段时间还没有请求"))).not.toHaveCount(0);
+    await card.getByRole("button", { name: "NovelAI→网关" }).click();
+    await expect(card.getByText(/NovelAI 实际返回给网关/)).toBeVisible();
+    await card.getByRole("button", { name: "拒绝原因" }).click();
+    await expect(card.getByText(/按原因归类/)).toBeVisible();
+    await expect(
+      card.locator(".ov-sc__row").or(card.getByText("这段时间没有被拒绝或失败的请求")),
+    ).not.toHaveCount(0);
+    for (const range of ["1 小时", "24 小时", "7 天", "今日"]) {
+      await card.getByRole("button", { name: range }).click();
+      await expect(card.locator(".ov-sc__row").or(card.getByText(/没有被拒绝|还没有请求/))).not.toHaveCount(
+        0,
+      );
+    }
+  });
+
+  test("日志：成员选择是可输入的搜索框——打字过滤、回车选中、「全部」清掉筛选", async ({ page }) => {
+    await open(page, "/admin/logs/audit", PAGES.find((x) => x.name === "logs-audit")?.ready as never);
+    const box = page.getByRole("combobox", { name: "成员" });
+    await box.click();
+    const list = page.getByRole("listbox", { name: "成员" });
+    await expect(list).toBeVisible();
+    await expect(list.getByRole("option").first()).toHaveText("全部成员");
+    const total = await list.getByRole("option").count();
+    // 不存在的名字：只剩「全部成员」，并说明没有匹配
+    await box.fill("这个名字肯定不存在zzzz");
+    await expect(list.getByRole("option")).toHaveCount(1);
+    await expect(list).toContainText("没有匹配");
+    // 清空再点开：全部回来；选第一个真实成员
+    await box.fill("");
+    if (total > 1) {
+      await expect(list.getByRole("option")).toHaveCount(total);
+      await box.press("ArrowDown");
+      await box.press("Enter");
+      await expect(list).toHaveCount(0);
+      await expect(box).not.toHaveValue("");
+      await expect(page.getByRole("button", { name: "导出该成员全部" })).toBeEnabled();
+      // 「×」清掉，回到全部成员
+      await page.getByRole("button", { name: /清除，回到全部成员/ }).click();
+      await expect(box).toHaveValue("");
+    }
+    // 手机宽度不撑出横向滚动
+    await page.setViewportSize(MOBILE);
+    await box.click();
+    expect(await noHScroll(page)).toBe(true);
+  });
+
   test("总览：只列要处理的事（没有隐藏机制），统计格只有两个，已删的卡片不在", async ({ page }) => {
     await open(page, "/admin", PAGES[0]?.ready as never);
     await expect(page.getByRole("heading", { name: /件事要处理|一切正常/ })).toBeVisible();
     await expect(page.getByRole("button", { name: /隐藏/ })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /恢复/ })).toHaveCount(0);
     await expect(page.locator(".ov-stats .stat__label")).toHaveText(["今日出图", "今天在用的成员"]);
-    for (const gone of ["系统状态", "状态码分布", "近 7 天"])
+    for (const gone of ["系统状态", "近 7 天"])
       await expect(page.getByRole("heading", { name: gone })).toHaveCount(0);
     // 磁盘 / 预算 / 限流中账号这类非重大事项不在提醒里
     await expect(page.locator(".ov-issues")).not.toContainText(/磁盘|Anlas|限流中/);

@@ -103,3 +103,62 @@
   color: var(--warn);
   font-weight: 650;
 }
+
+.ov-sc__tools {
+  margin-bottom: var(--sp-4);
+}
+.ov-sc {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp-3);
+}
+.ov-sc__row {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) 56px;
+  grid-template-areas:
+    "code main pct"
+    "bar bar bar";
+  align-items: center;
+  gap: 6px var(--sp-3);
+}
+.ov-sc__row > .badge {
+  grid-area: code;
+  justify-self: start;
+}
+.ov-sc__main {
+  grid-area: main;
+  display: grid;
+  min-width: 0;
+}
+.ov-sc__pct {
+  grid-area: pct;
+  text-align: right;
+  font-weight: 600;
+}
+.ov-sc__bar {
+  grid-area: bar;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+.ov-sc__bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--muted);
+}
+.ov-sc__bar i.is-ok {
+  background: var(--ok);
+}
+.ov-sc__bar i.is-info {
+  background: var(--info);
+}
+.ov-sc__bar i.is-warn {
+  background: var(--warn);
+}
+.ov-sc__bar i.is-danger {
+  background: var(--danger);
+}

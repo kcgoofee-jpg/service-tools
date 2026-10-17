@@ -19,4 +19,28 @@ impl Db {
         })
         .await
     }
+
+    /// 拒绝与失败的原因分布：`(原因码, 状态 rejected|error, 详情前 60 字, 次数)`，按次数从多到少，最多 400 行。
+    /// 没有原因码的（上游错误、老记录）带上详情前缀，交给调用方按首句归类。
+    pub async fn failure_reason_distribution(
+        &self,
+        since: i64,
+    ) -> Result<Vec<(String, String, String, i64)>> {
+        self.read(move |c| {
+            let mut stmt = c.prepare(
+                "SELECT reason, status, CASE WHEN reason='' THEN substr(detail,1,60) ELSE '' END, COUNT(*) \
+                 FROM usage_log WHERE ts>=? AND status!='ok' GROUP BY 1,2,3 ORDER BY 4 DESC LIMIT 400",
+            )?;
+            stmt.query_map([since], |r| {
+                Ok((
+                    value::text_or(r, 0, "")?,
+                    value::text_or(r, 1, "")?,
+                    value::text_or(r, 2, "")?,
+                    value::i64_or(r, 3, 0)?,
+                ))
+            })?
+            .collect()
+        })
+        .await
+    }
 }

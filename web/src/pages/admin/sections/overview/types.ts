@@ -29,3 +29,20 @@ export type BugsResp = {
   errors: Array<{ level: "error" | "warn"; resolved_at: number | null }>;
 };
 export type BotResp = { status?: { online?: boolean; seen_at?: number } };
+
+export type StatusCodeRow = { code: number; n: number; pct: number; meaning: string };
+export type FailureReasonRow = {
+  label: string;
+  reason: string;
+  status: "rejected" | "error" | string;
+  n: number;
+  pct: number;
+};
+export type StatusCodesResp = {
+  total: number;
+  codes: StatusCodeRow[];
+  upstream: StatusCodeRow[];
+  upstream_total: number;
+  reasons: FailureReasonRow[];
+  reasons_total: number;
+};

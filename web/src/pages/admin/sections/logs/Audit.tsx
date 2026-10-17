@@ -2,7 +2,7 @@
 import { ChevronLeft, ChevronRight, Download, ImageOff } from "lucide-preact";
 import { useEffect, useState } from "preact/hooks";
 import { fullTime, rel } from "../../../../lib/format";
-import { Badge, Button, copyText, cx, Dialog, Skeleton } from "../../../../ui";
+import { Badge, Button, copyText, cx, Dialog, SearchSelect, Skeleton } from "../../../../ui";
 import { useAdmin } from "../../Admin";
 import { LoadError } from "../_kit";
 import { downloadFile, Empty, Pager, usePageData } from "../members/shared";
@@ -191,25 +191,20 @@ export function Audit() {
   return (
     <div class="stack">
       <div class="xa-toolbar">
-        <label class="field-inline">
+        <div class="field-inline">
           <span class="field-inline__k">成员</span>
-          <select
-            class="select"
+          <SearchSelect
+            label="成员"
             value={key}
-            onChange={(e) => set({ key: e.currentTarget.value, page: null })}
-          >
-            <option value="">全部成员</option>
-            {(members.data?.members ?? []).map((m) => {
-              const v = (m.all_key_ids ?? [m.id]).join(",");
-              return (
-                <option key={v} value={v}>
-                  {m.discord?.display_name || m.name}
-                  {m.key_count > 1 ? `（${m.key_count} 把 Key）` : ""}
-                </option>
-              );
-            })}
-          </select>
-        </label>
+            allLabel="全部成员"
+            options={(members.data?.members ?? []).map((m) => ({
+              value: (m.all_key_ids ?? [m.id]).join(","),
+              label: `${m.discord?.display_name || m.name}${m.key_count > 1 ? `（${m.key_count} 把 Key）` : ""}`,
+              hint: m.name,
+            }))}
+            onChange={(v) => set({ key: v, page: null })}
+          />
+        </div>
         <label class="field-inline">
           <span class="field-inline__k">视图</span>
           <select
