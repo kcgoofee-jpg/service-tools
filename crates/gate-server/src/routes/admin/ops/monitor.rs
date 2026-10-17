@@ -24,6 +24,30 @@ pub(super) fn router() -> Router<AppState> {
         .route("/admin/api/allowance", get(allowance))
 }
 
+/// 总览「拒绝原因」认识的原因码：这些码的短说明固定，其余的码（已删除机制留下的历史记录）改按详情首句显示。
+const KNOWN_REASONS: &[&str] = &[
+    "key_paused",
+    "queue_full",
+    "key_busy",
+    "hourly_cap",
+    "quiet_cap",
+    "cap_3h",
+    "burst_cap",
+    "daily_cap",
+    "paced",
+    "breaker",
+    "cooldown",
+    "v5_exhausted",
+    "queue_timeout",
+    "member_quota",
+    "site_quota",
+    "key_rate",
+    "body_abort",
+    "feature_off",
+    "test_request",
+    "param",
+];
+
 /// 成员接口返回的 HTTP 状态码含义（旧版 `status_stats.MEANING`）。
 fn meaning(code: i64) -> &'static str {
     match code {
@@ -128,7 +152,11 @@ async fn status_codes(State(state): State<AppState>, _s: AdminSession, uri: Uri)
 
     // 拒绝与失败的原因（usage_log.reason；没有原因码的按详情首句归类）
     let mut by_label: BTreeMap<(String, String, String), i64> = BTreeMap::new();
-    for (reason, status, detail, n) in state.db.failure_reason_distribution(since).await? {
+    for (reason, status, detail, n) in state
+        .db
+        .failure_reason_distribution(since, KNOWN_REASONS)
+        .await?
+    {
         // LABELS 里没有这两个码（站长很少用到的短说明），总览里补上，免得全落进「其他」
         let label = match reason.as_str() {
             gate_core::reasons::FEATURE_OFF => "功能或模型没开通".to_string(),

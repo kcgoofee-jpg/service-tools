@@ -66,7 +66,7 @@ function WhyRows(props: { rows: FailureReasonRow[] }) {
           <span class="ov-sc__pct tabular">{r.n > 0 && r.pct === 0 ? "<0.1%" : `${r.pct}%`}</span>
           <span class="ov-sc__bar" aria-hidden="true">
             <i
-              class={r.status === "error" ? "is-danger" : "is-warn"}
+              class={r.status === "error" ? "is-danger" : r.status === "cancelled" ? "is-info" : "is-warn"}
               style={{ width: `${Math.max(1, r.pct)}%`, minWidth: "3px" }}
             />
           </span>
