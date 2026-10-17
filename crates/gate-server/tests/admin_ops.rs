@@ -2727,8 +2727,8 @@ async fn status_codes_distribution() {
     assert_eq!(
         rs,
         vec![
-            ("额度用完".to_string(), "rejected".to_string(), 1),
             ("上游 429".to_string(), "error".to_string(), 1),
+            ("额度用完".to_string(), "rejected".to_string(), 1),
         ]
     );
     // 范围参数
