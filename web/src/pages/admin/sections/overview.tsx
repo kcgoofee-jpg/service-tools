@@ -7,6 +7,7 @@ import { useAdmin } from "../Admin";
 import { LoadError, Loading, SectionHead, Stat } from "./_kit";
 import { FeatureUsage } from "./overview/FeatureUsage";
 import { buildReminders, computeVerdict } from "./overview/reminders";
+import { StatusCodes } from "./overview/StatusCodes";
 import type { BotResp, BugsResp, Overview as OverviewData } from "./overview/types";
 import { Verdict } from "./overview/Verdict";
 import type { JobsResponse } from "./system/jobs-core";
@@ -88,6 +89,8 @@ export default function Overview() {
           hint={`有效 Key ${d.keys_active} / ${d.keys_total}`}
         />
       </div>
+
+      <StatusCodes />
 
       <FeatureUsage rows={d.feature_usage} logSince={d.log_since} />
     </div>

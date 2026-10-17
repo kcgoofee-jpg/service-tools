@@ -596,3 +596,89 @@
 .notice--ok {
   background: var(--ok-soft);
 }
+
+/* ---------- SearchSelect（可输入搜索的选择框） ---------- */
+.ss {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+.ss__input {
+  width: 14em;
+  max-width: 100%;
+  padding-right: calc(var(--control-px) + 18px);
+}
+.field-inline .ss__input {
+  height: calc(var(--control-h) - 2px);
+  border: 0;
+  background-color: transparent;
+  padding-left: var(--sp-2);
+}
+.field-inline .ss__input:focus-visible {
+  outline: none;
+}
+.ss__clear {
+  position: absolute;
+  right: 4px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.ss__clear:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+.ss__list {
+  display: block;
+  position: absolute;
+  left: 0;
+  top: calc(100% + 6px);
+  z-index: 50;
+  width: max(100%, 18em);
+  max-width: min(28em, 90vw);
+  max-height: 280px;
+  overflow-y: auto;
+  padding: var(--sp-1);
+  margin: 0;
+  list-style: none;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-2);
+}
+.ss__opt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+.ss__opt.is-active {
+  background: var(--surface-2);
+}
+.ss__label {
+  overflow-wrap: anywhere;
+}
+.ss__opt.is-selected .ss__label {
+  font-weight: 700;
+}
+.ss__hint {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+.ss__note {
+  padding: var(--sp-2) var(--sp-3);
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}

@@ -31,15 +31,15 @@ fn meaning(code: i64) -> &'static str {
         400 => "参数不对（尺寸、步数、不支持的功能等）",
         401 => "Key 错误、缺失或已失效",
         402 => "额度用完（每日 / V5 / Anlas）",
-        403 => "功能没开放（Vibe、放大、图生图等）",
-        404 => "地址填错了",
+        403 => "Key 不可用或功能没开放（过期、停用、被暂停；Vibe、放大、图生图、V5 模型未开通）",
+        404 => "地址填错了（也包括互联网上的扫描）",
         405 => "请求方法不对（多半是地址填错）",
         409 => "请求冲突",
         413 => "请求太大",
         422 => "参数格式不对",
         429 => "太频繁 / 排队满 / 每小时上限",
         499 => "客户端提前断开",
-        500 => "网关出错",
+        500 => "服务器返回 500（NovelAI 返回 500 时网关原样转给成员，不一定是网关自己出错）",
         502 => "上游出错",
         503 => "上游不可用或冷却中",
         504 => "上游超时",
@@ -125,6 +125,42 @@ async fn status_codes(State(state): State<AppState>, _s: AdminSession, uri: Uri)
             json!({"code": c, "n": n, "pct": pct, "meaning": upstream_meaning(*c)})
         })
         .collect();
+
+    // 拒绝与失败的原因（usage_log.reason；没有原因码的按详情首句归类）
+    let mut by_label: BTreeMap<(String, String, String), i64> = BTreeMap::new();
+    for (reason, status, detail, n) in state.db.failure_reason_distribution(since).await? {
+        // LABELS 里没有这两个码（站长很少用到的短说明），总览里补上，免得全落进「其他」
+        let label = match reason.as_str() {
+            gate_core::reasons::FEATURE_OFF => "功能或模型没开通".to_string(),
+            gate_core::reasons::PARAM => "参数不被支持".to_string(),
+            _ => gate_core::reasons::reason_label(&reason, &detail),
+        };
+        // 码不认识又没有详情时直接显示码，别笼统写「其他」
+        let label = if label == "其他" && !reason.is_empty() {
+            reason.clone()
+        } else {
+            label
+        };
+        *by_label.entry((label, reason, status)).or_default() += n;
+    }
+    let fail_total: i64 = by_label.values().sum();
+    let mut reasons: Vec<(i64, String, String, String)> = by_label
+        .into_iter()
+        .map(|((label, reason, status), n)| (n, label, reason, status))
+        .collect();
+    reasons.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+    let reasons: Vec<Value> = reasons
+        .into_iter()
+        .take(20)
+        .map(|(n, label, reason, status)| {
+            let pct = if fail_total != 0 {
+                pyc::round(n as f64 / fail_total as f64 * 100.0, 1)
+            } else {
+                0.0
+            };
+            json!({"label": label, "reason": reason, "status": status, "n": n, "pct": pct})
+        })
+        .collect();
     Ok(ok_json(&json!({
         "hours": h_val,
         "since": since,
@@ -132,6 +168,8 @@ async fn status_codes(State(state): State<AppState>, _s: AdminSession, uri: Uri)
         "codes": codes,
         "upstream": upstream,
         "upstream_total": up_total,
+        "reasons": reasons,
+        "reasons_total": fail_total,
     })))
 }
 

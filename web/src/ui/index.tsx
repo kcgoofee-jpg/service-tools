@@ -9,6 +9,8 @@ import { useEffect, useId, useRef, useState } from "preact/hooks";
 import "./base.css";
 import "./components.css";
 
+export { type SearchOption, SearchSelect } from "./SearchSelect";
+
 type Cls = string | false | null | undefined;
 export const cx = (...c: Cls[]): string => c.filter(Boolean).join(" ");
 

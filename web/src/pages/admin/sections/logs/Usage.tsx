@@ -1,7 +1,7 @@
 /** 用量日志：每次请求一行；按成员 / 功能 / 错误编号筛选，服务端分页，可导出客户端日志。 */
 import { useEffect, useState } from "preact/hooks";
 import { fullTime, num } from "../../../../lib/format";
-import { Badge, cx, Skeleton } from "../../../../ui";
+import { Badge, cx, SearchSelect, Skeleton } from "../../../../ui";
 import { useAdmin } from "../../Admin";
 import { LoadError, TableWrap } from "../_kit";
 import { Empty, NARROW, Pager, useDebounced, useMedia, usePageData } from "../members/shared";
@@ -116,21 +116,16 @@ export function Usage() {
 
   const filters = (
     <div class="xa-toolbar lg-filters-in">
-      <label class="field-inline">
+      <div class="field-inline">
         <span class="field-inline__k">成员</span>
-        <select
-          class="select"
+        <SearchSelect
+          label="成员"
           value={keyId}
-          onChange={(e) => set({ key: e.currentTarget.value, page: null })}
-        >
-          <option value="">全部 Key</option>
-          {(keys.data?.keys ?? []).map((k) => (
-            <option key={k.id} value={k.id}>
-              {k.name}
-            </option>
-          ))}
-        </select>
-      </label>
+          allLabel="全部 Key"
+          options={(keys.data?.keys ?? []).map((k) => ({ value: String(k.id), label: k.name }))}
+          onChange={(v) => set({ key: v, page: null })}
+        />
+      </div>
       <label class="field-inline">
         <span class="field-inline__k">功能</span>
         <select
