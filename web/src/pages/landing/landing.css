@@ -344,34 +344,41 @@ a.btn:hover {
   padding-left: var(--sp-6);
   color: var(--text-2);
 }
+/* 使用须知：左边一列固定宽度的小标题，右边是正文（悬挂缩进），比圆点列表整齐；每条不跨列拆开 */
 .lp-rules {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: var(--sp-3) var(--sp-8);
+  gap: var(--sp-4) var(--sp-8);
   margin: 0;
-  padding: 0;
-  list-style: none;
   color: var(--text-2);
 }
-.lp-rules li {
-  position: relative;
-  padding-left: var(--sp-4);
+.lp-rule {
+  display: grid;
+  grid-template-columns: 5em minmax(0, 1fr);
+  gap: var(--sp-3);
+  align-items: start;
 }
-.lp-rules li::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 0.7em;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--border-strong);
-}
-.lp-rules b {
+.lp-rule dt {
+  margin: 0;
   color: var(--text);
+  font-weight: 700;
+  white-space: nowrap;
+}
+.lp-rule dd {
+  margin: 0;
+  text-wrap: pretty;
+}
+.lp-rule code {
+  white-space: nowrap; /* 「V5 Full」不在中间折行 */
+}
+.lp-nb {
+  white-space: nowrap;
+}
+.lp-step__note {
+  margin-top: var(--sp-2);
 }
 .lp-list code,
-.lp-rules code,
+.lp-rule code,
 .lp-main p code {
   padding: 1px 6px;
   border: 1px solid var(--border);

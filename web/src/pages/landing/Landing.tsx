@@ -21,7 +21,10 @@ import "./landing.css";
 function verifyNotice(v: string, role: string): { text: string; error: boolean } | undefined {
   switch (v) {
     case "ok":
-      return { text: "身份组验证通过，现在可以回 Discord 用 /register 领取 Key 了。", error: false };
+      return {
+        text: "身份组验证通过。现在回到猫头鹰公益站的 Discord 服务器，在任意频道输入 /register 领取 Key。",
+        error: false,
+      };
     case "no":
       return {
         text: `没有检测到「${role}」，暂时不能领取 Key。请先获得该身份组后再来。`,
