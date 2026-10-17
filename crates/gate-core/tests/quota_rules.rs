@@ -231,6 +231,27 @@ fn each_is_pool_over_active_people_without_clamp() {
 }
 
 #[test]
+fn v5_pool_adds_up_across_upstream_accounts() {
+    // 剩余 % 与恢复速度是单个账号的平均；全站池 = ⌊速度 × 账号数 × 14.2⌋（站长 10-17）
+    for (accounts, pool) in [(1, 71), (2, 142), (3, 213)] {
+        let mut v = base_inputs();
+        v["accounts"] = json!(vec![
+            json!({"percent": 90, "recharge_per_day": null});
+            accounts
+        ]);
+        v["active_v5"] = json!(40);
+        let out = run(v);
+        let v5 = v5_of(&out);
+        assert_eq!(v5["global"], pool, "accounts={accounts}");
+        assert_eq!(
+            v5["each"],
+            std::cmp::max(3, pool / 40),
+            "accounts={accounts}"
+        );
+    }
+}
+
+#[test]
 fn battery_level_no_longer_changes_the_pool() {
     // 旧版：剩余 ≥ 85% 时全站至少 260、每人至少 10，首页写「当前电池充沛…额度放宽」；剩余低时乘 0.3～0.6
     for percent in [95, 50, 5] {

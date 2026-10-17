@@ -59,7 +59,7 @@
 //!
 //! # V5
 //!
-//! 全站 V5 池 G = ⌊恢复速度 × [`V5_IMAGES_PER_PERCENT`]⌋，每人上限 = max(3, ⌊G ÷ max(10, N)⌋)，
+//! 全站 V5 池 G = ⌊恢复速度 × 账号数 × [`V5_IMAGES_PER_PERCENT`]⌋，每人上限 = max(3, ⌊G ÷ max(10, N)⌋)，
 //! N = 前 3 个完整服务日里用过 V5 的人数。两者都在服务日第一次计算时（07:00 后）定下，当天不再改。
 //! 每人上限只是上限：全站池先到先得。
 
@@ -515,15 +515,21 @@ impl V5Plan {
 }
 
 /// 全站 V5 池 G 与每人上限：
-/// G = ⌊恢复速度 × 每 1% 的张数⌋，每人 = max(3, ⌊G ÷ max(10, N)⌋)。
+/// G = ⌊恢复速度 × 账号数 × 每 1% 的张数⌋，每人 = max(3, ⌊G ÷ max(10, N)⌋)。
 /// `rate` = 采用的恢复 %/天（`None` / ≤ 0 / NaN 用保守的 5）；`active` = N（前 3 个完整服务日用过 V5 的人数）。
 /// 返回的 `rate` 已 `round(rate, 1)`。旧版的电量系数、3～30 夹取、洪峰放宽都已删除。
 pub fn v5_plan(percent: Option<f64>, rate: Option<f64>, active: i64) -> V5Plan {
+    v5_plan_n(percent, rate, active, 1)
+}
+
+/// 多个上游账号时全站池按账号数相加（站长 10-17）：恢复速度、剩余 % 都是「单个账号的平均」，
+/// 池 = ⌊速度 × 账号数 × 每 1% 的张数⌋。`accounts` < 1 按 1。
+pub fn v5_plan_n(percent: Option<f64>, rate: Option<f64>, active: i64, accounts: i64) -> V5Plan {
     let rate = match rate {
         Some(r) if r > 0.0 => r,
         _ => V5_FALLBACK_RATE,
     };
-    let pool = (rate * V5_IMAGES_PER_PERCENT).floor() as i64;
+    let pool = (rate * std::cmp::max(1, accounts) as f64 * V5_IMAGES_PER_PERCENT).floor() as i64;
     let people = std::cmp::max(V5_MIN_PEOPLE, active);
     let each = std::cmp::max(V5_MIN_EACH, pool.div_euclid(people));
     V5Plan {
@@ -1140,6 +1146,11 @@ fn run_inner(inp: &QuotaInputs, clock: &Clock, cx: &mut Cx) -> Result<Value, Dec
 
     // ---- V5 ----
     let (pct, rate_api) = allowance_summary(&inp.accounts);
+    // 有读数的上游账号数：剩余 % 与恢复速度是单个账号的平均，用掉的张数是全站合计
+    let n_accounts = std::cmp::max(
+        1,
+        inp.accounts.iter().filter(|a| a.percent.is_some()).count() as i64,
+    );
     let mut hist = as_history(loads_setting(cx.get(HISTORY_KEY), "[]")?)?;
     if let (Some(rev), Some(p)) = (review.as_mut(), pct) {
         // 每天记一笔账号 V5 剩余和接口给的恢复速度，并用「余量变化 + 前一天用掉的量」反推实测恢复速度
@@ -1175,7 +1186,7 @@ fn run_inner(inp: &QuotaInputs, clock: &Clock, cx: &mut Cx) -> Result<Value, Dec
                 .as_ref()
                 .ok_or_else(|| DecideError::MissingInput("daily".into()))?;
             let used = v5_used_equiv(&d.v5_rows);
-            let used_pct = pyc::round(used / V5_IMAGES_PER_PERCENT, 2);
+            let used_pct = pyc::round(used / V5_IMAGES_PER_PERCENT / n_accounts as f64, 2);
             rev.insert("v5_used_pct".into(), pyval::float(used_pct));
             let prev_pct = num(hget_nn(&prev, "v5_pct")?.expect("上面刚判过非空"))?;
             rev.insert(
@@ -1224,7 +1235,7 @@ fn run_inner(inp: &QuotaInputs, clock: &Clock, cx: &mut Cx) -> Result<Value, Dec
         Some(Value::Object(sp)) => sp,
         Some(_) => return Err(DecideError::Type("V5 方案不是 dict".into())),
         None => {
-            let mut fresh = v5_plan(pct, Some(rate), inp.active_v5).to_map();
+            let mut fresh = v5_plan_n(pct, Some(rate), inp.active_v5, n_accounts).to_map();
             fresh.insert("rate_info".into(), Value::Object(rate_info.clone()));
             let v = json!({"day": today, "plan": Value::Object(fresh.clone())});
             cx.set(V5_DAY_KEY, jsondump::dumps(&v));
