@@ -20,17 +20,27 @@ impl Db {
         .await
     }
 
-    /// 拒绝与失败的原因分布：`(原因码, 状态 rejected|error, 详情前 60 字, 次数)`，按次数从多到少，最多 400 行。
-    /// 没有原因码的（上游错误、老记录）带上详情前缀，交给调用方按首句归类。
+    /// 拒绝与失败的原因分布：`(原因码, 状态 rejected|error|cancelled, 详情前 60 字, 次数)`，按次数从多到少，最多 400 行。
+    /// 没有原因码的（上游错误、老记录），以及 `known` 之外的码（已删除机制留下的历史码）带上详情前缀，
+    /// 交给调用方按首句归类；`known` 里的码详情不取（同一个码的详情常带时间、数字，取了会拆成很多行）。
     pub async fn failure_reason_distribution(
         &self,
         since: i64,
+        known: &[&str],
     ) -> Result<Vec<(String, String, String, i64)>> {
+        // known 全是代码里的常量（字母和下划线），直接拼进 SQL 的 IN 列表
+        let list = known
+            .iter()
+            .filter(|k| k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
+            .map(|k| format!("'{k}'"))
+            .collect::<Vec<_>>()
+            .join(",");
         self.read(move |c| {
-            let mut stmt = c.prepare(
-                "SELECT reason, status, CASE WHEN reason='' THEN substr(detail,1,60) ELSE '' END, COUNT(*) \
-                 FROM usage_log WHERE ts>=? AND status!='ok' GROUP BY 1,2,3 ORDER BY 4 DESC LIMIT 400",
-            )?;
+            let sql = format!(
+                "SELECT reason, status, CASE WHEN reason IN ({list}) THEN '' ELSE substr(detail,1,60) END, COUNT(*) \
+                 FROM usage_log WHERE ts>=? AND status!='ok' GROUP BY 1,2,3 ORDER BY 4 DESC LIMIT 400"
+            );
+            let mut stmt = c.prepare(&sql)?;
             stmt.query_map([since], |r| {
                 Ok((
                     value::text_or(r, 0, "")?,

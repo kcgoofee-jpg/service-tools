@@ -2709,7 +2709,7 @@ async fn status_codes_distribution() {
         ]
     );
     assert_eq!(v["upstream_total"], 5);
-    // 拒绝与失败原因：有原因码的用码的短说明（不认识的码直接显示码），没有原因码的按详情首句归类
+    // 拒绝与失败原因：认识的码用码的短说明；没有码、或码已不认识（旧机制留下的）的按详情首句归类
     assert_eq!(v["reasons_total"], 2);
     let mut rs: Vec<(String, String, i64)> = v["reasons"]
         .as_array()
@@ -2727,7 +2727,7 @@ async fn status_codes_distribution() {
     assert_eq!(
         rs,
         vec![
-            ("daily_quota".to_string(), "rejected".to_string(), 1),
+            ("额度用完".to_string(), "rejected".to_string(), 1),
             ("上游 429".to_string(), "error".to_string(), 1),
         ]
     );
