@@ -512,7 +512,13 @@ function Shell(props: { children: ComponentChildren }) {
 /** 旧的「模块」页已经删了（改成「系统」页的「定时任务」卡片）：旧书签直接换到那里 */
 function OldModules() {
   const { route } = useLocation();
-  useEffect(() => route("/admin/system#jobs", true), [route]);
+  // 只换一次：懒加载切换期间这个组件还会多挂一阵，不能因为 route 变了又跳一遍
+  const done = useRef(false);
+  useEffect(() => {
+    if (done.current) return;
+    done.current = true;
+    route("/admin/system#jobs", true);
+  }, [route]);
   return null;
 }
 
