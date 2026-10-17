@@ -41,7 +41,7 @@ export function NoKeyCard({ me }: { me: MeMember }) {
           <p>你还没有 Key。注册当前已关闭，开放时间看站长公告。</p>
         ) : (
           <>
-            <p>你还没有 Key。在 Discord 服务器任意频道输入下面的命令即可领取。</p>
+            <p>你还没有 Key。在猫头鹰公益站的 Discord 服务器里，任意频道输入下面的命令即可领取。</p>
             <CopyField value="/register" label="命令" />
           </>
         )}

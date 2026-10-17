@@ -87,6 +87,9 @@ test.describe("游客", () => {
     await expect(page.locator(".lp-step")).toHaveCount(3);
     await expect(page.getByRole("button", { name: "复制领取命令" })).toBeVisible();
     await expect(page.locator(".lp-step").nth(1)).toContainText("/register");
+    // 领取命令要在本站的 Discord 服务器里发：步骤里写明，免得有人在别的服务器 / 私聊里试
+    await expect(page.locator(".lp-step").nth(1)).toContainText("猫头鹰公益站的 Discord 服务器");
+    await expect(page.locator(".lp-step").nth(1)).toContainText("别的服务器或私聊里不会生效");
     await expect(page.locator(".lp-step").nth(2)).toContainText(new URL(page.url()).origin);
 
     // 客户端设置：两个标签（没有文本客户端），方向键可切换
@@ -101,7 +104,7 @@ test.describe("游客", () => {
     const rules = page.locator(".lp-rules");
     await expect(rules).toContainText("最近 60 分钟（滚动窗口）");
     await expect(rules).toContainText("每日 7 点重置");
-    await expect(rules).toContainText("每人上限");
+    await expect(rules).toContainText("每人每日上限");
     await expect(rules).toContainText("先到先得");
     // 接入地址整页只在「三步上手」里写一次；使用须知里不再重复
     await expect(rules.getByText("地址", { exact: false })).toHaveCount(0);
