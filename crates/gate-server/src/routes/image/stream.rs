@@ -507,9 +507,10 @@ async fn perform_stream(
     if cancelled {
         return Ok(());
     }
-    // 派发之后客户端断开、没拿到全部图：记一条 Bug（图已生成并计数）
+    // 派发之后客户端断开、没拿到全部图（图已生成并计数）：这是客户端的行为（超时、关了页面、换了请求），
+    // 不是网关的 Bug，不进 Bug 列表（以前每次都记一条，总览永远挂着「1 个 Bug 没处理」）；只留一行日志，请求本身在用量日志里
     if (disconnect.is_cancelled() || sink.client_gone()) && !delivered && was_dispatched {
-        state.bug("disconnect", None, ctx);
+        tracing::info!(rid = %ctx.rid(), "客户端在图片返回前断开连接（图已生成并计数）");
     }
     match gate_err {
         Some(g) => Err(g.into()),
