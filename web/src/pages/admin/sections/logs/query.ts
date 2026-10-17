@@ -10,6 +10,8 @@ export function useQueryState(): {
   return {
     query,
     set: (patch) => {
+      // 筛选框的延迟回调（输入防抖等）可能在人已经点去别的栏目之后才触发：地址已经不是这一页，就不要再跳回来
+      if (typeof location !== "undefined" && location.pathname !== path) return;
       const next = new URLSearchParams(query);
       for (const [k, v] of Object.entries(patch)) {
         if (v === null || v === "") next.delete(k);

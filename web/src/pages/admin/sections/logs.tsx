@@ -26,15 +26,20 @@ const TABS: Tab[] = [
   { id: "survey", label: "问卷", view: Survey },
 ];
 
+/** 地址是否在日志页之下（/admin/logs 或 /admin/logs/…） */
+export const inLogs = (path: string): boolean => path === "/admin/logs" || path.startsWith("/admin/logs/");
+
 export default function Logs() {
   const { path, route } = useLocation();
   const open = useOpenBugs();
   const seg = path.split("/")[3] ?? "";
   const tab = TABS.find((t) => t.id === seg);
-  // /admin/logs 或不认识的子路径：回到第一个子页（replace，不留历史）
+  // /admin/logs 或不认识的子路径：回到第一个子页（replace，不留历史）。
+  // 只在真的还在日志页下才跳：各页是懒加载的，点别的栏目时新页面还没加载完，旧的日志页会带着「已经是新地址」的 path
+  // 多渲染一阵——这时 tab 是空的，不加这个判断就会把人又跳回日志页（「点别的栏目跳转失败」）
   useEffect(() => {
-    if (!tab) route("/admin/logs/audit", true);
-  }, [tab, route]);
+    if (!tab && inLogs(path)) route("/admin/logs/audit", true);
+  }, [tab, path, route]);
   const View = tab?.view;
   return (
     <div class="xa-page">
