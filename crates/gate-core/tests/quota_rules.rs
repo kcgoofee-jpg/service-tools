@@ -194,12 +194,12 @@ fn v5_of(out: &quota::QuotaOutputs) -> Value {
 #[test]
 fn each_is_pool_over_active_people_without_clamp() {
     for (active, each) in [
-        (0, 7),   // 不到 10 人按 10 人：⌊71 ÷ 10⌋
-        (10, 7),  //
-        (20, 3),  // ⌊71 ÷ 20⌋
-        (35, 3),  // ⌊71 ÷ 35⌋ = 2 → 至少 3（10-17 起下限 3，全站池先到先得）
-        (75, 3),  // ⌊71 ÷ 75⌋ = 0 → 至少 3
-        (500, 3), //
+        (0, 10),   // 不到 10 人按 10 人：⌊71 ÷ 10⌋ = 7 → 至少 10（10-17 起下限 10，全站池先到先得）
+        (10, 10),  //
+        (20, 10),  // ⌊71 ÷ 20⌋ = 3 → 至少 10
+        (35, 10),  // ⌊71 ÷ 35⌋ = 2 → 至少 10
+        (75, 10),  // ⌊71 ÷ 75⌋ = 0 → 至少 10
+        (500, 10), //
     ] {
         let mut v = base_inputs();
         v["active_v5"] = json!(active);
@@ -245,7 +245,7 @@ fn v5_pool_adds_up_across_upstream_accounts() {
         assert_eq!(v5["global"], pool, "accounts={accounts}");
         assert_eq!(
             v5["each"],
-            std::cmp::max(3, pool / 40),
+            std::cmp::max(10, pool / 40),
             "accounts={accounts}"
         );
     }
@@ -261,7 +261,7 @@ fn battery_level_no_longer_changes_the_pool() {
         let v5 = v5_of(&out);
         assert_eq!(
             (v5["global"].as_i64(), v5["each"].as_i64()),
-            (Some(G), Some(7))
+            (Some(G), Some(10))
         );
         assert_eq!(v5["percent"], json!(percent as f64), "剩余只用于显示");
         let notice = setting(&out, "algo_notice").unwrap();
@@ -271,14 +271,14 @@ fn battery_level_no_longer_changes_the_pool() {
 
 #[test]
 fn todays_plan_is_fixed_for_the_whole_day() {
-    // 早上 07:00 后第一次计算时定下（这里是 G = 71、每人 7），写进当天方案
+    // 早上 07:00 后第一次计算时定下（这里是 G = 71、每人 10：⌊71 ÷ 10⌋ = 7，不足下限 10），写进当天方案
     let out = run(base_inputs());
     let plan = setting(&out, quota::V5_DAY_KEY)
         .expect("第一次计算要写当天方案")
         .to_string();
     let plan_v: Value = serde_json::from_str(&plan).unwrap();
     assert_eq!(plan_v["day"], "2030-03-15");
-    assert_eq!(plan_v["plan"]["each"], 7);
+    assert_eq!(plan_v["plan"]["each"], 10);
     // 白天读数变了（电量满了、活跃人数变了）：沿用早上的方案，不放宽也不收紧、不重写
     let mut v = base_inputs();
     v["now"] = json!(NOW + 6.0 * 3600.0);
@@ -290,7 +290,7 @@ fn todays_plan_is_fixed_for_the_whole_day() {
     let v5 = v5_of(&out);
     assert_eq!(
         (v5["global"].as_i64(), v5["each"].as_i64()),
-        (Some(G), Some(7))
+        (Some(G), Some(10))
     );
     assert!(setting(&out, quota::V5_DAY_KEY).is_none(), "当天不再改");
     // 第二天 07:00 后重新定（昨天的方案作废）
@@ -299,7 +299,7 @@ fn todays_plan_is_fixed_for_the_whole_day() {
     v["settings"][quota::V5_DAY_KEY] = json!(plan);
     v["active_v5"] = json!(40);
     let out = run(v);
-    assert_eq!(v5_of(&out)["each"], 3, "⌊71 ÷ 40⌋ = 1 → 下限 3");
+    assert_eq!(v5_of(&out)["each"], 10, "⌊71 ÷ 40⌋ = 1 → 下限 10");
     assert!(
         setting(&out, quota::V5_DAY_KEY)
             .unwrap()
@@ -309,15 +309,15 @@ fn todays_plan_is_fixed_for_the_whole_day() {
 
 #[test]
 fn oversell_is_judged_by_active_people_not_all_keys() {
-    // 200 把算法管理的 Key，但前 3 天只有 20 人用过 V5：每人 3 × 20 = 60 ≤ 71，不算超卖
+    // 200 把算法管理的 Key，但前 3 天只有 7 人用过 V5：每人 10 × 7 = 70 ≤ 71，不算超卖
     let mut v = base_inputs();
     v["members"] = json!(200);
-    v["active_v5"] = json!(20);
+    v["active_v5"] = json!(7);
     let out = run(v);
     let v5 = v5_of(&out);
     assert_eq!(v5["oversell"], Value::Null);
     assert!(!setting(&out, "algo_notice").unwrap().contains("先到先得"));
-    // 100 人用过 V5：每人至少 3 张，3 × 100 > 71 → 先到先得
+    // 100 人用过 V5：每人至少 10 张，10 × 100 > 71 → 先到先得
     let mut v = base_inputs();
     v["members"] = json!(200);
     v["active_v5"] = json!(100);
@@ -325,12 +325,12 @@ fn oversell_is_judged_by_active_people_not_all_keys() {
     let v5 = v5_of(&out);
     assert_eq!(
         v5["oversell"],
-        json!({"each": 3, "members": 100, "global": G})
+        json!({"each": 10, "members": 100, "global": G})
     );
     assert!(
         setting(&out, "algo_notice")
             .unwrap()
-            .contains("V5 每人 3 张（全站今日共 71 张，先到先得）")
+            .contains("V5 每人 10 张（全站今日共 71 张，先到先得）")
     );
 }
 
@@ -357,7 +357,7 @@ fn removed_v5_settings_are_not_read() {
     v["settings"]["quota_v5_max"] = json!("2");
     v["active_v5"] = json!(75);
     let out = run(v);
-    assert_eq!(v5_of(&out)["each"], 3);
+    assert_eq!(v5_of(&out)["each"], 10);
     assert!(!quota::SETTING_KEYS_READ.contains(&"quota_v5_min"));
     assert!(!quota::SETTING_KEYS_READ.contains(&"quota_v5_max"));
 }
