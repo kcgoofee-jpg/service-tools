@@ -609,10 +609,23 @@ fn py_splitlines(text: &str) -> Vec<&str> {
     out
 }
 
-/// 手机自带浏览器（荣耀 / 华为 / 小米等）、翻译和广告插件往页面注入的脚本出的错：我们修不了，不进 Bug 追踪。
-/// 特征：堆栈里有调用帧，但没有一帧来自本站文件（全是 <anonymous> / 扩展协议）；或者是没有来源的「Script error.」。
+/// 钱包类浏览器扩展（MetaMask 等）往每个页面注入 window.ethereum，断线时抛出的错：没有堆栈，文字固定，跟本站无关。
+const EXTENSION_MESSAGES: &[&str] = &[
+    "disconnected from all chains", // EIP-1193 错误 4901，MetaMask / 各类钱包
+    "metamask",
+    "chrome-extension://",
+    "moz-extension://",
+];
+
+/// 手机自带浏览器（荣耀 / 华为 / 小米等）、翻译、广告和钱包插件往页面注入的脚本出的错：我们修不了，不进 Bug 追踪。
+/// 特征：堆栈里有调用帧，但没有一帧来自本站文件（全是 <anonymous> / 扩展协议）；或者是没有来源的「Script error.」；
+/// 或者是已知的钱包扩展报错文字（没有堆栈，只能按文字认）。
 fn injected_script_error(msg: &str, stack: &str, host: &str) -> bool {
     if strip(msg) == "Script error." {
+        return true;
+    }
+    let lower = msg.to_lowercase();
+    if EXTENSION_MESSAGES.iter().any(|m| lower.contains(m)) {
         return true;
     }
     let frames: Vec<&str> = py_splitlines(stack)
@@ -1069,6 +1082,22 @@ mod tests {
             host
         ));
         assert!(!injected_script_error("x", "no frames here", host));
+        // 钱包扩展的报错：没有堆栈，按文字认（线上 10-17 晚就是这条把总览顶出「1 个 Bug 没处理」）
+        assert!(injected_script_error(
+            "The provider is disconnected from all chains.",
+            "",
+            host
+        ));
+        assert!(injected_script_error(
+            "Failed to connect to MetaMask",
+            "",
+            host
+        ));
+        assert!(!injected_script_error(
+            "Cannot read properties of undefined",
+            "",
+            host
+        ));
         assert!(!injected_script_error(
             "x",
             "f@https://other.test/_owl/a.js:1:1",
